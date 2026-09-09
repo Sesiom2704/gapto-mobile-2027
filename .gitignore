@@ -1,0 +1,64 @@
+﻿# ============================================================
+# GAPTO MOBILE 2027
+# Fichero: .gitignore
+# Ruta: .gitignore
+# Descripción: Exclusiones del control de versiones.
+# Versión: 0.2.0
+# ============================================================
+
+# Secretos
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / React Native / Expo
+node_modules/
+.expo/
+dist/
+build/
+coverage/
+
+# IDE
+.vscode/
+.idea/
+
+# Sistema
+Thumbs.db
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Datos reales de migración V3
+data/migration_v3/input/*
+!data/migration_v3/input/.gitkeep
+
+data/migration_v3/working/*
+!data/migration_v3/working/.gitkeep
+
+data/migration_v3/reports/*
+!data/migration_v3/reports/.gitkeep
+
+# Bases, dumps y exports
+*.sqlite
+*.sqlite3
+*.db
+*.dump
+*.bak
+*.backup
+
+# Temporales
+*.tmp
+*.temp
+~$*
