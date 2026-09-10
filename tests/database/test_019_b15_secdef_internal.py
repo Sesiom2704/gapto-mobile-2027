@@ -21,7 +21,13 @@
 #              ella, los tests de camino correcto y de contexto inválido
 #              fallan con 42501 "permission denied to set role" y NO por
 #              el motivo que pretenden probar.
-# Versión: 0.1.2  -- corrige SET LOCAL parametrizado: SET no admite
+# Versión: 0.1.4  -- D-098: las lecturas de verificacion fijan el contexto de
+#                   tenant; sin el, un rol de conexion sin BYPASSRLS aborta con
+#                   22P02 al evaluar la policy de auditoria.
+#                   v0.1.3: D-098: _borrar_auditoria pasa a ser portable entre
+#                   proveedores (gapto_owner + NO FORCE temporal) y restaura
+#                   guard y FORCE RLS en finally.
+#                   v0.1.2: corrige SET LOCAL parametrizado: SET no admite
 #                   parametros vinculados, se usa set_config().  -- el test de guard append-only pasa a afirmar la
 #                   propiedad (fila inmutable) en vez de la capa concreta
 #                   que deniega, que depende del rol de conexión del
@@ -53,53 +59,112 @@ def _scalar(db: psycopg.Connection, sql: str, params: tuple | None = None):
     return row[0] if row else None
 
 
-def _borrar_auditoria(db: psycopg.Connection, owner_ids: tuple[str, ...]) -> None:
-    """Elimina filas de auditoría desactivando temporalmente el guard.
+def _fijar_contexto(db: psycopg.Connection, owner: str | None) -> None:
+    """Fija (o limpia) la GUC de tenant a nivel de sesión.
 
-    auditoria es append-only por diseño: ni siquiera gapto_owner puede
-    borrar sin desactivar el trigger. Mismo patrón que test_016.
+    D-098: cualquier lectura de `gapto.auditoria` hecha fuera de una
+    transacción con contexto falla con 22P02 si el rol de conexión no tiene
+    BYPASSRLS, porque la policy castea '' a uuid. Neon lo ocultaba; Supabase
+    no. Las lecturas de verificación fijan el contexto explícitamente.
     """
     with db.cursor() as cursor:
-        cursor.execute("SET ROLE gapto_owner")
-        cursor.execute(
-            "ALTER TABLE gapto.auditoria DISABLE TRIGGER trg_auditoria__guard_append_only"
-        )
         cursor.execute("RESET ROLE")
-        cursor.execute(
-            "DELETE FROM gapto.auditoria WHERE owner_user_id = ANY(%s::uuid[])",
-            (list(owner_ids),),
-        )
-        cursor.execute("SET ROLE gapto_owner")
-        cursor.execute(
-            "ALTER TABLE gapto.auditoria ENABLE TRIGGER trg_auditoria__guard_append_only"
-        )
+        if owner is None:
+            cursor.execute("RESET ALL")
+        else:
+            cursor.execute("SELECT set_config('gapto.owner_user_id', %s, false)", (owner,))
+
+
+def _scalar_tenant(db: psycopg.Connection, owner: str, sql: str, params: tuple):
+    """Lectura de verificación con contexto de tenant y limpieza posterior.
+
+    Fijar la GUC a nivel de sesión sin limpiarla contamina los casos que
+    prueban precisamente su ausencia, así que se limpia siempre.
+    """
+    _fijar_contexto(db, owner)
+    try:
+        return _scalar(db, sql, params)
+    finally:
+        _fijar_contexto(db, None)
+
+
+def _borrar_auditoria(db: psycopg.Connection, owner_ids: tuple[str, ...]) -> None:
+    """Elimina filas de auditoría de forma portable entre proveedores.
+
+    D-098: la versión anterior borraba con el rol de conexión, lo que solo
+    funciona donde ese rol puede escribir en toda la base. En Supabase,
+    `postgres` no tiene DELETE sobre gapto.auditoria y el helper fallaba con
+    42501, arrastrando todo el módulo (misma asimetría de D-088).
+
+    Se hace como `gapto_owner`, que es el propietario, retirando a la vez las
+    dos barreras que impiden el borrado: el guard append-only y FORCE RLS,
+    porque bajo FORCE y sin policy de DELETE el propietario obtendría 0 filas
+    en silencio. Ambas se restauran en `finally`: dejarlas retiradas sería
+    drift de seguridad.
+    """
+    with db.cursor() as cursor:
         cursor.execute("RESET ROLE")
+        cursor.execute("SET ROLE gapto_owner")
+        try:
+            cursor.execute(
+                "ALTER TABLE gapto.auditoria "
+                "DISABLE TRIGGER trg_auditoria__guard_append_only"
+            )
+            cursor.execute("ALTER TABLE gapto.auditoria NO FORCE ROW LEVEL SECURITY")
+            cursor.execute(
+                "DELETE FROM gapto.auditoria WHERE owner_user_id = ANY(%s::uuid[])",
+                (list(owner_ids),),
+            )
+        finally:
+            cursor.execute("ALTER TABLE gapto.auditoria FORCE ROW LEVEL SECURITY")
+            cursor.execute(
+                "ALTER TABLE gapto.auditoria "
+                "ENABLE TRIGGER trg_auditoria__guard_append_only"
+            )
+            cursor.execute("RESET ROLE")
+
+
+def _tenants(db: psycopg.Connection, crear: bool) -> None:
+    """Crea o retira los dos tenants como gapto_owner y con contexto fijado.
+
+    D-098: hacerlo con el rol de conexión solo funciona donde ese rol tiene
+    BYPASSRLS. En Supabase no lo tiene y la policy `tenant_isolation` rechaza
+    el INSERT. Como `usuarios` es la raíz de ownership, basta fijar la GUC al
+    propio id para que WITH CHECK se cumpla.
+    """
+    with db.cursor() as cursor:
+        cursor.execute("RESET ROLE")
+        cursor.execute("BEGIN")
+        try:
+            cursor.execute("SET LOCAL ROLE gapto_owner")
+            for uid, mail in ((OWNER_A, "b15.owner.a@example.com"),
+                              (OWNER_B, "b15.owner.b@example.com")):
+                cursor.execute("SELECT set_config('gapto.owner_user_id', %s, true)", (uid,))
+                cursor.execute("DELETE FROM gapto.usuarios WHERE id = %s", (uid,))
+                if crear:
+                    cursor.execute(
+                        "INSERT INTO gapto.usuarios (id, email, nombre) "
+                        "VALUES (%s, %s, 'B15 Owner')",
+                        (uid, mail),
+                    )
+            cursor.execute("COMMIT")
+        except psycopg.Error:
+            cursor.execute("ROLLBACK")
+            raise
+        finally:
+            cursor.execute("RESET ROLE")
 
 
 @pytest.fixture(scope="module")
 def usuarios_b15(db: psycopg.Connection):
     """Dos usuarios/tenants para probar aislamiento y FK de auditoría."""
     _borrar_auditoria(db, (OWNER_A, OWNER_B))
-    with db.cursor() as cursor:
-        cursor.execute(
-            "DELETE FROM gapto.usuarios WHERE id = ANY(%s::uuid[])",
-            ([OWNER_A, OWNER_B],),
-        )
-        cursor.execute(
-            "INSERT INTO gapto.usuarios (id, email, nombre) VALUES "
-            "(%s, 'b15.owner.a@example.com', 'B15 Owner A'), "
-            "(%s, 'b15.owner.b@example.com', 'B15 Owner B')",
-            (OWNER_A, OWNER_B),
-        )
+    _tenants(db, crear=True)
 
     yield
 
     _borrar_auditoria(db, (OWNER_A, OWNER_B))
-    with db.cursor() as cursor:
-        cursor.execute(
-            "DELETE FROM gapto.usuarios WHERE id = ANY(%s::uuid[])",
-            ([OWNER_A, OWNER_B],),
-        )
+    _tenants(db, crear=False)
 
 
 def _registrar(
@@ -322,6 +387,7 @@ def test_b15_camino_correcto_sistema(db: psycopg.Connection, usuarios_b15) -> No
 
     fila = None
     with db.cursor() as cursor:
+        cursor.execute("SELECT set_config('gapto.owner_user_id', %s, false)", (OWNER_A,))
         cursor.execute(
             "SELECT owner_user_id::text, actor_tipo, actor_user_id, request_id::text, "
             "       tabla, registro_id::text, accion, motivo "
@@ -329,6 +395,7 @@ def test_b15_camino_correcto_sistema(db: psycopg.Connection, usuarios_b15) -> No
             (nuevo_id,),
         )
         fila = cursor.fetchone()
+        cursor.execute("RESET ALL")
 
     assert fila is not None
     owner, actor_tipo, actor_user, request, tabla, registro, accion, motivo = fila
@@ -346,11 +413,13 @@ def test_b15_camino_correcto_sistema(db: psycopg.Connection, usuarios_b15) -> No
 def test_b15_camino_correcto_usuario(db: psycopg.Connection, usuarios_b15) -> None:
     nuevo_id = _registrar(db, actor_tipo="USUARIO", actor_user=OWNER_A, accion="ACTUALIZAR")
     with db.cursor() as cursor:
+        cursor.execute("SELECT set_config('gapto.owner_user_id', %s, false)", (OWNER_A,))
         cursor.execute(
             "SELECT actor_tipo, actor_user_id::text FROM gapto.auditoria WHERE id = %s",
             (nuevo_id,),
         )
         actor_tipo, actor_user = cursor.fetchone()
+        cursor.execute("RESET ALL")
     assert (actor_tipo, actor_user) == ("USUARIO", OWNER_A)
 
 
@@ -361,8 +430,8 @@ def test_b15_owner_no_es_falsificable(db: psycopg.Connection, usuarios_b15) -> N
     todos los parámetros del caller sean idénticos al caso de OWNER_A.
     """
     nuevo_id = _registrar(db, owner=OWNER_B)
-    assert _scalar(
-        db, "SELECT owner_user_id::text FROM gapto.auditoria WHERE id = %s", (nuevo_id,)
+    assert _scalar_tenant(
+        db, OWNER_B, "SELECT owner_user_id::text FROM gapto.auditoria WHERE id = %s", (nuevo_id,)
     ) == OWNER_B
 
 
@@ -380,9 +449,8 @@ def test_b15_llamada_en_la_misma_transaccion_hace_rollback(db: psycopg.Connectio
         )
         (id_descartado,) = cursor.fetchone()
         cursor.execute("ROLLBACK")
-
-    assert _scalar(
-        db, "SELECT count(*) FROM gapto.auditoria WHERE id = %s", (id_descartado,)
+    assert _scalar_tenant(
+        db, OWNER_A, "SELECT count(*) FROM gapto.auditoria WHERE id = %s", (id_descartado,)
     ) == 0
 
 
@@ -449,8 +517,8 @@ def test_b15_snapshot_funcional_valido_se_acepta(db: psycopg.Connection, usuario
         datos_antes='{"nombre": "Antes"}',
         datos_despues='{"nombre": "Despues"}',
     )
-    assert _scalar(
-        db, "SELECT datos_despues->>'nombre' FROM gapto.auditoria WHERE id = %s", (nuevo_id,)
+    assert _scalar_tenant(
+        db, OWNER_A, "SELECT datos_despues->>'nombre' FROM gapto.auditoria WHERE id = %s", (nuevo_id,)
     ) == "Despues"
 
 
@@ -526,6 +594,9 @@ def test_b15_update_delete_siguen_bloqueados(db: psycopg.Connection, usuarios_b1
     ):
         with db.cursor() as cursor:
             cursor.execute("BEGIN")
+            # Sin contexto, la policy castea '' a uuid y el intento fallaria por
+            # 22P02 en vez de por la denegacion que se quiere demostrar (D-075).
+            cursor.execute("SELECT set_config('gapto.owner_user_id', %s, true)", (OWNER_A,))
             try:
                 cursor.execute(sentencia, (nuevo_id,))
                 afectadas = cursor.rowcount
@@ -540,8 +611,8 @@ def test_b15_update_delete_siguen_bloqueados(db: psycopg.Connection, usuarios_b1
         assert denegado, f"auditoria debe ser inmutable; {sentencia.split()[0]}: {detalle}"
 
     # La fila sigue intacta.
-    assert _scalar(
-        db, "SELECT accion FROM gapto.auditoria WHERE id = %s", (nuevo_id,)
+    assert _scalar_tenant(
+        db, OWNER_A, "SELECT accion FROM gapto.auditoria WHERE id = %s", (nuevo_id,)
     ) == "CREAR"
 
 

@@ -7,7 +7,11 @@
 #              gapto_backup (BYPASSRLS + SELECT=79, sin escritura), PUBLIC
 #              revocado, y 7 guard triggers append-only que bloquean
 #              UPDATE/DELETE incluso con RLS fuera de juego (BYPASSRLS).
-# Versión: 0.1.4  -- D-098: fixture idempotente (ON CONFLICT DO NOTHING) para
+# Versión: 0.1.5  -- D-098: el test del guard afirma la propiedad (fila
+#                   inmutable) en vez de la capa que deniega, que difiere por
+#                   proveedor (D-088), y la limpieza reactiva el guard en
+#                   finally para no dejar drift de seguridad.
+#                   v0.1.4: D-098: fixture idempotente (ON CONFLICT DO NOTHING) para
 #                   que un residuo de una ejecucion previa no aborte la suite.
 #                   v0.1.3: D-098: la limpieza usaba SET LOCAL fuera de transaccion.
 #                   v0.1.2: v0.1.1 pasó INSERT==74 a rango 73/74 por F03-01-B15.
@@ -184,77 +188,103 @@ def test_b14_exactly_7_guard_triggers(db: psycopg.Connection) -> None:
 
 
 def test_b14_guard_blocks_update_even_with_bypassrls(db: psycopg.Connection) -> None:
-    """Prueba real: como rol con BYPASSRLS (equivalente a gapto_backup),
-    un UPDATE sobre auditoria debe seguir bloqueado por el guard trigger,
-    independientemente de RLS."""
-    with db.cursor() as cursor:
-        cursor.execute("BEGIN")
-        cursor.execute("SET ROLE gapto_owner")
-        cursor.execute("SET LOCAL gapto.owner_user_id = '99999999-d1d1-d1d1-d1d1-d1d1d1d1d1d1'")
-        # D-098: idempotente. Si una ejecucion anterior murio a mitad, la fila
-        # puede haber quedado; sin esto el test falla por pk_usuarios y, al
-        # estar dentro de un BEGIN, aborta la conexion para el resto de la suite.
-        cursor.execute(
-            "INSERT INTO gapto.usuarios (id, email, nombre) VALUES "
-            "('99999999-d1d1-d1d1-d1d1-d1d1d1d1d1d1','test_guard@example.com','Test Guard') "
-            "ON CONFLICT (id) DO NOTHING"
-        )
-        cursor.execute(
-            "INSERT INTO gapto.auditoria "
-            "(id, owner_user_id, actor_tipo, tabla, registro_id, accion) VALUES "
-            "('99999999-d2d2-d2d2-d2d2-d2d2d2d2d2d2',"
-            "'99999999-d1d1-d1d1-d1d1-d1d1d1d1d1d1','SISTEMA','usuarios',"
-            "'99999999-d1d1-d1d1-d1d1-d1d1d1d1d1d1','CREAR') "
-            "ON CONFLICT (id) DO NOTHING"
-        )
-        cursor.execute("COMMIT")
+    """auditoria es inmutable: un UPDATE nunca puede cambiar la fila.
 
-    # RESET ROLE vuelve al rol de conexion de GAPTO_TEST_DATABASE_URL.
-    # Este test ASUME que ese rol tiene BYPASSRLS (como gapto_backup, o
-    # como el rol administrativo de Neon/Supabase usado en desarrollo),
-    # para que el UPDATE no se filtre silenciosamente por ausencia de
-    # policy y demuestre que el guard actua independientemente de RLS.
-    # Si el rol de conexion NO tiene BYPASSRLS, este test seguira
-    # pasando pero por el motivo equivocado (RLS filtra antes de llegar
-    # al guard) -- verificar manualmente si el assert de mas abajo no
-    # detecta ninguna excepcion.
-    with db.cursor() as cursor:
-        cursor.execute("RESET ROLE")
-        with pytest.raises(psycopg.errors.RaiseException):
+    D-088/D-098: la CAPA que deniega depende del rol de conexión y por tanto
+    del proveedor. En Neon, `neondb_owner` hereda `neon_superuser`, tiene
+    UPDATE sobre gapto.auditoria y BYPASSRLS, así que llega al guard y recibe
+    P0001. En Supabase, `postgres` no tiene UPDATE sobre esa tabla y la
+    denegación llega antes, por ACL, con 42501. Ninguna es incorrecta.
+
+    Fijar P0001 haría el test dependiente del proveedor, que es justo lo que
+    F03-01 no admite, así que se afirma la propiedad: la fila no cambia.
+    La comprobación de que el guard sigue instalado y habilitado vive en
+    test_019, separada de esta.
+
+    La limpieza va en `finally`: desactiva el guard para poder borrar, y debe
+    reactivarlo pase lo que pase. Dejarlo desactivado sería drift de seguridad.
+    """
+    usuario = "99999999-d1d1-d1d1-d1d1-d1d1d1d1d1d1"
+    registro = "99999999-d2d2-d2d2-d2d2-d2d2d2d2d2d2"
+    try:
+        with db.cursor() as cursor:
+            cursor.execute("BEGIN")
+            cursor.execute("SET LOCAL ROLE gapto_owner")
+            cursor.execute("SELECT set_config('gapto.owner_user_id', %s, true)", (usuario,))
             cursor.execute(
-                "UPDATE gapto.auditoria SET accion='ACTUALIZAR' WHERE id = "
-                "'99999999-d2d2-d2d2-d2d2-d2d2d2d2d2d2'"
+                "INSERT INTO gapto.usuarios (id, email, nombre) VALUES "
+                "(%s,'test_guard@example.com','Test Guard') ON CONFLICT (id) DO NOTHING",
+                (usuario,),
             )
+            cursor.execute(
+                "INSERT INTO gapto.auditoria "
+                "(id, owner_user_id, actor_tipo, tabla, registro_id, accion) VALUES "
+                "(%s, %s, 'SISTEMA', 'usuarios', %s, 'CREAR') ON CONFLICT (id) DO NOTHING",
+                (registro, usuario, usuario),
+            )
+            cursor.execute("COMMIT")
+            cursor.execute("RESET ROLE")
 
-    # limpieza
-    with db.cursor() as cursor:
-        cursor.execute("SET ROLE gapto_owner")
-        cursor.execute(
-            "ALTER TABLE gapto.auditoria DISABLE TRIGGER trg_auditoria__guard_append_only"
-        )
-        cursor.execute("RESET ROLE")
-        cursor.execute(
-            "DELETE FROM gapto.auditoria WHERE id = "
-            "'99999999-d2d2-d2d2-d2d2-d2d2d2d2d2d2'"
-        )
-        cursor.execute("SET ROLE gapto_owner")
-        cursor.execute(
-            "ALTER TABLE gapto.auditoria ENABLE TRIGGER trg_auditoria__guard_append_only"
-        )
-        cursor.execute("RESET ROLE")
-        # D-098: SET LOCAL fuera de una transaccion explicita no fija nada, la GUC
-        # queda vacia y el cast a uuid de la policy aborta con 22P02 (caso limite
-        # de D-075). Se abre transaccion y se usa set_config, que si admite
-        # parametros y funciona en ambos ambitos.
-        cursor.execute("BEGIN")
-        cursor.execute("SET LOCAL ROLE gapto_owner")
-        cursor.execute(
-            "SELECT set_config('gapto.owner_user_id', %s, true)",
-            ("99999999-d1d1-d1d1-d1d1-d1d1d1d1d1d1",),
-        )
-        cursor.execute(
-            "DELETE FROM gapto.usuarios WHERE id = "
-            "'99999999-d1d1-d1d1-d1d1-d1d1d1d1d1d1'"
-        )
-        cursor.execute("COMMIT")
-        cursor.execute("RESET ROLE")
+        with db.cursor() as cursor:
+            cursor.execute("BEGIN")
+            try:
+                # Sin contexto, la policy castea '' a uuid y el intento fallaria
+                # por 22P02 en vez de por la denegacion buscada (D-075).
+                cursor.execute(
+                    "SELECT set_config('gapto.owner_user_id', %s, true)", (usuario,)
+                )
+                cursor.execute(
+                    "UPDATE gapto.auditoria SET accion='ACTUALIZAR' WHERE id = %s",
+                    (registro,),
+                )
+                denegado = cursor.rowcount == 0
+                detalle = f"sin error pero {cursor.rowcount} filas afectadas"
+            except (psycopg.errors.RaiseException, psycopg.errors.InsufficientPrivilege) as exc:
+                denegado = True
+                detalle = type(exc).__name__
+            finally:
+                cursor.execute("ROLLBACK")
+        assert denegado, f"auditoria debe ser inmutable; UPDATE: {detalle}"
+
+        with db.cursor() as cursor:
+            # Sin GUC, la policy de auditoria castea '' a uuid y aborta (D-075);
+            # el rol de conexion solo se libra de ello si tiene BYPASSRLS.
+            cursor.execute("SELECT set_config('gapto.owner_user_id', %s, false)", (usuario,))
+            cursor.execute("SELECT accion FROM gapto.auditoria WHERE id = %s", (registro,))
+            fila = cursor.fetchone()
+            cursor.execute("RESET ALL")
+        if fila is not None:
+            assert fila[0] == "CREAR", "la fila de auditoria no debe haber cambiado"
+    finally:
+        with db.cursor() as cursor:
+            try:
+                cursor.execute("RESET ROLE")
+                cursor.execute("SET ROLE gapto_owner")
+                cursor.execute(
+                    "ALTER TABLE gapto.auditoria "
+                    "DISABLE TRIGGER trg_auditoria__guard_append_only"
+                )
+                cursor.execute("RESET ROLE")
+                cursor.execute("DELETE FROM gapto.auditoria WHERE id = %s", (registro,))
+            except psycopg.Error:
+                pass
+            finally:
+                # El guard SIEMPRE vuelve a quedar activo.
+                cursor.execute("RESET ROLE")
+                cursor.execute("SET ROLE gapto_owner")
+                cursor.execute(
+                    "ALTER TABLE gapto.auditoria "
+                    "ENABLE TRIGGER trg_auditoria__guard_append_only"
+                )
+                cursor.execute("RESET ROLE")
+            try:
+                cursor.execute("BEGIN")
+                cursor.execute("SET LOCAL ROLE gapto_owner")
+                cursor.execute("SELECT set_config('gapto.owner_user_id', %s, true)", (usuario,))
+                cursor.execute("DELETE FROM gapto.usuarios WHERE id = %s", (usuario,))
+                cursor.execute("COMMIT")
+            except psycopg.Error:
+                cursor.execute("ROLLBACK")
+            cursor.execute("RESET ROLE")
+
+
