@@ -29,7 +29,9 @@
 #
 # PRECONDICIÓN: requiere 0190 (B16) para asumir `gapto_runtime` y 0210
 #              (B19), sin el cual cuatro tablas no admiten INSERT bajo RLS.
-# Versión: 0.1.0
+# Versión: 0.1.1  -- los catalogos globales se insertan como gapto_owner y no
+#                   con el rol de conexion: en Supabase el rol postgres no tiene
+#                   escritura sobre gapto.paises y el fixture fallaba con 42501.
 # ============================================================
 
 from __future__ import annotations
@@ -260,11 +262,14 @@ class _Contexto:
         return _uid(ft, "G") if ft in GLOBALES else _uid(ft, tn)
 
     def insertar(self, cur, tabla: str, fila: dict, rol: str, tn: str) -> None:
-        if tabla in GLOBALES:
-            cur.execute("RESET ROLE")
-        else:
-            cur.execute("RESET ROLE")
-            cur.execute(f"SET LOCAL ROLE {rol}")
+        # Los catalogos globales tambien se escriben como gapto_owner, que es su
+        # propietario. Hacerlo con el rol de conexion solo funciona donde ese rol
+        # tiene escritura sobre todo, que es el caso de Neon y no el de Supabase
+        # (misma asimetria de proveedor que documenta D-088).
+        cur.execute("RESET ROLE")
+        efectivo = "gapto_owner" if tabla in GLOBALES else rol
+        cur.execute(f"SET LOCAL ROLE {efectivo}")
+        if tabla not in GLOBALES:
             cur.execute("SELECT set_config('gapto.owner_user_id',%s,true)", (TENANTS[tn],))
         d = dict(fila)
         for k, v in list(d.items()):
