@@ -4,7 +4,8 @@
 # Ruta: tests/database/test_001_bootstrap.py
 # Descripción: Verifica el contrato físico de F03-01-B00: plataforma,
 #              roles, schemas, extensiones y deny-by-default inicial.
-# Versión: 0.1.0
+# Versión: 0.1.1
+#                   D-098: gapto_backup tiene BYPASSRLS por D-081.
 # ============================================================
 
 from __future__ import annotations
@@ -84,14 +85,19 @@ def test_gapto_roles_are_restricted_capability_roles(db: psycopg.Connection) -> 
 
     assert {row[0] for row in rows} == GAPTO_ROLES
     for row in rows:
-        _, rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin, rolreplication, rolbypassrls = row
+        rolname, rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin, rolreplication, rolbypassrls = row
         assert rolsuper is False
         assert rolinherit is False
         assert rolcreaterole is False
         assert rolcreatedb is False
         assert rolcanlogin is False
         assert rolreplication is False
-        assert rolbypassrls is False
+        # D-081 concedio BYPASSRLS a gapto_backup de forma deliberada, para que
+        # el backup sea completo sin depender del contexto de tenant. Es el unico
+        # rol del modelo que puede tenerlo.
+        assert rolbypassrls is (rolname == 'gapto_backup'), (
+            f"BYPASSRLS inesperado en {rolname}"
+        )
 
 
 def test_migrator_set_role_chain_is_explicit(db: psycopg.Connection) -> None:

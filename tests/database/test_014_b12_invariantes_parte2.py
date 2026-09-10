@@ -10,7 +10,9 @@
 #              DEFERRABLE INITIALLY DEFERRED. Incluye la prueba
 #              funcional real que detectó el bug de la sesión original
 #              (trigger inmediato bloqueaba reparto en varios pasos).
-# Versión: 0.1.0
+# Versión: 0.1.1  -- D-098: el reparto en dos pasos usaba el MISMO actor y
+#                   chocaba con uq_efecto_atribuciones__efecto_actor.
+#                   v0.1.0 anterior.
 # ============================================================
 
 from __future__ import annotations
@@ -96,10 +98,26 @@ def test_b12p2_multistep_attribution_completes_within_transaction(db: psycopg.Co
                 "INSERT INTO gapto.usuarios (id, email, nombre) VALUES "
                 "('99999999-4444-4444-4444-444444444444','test_b12p2@example.com','Test B12P2')"
             )
+            # D-098: uq_efecto_atribuciones__efecto_actor impide dos atribuciones
+            # del MISMO actor sobre el mismo efecto. Para probar el reparto en
+            # varios pasos hacen falta dos actores distintos.
             cursor.execute(
                 "INSERT INTO gapto.actores_financieros (id, owner_user_id, tercero_id) VALUES "
                 "('99999999-5555-5555-5555-555555555555',"
                 "'99999999-4444-4444-4444-444444444444', NULL)"
+            )
+            # El segundo actor necesita un tercero: uq_actores_financieros__owner_tercero
+            # solo admite un actor propio (tercero_id NULL) por tenant.
+            cursor.execute(
+                "INSERT INTO gapto.terceros (id, owner_user_id, nombre, naturaleza) VALUES "
+                "('99999999-3333-3333-3333-333333333333',"
+                "'99999999-4444-4444-4444-444444444444','Tercero B12P2','PERSONA')"
+            )
+            cursor.execute(
+                "INSERT INTO gapto.actores_financieros (id, owner_user_id, tercero_id) VALUES "
+                "('99999999-5555-5555-5555-555555555556',"
+                "'99999999-4444-4444-4444-444444444444',"
+                "'99999999-3333-3333-3333-333333333333')"
             )
             cursor.execute(
                 "SELECT id FROM gapto.tipos_hecho WHERE codigo='GASTO'"
@@ -132,7 +150,7 @@ def test_b12p2_multistep_attribution_completes_within_transaction(db: psycopg.Co
                 "INSERT INTO gapto.efecto_atribuciones "
                 "(efecto_id, actor_id, importe_atribuido, criterio_atribucion) VALUES "
                 "('99999999-7777-7777-7777-777777777777',"
-                "'99999999-5555-5555-5555-555555555555',-30.00,'MANUAL')"
+                "'99999999-5555-5555-5555-555555555556',-30.00,'MANUAL')"
             )
         finally:
             cursor.execute("ROLLBACK")

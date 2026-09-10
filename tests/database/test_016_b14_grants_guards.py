@@ -7,7 +7,8 @@
 #              gapto_backup (BYPASSRLS + SELECT=79, sin escritura), PUBLIC
 #              revocado, y 7 guard triggers append-only que bloquean
 #              UPDATE/DELETE incluso con RLS fuera de juego (BYPASSRLS).
-# Versión: 0.1.2  -- v0.1.1 pasó INSERT==74 a rango 73/74 por F03-01-B15.
+# Versión: 0.1.3  -- D-098: la limpieza usaba SET LOCAL fuera de transaccion.
+#                   v0.1.2: v0.1.1 pasó INSERT==74 a rango 73/74 por F03-01-B15.
 #                   v0.1.2 pasa DELETE==67 a rango 50/67 por F03-01-B18, que
 #                   revoca el DELETE sobre las 17 tablas de realidad
 #                   financiera. No se modifica 0130; el cambio es solo del
@@ -234,10 +235,19 @@ def test_b14_guard_blocks_update_even_with_bypassrls(db: psycopg.Connection) -> 
             "ALTER TABLE gapto.auditoria ENABLE TRIGGER trg_auditoria__guard_append_only"
         )
         cursor.execute("RESET ROLE")
-        cursor.execute("SET ROLE gapto_owner")
-        cursor.execute("SET LOCAL gapto.owner_user_id = '99999999-d1d1-d1d1-d1d1-d1d1d1d1d1d1'")
+        # D-098: SET LOCAL fuera de una transaccion explicita no fija nada, la GUC
+        # queda vacia y el cast a uuid de la policy aborta con 22P02 (caso limite
+        # de D-075). Se abre transaccion y se usa set_config, que si admite
+        # parametros y funciona en ambos ambitos.
+        cursor.execute("BEGIN")
+        cursor.execute("SET LOCAL ROLE gapto_owner")
+        cursor.execute(
+            "SELECT set_config('gapto.owner_user_id', %s, true)",
+            ("99999999-d1d1-d1d1-d1d1-d1d1d1d1d1d1",),
+        )
         cursor.execute(
             "DELETE FROM gapto.usuarios WHERE id = "
             "'99999999-d1d1-d1d1-d1d1-d1d1d1d1d1d1'"
         )
         cursor.execute("COMMIT")
+        cursor.execute("RESET ROLE")

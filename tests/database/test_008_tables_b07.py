@@ -8,7 +8,11 @@
 #              trazabilidad de importación (fuentes/registros/mapeos),
 #              tercero_personas (subtipo PK=FK) y revisión de renta.
 #              Este bloque COMPLETA el baseline físico de 79/79 tablas.
-# Versión: 0.1.0
+# Versión: 0.1.1
+#                   D-098: expectativa caducada migrada a validacion de
+#                   propiedad/baseline. El layering se sigue verificando a
+#                   nivel de fichero de migration, que es donde es cierto de
+#                   forma permanente, y no contra el estado acumulado de la BD.
 # ============================================================
 
 from __future__ import annotations
@@ -105,23 +109,6 @@ def test_b07_row_version_only_on_expected_roots(db: psycopg.Connection) -> None:
         """, (sorted(B07_TABLES),))
         actual = {r[0] for r in cursor.fetchall()}
     assert actual == expected
-
-
-def test_b07_layering_has_no_fk_unique_exclude_or_secondary_indexes(db: psycopg.Connection) -> None:
-    with db.cursor() as cursor:
-        cursor.execute("""
-            SELECT con.contype, count(*) FROM pg_catalog.pg_constraint con
-              JOIN pg_catalog.pg_class c ON c.oid=con.conrelid JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
-             WHERE n.nspname='gapto' AND c.relname = ANY(%s) AND con.contype IN ('f','u','x') GROUP BY con.contype
-        """, (sorted(B07_TABLES),))
-        assert cursor.fetchall() == []
-    with db.cursor() as cursor:
-        cursor.execute("""
-            SELECT count(*) FROM pg_catalog.pg_index i JOIN pg_catalog.pg_class c ON c.oid=i.indrelid
-              JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
-             WHERE n.nspname='gapto' AND c.relname = ANY(%s) AND NOT i.indisprimary
-        """, (sorted(B07_TABLES),))
-        assert cursor.fetchone()[0] == 0
 
 
 def test_b07_migration_respects_layering() -> None:

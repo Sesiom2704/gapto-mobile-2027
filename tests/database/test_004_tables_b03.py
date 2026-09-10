@@ -4,7 +4,11 @@
 # Ruta: tests/database/test_004_tables_b03.py
 # Descripción: Verifica el contrato físico F03-01-B03 de las tablas 29..32:
 #              reglas financieras, versiones, excepciones y previsiones.
-# Versión: 0.1.1
+# Versión: 0.1.2
+#                   D-098: expectativa caducada migrada a validacion de
+#                   propiedad/baseline. El layering se sigue verificando a
+#                   nivel de fichero de migration, que es donde es cierto de
+#                   forma permanente, y no contra el estado acumulado de la BD.
 # ============================================================
 
 from __future__ import annotations
@@ -180,23 +184,6 @@ def test_b03_local_checks_are_materialized(db: psycopg.Connection) -> None:
 def test_b03_public_has_no_table_dml(db: psycopg.Connection) -> None:
     for table in B03_TABLES:
         assert not _scalar(db, "SELECT has_table_privilege('public', %s, 'INSERT,UPDATE,DELETE')", (f'gapto.{table}',))
-
-
-def test_b03_layering_has_no_fk_unique_exclude_or_secondary_indexes(db: psycopg.Connection) -> None:
-    with db.cursor() as cursor:
-        cursor.execute("""
-            SELECT con.contype, count(*) FROM pg_catalog.pg_constraint con
-              JOIN pg_catalog.pg_class c ON c.oid=con.conrelid JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
-             WHERE n.nspname='gapto' AND c.relname = ANY(%s) AND con.contype IN ('f','u','x') GROUP BY con.contype
-        """, (sorted(B03_TABLES),))
-        assert cursor.fetchall() == []
-    with db.cursor() as cursor:
-        cursor.execute("""
-            SELECT count(*) FROM pg_catalog.pg_index i JOIN pg_catalog.pg_class c ON c.oid=i.indrelid
-              JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
-             WHERE n.nspname='gapto' AND c.relname = ANY(%s) AND NOT i.indisprimary
-        """, (sorted(B03_TABLES),))
-        assert cursor.fetchone()[0] == 0
 
 
 def test_b03_migration_respects_layering() -> None:
