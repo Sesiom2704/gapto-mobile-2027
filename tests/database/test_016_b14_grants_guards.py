@@ -7,7 +7,9 @@
 #              gapto_backup (BYPASSRLS + SELECT=79, sin escritura), PUBLIC
 #              revocado, y 7 guard triggers append-only que bloquean
 #              UPDATE/DELETE incluso con RLS fuera de juego (BYPASSRLS).
-# Versión: 0.1.3  -- D-098: la limpieza usaba SET LOCAL fuera de transaccion.
+# Versión: 0.1.4  -- D-098: fixture idempotente (ON CONFLICT DO NOTHING) para
+#                   que un residuo de una ejecucion previa no aborte la suite.
+#                   v0.1.3: D-098: la limpieza usaba SET LOCAL fuera de transaccion.
 #                   v0.1.2: v0.1.1 pasó INSERT==74 a rango 73/74 por F03-01-B15.
 #                   v0.1.2 pasa DELETE==67 a rango 50/67 por F03-01-B18, que
 #                   revoca el DELETE sobre las 17 tablas de realidad
@@ -189,16 +191,21 @@ def test_b14_guard_blocks_update_even_with_bypassrls(db: psycopg.Connection) -> 
         cursor.execute("BEGIN")
         cursor.execute("SET ROLE gapto_owner")
         cursor.execute("SET LOCAL gapto.owner_user_id = '99999999-d1d1-d1d1-d1d1-d1d1d1d1d1d1'")
+        # D-098: idempotente. Si una ejecucion anterior murio a mitad, la fila
+        # puede haber quedado; sin esto el test falla por pk_usuarios y, al
+        # estar dentro de un BEGIN, aborta la conexion para el resto de la suite.
         cursor.execute(
             "INSERT INTO gapto.usuarios (id, email, nombre) VALUES "
-            "('99999999-d1d1-d1d1-d1d1-d1d1d1d1d1d1','test_guard@example.com','Test Guard')"
+            "('99999999-d1d1-d1d1-d1d1-d1d1d1d1d1d1','test_guard@example.com','Test Guard') "
+            "ON CONFLICT (id) DO NOTHING"
         )
         cursor.execute(
             "INSERT INTO gapto.auditoria "
             "(id, owner_user_id, actor_tipo, tabla, registro_id, accion) VALUES "
             "('99999999-d2d2-d2d2-d2d2-d2d2d2d2d2d2',"
             "'99999999-d1d1-d1d1-d1d1-d1d1d1d1d1d1','SISTEMA','usuarios',"
-            "'99999999-d1d1-d1d1-d1d1-d1d1d1d1d1d1','CREAR')"
+            "'99999999-d1d1-d1d1-d1d1-d1d1d1d1d1d1','CREAR') "
+            "ON CONFLICT (id) DO NOTHING"
         )
         cursor.execute("COMMIT")
 
