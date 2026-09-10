@@ -7,7 +7,8 @@
 #              gapto_backup (BYPASSRLS + SELECT=79, sin escritura), PUBLIC
 #              revocado, y 7 guard triggers append-only que bloquean
 #              UPDATE/DELETE incluso con RLS fuera de juego (BYPASSRLS).
-# Versión: 0.1.5  -- D-098: el test del guard afirma la propiedad (fila
+# Versión: 0.1.6  -- B21 lleva DELETE de 50 a 36.
+#                   v0.1.5:  -- D-098: el test del guard afirma la propiedad (fila
 #                   inmutable) en vez de la capa que deniega, que difiere por
 #                   proveedor (D-088), y la limpieza reactiva el guard en
 #                   finally para no dejar drift de seguridad.
@@ -95,8 +96,8 @@ def test_b14_runtime_delete_on_tenant_tables(db: psycopg.Connection) -> None:
     posteriores legítimos. Mismo criterio que D-073.
     """
     concedidas = _grant_count(db, "gapto_runtime", "DELETE")
-    assert concedidas in (50, 67), (
-        f"DELETE esperado en 67 tablas (pre-B18) o 50 (post-B18); encontrado {concedidas}"
+    assert concedidas in (36, 50, 67), (
+        f"DELETE esperado 67 (pre-B18), 50 (post-B18) o 36 (post-B21); encontrado {concedidas}"
     )
     for catalogo in ("paises", "regiones", "localidades", "tipos_hecho", "metricas_definicion"):
         assert _has_table_priv(db, "gapto_runtime", catalogo, "DELETE") is False, (

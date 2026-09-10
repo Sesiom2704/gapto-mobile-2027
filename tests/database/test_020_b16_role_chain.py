@@ -12,7 +12,8 @@
 #              corrección es de impersonación, no de privilegios. Ni
 #              gapto_runtime ni gapto_backup ganan nada, y gapto_migrator
 #              no hereda pasivamente sus privilegios (INHERIT FALSE).
-# Versión: 0.1.2  -- corrige el SET LOCAL parametrizado que quedo sin migrar
+# Versión: 0.1.3  -- B21 lleva DELETE de 50 a 36.
+#                   v0.1.2:  -- corrige el SET LOCAL parametrizado que quedo sin migrar
 #                   a set_config() en v0.1.1.
 #                   v0.1.1: el conteo DELETE==67 pasa a rango 50/67 por
 #                   F03-01-B18. La aserción sigue verificando que 0190 no
@@ -95,7 +96,7 @@ def test_b16_no_concede_privilegios_nuevos(db: psycopg.Connection) -> None:
     assert cuenta("gapto_runtime", "INSERT") == 73
     assert cuenta("gapto_runtime", "UPDATE") == 67  # B18 no toca UPDATE
     # B18 revoca el DELETE del Bucket A; se admiten ambos baselines.
-    assert cuenta("gapto_runtime", "DELETE") in (50, 67)
+    assert cuenta("gapto_runtime", "DELETE") in (36, 50, 67)
     assert cuenta("gapto_backup", "SELECT") == 79
     for priv in ("INSERT", "UPDATE", "DELETE"):
         assert cuenta("gapto_backup", priv) == 0
