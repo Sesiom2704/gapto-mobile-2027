@@ -1,0 +1,305 @@
+#!/usr/bin/env python3
+# ============================================================
+# GAPTO MOBILE 2027
+# Fichero: run_clean_room.py
+# Ruta: scripts/postgres/run_clean_room.py
+# Descripción: F03-GATE-01, criterio G4. Reconstruye el baseline completo
+#              desde cero aplicando en orden las migrations del repositorio
+#              sobre una base virgen, y despues compara el contrato fisico
+#              resultante contra el contrato esperado.
+#
+#              Responde a la unica pregunta que F03-01 afirma y nunca se
+#              habia demostrado sobre PostgreSQL 17: que el repositorio
+#              reproduce el estado de los proveedores sin pasos manuales.
+#
+#              No modifica nada del repositorio ni de las bases de trabajo.
+#              La base destino se pasa por variable de entorno y debe estar
+#              vacia: el script se niega a ejecutar si encuentra el schema
+#              gapto, para no destruir por accidente una base en uso.
+#
+# USO:
+#   set GAPTO_CLEANROOM_URL=<dsn de la base virgen>
+#   python scripts/postgres/run_clean_room.py
+#
+#   Opciones:
+#     --desde 0002      empieza en esa migration en vez de en la primera
+#     --solo-verificar  no aplica nada; solo comprueba el contrato
+#     --permitir-sucia  aplica aunque el schema gapto ya exista
+#
+# NOTA SOBRE 0001. El provisioning de roles es de INSTANCIA, no de base. Si
+# la base virgen vive en la misma instancia que una base ya provisionada,
+# los cinco roles gapto ya existen y 0001 aborta con su propio postcheck de
+# ROLE DRIFT, que es correcto y deliberado. En ese caso se usa --desde 0002
+# y el clean-room demuestra reproducibilidad DE LA BASE, no de la instancia.
+# Reproducir tambien la instancia exige un proyecto nuevo.
+# Versión: 0.1.0
+# ============================================================
+
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+from pathlib import Path
+
+try:
+    import psycopg
+except ImportError:  # pragma: no cover
+    sys.exit("Falta psycopg. Instala con: python -m pip install \"psycopg[binary]\"")
+
+
+# Contrato fisico esperado. Es el certificado por D-109 en Neon y Supabase.
+CONTRATO = {
+    "tablas": 79,
+    "force_rls": 74,
+    "policies": 81,
+    "foreign_keys": 166,
+    "unique_constraints": 37,
+    "exclude_constraints": 11,
+    "funciones": 15,
+    "security_definer": 1,
+    "vistas_security_invoker": 3,
+    "triggers_no_internos": 34,
+    "constraint_triggers": 19,
+    "triggers_deshabilitados": 0,
+    "policies_autorreferentes": 0,
+    "fk_tenant_sin_validar": 0,
+    "runtime_select": 79,
+    "runtime_insert": 73,
+    "runtime_update": 67,
+    "runtime_delete": 36,
+}
+
+HUELLAS = {
+    "fn_registrar_auditoria": "5a9e6ce8e8dc402b3123e3bf5c718725",
+    "fn_check_participacion_suma": "c909c04f4e0131a32c6552efe601d370",
+    "fn_check_bolsa_prioridad_alcance": "0eb39ed53b28a3c4657e032f3aaaa037",
+}
+
+CONSULTA_CONTRATO = """
+SELECT
+  (SELECT count(*) FROM pg_catalog.pg_tables WHERE schemaname='gapto') AS tablas,
+  (SELECT count(*) FROM pg_catalog.pg_class c
+     JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+    WHERE n.nspname='gapto' AND c.relkind='r' AND c.relforcerowsecurity) AS force_rls,
+  (SELECT count(*) FROM pg_catalog.pg_policies WHERE schemaname='gapto') AS policies,
+  (SELECT count(*) FROM pg_catalog.pg_constraint con
+     JOIN pg_catalog.pg_class t ON t.oid=con.conrelid
+     JOIN pg_catalog.pg_namespace n ON n.oid=t.relnamespace
+    WHERE n.nspname='gapto' AND con.contype='f') AS foreign_keys,
+  (SELECT count(*) FROM pg_catalog.pg_constraint con
+     JOIN pg_catalog.pg_class t ON t.oid=con.conrelid
+     JOIN pg_catalog.pg_namespace n ON n.oid=t.relnamespace
+    WHERE n.nspname='gapto' AND con.contype='u') AS unique_constraints,
+  (SELECT count(*) FROM pg_catalog.pg_constraint con
+     JOIN pg_catalog.pg_class t ON t.oid=con.conrelid
+     JOIN pg_catalog.pg_namespace n ON n.oid=t.relnamespace
+    WHERE n.nspname='gapto' AND con.contype='x') AS exclude_constraints,
+  (SELECT count(*) FROM pg_catalog.pg_proc p
+     JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+    WHERE n.nspname='gapto') AS funciones,
+  (SELECT count(*) FROM pg_catalog.pg_proc p
+     JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+    WHERE n.nspname='gapto' AND p.prosecdef) AS security_definer,
+  (SELECT count(*) FROM pg_catalog.pg_class c
+     JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+    WHERE n.nspname='gapto' AND c.relkind='v'
+      AND c.reloptions @> ARRAY['security_invoker=true']) AS vistas_security_invoker,
+  (SELECT count(*) FROM pg_catalog.pg_trigger t
+     JOIN pg_catalog.pg_class c ON c.oid=t.tgrelid
+     JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+    WHERE n.nspname='gapto' AND NOT t.tgisinternal) AS triggers_no_internos,
+  (SELECT count(*) FROM pg_catalog.pg_trigger t
+     JOIN pg_catalog.pg_class c ON c.oid=t.tgrelid
+     JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+    WHERE n.nspname='gapto' AND NOT t.tgisinternal AND t.tgconstraint <> 0)
+      AS constraint_triggers,
+  (SELECT count(*) FROM pg_catalog.pg_trigger t
+     JOIN pg_catalog.pg_class c ON c.oid=t.tgrelid
+     JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+    WHERE n.nspname='gapto' AND NOT t.tgisinternal AND t.tgenabled <> 'O')
+      AS triggers_deshabilitados,
+  (SELECT count(*) FROM pg_catalog.pg_policies p
+    WHERE p.schemaname='gapto'
+      AND coalesce(p.with_check,'') || coalesce(p.qual,'')
+          ~ ('gapto\\.' || p.tablename || '\\M')) AS policies_autorreferentes,
+  (SELECT count(*) FROM (
+      WITH tenant AS (
+        SELECT c.oid, c.relname FROM pg_catalog.pg_class c
+          JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+         WHERE n.nspname='gapto' AND c.relkind='r' AND c.relrowsecurity
+      ), fks AS (
+        SELECT DISTINCT t.relname AS tabla, att.attname AS columna,
+               array_length(con.conkey,1) AS ncols
+          FROM pg_catalog.pg_constraint con
+          JOIN tenant t ON t.oid=con.conrelid
+          JOIN tenant tf ON tf.oid=con.confrelid
+          CROSS JOIN LATERAL unnest(con.conkey) AS k(attnum)
+          JOIN pg_catalog.pg_attribute att
+            ON att.attrelid=con.conrelid AND att.attnum=k.attnum
+         WHERE con.contype='f' AND att.attname <> 'owner_user_id'
+      ), compuestas AS (SELECT tabla, columna FROM fks WHERE ncols>1),
+      pol AS (
+        SELECT tablename, string_agg(coalesce(with_check,''),' ') AS wc
+          FROM pg_catalog.pg_policies WHERE schemaname='gapto' GROUP BY tablename
+      )
+      SELECT 1 FROM fks f
+        LEFT JOIN pol p ON p.tablename=f.tabla
+        LEFT JOIN compuestas cc ON cc.tabla=f.tabla AND cc.columna=f.columna
+       WHERE f.ncols=1 AND cc.columna IS NULL
+         AND coalesce(p.wc,'') NOT LIKE '%' || f.columna || '%'
+  ) AS x) AS fk_tenant_sin_validar,
+  (SELECT count(*) FROM pg_catalog.pg_class c
+     JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+     CROSS JOIN LATERAL pg_catalog.aclexplode(c.relacl) AS acl
+     JOIN pg_catalog.pg_roles r ON r.oid=acl.grantee
+    WHERE n.nspname='gapto' AND c.relkind='r'
+      AND r.rolname='gapto_runtime' AND acl.privilege_type='SELECT') AS runtime_select,
+  (SELECT count(*) FROM pg_catalog.pg_class c
+     JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+     CROSS JOIN LATERAL pg_catalog.aclexplode(c.relacl) AS acl
+     JOIN pg_catalog.pg_roles r ON r.oid=acl.grantee
+    WHERE n.nspname='gapto' AND c.relkind='r'
+      AND r.rolname='gapto_runtime' AND acl.privilege_type='INSERT') AS runtime_insert,
+  (SELECT count(*) FROM pg_catalog.pg_class c
+     JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+     CROSS JOIN LATERAL pg_catalog.aclexplode(c.relacl) AS acl
+     JOIN pg_catalog.pg_roles r ON r.oid=acl.grantee
+    WHERE n.nspname='gapto' AND c.relkind='r'
+      AND r.rolname='gapto_runtime' AND acl.privilege_type='UPDATE') AS runtime_update,
+  (SELECT count(*) FROM pg_catalog.pg_class c
+     JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+     CROSS JOIN LATERAL pg_catalog.aclexplode(c.relacl) AS acl
+     JOIN pg_catalog.pg_roles r ON r.oid=acl.grantee
+    WHERE n.nspname='gapto' AND c.relkind='r'
+      AND r.rolname='gapto_runtime' AND acl.privilege_type='DELETE') AS runtime_delete
+"""
+
+
+def raiz_repositorio() -> Path:
+    return Path(__file__).resolve().parent.parent.parent
+
+
+def migrations(desde: str | None) -> list[Path]:
+    ruta = raiz_repositorio() / "migrations"
+    if not ruta.is_dir():
+        sys.exit(f"No encuentro {ruta}. Ejecuta el script desde el repositorio clonado.")
+    ficheros = sorted(ruta.glob("*.sql"))
+    if desde:
+        ficheros = [f for f in ficheros if f.name >= desde]
+    return ficheros
+
+
+def base_esta_vacia(conexion) -> bool:
+    with conexion.cursor() as cursor:
+        cursor.execute("SELECT count(*) FROM pg_catalog.pg_namespace WHERE nspname='gapto'")
+        (existe,) = cursor.fetchone()
+    return existe == 0
+
+
+def aplicar(conexion, ficheros: list[Path]) -> None:
+    for fichero in ficheros:
+        sql = fichero.read_text(encoding="utf-8")
+        try:
+            with conexion.cursor() as cursor:
+                cursor.execute(sql)
+        except psycopg.Error as error:
+            print(f"  FALLO  {fichero.name}")
+            print(f"         {error}")
+            sys.exit(
+                "\nClean-room INTERRUMPIDO. El repositorio no reproduce el baseline "
+                "sin intervencion manual: eso es exactamente lo que este criterio "
+                "existe para detectar."
+            )
+        print(f"  ok     {fichero.name}")
+
+
+def leer_contrato(conexion) -> dict:
+    with conexion.cursor() as cursor:
+        cursor.execute(CONSULTA_CONTRATO)
+        columnas = [d.name for d in cursor.description]
+        valores = cursor.fetchone()
+    return dict(zip(columnas, valores))
+
+
+def leer_huellas(conexion) -> dict:
+    with conexion.cursor() as cursor:
+        cursor.execute("""
+            SELECT p.proname, md5(p.prosrc)
+              FROM pg_catalog.pg_proc p
+              JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+             WHERE n.nspname='gapto' AND p.proname = ANY(%s)
+        """, (sorted(HUELLAS),))
+        return dict(cursor.fetchall())
+
+
+def comparar(obtenido: dict, esperado: dict, titulo: str) -> list[str]:
+    print(f"\n{titulo}")
+    print("-" * len(titulo))
+    fallos = []
+    for clave in esperado:
+        real = obtenido.get(clave)
+        ok = real == esperado[clave]
+        marca = "ok  " if ok else "FALLO"
+        print(f"  {marca}  {clave:26} esperado={esperado[clave]!s:<34} obtenido={real}")
+        if not ok:
+            fallos.append(f"{clave}: esperado {esperado[clave]}, obtenido {real}")
+    return fallos
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Clean-room de GaptoMobile 2027")
+    parser.add_argument("--desde", default=None,
+                        help="nombre de fichero desde el que empezar, p.ej. 0002")
+    parser.add_argument("--solo-verificar", action="store_true",
+                        help="no aplica migrations; solo comprueba el contrato")
+    parser.add_argument("--permitir-sucia", action="store_true",
+                        help="aplica aunque el schema gapto ya exista")
+    args = parser.parse_args()
+
+    dsn = os.getenv("GAPTO_CLEANROOM_URL")
+    if not dsn:
+        sys.exit(
+            "Falta GAPTO_CLEANROOM_URL. Debe apuntar a una base VACIA, nunca a "
+            "gapto2027_test ni a la de Supabase en uso."
+        )
+
+    with psycopg.connect(dsn, autocommit=True) as conexion:
+        with conexion.cursor() as cursor:
+            cursor.execute("SELECT current_database(), version()")
+            base, version = cursor.fetchone()
+        print(f"Base destino: {base}")
+        print(f"Motor:        {version.split(' on ')[0]}")
+
+        if not args.solo_verificar:
+            vacia = base_esta_vacia(conexion)
+            if not vacia and not args.permitir_sucia:
+                sys.exit(
+                    f"\nLa base '{base}' YA contiene el schema gapto. Me niego a "
+                    "aplicar migrations encima. Usa una base virgen, o --permitir-sucia "
+                    "si sabes lo que haces."
+                )
+            ficheros = migrations(args.desde)
+            print(f"\nAplicando {len(ficheros)} migrations desde "
+                  f"{ficheros[0].name} hasta {ficheros[-1].name}:\n")
+            aplicar(conexion, ficheros)
+
+        contrato = leer_contrato(conexion)
+        huellas = leer_huellas(conexion)
+
+    fallos = comparar(contrato, CONTRATO, "CONTRATO FISICO")
+    fallos += comparar(huellas, HUELLAS, "HUELLAS DE FUNCION (md5 de prosrc)")
+
+    print()
+    if fallos:
+        print(f"RESULTADO: FALLO. {len(fallos)} discrepancias:")
+        for f in fallos:
+            print(f"  - {f}")
+        return 1
+
+    print("RESULTADO: OK. El repositorio reproduce el baseline sin intervencion manual.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
