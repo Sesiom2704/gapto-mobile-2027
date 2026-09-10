@@ -3,11 +3,15 @@
 # Fichero: test_016_b14_grants_guards.py
 # Ruta: tests/database/test_016_b14_grants_guards.py
 # Descripción: Verifica F03-01-B14: GRANTs de mínimo privilegio para
-#              gapto_runtime (SELECT=79/INSERT=74/UPDATE=67/DELETE=67) y
+#              gapto_runtime (SELECT=79/INSERT tenant/UPDATE=67/DELETE=67) y
 #              gapto_backup (BYPASSRLS + SELECT=79, sin escritura), PUBLIC
 #              revocado, y 7 guard triggers append-only que bloquean
 #              UPDATE/DELETE incluso con RLS fuera de juego (BYPASSRLS).
-# Versión: 0.1.0
+# Versión: 0.1.2  -- v0.1.1 pasó INSERT==74 a rango 73/74 por F03-01-B15.
+#                   v0.1.2 pasa DELETE==67 a rango 50/67 por F03-01-B18, que
+#                   revoca el DELETE sobre las 17 tablas de realidad
+#                   financiera. No se modifica 0130; el cambio es solo del
+#                   test histórico.
 # ============================================================
 
 from __future__ import annotations
@@ -36,20 +40,62 @@ def _grant_count(db: psycopg.Connection, role: str, priv: str) -> int:
     return count
 
 
+def _has_table_priv(db: psycopg.Connection, role: str, tabla: str, priv: str) -> bool:
+    with db.cursor() as cursor:
+        cursor.execute(
+            "SELECT pg_catalog.has_table_privilege(%s, %s, %s)",
+            (role, f"gapto.{tabla}", priv),
+        )
+        (resultado,) = cursor.fetchone()
+    return resultado
+
+
 def test_b14_runtime_select_on_79_tables(db: psycopg.Connection) -> None:
     assert _grant_count(db, "gapto_runtime", "SELECT") == 79
 
 
-def test_b14_runtime_insert_on_74_tables(db: psycopg.Connection) -> None:
-    assert _grant_count(db, "gapto_runtime", "INSERT") == 74
+def test_b14_runtime_insert_on_tenant_tables(db: psycopg.Connection) -> None:
+    """B14 concedió INSERT en las 74 tablas tenant no catálogo.
+
+    F03-01-B15 revoca después el INSERT sobre `auditoria` para cumplir D-068
+    (append-only real, escritura solo por mecanismo interno). Este test
+    valida la propiedad que B14 debe seguir garantizando —INSERT en las
+    tablas tenant escribibles y en ninguno de los 5 catálogos globales— sin
+    fijar un conteo exacto que bloquee bloques posteriores legítimos. Mismo
+    criterio que la corrección de D-073 sobre los conteos globales de B02/B03.
+    """
+    concedidas = _grant_count(db, "gapto_runtime", "INSERT")
+    assert concedidas in (73, 74), (
+        f"INSERT esperado en 74 tablas (pre-B15) o 73 (post-B15); encontrado {concedidas}"
+    )
+    for catalogo in ("paises", "regiones", "localidades", "tipos_hecho", "metricas_definicion"):
+        assert _has_table_priv(db, "gapto_runtime", catalogo, "INSERT") is False, (
+            f"{catalogo} es catálogo global de solo lectura"
+        )
 
 
 def test_b14_runtime_update_on_67_tables(db: psycopg.Connection) -> None:
     assert _grant_count(db, "gapto_runtime", "UPDATE") == 67
 
 
-def test_b14_runtime_delete_on_67_tables(db: psycopg.Connection) -> None:
-    assert _grant_count(db, "gapto_runtime", "DELETE") == 67
+def test_b14_runtime_delete_on_tenant_tables(db: psycopg.Connection) -> None:
+    """B14 concedió DELETE en las 67 tablas tenant de acceso completo.
+
+    F03-01-B18 revoca después el DELETE sobre las 17 tablas de realidad
+    financiera y conciliación (Bucket A de D-086), dejando 50. Se valida la
+    propiedad —DELETE nunca alcanza los 5 catálogos globales ni las 7
+    append-only— en vez de un conteo exacto que bloquearía bloques
+    posteriores legítimos. Mismo criterio que D-073.
+    """
+    concedidas = _grant_count(db, "gapto_runtime", "DELETE")
+    assert concedidas in (50, 67), (
+        f"DELETE esperado en 67 tablas (pre-B18) o 50 (post-B18); encontrado {concedidas}"
+    )
+    for catalogo in ("paises", "regiones", "localidades", "tipos_hecho", "metricas_definicion"):
+        assert _has_table_priv(db, "gapto_runtime", catalogo, "DELETE") is False, (
+            f"{catalogo} es catálogo global de solo lectura"
+        )
+    assert _has_table_priv(db, "gapto_runtime", "auditoria", "DELETE") is False
 
 
 def test_b14_backup_select_only_on_79_tables_no_write(db: psycopg.Connection) -> None:
