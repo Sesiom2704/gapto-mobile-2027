@@ -29,9 +29,13 @@
 #
 # PRECONDICIÓN: requiere 0190 (B16) para asumir `gapto_runtime` y 0210
 #              (B19), sin el cual cuatro tablas no admiten INSERT bajo RLS.
-# Versión: 0.1.1  -- los catalogos globales se insertan como gapto_owner y no
-#                   con el rol de conexion: en Supabase el rol postgres no tiene
-#                   escritura sobre gapto.paises y el fixture fallaba con 42501.
+# Versión: 0.2.0  -- v0.1.1 insertaba los catalogos globales como gapto_owner
+#                   en vez de con el rol de conexion, porque en Supabase el rol
+#                   postgres no tiene escritura sobre gapto.paises.
+#                   v0.2.0 prueba TODAS las FK tenant de cada tabla y no solo la
+#                   primera: probar una sola hacia el resultado dependiente del
+#                   orden del catalogo y oculto la fuga de
+#                   tercero_direcciones.direccion_id en un proveedor.
 # ============================================================
 
 from __future__ import annotations
@@ -282,24 +286,35 @@ class _Contexto:
         marcas = ", ".join(["%s"] * len(d))
         cur.execute(f"INSERT INTO gapto.{tabla} ({columnas}) VALUES ({marcas})", list(d.values()))
 
-    def variante_cross_tenant(self, tabla: str):
-        """Fila del tenant B con una FK apuntando al tenant A."""
+    def variantes_cross_tenant(self, tabla: str) -> list:
+        """Todas las filas intrusas posibles: una por FK tenant de la tabla.
+
+        La versión 0.1.x solo retorcía la PRIMERA clave foránea encontrada, y
+        el orden depende de cómo devuelva el catálogo los constraints. Eso hizo
+        que la misma tabla se probara por caminos distintos en Neon y en
+        Supabase, y que la fuga de `tercero_direcciones.direccion_id` pasara
+        inadvertida en un proveedor y saltara en el otro. Ahora se prueban
+        todas.
+        """
         filas = {t: d for t, d in self.filas("B")}
-        d = dict(filas.get(tabla, {}))
-        if not d:
-            return None
+        base = filas.get(tabla)
+        if not base:
+            return []
         entA = self._entidades("A")
+        salida = []
         for c, (ft, fc) in self._fks(tabla).items():
-            if ft in GLOBALES or ft in SEMBRADOS or c not in d:
+            if ft in GLOBALES or ft in SEMBRADOS or c not in base:
                 continue
             if fc not in ("id", "entidad_id") or not self.M[ft]["rls"]:
                 continue
-            d[c] = entA[ft] if ft in SUBTIPOS else (TENANTS["A"] if ft == "usuarios" else _uid(ft, "A"))
+            d = dict(base)
+            d[c] = entA[ft] if ft in SUBTIPOS else (
+                TENANTS["A"] if ft == "usuarios" else _uid(ft, "A")
+            )
             if "id" in d:
-                d["id"] = _uid("cross", tabla)
-            return c, d
-        return None
-
+                d["id"] = _uid("cross", tabla, c)
+            salida.append((c, ft, d))
+        return salida
 
 # ============================================================
 # Introspección del catálogo
@@ -454,13 +469,16 @@ def test_b17_aislamiento_de_lectura(db: psycopg.Connection, escenario) -> None:
 def test_b17_fk_cross_tenant_rechazada(db: psycopg.Connection, escenario) -> None:
     """(4) La comprobación que de verdad valida D-074.
 
-    Para cada tabla derivada se toma su fila del tenant B y se apunta una de
-    sus claves foráneas a la fila equivalente del tenant A. La escritura debe
-    ser rechazada, por WITH CHECK o por FK compuesto: cualquiera de las dos
-    capas es una defensa válida, lo inaceptable es que se acepte.
+    Para CADA clave foránea tenant de cada tabla derivada se toma la fila del
+    tenant B y se apunta esa FK a la fila equivalente del tenant A. La
+    escritura debe ser rechazada, por WITH CHECK o por FK compuesto:
+    cualquiera de las dos capas es defensa válida; lo inaceptable es que se
+    acepte. Se prueban todas las FK, no solo la primera: probar una sola hacía
+    el resultado dependiente del orden del catálogo y ocultó una fuga real.
     """
     aceptadas = {}
     sin_cobertura = []
+    probadas = 0
     with db.cursor() as cur:
         for tabla, fila in escenario.filas("B"):
             try:
@@ -474,19 +492,21 @@ def test_b17_fk_cross_tenant_rechazada(db: psycopg.Connection, escenario) -> Non
         for tabla in _derivadas(escenario):
             if tabla == "usuarios":
                 continue
-            intruso = escenario.variante_cross_tenant(tabla)
-            if intruso is None:
+            intrusos = escenario.variantes_cross_tenant(tabla)
+            if not intrusos:
                 sin_cobertura.append(tabla)
                 continue
-            columna, fila = intruso
-            try:
-                cur.execute("SAVEPOINT sp_cross")
-                escenario.insertar(cur, tabla, fila, "gapto_runtime", "B")
-                aceptadas[tabla] = columna
-                cur.execute("ROLLBACK TO SAVEPOINT sp_cross")
-            except psycopg.Error:
-                cur.execute("ROLLBACK TO SAVEPOINT sp_cross")
-            cur.execute("RESET ROLE")
+            for columna, padre, fila in intrusos:
+                probadas += 1
+                try:
+                    cur.execute("SAVEPOINT sp_cross")
+                    escenario.insertar(cur, tabla, fila, "gapto_runtime", "B")
+                    aceptadas[f"{tabla}.{columna}"] = f"-> {padre}"
+                    cur.execute("ROLLBACK TO SAVEPOINT sp_cross")
+                except psycopg.Error:
+                    cur.execute("ROLLBACK TO SAVEPOINT sp_cross")
+                cur.execute("RESET ROLE")
 
     assert aceptadas == {}, f"FUGA CROSS-TENANT aceptada en: {aceptadas}"
     assert sin_cobertura == [], f"sin FK tenant ejercitable: {sin_cobertura}"
+    assert probadas >= 60, f"cobertura insuficiente: solo {probadas} FK probadas"
