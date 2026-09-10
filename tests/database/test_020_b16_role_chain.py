@@ -12,7 +12,9 @@
 #              corrección es de impersonación, no de privilegios. Ni
 #              gapto_runtime ni gapto_backup ganan nada, y gapto_migrator
 #              no hereda pasivamente sus privilegios (INHERIT FALSE).
-# Versión: 0.1.1  -- el conteo DELETE==67 pasa a rango 50/67 por
+# Versión: 0.1.2  -- corrige el SET LOCAL parametrizado que quedo sin migrar
+#                   a set_config() en v0.1.1.
+#                   v0.1.1: el conteo DELETE==67 pasa a rango 50/67 por
 #                   F03-01-B18. La aserción sigue verificando que 0190 no
 #                   movió privilegios de datos, que es su propósito.
 # ============================================================
@@ -140,7 +142,7 @@ def test_b16_aislamiento_tenant_como_runtime_real(db: psycopg.Connection) -> Non
         try:
             cursor.execute("SET LOCAL ROLE gapto_owner")
             for uid, mail in ((a, "b16.a@example.com"), (b, "b16.b@example.com")):
-                cursor.execute("SET LOCAL gapto.owner_user_id = %s", (uid,))
+                cursor.execute("SELECT set_config('gapto.owner_user_id', %s, true)", (uid,))
                 cursor.execute(
                     "INSERT INTO gapto.usuarios (id,email,nombre) VALUES (%s,%s,'B16')",
                     (uid, mail),
@@ -148,7 +150,7 @@ def test_b16_aislamiento_tenant_como_runtime_real(db: psycopg.Connection) -> Non
             cursor.execute("RESET ROLE")
 
             cursor.execute("SET LOCAL ROLE gapto_runtime")
-            cursor.execute("SET LOCAL gapto.owner_user_id = %s", (a,))
+            cursor.execute("SELECT set_config('gapto.owner_user_id', %s, true)", (a,))
             cursor.execute(
                 "SELECT count(*) FROM gapto.usuarios WHERE id = ANY(%s::uuid[])",
                 ([a, b],),
