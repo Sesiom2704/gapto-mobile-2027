@@ -32,9 +32,13 @@
 # ROLE DRIFT, que es correcto y deliberado. En ese caso se usa --desde 0002
 # y el clean-room demuestra reproducibilidad DE LA BASE, no de la instancia.
 # Reproducir tambien la instancia exige un proyecto nuevo.
-# Versión: 0.2.0  -- anade preflight de roles en solo lectura y etiqueta el
-#                   resultado como clean-room DE BASE, nunca como bootstrap de
-#                   instancia.
+# Versión: 0.3.0  -- soporta los dos modos y se niega a mezclarlos: BOOTSTRAP DE
+#                   INSTANCIA aplicando 0001 sobre una instancia sin roles, con
+#                   postflight de los cinco roles creados; y CLEAN-ROOM DE BASE
+#                   arrancando en 0002 sobre instancia ya provisionada, con
+#                   preflight de solo lectura. El resultado se etiqueta segun el
+#                   modo realmente ejecutado.
+#                   v0.2.0: preflight de roles y etiquetado de alcance.
 # ============================================================
 
 from __future__ import annotations
@@ -202,23 +206,17 @@ ROLES_ESPERADOS = {
 }
 
 
-def preflight_roles(conexion) -> list[str]:
-    """Comprobacion de SOLO LECTURA de los cinco roles del modelo.
-
-    Los roles son cluster-scoped: no pertenecen a la base sino a la instancia.
-    Por eso 0001 no se ejecuta en este clean-room y por eso hay que verificar
-    aparte que la instancia esta correctamente provisionada. No se modifica
-    nada: si algo no cuadra, se aborta.
-    """
-    print("\nPreflight de roles (solo lectura, la instancia NO se modifica):")
+def leer_roles(conexion) -> dict:
     with conexion.cursor() as cursor:
         cursor.execute("""
             SELECT rolname, rolcanlogin, rolsuper, rolbypassrls
               FROM pg_catalog.pg_roles
              WHERE rolname = ANY(%s) ORDER BY rolname
         """, (sorted(ROLES_ESPERADOS),))
-        encontrados = {f[0]: (f[1], f[2], f[3]) for f in cursor.fetchall()}
+        return {f[0]: (f[1], f[2], f[3]) for f in cursor.fetchall()}
 
+
+def comprobar_roles(encontrados: dict) -> list[str]:
     problemas = []
     for rol, esperado in sorted(ROLES_ESPERADOS.items()):
         real = encontrados.get(rol)
@@ -232,6 +230,57 @@ def preflight_roles(conexion) -> list[str]:
         if not ok:
             problemas.append(f"{rol}: atributos {real}, esperados {esperado}")
     return problemas
+
+
+def preflight_roles(conexion, incluye_0001: bool) -> None:
+    """Decide si el estado de roles de la instancia encaja con lo que se va a
+    aplicar, y aborta si no.
+
+    Los roles son cluster-scoped: pertenecen a la instancia, no a la base. De
+    ahi que existan dos modos legitimos y excluyentes:
+
+      - CLEAN-ROOM DE INSTANCIA. Se aplica 0001 y los cinco roles NO deben
+        existir todavia. Es el bootstrap completo.
+      - CLEAN-ROOM DE BASE. Se arranca en 0002 sobre una instancia ya
+        provisionada, y los cinco roles SI deben existir con sus atributos
+        correctos. 0001 no puede ejecutarse aqui porque su postcheck de ROLE
+        DRIFT lo impediria, y hace bien.
+
+    Mezclar los dos modos produce una evidencia que no demuestra ninguno de
+    los dos, asi que el script se niega.
+    """
+    encontrados = leer_roles(conexion)
+    existentes = sorted(encontrados)
+
+    if incluye_0001:
+        print("\nPreflight de roles (modo BOOTSTRAP DE INSTANCIA):")
+        if existentes:
+            print(f"  FALLO  ya existen roles del modelo: {', '.join(existentes)}")
+            sys.exit(
+                "\nNo es un bootstrap de instancia: los roles ya estan creados. "
+                "0001 abortaria con su propio postcheck de ROLE DRIFT, y hace bien. "
+                "Usa --desde 0002 para un clean-room DE BASE, o una instancia nueva."
+            )
+        print("  ok    ninguno de los cinco roles existe; 0001 los creara")
+        return
+
+    print("\nPreflight de roles (modo CLEAN-ROOM DE BASE, solo lectura):")
+    problemas = comprobar_roles(encontrados)
+    if problemas:
+        print()
+        for problema in problemas:
+            print(f"  - {problema}")
+        sys.exit(
+            "\nPreflight FALLIDO. Se arranca en 0002, asi que la instancia deberia "
+            "estar ya provisionada por 0001 y no lo esta. Este script no provisiona "
+            "roles por su cuenta: eso es trabajo de 0001."
+        )
+
+
+def postflight_roles(conexion) -> list[str]:
+    """Tras un bootstrap de instancia, 0001 debe haber dejado los cinco roles."""
+    print("\nPostflight de roles (los ha creado 0001):")
+    return comprobar_roles(leer_roles(conexion))
 
 
 def base_esta_vacia(conexion) -> bool:
@@ -315,18 +364,13 @@ def main() -> int:
         print(f"Base destino: {base}")
         print(f"Motor:        {version.split(' on ')[0]}")
 
-        problemas_rol = preflight_roles(conexion)
-        if problemas_rol:
-            print()
-            for problema in problemas_rol:
-                print(f"  - {problema}")
-            sys.exit(
-                "\nPreflight FALLIDO. La instancia no esta provisionada como exige "
-                "0001. Este script no provisiona roles: son cluster-scoped y su "
-                "creacion es responsabilidad de 0001 sobre una instancia nueva."
-            )
+        ficheros = migrations(args.desde)
+        incluye_0001 = any(f.name.startswith("0001") for f in ficheros)
 
-        if not args.solo_verificar:
+        if args.solo_verificar:
+            incluye_0001 = False
+        else:
+            preflight_roles(conexion, incluye_0001)
             vacia = base_esta_vacia(conexion)
             if not vacia and not args.permitir_sucia:
                 sys.exit(
@@ -334,15 +378,17 @@ def main() -> int:
                     "aplicar migrations encima. Usa una base virgen, o --permitir-sucia "
                     "si sabes lo que haces."
                 )
-            ficheros = migrations(args.desde)
             print(f"\nAplicando {len(ficheros)} migrations desde "
                   f"{ficheros[0].name} hasta {ficheros[-1].name}:\n")
             aplicar(conexion, ficheros)
 
+        problemas_rol = postflight_roles(conexion) if incluye_0001 else []
+
         contrato = leer_contrato(conexion)
         huellas = leer_huellas(conexion)
 
-    fallos = comparar(contrato, CONTRATO, "CONTRATO FISICO")
+    fallos = list(problemas_rol)
+    fallos += comparar(contrato, CONTRATO, "CONTRATO FISICO")
     fallos += comparar(huellas, HUELLAS, "HUELLAS DE FUNCION (md5 de prosrc)")
 
     print()
@@ -354,15 +400,23 @@ def main() -> int:
 
     print("RESULTADO: OK.")
     print()
-    print("ALCANCE DE ESTA EVIDENCIA: clean-room DE BASE sobre una instancia")
-    print("previamente provisionada. Los cinco roles gapto son cluster-scoped y ya")
-    print("existian, de modo que 0001 no se ha ejecutado: se ha verificado en modo")
-    print("solo lectura que existen con los atributos correctos. Esto NO es un")
-    print("bootstrap completo de instancia; demostrarlo exigiria una instancia nueva.")
-    print()
-    print("Dentro de ese alcance: el repositorio reproduce el baseline aplicando las")
-    print("migrations desde 0002 en orden, sin SET search_path manual, sin parches")
-    print("temporales y sin ningun paso manual.")
+    if incluye_0001:
+        print("ALCANCE DE ESTA EVIDENCIA: clean-room DE INSTANCIA, es decir bootstrap")
+        print("completo desde cero. Ninguno de los cinco roles gapto existia antes de")
+        print("empezar; los ha creado 0001 durante esta misma ejecucion, y el postflight")
+        print("confirma que quedan con los atributos esperados. La cadena completa")
+        print("0001..0240 se aplica sin SET search_path manual, sin parches temporales y")
+        print("sin ningun paso manual.")
+    else:
+        print("ALCANCE DE ESTA EVIDENCIA: clean-room DE BASE sobre una instancia")
+        print("previamente provisionada. Los cinco roles gapto son cluster-scoped y ya")
+        print("existian, de modo que 0001 no se ha ejecutado: se ha verificado en modo")
+        print("solo lectura que existen con los atributos correctos. Esto NO es un")
+        print("bootstrap completo de instancia; demostrarlo exigiria una instancia nueva.")
+        print()
+        print("Dentro de ese alcance: el repositorio reproduce el baseline aplicando las")
+        print("migrations desde 0002 en orden, sin SET search_path manual, sin parches")
+        print("temporales y sin ningun paso manual.")
     return 0
 
 
