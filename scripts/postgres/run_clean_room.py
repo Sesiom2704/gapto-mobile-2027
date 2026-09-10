@@ -32,7 +32,9 @@
 # ROLE DRIFT, que es correcto y deliberado. En ese caso se usa --desde 0002
 # y el clean-room demuestra reproducibilidad DE LA BASE, no de la instancia.
 # Reproducir tambien la instancia exige un proyecto nuevo.
-# Versión: 0.1.0
+# Versión: 0.2.0  -- anade preflight de roles en solo lectura y etiqueta el
+#                   resultado como clean-room DE BASE, nunca como bootstrap de
+#                   instancia.
 # ============================================================
 
 from __future__ import annotations
@@ -190,6 +192,48 @@ def migrations(desde: str | None) -> list[Path]:
     return ficheros
 
 
+ROLES_ESPERADOS = {
+    # rol            : (canlogin, superuser, bypassrls)
+    "gapto_owner":    (False, False, False),
+    "gapto_migrator": (False, False, False),
+    "gapto_internal": (False, False, False),
+    "gapto_runtime":  (False, False, False),
+    "gapto_backup":   (False, False, True),
+}
+
+
+def preflight_roles(conexion) -> list[str]:
+    """Comprobacion de SOLO LECTURA de los cinco roles del modelo.
+
+    Los roles son cluster-scoped: no pertenecen a la base sino a la instancia.
+    Por eso 0001 no se ejecuta en este clean-room y por eso hay que verificar
+    aparte que la instancia esta correctamente provisionada. No se modifica
+    nada: si algo no cuadra, se aborta.
+    """
+    print("\nPreflight de roles (solo lectura, la instancia NO se modifica):")
+    with conexion.cursor() as cursor:
+        cursor.execute("""
+            SELECT rolname, rolcanlogin, rolsuper, rolbypassrls
+              FROM pg_catalog.pg_roles
+             WHERE rolname = ANY(%s) ORDER BY rolname
+        """, (sorted(ROLES_ESPERADOS),))
+        encontrados = {f[0]: (f[1], f[2], f[3]) for f in cursor.fetchall()}
+
+    problemas = []
+    for rol, esperado in sorted(ROLES_ESPERADOS.items()):
+        real = encontrados.get(rol)
+        if real is None:
+            print(f"  FALLO  {rol:16} no existe en la instancia")
+            problemas.append(f"{rol}: no existe")
+            continue
+        ok = real == esperado
+        print(f"  {'ok  ' if ok else 'FALLO'}  {rol:16} "
+              f"login={real[0]} super={real[1]} bypassrls={real[2]}")
+        if not ok:
+            problemas.append(f"{rol}: atributos {real}, esperados {esperado}")
+    return problemas
+
+
 def base_esta_vacia(conexion) -> bool:
     with conexion.cursor() as cursor:
         cursor.execute("SELECT count(*) FROM pg_catalog.pg_namespace WHERE nspname='gapto'")
@@ -271,6 +315,17 @@ def main() -> int:
         print(f"Base destino: {base}")
         print(f"Motor:        {version.split(' on ')[0]}")
 
+        problemas_rol = preflight_roles(conexion)
+        if problemas_rol:
+            print()
+            for problema in problemas_rol:
+                print(f"  - {problema}")
+            sys.exit(
+                "\nPreflight FALLIDO. La instancia no esta provisionada como exige "
+                "0001. Este script no provisiona roles: son cluster-scoped y su "
+                "creacion es responsabilidad de 0001 sobre una instancia nueva."
+            )
+
         if not args.solo_verificar:
             vacia = base_esta_vacia(conexion)
             if not vacia and not args.permitir_sucia:
@@ -297,7 +352,17 @@ def main() -> int:
             print(f"  - {f}")
         return 1
 
-    print("RESULTADO: OK. El repositorio reproduce el baseline sin intervencion manual.")
+    print("RESULTADO: OK.")
+    print()
+    print("ALCANCE DE ESTA EVIDENCIA: clean-room DE BASE sobre una instancia")
+    print("previamente provisionada. Los cinco roles gapto son cluster-scoped y ya")
+    print("existian, de modo que 0001 no se ha ejecutado: se ha verificado en modo")
+    print("solo lectura que existen con los atributos correctos. Esto NO es un")
+    print("bootstrap completo de instancia; demostrarlo exigiria una instancia nueva.")
+    print()
+    print("Dentro de ese alcance: el repositorio reproduce el baseline aplicando las")
+    print("migrations desde 0002 en orden, sin SET search_path manual, sin parches")
+    print("temporales y sin ningun paso manual.")
     return 0
 
 
