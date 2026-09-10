@@ -13,7 +13,17 @@
 --   No incluye los 11 indices GiST que ya crean automaticamente los
 --   EXCLUDE de B10, ni las anchors/UNIQUE de B08 (45) ni las FK de B09
 --   (161), que ya tienen su propio indice por definicion de constraint.
--- Version: 0.1.0
+-- Version: 0.1.1
+-- Nota v0.1.1 (excepcion pre-freeze F03-GATE-01): las seis referencias a
+--   gin_trgm_ops pasan a estar cualificadas como gapto_ext.gin_trgm_ops.
+--   Sin cualificar, el fichero solo funcionaba si la sesion traia gapto_ext en
+--   el search_path, cosa que ninguna migration fija: 0002 establece timezone y
+--   default_transaction_isolation por ALTER DATABASE, pero no search_path. El
+--   fichero era por tanto irreproducible desde una sesion limpia. El cambio es
+--   semanticamente neutro: el catalogo de Neon y Supabase ya almacena estos
+--   indices con el opclass cualificado, de modo que la correccion alinea el
+--   fichero con lo que la base ya contiene. No se anade SET search_path, no se
+--   toca ninguna otra definicion y NO se reaplica sobre las bases existentes.
 -- ============================================================
 
 BEGIN;
@@ -165,12 +175,12 @@ CREATE INDEX ix_inversion_valoraciones__inversion_fecha ON gapto.inversion_valor
 CREATE INDEX ix_terceros__owner_nombre ON gapto.terceros (owner_user_id, nombre);
 
 -- Búsqueda humana (pg_trgm GIN) según F03-00-I
-CREATE INDEX ix_terceros__nombre_trgm ON gapto.terceros USING gin (nombre gin_trgm_ops);
-CREATE INDEX ix_terceros__nombre_legal_trgm ON gapto.terceros USING gin (nombre_legal gin_trgm_ops);
-CREATE INDEX ix_entidades__nombre_trgm ON gapto.entidades USING gin (nombre gin_trgm_ops);
-CREATE INDEX ix_hechos_financieros__concepto_trgm ON gapto.hechos_financieros USING gin (concepto gin_trgm_ops);
-CREATE INDEX ix_documentos__titulo_trgm ON gapto.documentos USING gin (titulo gin_trgm_ops);
-CREATE INDEX ix_documentos__nombre_archivo_trgm ON gapto.documentos USING gin (nombre_archivo_original gin_trgm_ops);
+CREATE INDEX ix_terceros__nombre_trgm ON gapto.terceros USING gin (nombre gapto_ext.gin_trgm_ops);
+CREATE INDEX ix_terceros__nombre_legal_trgm ON gapto.terceros USING gin (nombre_legal gapto_ext.gin_trgm_ops);
+CREATE INDEX ix_entidades__nombre_trgm ON gapto.entidades USING gin (nombre gapto_ext.gin_trgm_ops);
+CREATE INDEX ix_hechos_financieros__concepto_trgm ON gapto.hechos_financieros USING gin (concepto gapto_ext.gin_trgm_ops);
+CREATE INDEX ix_documentos__titulo_trgm ON gapto.documentos USING gin (titulo gapto_ext.gin_trgm_ops);
+CREATE INDEX ix_documentos__nombre_archivo_trgm ON gapto.documentos USING gin (nombre_archivo_original gapto_ext.gin_trgm_ops);
 
 RESET ROLE;
 

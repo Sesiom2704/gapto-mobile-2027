@@ -1,5 +1,7 @@
 -- ============================================================
+-- GAPTO MOBILE 2027
 -- Fichero: 0120_f03_01_b13_rls.sql
+-- Ruta: migrations/0120_f03_01_b13_rls.sql
 -- Descripcion: ENABLE+FORCE RLS y policies de aislamiento tenant sobre las 74 tablas
 --   no-catalogo. USING valida un solo camino de ownership; WITH CHECK valida TODOS
 --   los FK owner-scoped de la fila (principio "Forma A": cualquier vinculo cross-
@@ -9,6 +11,12 @@
 --   quedan sin RLS, protegidos por GRANT en F03-01-B14. Las 7 tablas append-only
 --   reciben solo policies de SELECT+INSERT; UPDATE/DELETE quedan denegados por
 --   ausencia de policy + guard trigger (F03-01-B14).
+-- Version: 0.1.1
+-- Nota v0.1.1 (excepcion pre-freeze F03-GATE-01): se anaden las lineas
+--   GAPTO MOBILE 2027, Ruta y Version, que el Working Method exige en todo
+--   artefacto propio y este fichero nunca llego a declarar. El SQL ejecutable
+--   es byte a byte el original: no se ha tocado ni una sentencia. NO se
+--   reaplica sobre las bases existentes.
 -- ============================================================
 
 SET ROLE gapto_owner;
