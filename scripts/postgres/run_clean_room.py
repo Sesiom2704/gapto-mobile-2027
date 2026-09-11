@@ -32,7 +32,11 @@
 # ROLE DRIFT, que es correcto y deliberado. En ese caso se usa --desde 0002
 # y el clean-room demuestra reproducibilidad DE LA BASE, no de la instancia.
 # Reproducir tambien la instancia exige un proyecto nuevo.
-# Versión: 0.5.0  -- F03-02 / migration 0260: huellas esperadas de
+# Versión: 0.6.0  -- F03-02 / migration 0270: el CONTRATO del final de la
+#                   cadena pasa a 19 funciones, 39 triggers no internos y 23
+#                   constraint triggers. Las HUELLAS de participacion, alcance
+#                   BOLSA y auditoria no cambian (0270 no toca esas funciones).
+#                   v0.5.0: F03-02 / migration 0260: huellas esperadas de
 #                   fn_check_participacion_suma y fn_check_bolsa_prioridad_alcance
 #                   pasan a las de 0260 (fail-closed y cambio de padre).
 #                   v0.4.0: F03-02 / migration 0250: las huellas esperadas de
@@ -63,7 +67,8 @@ except ImportError:  # pragma: no cover
     sys.exit("Falta psycopg. Instala con: python -m pip install \"psycopg[binary]\"")
 
 
-# Contrato fisico esperado. Es el certificado por D-109 en Neon y Supabase.
+# Contrato fisico esperado al final de la cadena (0270). Base: D-109; 0270
+# anade 4 funciones, 5 triggers no internos y 4 constraint triggers.
 CONTRATO = {
     "tablas": 79,
     "force_rls": 74,
@@ -71,11 +76,11 @@ CONTRATO = {
     "foreign_keys": 166,
     "unique_constraints": 37,
     "exclude_constraints": 11,
-    "funciones": 15,
+    "funciones": 19,
     "security_definer": 1,
     "vistas_security_invoker": 3,
-    "triggers_no_internos": 34,
-    "constraint_triggers": 19,
+    "triggers_no_internos": 39,
+    "constraint_triggers": 23,
     "triggers_deshabilitados": 0,
     "policies_autorreferentes": 0,
     "fk_tenant_sin_validar": 0,
