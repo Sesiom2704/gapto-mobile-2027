@@ -30,7 +30,12 @@
 # lo detecta y falla en el preflight).
 #
 # Nunca hardcodear credenciales en este fichero: siempre por variable de entorno.
-# Versión: 0.1.0
+# Versión: 0.1.1  -- la salida de run_clean_room.py (-AplicarCadena) se guarda
+#                   en logs/c27_<proveedor>_<marca>_cadena.log; salida de
+#                   Python en UTF-8 para evitar caracteres corruptos en la
+#                   consola de Windows; rutas con "/" (validas en Windows y en
+#                   PowerShell 7 de Linux).
+#                   v0.1.0: primera version.
 # ============================================================
 
 param(
@@ -43,7 +48,14 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+# Salida de Python en UTF-8 y consola en UTF-8 durante la ejecucion; se
+# restauran al final.
+$codificacionAnterior = [Console]::OutputEncoding
+$pythonIoAnterior = $env:PYTHONIOENCODING
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$env:PYTHONIOENCODING = "utf-8"
+
+$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
 $LogDir = Join-Path $RepoRoot "logs"
 if (-not (Test-Path $LogDir)) {
     New-Item -ItemType Directory -Path $LogDir | Out-Null
@@ -60,18 +72,23 @@ function Assert-UrlLaboratorio {
 }
 
 function Invoke-CadenaEnLaboratorio {
-    param([string]$Proveedor, [string]$Url)
-    Write-Host "==> ${Proveedor}: aplicando cadena 0002..0240 sobre gapto2027_cleanroom (clean-room DE BASE)..."
+    param([string]$Proveedor, [string]$Url, [string]$Log)
+    Write-Host "==> ${Proveedor}: aplicando la cadena del repositorio desde 0002 sobre gapto2027_cleanroom (clean-room DE BASE)..."
     $anterior = $env:GAPTO_CLEANROOM_URL
+    $preferenciaAnterior = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     try {
         $env:GAPTO_CLEANROOM_URL = $Url
-        python (Join-Path $RepoRoot "scripts\postgres\run_clean_room.py") --desde 0002
-        if ($LASTEXITCODE -ne 0) {
-            throw "run_clean_room.py fallo en ${Proveedor} (exit code $LASTEXITCODE). No se ejecuta la bateria."
-        }
+        python (Join-Path $RepoRoot "scripts/postgres/run_clean_room.py") --desde 0002 2>&1 | Tee-Object -FilePath $Log
+        $codigo = $LASTEXITCODE
     }
     finally {
         $env:GAPTO_CLEANROOM_URL = $anterior
+        $ErrorActionPreference = $preferenciaAnterior
+    }
+    Write-Host "    Log cadena: $Log"
+    if ($codigo -ne 0) {
+        throw "run_clean_room.py fallo en ${Proveedor} (exit code $codigo). No se ejecuta la bateria."
     }
 }
 
@@ -103,10 +120,11 @@ function Show-Resumen {
 function Invoke-Bateria {
     param([string]$Proveedor, [string]$Url)
     Assert-UrlLaboratorio -Proveedor $Proveedor -Url $Url
-    if ($AplicarCadena) {
-        Invoke-CadenaEnLaboratorio -Proveedor $Proveedor -Url $Url
-    }
     $marca = Get-Date -Format "yyyyMMdd-HHmmss"
+    if ($AplicarCadena) {
+        $logCadena = Join-Path $LogDir ("c27_{0}_{1}_cadena.log" -f $Proveedor.ToLower(), $marca)
+        Invoke-CadenaEnLaboratorio -Proveedor $Proveedor -Url $Url -Log $logCadena
+    }
     $xml = Join-Path $LogDir ("c27_{0}_{1}.xml" -f $Proveedor.ToLower(), $marca)
     $txt = Join-Path $LogDir ("c27_{0}_{1}.log" -f $Proveedor.ToLower(), $marca)
 
@@ -134,10 +152,16 @@ function Invoke-Bateria {
     Write-Host "    pytest exit code: $codigo"
 }
 
-if ($Provider -eq "Neon" -or $Provider -eq "Both") {
-    Invoke-Bateria -Proveedor "Neon" -Url $env:GAPTO_NEON_CONCURRENCY_URL
-}
+try {
+    if ($Provider -eq "Neon" -or $Provider -eq "Both") {
+        Invoke-Bateria -Proveedor "Neon" -Url $env:GAPTO_NEON_CONCURRENCY_URL
+    }
 
-if ($Provider -eq "Supabase" -or $Provider -eq "Both") {
-    Invoke-Bateria -Proveedor "Supabase" -Url $env:GAPTO_SUPABASE_CONCURRENCY_URL
+    if ($Provider -eq "Supabase" -or $Provider -eq "Both") {
+        Invoke-Bateria -Proveedor "Supabase" -Url $env:GAPTO_SUPABASE_CONCURRENCY_URL
+    }
+}
+finally {
+    [Console]::OutputEncoding = $codificacionAnterior
+    $env:PYTHONIOENCODING = $pythonIoAnterior
 }
