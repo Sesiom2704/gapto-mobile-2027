@@ -37,7 +37,13 @@
 #              UNIQUE de identidad versionada rechaza antes la versión igual.
 #
 # PRECONDICIÓN: requiere 0280.
-# Versión: 0.1.0
+# Versión: 0.1.1  -- el montaje ya no depende de los privilegios del rol de
+#                   conexión (en Supabase, postgres no hereda los de
+#                   gapto_owner): usuarios y datos se crean como gapto_owner
+#                   con el contexto de cada owner, y el caso de PARTE_DE entre
+#                   owners simula un rol que se salta RLS levantando FORCE RLS
+#                   de hechos_financieros y hecho_relaciones dentro de la
+#                   transacción del test, que siempre se revierte.
 # ============================================================
 
 from __future__ import annotations
@@ -106,15 +112,17 @@ DIFERIDO = "D-123"
 # Montaje
 # ------------------------------------------------------------
 
+def _contexto(cursor, owner: str = OWNER) -> None:
+    cursor.execute("SELECT set_config('gapto.owner_user_id', %s, true)", (owner,))
+
+
 def _usuarios(cursor) -> None:
-    for owner, nombre in ((OWNER, "c0320a"), (OWNER2, "c0320b")):
+    """Como gapto_owner y con el contexto de cada owner: no depende de los
+    privilegios del rol de conexión."""
+    for owner, nombre in ((OWNER2, "c0320b"), (OWNER, "c0320a")):
+        _contexto(cursor, owner)
         cursor.execute("INSERT INTO gapto.usuarios (id, email, nombre) VALUES (%s, %s, %s)",
                        (owner, nombre + "@example.invalid", nombre))
-
-
-def _contexto(cursor, owner: str = OWNER) -> None:
-    cursor.execute("SET LOCAL ROLE gapto_owner")
-    cursor.execute("SELECT set_config('gapto.owner_user_id', %s, true)", (owner,))
 
 
 def _inmediato(cursor) -> None:
@@ -127,18 +135,22 @@ def _validar_montaje(cursor) -> None:
 
 
 class _Tx:
-    """Transacción que siempre se revierte. Con rol=None se queda en el rol de
-    conexión (BYPASSRLS en todos los entornos del proyecto)."""
+    """Transacción como gapto_owner que siempre se revierte. Con sin_rls=True
+    levanta FORCE RLS de hechos_financieros y hecho_relaciones dentro de la
+    transacción: gapto_owner, dueño de las tablas, deja de estar sujeto a RLS
+    y simula un rol con BYPASSRLS y privilegios de escritura."""
 
-    def __init__(self, db: psycopg.Connection, rol: str | None = "gapto_owner") -> None:
-        self.db, self.rol = db, rol
+    def __init__(self, db: psycopg.Connection, sin_rls: bool = False) -> None:
+        self.db, self.sin_rls = db, sin_rls
 
     def __enter__(self):
         self.cursor = self.db.cursor()
         self.cursor.execute("BEGIN")
+        self.cursor.execute("SET LOCAL ROLE gapto_owner")
         _usuarios(self.cursor)
-        if self.rol:
-            _contexto(self.cursor)
+        if self.sin_rls:
+            self.cursor.execute("ALTER TABLE gapto.hechos_financieros NO FORCE ROW LEVEL SECURITY")
+            self.cursor.execute("ALTER TABLE gapto.hecho_relaciones NO FORCE ROW LEVEL SECURITY")
         return self.cursor
 
     def __exit__(self, *exc) -> None:
@@ -477,9 +489,9 @@ def test_0280_parte_de_cambio_de_extremo(db: psycopg.Connection) -> None:
 
 
 def test_0280_parte_de_mismo_owner_tambien_con_bypassrls(db: psycopg.Connection) -> None:
-    """Sin SET ROLE: rol de conexión con BYPASSRLS. La RLS no interviene; la
-    invariante de mismo owner la impone el trigger."""
-    with _Tx(db, rol=None) as cursor:
+    """Con RLS fuera de juego (simula un rol con BYPASSRLS): la invariante de
+    mismo owner la impone el trigger, no la policy."""
+    with _Tx(db, sin_rls=True) as cursor:
         _hecho(cursor, H_A)
         _hecho(cursor, H_B, OWNER2)
         _relacion(cursor, H_A, H_B)
