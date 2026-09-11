@@ -4,7 +4,10 @@
 # Ruta: tests/database/test_004_tables_b03.py
 # Descripción: Verifica el contrato físico F03-01-B03 de las tablas 29..32:
 #              reglas financieras, versiones, excepciones y previsiones.
-# Versión: 0.1.3  -- 0265 (D-126) añade regla_versiones.anclaje_recurrencia y
+# Versión: 0.1.4  -- 0270 (A8) añade ck_regla_versiones__ventana_dias_obligatorios
+#                   como segunda sucesora conocida (Working Method 12C.5); el
+#                   CHECK congelado de 0030 se conserva intacto.
+#                   v0.1.3: 0265 (D-126) añade regla_versiones.anclaje_recurrencia y
 #                   cuatro CHECK. El test valida el baseline B03 y acepta
 #                   exactamente esa sucesora conocida (Working Method 12C.5);
 #                   cualquier otra columna o CHECK sigue siendo drift.
@@ -79,6 +82,8 @@ SUCESORA_0265_CHECKS = {
     "ck_regla_versiones__anclaje_recurrencia", "ck_regla_versiones__anclaje_periodicidad",
     "ck_regla_versiones__rodante_fecha_modo", "ck_regla_versiones__rodante_importe_modo",
 }
+# Sucesora conocida: 0270 / A8 (dias obligatorios con fecha_modo=VENTANA).
+SUCESORA_0270_CHECKS = {"ck_regla_versiones__ventana_dias_obligatorios"}
 
 EXPECTED_CHECKS = {
     "ck_reglas_financieras__nombre_no_blanco",
@@ -193,7 +198,11 @@ def test_b03_local_checks_are_materialized(db: psycopg.Connection) -> None:
              WHERE n.nspname='gapto' AND c.relname = ANY(%s) AND con.contype='c'
         """, (sorted(B03_TABLES),))
         names = {r[0] for r in cursor.fetchall()}
-    assert names in (EXPECTED_CHECKS, EXPECTED_CHECKS | SUCESORA_0265_CHECKS)
+    assert names in (
+        EXPECTED_CHECKS,
+        EXPECTED_CHECKS | SUCESORA_0265_CHECKS,
+        EXPECTED_CHECKS | SUCESORA_0265_CHECKS | SUCESORA_0270_CHECKS,
+    )
 
 
 def test_b03_public_has_no_table_dml(db: psycopg.Connection) -> None:
