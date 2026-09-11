@@ -32,7 +32,11 @@
 # ROLE DRIFT, que es correcto y deliberado. En ese caso se usa --desde 0002
 # y el clean-room demuestra reproducibilidad DE LA BASE, no de la instancia.
 # Reproducir tambien la instancia exige un proyecto nuevo.
-# Versión: 0.6.0  -- F03-02 / migration 0270: el CONTRATO del final de la
+# Versión: 0.7.0  -- F03-02 / migration 0280: CONTRATO del final de la cadena
+#                   = 21 funciones, 40 triggers no internos, 30 constraint
+#                   triggers y 40 UNIQUE. Huellas de participacion, alcance
+#                   BOLSA y auditoria sin cambios.
+#                   v0.6.0: F03-02 / migration 0270: el CONTRATO del final de la
 #                   cadena pasa a 19 funciones, 39 triggers no internos y 23
 #                   constraint triggers. Las HUELLAS de participacion, alcance
 #                   BOLSA y auditoria no cambian (0270 no toca esas funciones).
@@ -67,20 +71,21 @@ except ImportError:  # pragma: no cover
     sys.exit("Falta psycopg. Instala con: python -m pip install \"psycopg[binary]\"")
 
 
-# Contrato fisico esperado al final de la cadena (0270). Base: D-109; 0270
-# anade 4 funciones, 5 triggers no internos y 4 constraint triggers.
+# Contrato fisico esperado al final de la cadena (0280). Base: D-109; 0270
+# anade 4 funciones, 5 triggers y 4 constraint triggers; 0280 cambia 1 funcion
+# por 3, 6 triggers BEFORE por 7 constraint triggers y anade 3 UNIQUE.
 CONTRATO = {
     "tablas": 79,
     "force_rls": 74,
     "policies": 81,
     "foreign_keys": 166,
-    "unique_constraints": 37,
+    "unique_constraints": 40,
     "exclude_constraints": 11,
-    "funciones": 19,
+    "funciones": 21,
     "security_definer": 1,
     "vistas_security_invoker": 3,
-    "triggers_no_internos": 39,
-    "constraint_triggers": 23,
+    "triggers_no_internos": 40,
+    "constraint_triggers": 30,
     "triggers_deshabilitados": 0,
     "policies_autorreferentes": 0,
     "fk_tenant_sin_validar": 0,
