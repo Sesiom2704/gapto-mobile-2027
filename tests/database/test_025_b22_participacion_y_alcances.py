@@ -16,8 +16,13 @@
 #              varios pasos dentro de una transacción sigue siendo válido porque
 #              los triggers son DEFERRABLE INITIALLY DEFERRED (D-081).
 #
+#              Huellas: el test histórico valida su baseline (0240) sin
+#              impedir la sucesora conocida. Se acepta la huella de 0240 o la
+#              de 0250 (F03-02, FOR UPDATE -> FOR NO KEY UPDATE), y nada más:
+#              cualquier otra huella sigue siendo drift.
+#
 # PRECONDICIÓN: requiere 0190 (B16).
-# Versión: 0.1.0
+# Versión: 0.1.1  -- acepta la huella sucesora de 0250.
 # ============================================================
 
 from __future__ import annotations
@@ -26,8 +31,14 @@ import psycopg
 import pytest
 
 HUELLAS = {
-    "fn_check_participacion_suma": ("c909c04f4e0131a32c6552efe601d370", 2436),
-    "fn_check_bolsa_prioridad_alcance": ("0eb39ed53b28a3c4657e032f3aaaa037", 1524),
+    "fn_check_participacion_suma": {
+        ("c909c04f4e0131a32c6552efe601d370", 2436),  # 0240 (baseline)
+        ("d01fd963789d8adf4b29cbb007604414", 2443),  # 0250 (sucesora)
+    },
+    "fn_check_bolsa_prioridad_alcance": {
+        ("0eb39ed53b28a3c4657e032f3aaaa037", 1524),  # 0240 (baseline)
+        ("7d9abf8d58b812b88d8c58e9968a50fe", 1531),  # 0250 (sucesora)
+    },
 }
 
 OWNER = "b22a0000-0000-4000-8000-000000000001"
@@ -51,7 +62,7 @@ def test_b22_huella_de_funcion(db: psycopg.Connection, funcion: str) -> None:
     Los cuerpos van sin comentarios inline a propósito: cualquier comentario
     dentro de prosrc es una fuente de divergencia silenciosa entre entornos.
     """
-    esperado, bytes_esperados = HUELLAS[funcion]
+    aceptadas = HUELLAS[funcion]
     with db.cursor() as cursor:
         cursor.execute("""
             SELECT md5(p.prosrc), length(p.prosrc)
@@ -61,8 +72,8 @@ def test_b22_huella_de_funcion(db: psycopg.Connection, funcion: str) -> None:
         """, (funcion,))
         fila = cursor.fetchone()
     assert fila is not None, f"{funcion} no existe"
-    assert fila == (esperado, bytes_esperados), (
-        f"{funcion}: huella {fila} != esperada {(esperado, bytes_esperados)}"
+    assert tuple(fila) in aceptadas, (
+        f"{funcion}: huella {tuple(fila)} no es ninguna de las aceptadas {sorted(aceptadas)}"
     )
 
 
