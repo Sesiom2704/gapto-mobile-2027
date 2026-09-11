@@ -22,7 +22,9 @@
 #              cualquier otra huella sigue siendo drift.
 #
 # PRECONDICIÓN: requiere 0190 (B16).
-# Versión: 0.1.3  -- el recuento de triggers acepta exactamente la sucesora de
+# Versión: 0.1.4  -- acepta también exactamente la sucesora de 0280 (40 no
+#                   internos, 30 constraint, 7 guards).
+#                   v0.1.3: el recuento de triggers acepta exactamente la sucesora de
 #                   0270 (39 no internos, 23 constraint, 7 guards) además del
 #                   baseline B22 (Working Method 12C.5).
 #                   v0.1.2: acepta las huellas sucesoras de 0250 y 0260.
@@ -142,7 +144,7 @@ def test_b22_recuento_de_triggers(db: psycopg.Connection) -> None:
              WHERE n.nspname='gapto' AND NOT t.tgisinternal
         """)
         total, constraint, guards = cursor.fetchone()
-    assert (total, constraint, guards) in ((34, 19, 7), (39, 23, 7))
+    assert (total, constraint, guards) in ((34, 19, 7), (39, 23, 7), (40, 30, 7))
 
 
 # ------------------------------------------------------------

@@ -66,6 +66,18 @@
 #                C16 R-TPN: UPDATE de naturaleza frente a INSERT de persona
 #                C17 R-GAR: cambio de tipo del destino frente a INSERT de la
 #                    garantía (dos padres bloqueados en orden de uuid)
+#                C18 D-123 categorías X<->Y (advisory lock por owner)
+#                C19 D-123 ciclo de longitud 3 construido desde dos sesiones
+#                C20 D-123 owners distintos: NO deben bloquearse entre sí
+#                C21 PARTE_DE X<->Y (caso propio, no equivalente a árboles)
+#                C22 reversión B->A frente a convertir A en reversión de C
+#                C23 reversiones A<->B (deadlock de dos padres -> reintento)
+#                C24 cadena de presupuestos: UPDATE de versión del
+#                    predecesor frente a UPDATE de versión del sucesor
+#                    (write-skew que solo evita el advisory lock)
+#                C25 bifurcación concurrente: la arbitra la UNIQUE (23505)
+#              Clasificaciones, inversiones y regiones se cubren por equivalencia
+#              estructural con C18-C20 (test_032, D-115).
 #              C15b (moneda frente al primer cierre_saldos_cuenta) se acepta por
 #              equivalencia estructural con C15a, verificada en test_028: el
 #              cierre es append-only y el caso dejaría residuo imborrable.
@@ -82,6 +94,10 @@
 #                FOR UPDATE del padre frente a KEY SHARE de FK .. C15a
 #                misma fila (lock de tupla y EPQ) ................ C15c
 #                hija que bloquea dos padres frente a su UPDATE .. C17
+#                advisory lock de grafo (mismo / distinto owner) . C18-C21
+#                lock de fila del original frente a su UPDATE ... C22
+#                validación cruzada de dos filas sin fila común . C24
+#                UNIQUE declarativa bajo concurrencia ............ C25
 #              entidad_participaciones, inversion_asignaciones_efecto y
 #              hecho_movimientos_tesoreria se aceptan por EQUIVALENCIA
 #              ESTRUCTURAL verificada estáticamente en test_028, no por prueba
@@ -104,8 +120,13 @@
 #              test verifica que no queda residuo.
 #
 # PRECONDICIÓN: cadena 0001..0270 aplicada en gapto2027_cleanroom (C1-C11
-#              requieren 0250; C12-C17, 0270).
-# Versión: 0.3.0  -- añade C12-C17 (F03-02 / 0270) con la plantilla
+#              requieren 0250; C12-C17, 0270; C18-C25, 0280).
+# Versión: 0.4.0  -- añade C18-C25 (0280). _caso_segunda_bloqueada admite
+#                   SQLSTATE de rechazo configurables (23505 solo en C25), el
+#                   resultado SIN_BLOQUEO (C20) y el owner de la sesión B; un
+#                   segundo owner temporal (usuario sin actor self) se crea y
+#                   se borra en el caso; limpieza de hecho_relaciones.
+#                   v0.3.0: añade C12-C17 (F03-02 / 0270) con la plantilla
 #                   _caso_segunda_bloqueada, limpieza de hmt, inversiones,
 #                   entidades y garantías, y amplía el control de residuos.
 #                   v0.2.0: añade C8, C8b, C9, C10 y C11 (topologías de lock no
@@ -137,12 +158,14 @@ pytestmark = pytest.mark.skipif(
 
 BASE_LABORATORIO = "gapto2027_cleanroom"
 OWNER_LAB = "c0270000-0000-4000-8000-000000000001"
+OWNER_LAB2 = "c0270000-0000-4000-8000-000000000003"
 SELF_LAB = "c0270000-0000-4000-8000-000000000002"
 
 ETIQUETAS = ("PASS", "PASS_WITH_EXPECTED_DEADLOCK", "FAIL_INTEGRITY", "FAIL_LIVENESS")
 SQLSTATE_INVARIANTE = "P0001"
 SQLSTATE_DEADLOCK = "40P01"
 SQLSTATE_EXCLUSION = "23P01"
+SQLSTATE_UNICIDAD = "23505"
 SQLSTATES_VIVACIDAD = {"55P03", "57014", "TIMEOUT_ORQUESTADOR"}
 
 D_ENE = date(2026, 1, 1)
@@ -317,10 +340,10 @@ class Sesion:
             cursor.execute(consulta, parametros)
             return cursor.fetchall() if cursor.description else []
 
-    def abrir_runtime(self) -> None:
+    def abrir_runtime(self, owner: str = OWNER_LAB) -> None:
         self.sql("BEGIN")
         self.sql("SET LOCAL ROLE gapto_runtime")
-        self.sql("SELECT set_config('gapto.owner_user_id', %s, true)", (OWNER_LAB,))
+        self.sql("SELECT set_config('gapto.owner_user_id', %s, true)", (owner,))
 
     def abortar(self) -> None:
         if self.conn is None or self.conn.closed or self.conn.broken:
@@ -470,7 +493,8 @@ class Laboratorio:
             ("gapto.inversion_asignaciones_efecto", "INSERT"), ("gapto.terceros", "UPDATE"),
             ("gapto.tercero_personas", "INSERT"), ("gapto.entidades", "UPDATE"),
             ("gapto.entidad_relaciones", "INSERT"), ("gapto.propiedades", "DELETE"),
-            ("gapto.servicios", "INSERT"),
+            ("gapto.servicios", "INSERT"), ("gapto.hecho_relaciones", "INSERT"),
+            ("gapto.presupuestos", "UPDATE"), ("gapto.categorias_financieras", "UPDATE"),
         ]
         sin_privilegio = [
             f"{tabla}:{priv}" for tabla, priv in requeridos
@@ -506,13 +530,13 @@ class Laboratorio:
 
     # ---------- administración como gapto_owner ----------
 
-    def tx_owner(self, sentencias: list[tuple]) -> list[list[tuple]]:
+    def tx_owner(self, sentencias: list[tuple], owner: str = OWNER_LAB) -> list[list[tuple]]:
         resultados = []
         self.admin.abortar()
         self.admin.sql("BEGIN")
         try:
             self.admin.sql("SET LOCAL ROLE gapto_owner")
-            self.admin.sql("SELECT set_config('gapto.owner_user_id', %s, true)", (OWNER_LAB,))
+            self.admin.sql("SELECT set_config('gapto.owner_user_id', %s, true)", (owner,))
             for consulta, parametros in sentencias:
                 resultados.append(self.admin.sql(consulta, parametros))
             self.admin.sql("COMMIT")
@@ -597,14 +621,33 @@ class Laboratorio:
         )])
         return presupuesto
 
-    def nueva_categoria(self) -> str:
-        categoria = self._anotar("categorias", str(uuid.uuid4()))
+    def nueva_categoria(self, padre: str | None = None, owner: str = OWNER_LAB) -> str:
+        categoria = self._anotar("categorias" if owner == OWNER_LAB else "categorias2", str(uuid.uuid4()))
         self.tx_owner([(
-            "INSERT INTO gapto.categorias_financieras (id, owner_user_id, nombre, ambito, "
-            "presupuestable_default) VALUES (%s, %s, %s, 'GASTO', true)",
-            (categoria, OWNER_LAB, f"Categoria C027 {categoria}"),
-        )])
+            "INSERT INTO gapto.categorias_financieras (id, owner_user_id, parent_id, nombre, ambito, "
+            "presupuestable_default) VALUES (%s, %s, %s, %s, 'GASTO', true)",
+            (categoria, owner, padre, f"Categoria C027 {categoria}"),
+        )], owner=owner)
         return categoria
+
+    def segundo_owner(self) -> str:
+        """Usuario temporal sin actor self (el trigger de actor self solo actúa
+        sobre actores_financieros): se puede borrar al limpiar, sin residuo."""
+        self.creados.setdefault("owner2", [OWNER_LAB2])
+        self.tx_owner([("INSERT INTO gapto.usuarios (id, email, nombre) "
+                        "VALUES (%s, 'c027-lab2@example.invalid', 'Laboratorio 2') ON CONFLICT (id) DO NOTHING",
+                        (OWNER_LAB2,))], owner=OWNER_LAB2)
+        return OWNER_LAB2
+
+    def presupuesto_version(self, version: int, reemplaza: str | None = None) -> str:
+        presupuesto = self._anotar("presupuestos", str(uuid.uuid4()))
+        self.tx_owner([(
+            "INSERT INTO gapto.presupuestos (id, owner_user_id, periodo_desde, periodo_hasta, "
+            "moneda, perspectiva, version_presupuesto, reemplaza_presupuesto_id) "
+            "VALUES (%s, %s, DATE '2025-01-01', DATE '2025-12-31', 'EUR', 'TOTAL', %s, %s)",
+            (presupuesto, OWNER_LAB, version, reemplaza),
+        )])
+        return presupuesto
 
     def nueva_bolsa(self, presupuesto: str, prioridad: int, categorias: list[str]) -> str:
         linea = str(uuid.uuid4())
@@ -739,7 +782,15 @@ class Laboratorio:
 
     def limpiar(self) -> None:
         c = self.creados
+        if c.get("owner2"):
+            self.tx_owner([
+                ("DELETE FROM gapto.categorias_financieras WHERE id = ANY(%s::uuid[])",
+                 (c.get("categorias2", []),)),
+                ("DELETE FROM gapto.usuarios WHERE id = %s", (OWNER_LAB2,)),
+            ], owner=OWNER_LAB2)
         self.tx_owner([
+            ("DELETE FROM gapto.hecho_relaciones WHERE hecho_origen_id = ANY(%s::uuid[]) "
+             "OR hecho_destino_id = ANY(%s::uuid[])", (c.get("hechos", []), c.get("hechos", []))),
             ("DELETE FROM gapto.hecho_movimientos_tesoreria WHERE hecho_id = ANY(%s::uuid[])",
              (c.get("hechos", []),)),
             ("DELETE FROM gapto.inversion_asignaciones_efecto WHERE inversion_entidad_id = ANY(%s::uuid[])",
@@ -981,7 +1032,9 @@ def _caso_con_barrera(lab: Laboratorio, prop, nombre: str, pasos_a: list, pasos_
 # ------------------------------------------------------------
 
 def _caso_segunda_bloqueada(lab: Laboratorio, prop, nombre: str, pasos_a: list, pasos_b: list,
-                            estado_valido, esperado_b: str) -> None:
+                            estado_valido, esperado_b: str,
+                            rechazos: tuple = (SQLSTATE_INVARIANTE,),
+                            owner_b: str = OWNER_LAB) -> None:
     """A prepara y valida ya (barrera): retiene sus locks. B lanza su
     transacción completa y DEBE quedar bloqueada por A. A confirma. Entonces:
 
@@ -990,7 +1043,13 @@ def _caso_segunda_bloqueada(lab: Laboratorio, prop, nombre: str, pasos_a: list, 
       esperado_b = "CONFIRMA": B debe confirmar (su escritura se aplica sobre el
                    estado ya confirmado por A); abortar es FAIL_LIVENESS.
 
-    Sin bloqueo observado de B el caso no demuestra nada: NO_CLASIFICABLE."""
+    Sin bloqueo observado de B el caso no demuestra nada: NO_CLASIFICABLE.
+
+      esperado_b = "SIN_BLOQUEO": lo contrario; B NO debe esperar a A (claves
+                   de lock distintas) y ambas confirman. Si B espera, el lock
+                   serializa de más: FAIL_LIVENESS.
+    rechazos: SQLSTATE que cuentan como rechazo de invariante (por defecto
+    solo P0001; 23505 únicamente cuando arbitra una UNIQUE declarativa)."""
     lab.monitor.iniciar([lab.a.pid, lab.b.pid])
     lab.a.abrir_runtime()
     preparar_a = lab.ejecutar(lab.a, pasos_a + [SET_IMMEDIATE])
@@ -998,7 +1057,7 @@ def _caso_segunda_bloqueada(lab: Laboratorio, prop, nombre: str, pasos_a: list, 
         lab.monitor.detener()
         emitir(prop, nombre, "NO_CLASIFICABLE",
                {"preparar_a": _op(preparar_a), "error": preparar_a.error})
-    lab.b.abrir_runtime()
+    lab.b.abrir_runtime(owner_b)
     operacion_b = lab.lote(lab.b, pasos_b + [COMMIT])
     estado_b = lab.observar(operacion_b)
     fin_a = lab.ejecutar(lab.a, [COMMIT])
@@ -1021,9 +1080,14 @@ def _caso_segunda_bloqueada(lab: Laboratorio, prop, nombre: str, pasos_a: list, 
         emitir(prop, nombre, "FAIL_LIVENESS", detalle)
     if esperado_b == "RECHAZO" and operacion_b.ok:
         emitir(prop, nombre, "FAIL_INTEGRITY", detalle)
+    if esperado_b == "SIN_BLOQUEO":
+        if estado_b == "TERMINADA" and operacion_b.ok:
+            emitir(prop, nombre, "PASS", detalle)
+            return
+        emitir(prop, nombre, "FAIL_LIVENESS", detalle)
     if estado_b != "BLOQUEADA":
         emitir(prop, nombre, "NO_CLASIFICABLE", detalle)
-    if esperado_b == "RECHAZO" and operacion_b.sqlstate == SQLSTATE_INVARIANTE:
+    if esperado_b == "RECHAZO" and operacion_b.sqlstate in rechazos:
         emitir(prop, nombre, "PASS", detalle)
         return
     if esperado_b == "CONFIRMA" and operacion_b.ok:
@@ -1690,6 +1754,156 @@ def test_c27_c17_tipo_destino_frente_a_garantia(caso, record_testsuite_property)
     )
 
 
+UPD_CAT_PADRE = "UPDATE gapto.categorias_financieras SET parent_id = %s WHERE id = %s"
+INS_PARTE_DE = ("INSERT INTO gapto.hecho_relaciones (hecho_origen_id, hecho_destino_id, tipo_relacion) "
+                "VALUES (%s, %s, 'PARTE_DE')")
+INS_REVERSION = (
+    "INSERT INTO gapto.movimientos_tesoreria (cuenta_id, fecha_movimiento, importe, confirmado_at, "
+    "clase_movimiento, reversion_de_movimiento_id) VALUES (%s, CURRENT_DATE, %s, now(), 'OPERACION', %s)"
+)
+UPD_MOV_REVERSION = "UPDATE gapto.movimientos_tesoreria SET reversion_de_movimiento_id = %s WHERE id = %s"
+UPD_PRESUPUESTO_VERSION = "UPDATE gapto.presupuestos SET version_presupuesto = %s WHERE id = %s"
+INS_SUCESOR = (
+    "INSERT INTO gapto.presupuestos (owner_user_id, periodo_desde, periodo_hasta, moneda, perspectiva, "
+    "version_presupuesto, reemplaza_presupuesto_id) "
+    "VALUES (%s, DATE '2025-01-01', DATE '2025-12-31', 'EUR', 'TOTAL', %s, %s)"
+)
+
+
+def _sin_ciclo_categorias(lab: Laboratorio, ids: list[str]) -> bool:
+    filas = lab.leer("""
+        WITH RECURSIVE a(s, n) AS (
+            SELECT id, parent_id FROM gapto.categorias_financieras WHERE id = ANY(%s::uuid[]) AND parent_id IS NOT NULL
+            UNION ALL
+            SELECT a.s, t.parent_id FROM a JOIN gapto.categorias_financieras t ON t.id = a.n WHERE t.parent_id IS NOT NULL
+        ) CYCLE n SET es_ciclo USING ruta
+        SELECT count(*) FROM a WHERE n = s""", (ids,))
+    return filas[0][0] == 0
+
+
+def test_c27_c18_categorias_ciclo_de_dos(caso, record_testsuite_property) -> None:
+    """A: X.parent=Y y valida (retiene el advisory lock CATEGORIAS/owner). B:
+    Y.parent=X debe esperar y, al releer el estado final, rechazar. Sin el
+    lock, B leía X sin padre y confirmaba: ciclo X<->Y."""
+    lab = caso
+    x, y = lab.nueva_categoria(), lab.nueva_categoria()
+    _caso_segunda_bloqueada(lab, record_testsuite_property, "C18",
+                            [(UPD_CAT_PADRE, (y, x))], [(UPD_CAT_PADRE, (x, y))],
+                            lambda: _sin_ciclo_categorias(lab, [x, y]), "RECHAZO")
+
+
+def test_c27_c19_categorias_ciclo_de_tres(caso, record_testsuite_property) -> None:
+    """A->B confirmado. A: B.parent=C; B: C.parent=A. Nunca C->A->B->C."""
+    lab = caso
+    b = lab.nueva_categoria()
+    c = lab.nueva_categoria()
+    a = lab.nueva_categoria(padre=b)
+    _caso_segunda_bloqueada(lab, record_testsuite_property, "C19",
+                            [(UPD_CAT_PADRE, (c, b))], [(UPD_CAT_PADRE, (a, c))],
+                            lambda: _sin_ciclo_categorias(lab, [a, b, c]), "RECHAZO")
+
+
+def test_c27_c20_owners_distintos_no_se_bloquean(caso, record_testsuite_property) -> None:
+    """La clave es (CATEGORIAS, owner): el cambio de jerarquía de otro owner no
+    debe esperar al lock retenido por A."""
+    lab = caso
+    owner2 = lab.segundo_owner()
+    x, y = lab.nueva_categoria(), lab.nueva_categoria()
+    x2, y2 = lab.nueva_categoria(owner=owner2), lab.nueva_categoria(owner=owner2)
+    _caso_segunda_bloqueada(lab, record_testsuite_property, "C20",
+                            [(UPD_CAT_PADRE, (y, x))], [(UPD_CAT_PADRE, (y2, x2))],
+                            lambda: True, "SIN_BLOQUEO", owner_b=owner2)
+
+
+def test_c27_c21_parte_de_ciclo_de_dos(caso, record_testsuite_property) -> None:
+    lab = caso
+    x, y = lab.nuevo_hecho(), lab.nuevo_hecho()
+
+    def valido() -> bool:
+        return lab.leer("SELECT count(*) FROM gapto.hecho_relaciones WHERE tipo_relacion = 'PARTE_DE' "
+                        "AND hecho_origen_id = ANY(%s::uuid[])", ([x, y],))[0][0] <= 1
+
+    _caso_segunda_bloqueada(lab, record_testsuite_property, "C21",
+                            [(INS_PARTE_DE, (x, y))], [(INS_PARTE_DE, (y, x))], valido, "RECHAZO")
+
+
+def _profundidad_uno(lab: Laboratorio, ids: list[str]) -> bool:
+    return lab.leer("""
+        SELECT count(*) FROM gapto.movimientos_tesoreria m
+         WHERE m.id = ANY(%s::uuid[]) AND m.reversion_de_movimiento_id IS NOT NULL
+           AND (EXISTS (SELECT 1 FROM gapto.movimientos_tesoreria o
+                         WHERE o.id = m.reversion_de_movimiento_id AND o.reversion_de_movimiento_id IS NOT NULL)
+                OR EXISTS (SELECT 1 FROM gapto.movimientos_tesoreria h WHERE h.reversion_de_movimiento_id = m.id))
+    """, (ids,))[0][0] == 0
+
+
+def test_c27_c22_reversion_frente_a_convertir_original(caso, record_testsuite_property) -> None:
+    """A: inserta R que revierte M (bloquea M). B: convierte M en reversión de
+    C: su UPDATE espera por el lock de fila de M y, tras el COMMIT de A, su
+    validador ve que M ya tiene hijos."""
+    lab = caso
+    cuenta = lab.nueva_cuenta()
+    m = lab.nuevo_movimiento(cuenta, Decimal("-100.0000"))
+    c = lab.nuevo_movimiento(cuenta, Decimal("100.0000"))
+    _caso_segunda_bloqueada(lab, record_testsuite_property, "C22",
+                            [(INS_REVERSION, (cuenta, Decimal("40.0000"), m))],
+                            [(UPD_MOV_REVERSION, (c, m))],
+                            lambda: _profundidad_uno(lab, lab.leer(
+                                "SELECT array_agg(id) FROM gapto.movimientos_tesoreria WHERE cuenta_id = %s",
+                                (cuenta,))[0][0]), "RECHAZO")
+
+
+def test_c27_c23_reversiones_mutuas(caso, record_testsuite_property) -> None:
+    """A: X revierte Y; B: Y revierte X. Cada validador bloquea al original
+    ajeno cuya fila retiene la otra transacción: deadlock inherente; el
+    reintento ve la reversión confirmada y la rechaza (profundidad 1)."""
+    lab = caso
+    cuenta = lab.nueva_cuenta()
+    x = lab.nuevo_movimiento(cuenta, Decimal("-100.0000"))
+    y = lab.nuevo_movimiento(cuenta, Decimal("100.0000"))
+    _caso_con_barrera(lab, record_testsuite_property, "C23",
+                      [(UPD_MOV_REVERSION, (y, x))], [(UPD_MOV_REVERSION, (x, y))],
+                      lambda: _profundidad_uno(lab, [x, y]))
+
+
+def test_c27_c24_cadena_write_skew(caso, record_testsuite_property) -> None:
+    """P(v3) <- S(v8). A sube P a v6 (válido frente a S v8); B baja S a v5
+    (válido frente a P v3). Juntas dejan S v5 < P v6. No comparten fila:
+    solo el advisory lock (PRESUPUESTOS, owner) las serializa."""
+    lab = caso
+    p = lab.presupuesto_version(3)
+    s = lab.presupuesto_version(8, p)
+
+    def valido() -> bool:
+        return lab.leer("SELECT s.version_presupuesto > p.version_presupuesto FROM gapto.presupuestos s "
+                        "JOIN gapto.presupuestos p ON p.id = s.reemplaza_presupuesto_id WHERE s.id = %s",
+                        (s,))[0][0]
+
+    _caso_segunda_bloqueada(lab, record_testsuite_property, "C24",
+                            [(UPD_PRESUPUESTO_VERSION, (6, p))], [(UPD_PRESUPUESTO_VERSION, (5, s))],
+                            valido, "RECHAZO")
+
+
+def test_c27_c25_bifurcacion_concurrente(caso, record_testsuite_property) -> None:
+    """Dos sucesores directos del mismo P: B espera en la UNIQUE sobre
+    reemplaza_presupuesto_id y, tras el COMMIT de A, recibe 23505."""
+    lab = caso
+    p = lab.presupuesto_version(1)
+
+    def valido() -> bool:
+        return lab.leer("SELECT count(*) FROM gapto.presupuestos WHERE reemplaza_presupuesto_id = %s",
+                        (p,))[0][0] <= 1
+
+    try:
+        _caso_segunda_bloqueada(lab, record_testsuite_property, "C25",
+                                [(INS_SUCESOR, (OWNER_LAB, 2, p))], [(INS_SUCESOR, (OWNER_LAB, 3, p))],
+                                valido, "RECHAZO", rechazos=(SQLSTATE_INVARIANTE, SQLSTATE_UNICIDAD))
+    finally:
+        lab.creados.setdefault("presupuestos", []).extend(
+            [r[0] for r in lab.leer("SELECT id::text FROM gapto.presupuestos WHERE reemplaza_presupuesto_id = %s",
+                                    (p,))])
+
+
 def test_c27_99_sin_residuos(lab) -> None:
     """Tras la batería solo puede quedar el tenant de laboratorio (usuario +
     actor self). Cualquier otra fila indica una limpieza incompleta."""
@@ -1705,7 +1919,8 @@ def test_c27_99_sin_residuos(lab) -> None:
                (SELECT count(*) FROM gapto.presupuestos WHERE owner_user_id = %(o)s),
                (SELECT count(*) FROM gapto.categorias_financieras WHERE owner_user_id = %(o)s),
                (SELECT count(*) FROM gapto.entidades WHERE owner_user_id = %(o)s)
-    """, {"o": OWNER_LAB})[0]
+               + (SELECT count(*) FROM gapto.usuarios WHERE id = %(o2)s)
+    """, {"o": OWNER_LAB, "o2": OWNER_LAB2})[0]
     assert tuple(fila) == (0, 0, 0, 0, 0, 0, 0, 0, 0), (
         "residuo en el laboratorio (cuentas, participaciones, terceros, actores no self, "
         f"hechos, reglas, presupuestos, categorias, entidades) = {tuple(fila)}"

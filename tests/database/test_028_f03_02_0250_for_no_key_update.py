@@ -40,7 +40,9 @@
 #              situado ANTES del primer agregado, y ningún otro lock de fila.
 #
 # PRECONDICIÓN: requiere 0250.
-# Versión: 0.4.0  -- 0270: FOR UPDATE admitido solo en fn_check_cuenta_moneda;
+# Versión: 0.4.1  -- 0280: la huella de fn_check_reversion_movimiento acepta
+#                   además exactamente la sucesora de 0280 (profundidad 1).
+#                   v0.4.0: 0270: FOR UPDATE admitido solo en fn_check_cuenta_moneda;
 #                   las huellas aceptan exactamente {0250, 0260, 0270} en las
 #                   cuatro funciones que 0270 reescribe; añade la equivalencia
 #                   estructural de C15b con C15a.
@@ -62,7 +64,8 @@ HUELLAS_0250 = {
     "fn_check_hecho_mov_tesoreria_suma": ({("693fa7086767b581a6bd45eadc8944c2", 993), ("2b9483c066e3f637f24d396babe27720", 1670), ("808128976910a4333fd8c6843d0b9919", 1986)}, 1),
     "fn_check_inversion_asignacion_suma": ({("9a59512f3e0109689af70e79e78159ee", 1281), ("182087c02d004ca2c2f0d38bd00f10ff", 1957), ("128a6bd0e45f5fe3632c83b25cbfa371", 2129)}, 1),
     "fn_check_participacion_suma": ({("d01fd963789d8adf4b29cbb007604414", 2443), ("b76161555c227a8aa19c3ab513aa4687", 3082)}, 1),
-    "fn_check_reversion_movimiento": ({("859f7f7e9a5b0b518e6272c410bedf83", 1775), ("00161f7875783230311834ca84e472e2", 2208), ("91a33cb088ab4ff8d9c56c29fc3d12c2", 2466)}, 1),
+    "fn_check_reversion_movimiento": ({("859f7f7e9a5b0b518e6272c410bedf83", 1775), ("00161f7875783230311834ca84e472e2", 2208), ("91a33cb088ab4ff8d9c56c29fc3d12c2", 2466),
+                                      ("bd4ab19984492486f595cb539f78d263", 3057)}, 1),
     "fn_check_transferencia_estructura": ({("a6c74336f91ddb4239914672cab01c97", 1876), ("e956eb54ec62b7ac7b9bcf11ca3f107e", 2392), ("545db95496409a5adf01fbb98e4b161a", 2722)}, 2),
 }
 

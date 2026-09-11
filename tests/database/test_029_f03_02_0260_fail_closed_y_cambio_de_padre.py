@@ -23,7 +23,9 @@
 #              revierte siempre.
 #
 # PRECONDICIÓN: requiere 0260.
-# Versión: 0.2.0  -- las huellas aceptan exactamente {0260, sucesora 0270} en
+# Versión: 0.2.1  -- fn_check_reversion_movimiento acepta además exactamente la
+#                   sucesora de 0280.
+#                   v0.2.0: las huellas aceptan exactamente {0260, sucesora 0270} en
 #                   las cuatro funciones que 0270 reescribe (T6 y R-INV); el
 #                   resto sigue fijado a 0260 (Working Method 12C.5).
 # ============================================================
@@ -48,7 +50,8 @@ HUELLAS_0260 = {
 SUCESORAS_0270 = {
     "fn_check_hecho_mov_tesoreria_suma": {("808128976910a4333fd8c6843d0b9919", 1986)},
     "fn_check_inversion_asignacion_suma": {("128a6bd0e45f5fe3632c83b25cbfa371", 2129)},
-    "fn_check_reversion_movimiento": {("91a33cb088ab4ff8d9c56c29fc3d12c2", 2466)},
+    "fn_check_reversion_movimiento": {("91a33cb088ab4ff8d9c56c29fc3d12c2", 2466),
+                                      ("bd4ab19984492486f595cb539f78d263", 3057)},
     "fn_check_transferencia_estructura": {("545db95496409a5adf01fbb98e4b161a", 2722)},
 }
 

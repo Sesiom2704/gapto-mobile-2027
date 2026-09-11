@@ -34,7 +34,9 @@
 #              el montaje.
 #
 # PRECONDICIÓN: requiere 0270.
-# Versión: 0.1.0
+# Versión: 0.1.1  -- 0280 reescribe fn_check_reversion_movimiento (profundidad
+#                   1): su huella 0270 pasa a histórica y el test acepta
+#                   exactamente {0270, 0280} para esa función.
 # ============================================================
 
 from __future__ import annotations
@@ -56,6 +58,9 @@ HUELLAS_0270 = {
     "fn_check_tercero_naturaleza": ("067d309ba09fe37c8743928d78826bc8", 706),
     "fn_check_entidad_garantizada_por": ("04ef0d4c49fdf1a1b1e06e82aeca3845", 1922),
 }
+
+# Sucesora conocida: 0280 reescribe la función de reversión (profundidad 1).
+SUCESORAS_0280 = {"fn_check_reversion_movimiento": {("bd4ab19984492486f595cb539f78d263", 3057)}}
 
 # tabla -> (trigger, función, eventos UPDATE OF, constraint diferido)
 TRIGGERS_0270 = {
@@ -233,7 +238,8 @@ def test_0270_huella_y_atributos(db: psycopg.Connection, funcion: str) -> None:
         """, (funcion,))
         fila = cursor.fetchone()
     assert fila is not None, f"{funcion} no existe"
-    assert (fila[0], fila[1]) == HUELLAS_0270[funcion], f"{funcion}: huella {fila[:2]}"
+    aceptadas = {HUELLAS_0270[funcion]} | SUCESORAS_0280.get(funcion, set())
+    assert (fila[0], fila[1]) in aceptadas, f"{funcion}: huella {fila[:2]}"
     assert fila[2:] == (False, "v", None, "gapto_owner"), f"{funcion}: atributos {fila[2:]}"
     assert "--" not in _fuente(db, funcion), f"{funcion}: comentario dentro del cuerpo"
 
