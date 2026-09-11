@@ -4,7 +4,11 @@
 # Ruta: tests/database/test_004_tables_b03.py
 # Descripción: Verifica el contrato físico F03-01-B03 de las tablas 29..32:
 #              reglas financieras, versiones, excepciones y previsiones.
-# Versión: 0.1.2
+# Versión: 0.1.3  -- 0265 (D-126) añade regla_versiones.anclaje_recurrencia y
+#                   cuatro CHECK. El test valida el baseline B03 y acepta
+#                   exactamente esa sucesora conocida (Working Method 12C.5);
+#                   cualquier otra columna o CHECK sigue siendo drift.
+#                   v0.1.2:
 #                   D-098: expectativa caducada migrada a validacion de
 #                   propiedad/baseline. El layering se sigue verificando a
 #                   nivel de fichero de migration, que es donde es cierto de
@@ -69,6 +73,13 @@ EXPECTED_COLUMNS = {
         "row_version": ("bigint", True),
     },
 }
+# Sucesora conocida: 0265 / D-126 (anclaje de recurrencia).
+SUCESORA_0265_COLUMNAS = {"anclaje_recurrencia": ("character varying(30)", False)}
+SUCESORA_0265_CHECKS = {
+    "ck_regla_versiones__anclaje_recurrencia", "ck_regla_versiones__anclaje_periodicidad",
+    "ck_regla_versiones__rodante_fecha_modo", "ck_regla_versiones__rodante_importe_modo",
+}
+
 EXPECTED_CHECKS = {
     "ck_reglas_financieras__nombre_no_blanco",
     "ck_regla_versiones__vigencia", "ck_regla_versiones__flujo_tesoreria", "ck_regla_versiones__moneda_formato",
@@ -129,7 +140,10 @@ def test_b03_column_contract_is_exact(db: psycopg.Connection) -> None:
                  WHERE n.nspname='gapto' AND c.relname=%s AND a.attnum>0 AND NOT a.attisdropped ORDER BY a.attnum
             """, (table,))
             actual = {r[0]:(r[1],r[2]) for r in cursor.fetchall()}
-        assert actual == expected
+        if table == "regla_versiones":
+            assert actual in (expected, {**expected, **SUCESORA_0265_COLUMNAS})
+        else:
+            assert actual == expected
 
 
 def test_b03_primary_keys_and_uuid_defaults(db: psycopg.Connection) -> None:
@@ -167,6 +181,7 @@ def test_b03_critical_defaults_and_nullability(db: psycopg.Connection) -> None:
     assert defaults[("previsiones","recalculo_automatico")] == 'true'
     assert defaults[("previsiones","row_version")] == '1'
     assert ("regla_versiones","moneda") not in defaults
+    assert ("regla_versiones","anclaje_recurrencia") not in defaults
     assert ("previsiones","moneda") not in defaults
 
 
@@ -178,7 +193,7 @@ def test_b03_local_checks_are_materialized(db: psycopg.Connection) -> None:
              WHERE n.nspname='gapto' AND c.relname = ANY(%s) AND con.contype='c'
         """, (sorted(B03_TABLES),))
         names = {r[0] for r in cursor.fetchall()}
-    assert names == EXPECTED_CHECKS
+    assert names in (EXPECTED_CHECKS, EXPECTED_CHECKS | SUCESORA_0265_CHECKS)
 
 
 def test_b03_public_has_no_table_dml(db: psycopg.Connection) -> None:
