@@ -19,7 +19,11 @@
 #
 # PRECONDICIÓN: requiere 0190 (B16). Debe ejecutarse desde la raiz del
 #              repositorio, porque G6 inspecciona migrations/ y tests/.
-# Versión: 0.1.1  -- G6 inspecciona solo ficheros regulares (is_file): un
+# Versión: 0.2.0  -- G2 acepta el contrato del gate o EXACTAMENTE su sucesora
+#                   conocida 0270 (funciones 19, triggers 39, constraint
+#                   triggers 23); el resto del contrato no cambia y cualquier
+#                   otra combinacion es drift (Working Method 12C.5).
+#                   v0.1.1: G6 inspecciona solo ficheros regulares (is_file): un
 #                   directorio que encaje con el patrón (p. ej. __pycache__)
 #                   ya no se intenta leer como fichero.
 # ============================================================
@@ -49,6 +53,10 @@ CONTRATO_ESPERADO = {
     "constraint_triggers": 19,
     "guards_append_only": 7,
 }
+
+# Sucesora conocida: 0270 (revalidacion desde el padre, R-MON, R-TPN, R-GAR).
+SUCESORA_0270 = {**CONTRATO_ESPERADO, "funciones": 19, "triggers_no_internos": 39,
+                 "constraint_triggers": 23}
 
 MATRIZ_RUNTIME = {"SELECT": 79, "INSERT": 73, "UPDATE": 67, "DELETE": 36}
 
@@ -122,11 +130,15 @@ def test_gate_g2_contrato_fisico(db: psycopg.Connection) -> None:
              WHERE n.nspname='gapto' AND NOT t.tgisinternal
                AND t.tgname LIKE '%%guard%%'"""),
     }
+    if obtenido == SUCESORA_0270:
+        return
     diferencias = {
         k: (CONTRATO_ESPERADO[k], obtenido[k])
         for k in CONTRATO_ESPERADO if obtenido[k] != CONTRATO_ESPERADO[k]
     }
-    assert diferencias == {}, f"contrato fisico desviado (esperado, obtenido): {diferencias}"
+    assert diferencias == {}, (
+        f"contrato fisico desviado del gate y de la sucesora 0270 (esperado, obtenido): {diferencias}"
+    )
 
 
 @pytest.mark.parametrize("privilegio,esperado", sorted(MATRIZ_RUNTIME.items()))

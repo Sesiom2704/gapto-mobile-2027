@@ -53,6 +53,22 @@
 #                C10 BOLSA desde presupuesto_lineas: empate de prioridad, con barrera
 #                C11 BOLSA desde presupuesto_linea_alcances: aparición del cruce
 #                    de alcances, con barrera
+#                C12 hmt: asignación confirmada y UPDATE de importe del movimiento
+#                    que la deja fuera (revalidación desde el padre, 0270)
+#                C13 inversión: asignación confirmada y UPDATE de importe_delta
+#                C14 transferencia: cada transacción mueve una pata a la misma
+#                    cuenta; válido por separado, inválido junto. Deadlock
+#                    inherente de dos padres -> reintento completo
+#                C15a-1/2 R-MON: moneda frente al primer movimiento, en los dos
+#                    órdenes (FOR UPDATE frente al FOR KEY SHARE de la FK)
+#                C15c-1/2 R-MON: moneda frente al primer saldo_apertura (misma
+#                    fila: lock de tupla y OLD tras EPQ), en los dos órdenes
+#                C16 R-TPN: UPDATE de naturaleza frente a INSERT de persona
+#                C17 R-GAR: cambio de tipo del destino frente a INSERT de la
+#                    garantía (dos padres bloqueados en orden de uuid)
+#              C15b (moneda frente al primer cierre_saldos_cuenta) se acepta por
+#              equivalencia estructural con C15a, verificada en test_028: el
+#              cierre es append-only y el caso dejaría residuo imborrable.
 #
 #              Matriz de cobertura por TOPOLOGÍA de lock (no por tabla):
 #                un padre + suma de hijas ........................ C1-C4b
@@ -61,6 +77,11 @@
 #                conflicto por JOIN provocado desde la línea ..... C10
 #                conflicto por JOIN provocado desde el alcance ... C11
 #                deadlock multi-padre inevitable ................. C7
+#                hija confirmada frente a UPDATE del padre ...... C12, C13, C16
+#                dos padres movidos a la vez (deadlock) .......... C14
+#                FOR UPDATE del padre frente a KEY SHARE de FK .. C15a
+#                misma fila (lock de tupla y EPQ) ................ C15c
+#                hija que bloquea dos padres frente a su UPDATE .. C17
 #              entidad_participaciones, inversion_asignaciones_efecto y
 #              hecho_movimientos_tesoreria se aceptan por EQUIVALENCIA
 #              ESTRUCTURAL verificada estáticamente en test_028, no por prueba
@@ -82,8 +103,12 @@
 #              demás que crea cada caso se borra en su finally; el último
 #              test verifica que no queda residuo.
 #
-# PRECONDICIÓN: cadena 0001..0240 aplicada en gapto2027_cleanroom.
-# Versión: 0.2.0  -- añade C8, C8b, C9, C10 y C11 (topologías de lock no
+# PRECONDICIÓN: cadena 0001..0270 aplicada en gapto2027_cleanroom (C1-C11
+#              requieren 0250; C12-C17, 0270).
+# Versión: 0.3.0  -- añade C12-C17 (F03-02 / 0270) con la plantilla
+#                   _caso_segunda_bloqueada, limpieza de hmt, inversiones,
+#                   entidades y garantías, y amplía el control de residuos.
+#                   v0.2.0: añade C8, C8b, C9, C10 y C11 (topologías de lock no
 #                   cubiertas por C1-C7) y la sesión H para C9.
 #                   v0.1.0: C1-C7.
 # ============================================================
@@ -161,6 +186,30 @@ UPD_LINEA_PRIORIDAD = "UPDATE gapto.presupuesto_lineas SET prioridad_consumo = %
 INS_ALCANCE = (
     "INSERT INTO gapto.presupuesto_linea_alcances (presupuesto_linea_id, categoria_id) "
     "VALUES (%s, %s)"
+)
+INS_HMT = (
+    "INSERT INTO gapto.hecho_movimientos_tesoreria (hecho_id, movimiento_tesoreria_id, "
+    "importe_asignado) VALUES (%s, %s, %s)"
+)
+UPD_MOV_IMPORTE = "UPDATE gapto.movimientos_tesoreria SET importe = %s WHERE id = %s"
+UPD_MOV_CUENTA = "UPDATE gapto.movimientos_tesoreria SET cuenta_id = %s WHERE id = %s"
+INS_ASIG_INV = (
+    "INSERT INTO gapto.inversion_asignaciones_efecto (efecto_inversion_id, "
+    "inversion_entidad_id, importe_asignado) VALUES (%s, %s, %s)"
+)
+INS_MOVIMIENTO = (
+    "INSERT INTO gapto.movimientos_tesoreria (cuenta_id, fecha_movimiento, importe, "
+    "confirmado_at, clase_movimiento) VALUES (%s, CURRENT_DATE, %s, now(), 'OPERACION')"
+)
+UPD_CUENTA_MONEDA = "UPDATE gapto.cuentas SET moneda = %s WHERE id = %s"
+UPD_CUENTA_APERTURA = (
+    "UPDATE gapto.cuentas SET saldo_apertura = 0, fecha_inicio_ledger = CURRENT_DATE WHERE id = %s"
+)
+UPD_TERCERO_NATURALEZA = "UPDATE gapto.terceros SET naturaleza = %s WHERE id = %s"
+INS_PERSONA = "INSERT INTO gapto.tercero_personas (tercero_id) VALUES (%s)"
+INS_GARANTIA = (
+    "INSERT INTO gapto.entidad_relaciones (entidad_origen_id, entidad_destino_id, tipo_relacion) "
+    "VALUES (%s, %s, 'GARANTIZADA_POR')"
 )
 SET_IMMEDIATE = ("SET CONSTRAINTS ALL IMMEDIATE", None)
 SET_DEFERRED = ("SET CONSTRAINTS ALL DEFERRED", None)
@@ -417,6 +466,11 @@ class Laboratorio:
             ("gapto.cuenta_participaciones", "INSERT"), ("gapto.cuenta_participaciones", "UPDATE"),
             ("gapto.efecto_atribuciones", "INSERT"), ("gapto.hecho_efectos", "UPDATE"),
             ("gapto.cuentas", "UPDATE"), ("gapto.regla_versiones", "INSERT"),
+            ("gapto.hecho_movimientos_tesoreria", "INSERT"), ("gapto.movimientos_tesoreria", "UPDATE"),
+            ("gapto.inversion_asignaciones_efecto", "INSERT"), ("gapto.terceros", "UPDATE"),
+            ("gapto.tercero_personas", "INSERT"), ("gapto.entidades", "UPDATE"),
+            ("gapto.entidad_relaciones", "INSERT"), ("gapto.propiedades", "DELETE"),
+            ("gapto.servicios", "INSERT"),
         ]
         sin_privilegio = [
             f"{tabla}:{priv}" for tabla, priv in requeridos
@@ -564,6 +618,79 @@ class Laboratorio:
         self.tx_owner(sentencias)
         return linea
 
+    def nuevo_hecho(self) -> str:
+        hecho = self._anotar("hechos", str(uuid.uuid4()))
+        self.tx_owner([(
+            "INSERT INTO gapto.hechos_financieros (id, owner_user_id, tipo_hecho_id, "
+            "fecha_hecho, concepto, moneda, estado_localizacion, presupuestable) "
+            "VALUES (%s, %s, %s, CURRENT_DATE, 'Hecho C027', 'EUR', 'NO_APLICA', true)",
+            (hecho, OWNER_LAB, self.tipo_gasto),
+        )])
+        return hecho
+
+    def nuevo_efecto_inversion(self, importe: Decimal) -> tuple[str, str]:
+        """Entidad INVERSION con su subtipo y un efecto INVERSION PARCIAL."""
+        entidad = self._anotar("entidades", str(uuid.uuid4()))
+        hecho = self._anotar("hechos", str(uuid.uuid4()))
+        efecto = str(uuid.uuid4())
+        self.tx_owner([
+            ("INSERT INTO gapto.entidades (id, owner_user_id, tipo_entidad, nombre) "
+             "VALUES (%s, %s, 'INVERSION', 'Fondo C027')", (entidad, OWNER_LAB)),
+            ("INSERT INTO gapto.inversiones (entidad_id, rol_estructura, tipo_producto, moneda, "
+             "estado) VALUES (%s, 'POSICION', 'FONDO', 'EUR', 'ACTIVA')", (entidad,)),
+            ("INSERT INTO gapto.hechos_financieros (id, owner_user_id, tipo_hecho_id, "
+             "fecha_hecho, concepto, moneda, estado_localizacion, presupuestable) "
+             "VALUES (%s, %s, %s, CURRENT_DATE, 'Hecho C027', 'EUR', 'NO_APLICA', true)",
+             (hecho, OWNER_LAB, self.tipo_gasto)),
+            ("INSERT INTO gapto.hecho_efectos (id, hecho_id, tipo_efecto, importe_delta, "
+             "estado_atribucion) VALUES (%s, %s, 'INVERSION', %s, 'PARCIAL')",
+             (efecto, hecho, importe)),
+        ])
+        return entidad, efecto
+
+    def nuevo_tercero_persona_sin_datos(self) -> str:
+        tercero = self._anotar("terceros", str(uuid.uuid4()))
+        self.tx_owner([(
+            "INSERT INTO gapto.terceros (id, owner_user_id, nombre, naturaleza) "
+            "VALUES (%s, %s, 'Tercero C027', 'PERSONA')", (tercero, OWNER_LAB),
+        )])
+        return tercero
+
+    def nuevas_entidades_garantia(self) -> tuple[str, str]:
+        """FINANCIACION y PROPIEDAD con sus subtipos, todavía sin relación."""
+        financiacion = self._anotar("entidades", str(uuid.uuid4()))
+        propiedad = self._anotar("entidades", str(uuid.uuid4()))
+        self.tx_owner([
+            ("INSERT INTO gapto.entidades (id, owner_user_id, tipo_entidad, nombre) "
+             "VALUES (%s, %s, 'FINANCIACION', 'Hipoteca C027'), (%s, %s, 'PROPIEDAD', 'Piso C027')",
+             (financiacion, OWNER_LAB, propiedad, OWNER_LAB)),
+            ("INSERT INTO gapto.financiaciones (entidad_id, tipo_financiacion, moneda, estado) "
+             "VALUES (%s, 'HIPOTECA', 'EUR', 'ACTIVA')", (financiacion,)),
+            ("INSERT INTO gapto.propiedades (entidad_id, tipo_propiedad, incluir_en_rentabilidad) "
+             "VALUES (%s, 'VIVIENDA', true)", (propiedad,)),
+        ])
+        return financiacion, propiedad
+
+    def asignado_hmt(self, movimiento: str) -> tuple:
+        return self.leer(
+            "SELECT m.importe, COALESCE(sum(h.importe_asignado), 0) "
+            "FROM gapto.movimientos_tesoreria m "
+            "LEFT JOIN gapto.hecho_movimientos_tesoreria h ON h.movimiento_tesoreria_id = m.id "
+            "WHERE m.id = %s GROUP BY m.importe", (movimiento,))[0]
+
+    def asignado_inversion(self, efecto: str) -> tuple:
+        return self.leer(
+            "SELECT e.importe_delta, COALESCE(sum(a.importe_asignado), 0) "
+            "FROM gapto.hecho_efectos e "
+            "LEFT JOIN gapto.inversion_asignaciones_efecto a ON a.efecto_inversion_id = e.id "
+            "WHERE e.id = %s GROUP BY e.importe_delta", (efecto,))[0]
+
+    def cuenta(self, cuenta: str) -> tuple:
+        return self.leer(
+            "SELECT c.moneda, c.saldo_apertura, "
+            "(SELECT count(*) FROM gapto.movimientos_tesoreria m WHERE m.cuenta_id = c.id) "
+            "FROM gapto.cuentas c WHERE c.id = %s", (cuenta,))[0]
+
     def reversiones(self, original: str) -> tuple:
         return self.leer(
             "SELECT abs(o.importe), COALESCE(sum(abs(r.importe)) "
@@ -613,6 +740,12 @@ class Laboratorio:
     def limpiar(self) -> None:
         c = self.creados
         self.tx_owner([
+            ("DELETE FROM gapto.hecho_movimientos_tesoreria WHERE hecho_id = ANY(%s::uuid[])",
+             (c.get("hechos", []),)),
+            ("DELETE FROM gapto.inversion_asignaciones_efecto WHERE inversion_entidad_id = ANY(%s::uuid[])",
+             (c.get("entidades", []),)),
+            ("DELETE FROM gapto.entidad_relaciones WHERE entidad_origen_id = ANY(%s::uuid[]) "
+             "OR entidad_destino_id = ANY(%s::uuid[])", (c.get("entidades", []), c.get("entidades", []))),
             ("DELETE FROM gapto.efecto_atribuciones WHERE efecto_id IN "
              "(SELECT id FROM gapto.hecho_efectos WHERE hecho_id = ANY(%s::uuid[]))",
              (c.get("hechos", []),)),
@@ -645,6 +778,7 @@ class Laboratorio:
              (c.get("reglas", []),)),
             ("DELETE FROM gapto.reglas_financieras WHERE id = ANY(%s::uuid[])",
              (c.get("reglas", []),)),
+            ("DELETE FROM gapto.entidades WHERE id = ANY(%s::uuid[])", (c.get("entidades", []),)),
             ("DELETE FROM gapto.actores_financieros WHERE id = ANY(%s::uuid[])",
              (c.get("actores", []),)),
             ("DELETE FROM gapto.terceros WHERE id = ANY(%s::uuid[])", (c.get("terceros", []),)),
@@ -838,6 +972,65 @@ def _caso_con_barrera(lab: Laboratorio, prop, nombre: str, pasos_a: list, pasos_
             return
         emitir(prop, nombre, "FAIL_LIVENESS", detalle)
     if perdedora.sqlstate in SQLSTATES_VIVACIDAD:
+        emitir(prop, nombre, "FAIL_LIVENESS", detalle)
+    emitir(prop, nombre, "NO_CLASIFICABLE", detalle)
+
+
+# ------------------------------------------------------------
+# Plantilla con segunda sesión bloqueada: C12, C13, C15, C16, C17
+# ------------------------------------------------------------
+
+def _caso_segunda_bloqueada(lab: Laboratorio, prop, nombre: str, pasos_a: list, pasos_b: list,
+                            estado_valido, esperado_b: str) -> None:
+    """A prepara y valida ya (barrera): retiene sus locks. B lanza su
+    transacción completa y DEBE quedar bloqueada por A. A confirma. Entonces:
+
+      esperado_b = "RECHAZO": B debe fallar por la invariante (P0001); que
+                   confirme es FAIL_INTEGRITY aunque el oráculo no lo vea.
+      esperado_b = "CONFIRMA": B debe confirmar (su escritura se aplica sobre el
+                   estado ya confirmado por A); abortar es FAIL_LIVENESS.
+
+    Sin bloqueo observado de B el caso no demuestra nada: NO_CLASIFICABLE."""
+    lab.monitor.iniciar([lab.a.pid, lab.b.pid])
+    lab.a.abrir_runtime()
+    preparar_a = lab.ejecutar(lab.a, pasos_a + [SET_IMMEDIATE])
+    if not preparar_a.ok:
+        lab.monitor.detener()
+        emitir(prop, nombre, "NO_CLASIFICABLE",
+               {"preparar_a": _op(preparar_a), "error": preparar_a.error})
+    lab.b.abrir_runtime()
+    operacion_b = lab.lote(lab.b, pasos_b + [COMMIT])
+    estado_b = lab.observar(operacion_b)
+    fin_a = lab.ejecutar(lab.a, [COMMIT])
+    lab.esperar(operacion_b)
+    lab.monitor.detener()
+
+    detalle = {
+        "modo_lock": lab.modo_lock,
+        "B_durante_A": estado_b,
+        "A": _op(fin_a),
+        "B": _op(operacion_b),
+        "error_B": operacion_b.error,
+        "espera_B": lab.monitor.resumen(lab.b.pid),
+    }
+    valido = estado_valido()
+    detalle["estado_final_valido"] = valido
+    if not valido:
+        emitir(prop, nombre, "FAIL_INTEGRITY", detalle)
+    if not fin_a.ok:
+        emitir(prop, nombre, "FAIL_LIVENESS", detalle)
+    if esperado_b == "RECHAZO" and operacion_b.ok:
+        emitir(prop, nombre, "FAIL_INTEGRITY", detalle)
+    if estado_b != "BLOQUEADA":
+        emitir(prop, nombre, "NO_CLASIFICABLE", detalle)
+    if esperado_b == "RECHAZO" and operacion_b.sqlstate == SQLSTATE_INVARIANTE:
+        emitir(prop, nombre, "PASS", detalle)
+        return
+    if esperado_b == "CONFIRMA" and operacion_b.ok:
+        emitir(prop, nombre, "PASS", detalle)
+        return
+    if operacion_b.sqlstate in SQLSTATES_VIVACIDAD or operacion_b.sqlstate == SQLSTATE_DEADLOCK \
+            or esperado_b == "CONFIRMA":
         emitir(prop, nombre, "FAIL_LIVENESS", detalle)
     emitir(prop, nombre, "NO_CLASIFICABLE", detalle)
 
@@ -1330,6 +1523,173 @@ def test_c27_c11_bolsa_cruce_desde_alcance(caso, record_testsuite_property) -> N
     )
 
 
+def test_c27_c12_hmt_frente_a_importe_del_movimiento(caso, record_testsuite_property) -> None:
+    """Movimiento de -100 sin asignaciones. A asigna -100 a un hecho y valida
+    (bloquea el movimiento). B reduce el importe a -50: queda bloqueada y,
+    tras el COMMIT de A, su revalidación desde el padre debe rechazarla.
+    Antes de 0270 B confirmaba y dejaba -100 asignado sobre -50."""
+    lab = caso
+    cuenta = lab.nueva_cuenta()
+    movimiento = lab.nuevo_movimiento(cuenta, Decimal("-100.0000"))
+    hecho = lab.nuevo_hecho()
+
+    def valido() -> bool:
+        importe, suma = lab.asignado_hmt(movimiento)
+        return atribucion_parcial_valida(importe, suma)
+
+    _caso_segunda_bloqueada(
+        lab, record_testsuite_property, "C12",
+        [(INS_HMT, (hecho, movimiento, Decimal("-100.0000")))],
+        [(UPD_MOV_IMPORTE, (Decimal("-50.0000"), movimiento))],
+        valido, "RECHAZO",
+    )
+
+
+def test_c27_c13_inversion_frente_a_importe_delta(caso, record_testsuite_property) -> None:
+    """Efecto INVERSION de 100. A asigna 100 a la inversión; B reduce
+    importe_delta a 50. Misma topología que C12 sobre hecho_efectos."""
+    lab = caso
+    entidad, efecto = lab.nuevo_efecto_inversion(Decimal("100.0000"))
+
+    def valido() -> bool:
+        importe, suma = lab.asignado_inversion(efecto)
+        return atribucion_parcial_valida(importe, suma)
+
+    _caso_segunda_bloqueada(
+        lab, record_testsuite_property, "C13",
+        [(INS_ASIG_INV, (efecto, entidad, Decimal("100.0000")))],
+        [(UPD_EFECTO_IMPORTE, (Decimal("50.0000"), efecto))],
+        valido, "RECHAZO",
+    )
+
+
+def test_c27_c14_transferencia_patas_a_la_misma_cuenta(caso, record_testsuite_property) -> None:
+    """Transferencia X(-100) -> Y(+100). A mueve la salida a Z; B mueve la
+    entrada a Z. Cada cambio es válido frente al estado confirmado; juntos
+    dejan las dos patas en la misma cuenta. Cada validación bloquea las dos
+    patas en orden LEAST/GREATEST y la propia ya está bloqueada por su UPDATE:
+    el deadlock es inherente (dos padres) y se resuelve reintentando."""
+    lab = caso
+    cuenta_x, cuenta_y, cuenta_z = lab.nueva_cuenta(), lab.nueva_cuenta(), lab.nueva_cuenta()
+    salida = lab.nuevo_movimiento(cuenta_x, Decimal("-100.0000"))
+    entrada = lab.nuevo_movimiento(cuenta_y, Decimal("100.0000"))
+    lab.tx_owner([(INS_TRANSFERENCIA, (salida, entrada))])
+
+    def valido() -> bool:
+        filas = lab.leer("SELECT count(DISTINCT cuenta_id) FROM gapto.movimientos_tesoreria "
+                         "WHERE id = ANY(%s::uuid[])", ([salida, entrada],))
+        return filas[0][0] == 2
+
+    _caso_con_barrera(
+        lab, record_testsuite_property, "C14",
+        [(UPD_MOV_CUENTA, (cuenta_z, salida))],
+        [(UPD_MOV_CUENTA, (cuenta_z, entrada))],
+        valido,
+    )
+
+
+def test_c27_c15a1_moneda_tras_primer_movimiento(caso, record_testsuite_property) -> None:
+    """A registra el primer movimiento (FK: FOR KEY SHARE sobre la cuenta). B
+    cambia la moneda: su FOR UPDATE debe esperar a A y, tras el COMMIT de A,
+    rechazar el cambio porque la cuenta ya tiene historia."""
+    lab = caso
+    cuenta = lab.nueva_cuenta()
+    _caso_segunda_bloqueada(
+        lab, record_testsuite_property, "C15a-1",
+        [(INS_MOVIMIENTO, (cuenta, Decimal("-10.0000")))],
+        [(UPD_CUENTA_MONEDA, ("USD", cuenta))],
+        lambda: lab.cuenta(cuenta)[0] == "EUR", "RECHAZO",
+    )
+
+
+def test_c27_c15a2_primer_movimiento_tras_moneda(caso, record_testsuite_property) -> None:
+    """A cambia la moneda (FOR UPDATE). B registra el primer movimiento: su FK
+    debe esperar a A y confirmar después, ya bajo la moneda nueva."""
+    lab = caso
+    cuenta = lab.nueva_cuenta()
+    _caso_segunda_bloqueada(
+        lab, record_testsuite_property, "C15a-2",
+        [(UPD_CUENTA_MONEDA, ("USD", cuenta))],
+        [(INS_MOVIMIENTO, (cuenta, Decimal("-10.0000")))],
+        lambda: lab.cuenta(cuenta)[0] == "USD" and lab.cuenta(cuenta)[2] == 1, "CONFIRMA",
+    )
+
+
+def test_c27_c15c1_moneda_tras_saldo_apertura(caso, record_testsuite_property) -> None:
+    """Misma fila. A fija saldo_apertura = 0 (0 cuenta como historia). B cambia
+    la moneda: espera por el lock de tupla y, tras el COMMIT de A, su trigger
+    ve OLD (versión tras EPQ) con saldo 0 y rechaza."""
+    lab = caso
+    cuenta = lab.nueva_cuenta()
+    _caso_segunda_bloqueada(
+        lab, record_testsuite_property, "C15c-1",
+        [(UPD_CUENTA_APERTURA, (cuenta,))],
+        [(UPD_CUENTA_MONEDA, ("USD", cuenta))],
+        lambda: lab.cuenta(cuenta)[0] == "EUR", "RECHAZO",
+    )
+
+
+def test_c27_c15c2_saldo_apertura_tras_moneda(caso, record_testsuite_property) -> None:
+    """A cambia la moneda; B fija el saldo de apertura: espera y confirma, y
+    la historia nace bajo la moneda nueva."""
+    lab = caso
+    cuenta = lab.nueva_cuenta()
+    _caso_segunda_bloqueada(
+        lab, record_testsuite_property, "C15c-2",
+        [(UPD_CUENTA_MONEDA, ("USD", cuenta))],
+        [(UPD_CUENTA_APERTURA, (cuenta,))],
+        lambda: lab.cuenta(cuenta)[:2] == ("USD", Decimal("0.0000")), "CONFIRMA",
+    )
+
+
+def test_c27_c16_naturaleza_frente_a_persona(caso, record_testsuite_property) -> None:
+    """Tercero PERSONA sin datos de persona. A cambia la naturaleza a EMPRESA y
+    valida; B inserta la persona: su validador debe bloquear el tercero,
+    esperar y releer EMPRESA. Sin ese lock, B leía PERSONA y su FK solo
+    tomaba KEY SHARE, compatible con el UPDATE de A (write-skew)."""
+    lab = caso
+    tercero = lab.nuevo_tercero_persona_sin_datos()
+
+    def valido() -> bool:
+        return lab.leer("SELECT count(*) FROM gapto.tercero_personas p "
+                        "JOIN gapto.terceros t ON t.id = p.tercero_id "
+                        "WHERE p.tercero_id = %s AND t.naturaleza IS DISTINCT FROM 'PERSONA'",
+                        (tercero,))[0][0] == 0
+
+    _caso_segunda_bloqueada(
+        lab, record_testsuite_property, "C16",
+        [(UPD_TERCERO_NATURALEZA, ("EMPRESA", tercero))],
+        [(INS_PERSONA, (tercero,))],
+        valido, "RECHAZO",
+    )
+
+
+def test_c27_c17_tipo_destino_frente_a_garantia(caso, record_testsuite_property) -> None:
+    """FINANCIACION F y PROPIEDAD P sin relación. A convierte P en SERVICIO
+    (retira su subtipo y crea el nuevo) y valida; B crea la garantía F -> P:
+    su validador bloquea F y P en orden de uuid, espera a A y relee."""
+    lab = caso
+    financiacion, propiedad = lab.nuevas_entidades_garantia()
+
+    def valido() -> bool:
+        return lab.leer("""
+            SELECT count(*) FROM gapto.entidad_relaciones r
+              JOIN gapto.entidades o ON o.id = r.entidad_origen_id
+              JOIN gapto.entidades d ON d.id = r.entidad_destino_id
+             WHERE r.entidad_destino_id = %s
+               AND (o.tipo_entidad <> 'FINANCIACION' OR d.tipo_entidad <> 'PROPIEDAD')
+        """, (propiedad,))[0][0] == 0
+
+    _caso_segunda_bloqueada(
+        lab, record_testsuite_property, "C17",
+        [("DELETE FROM gapto.propiedades WHERE entidad_id = %s", (propiedad,)),
+         ("UPDATE gapto.entidades SET tipo_entidad = 'SERVICIO' WHERE id = %s", (propiedad,)),
+         ("INSERT INTO gapto.servicios (entidad_id, tipo_servicio) VALUES (%s, 'OTRO')", (propiedad,))],
+        [(INS_GARANTIA, (financiacion, propiedad))],
+        valido, "RECHAZO",
+    )
+
+
 def test_c27_99_sin_residuos(lab) -> None:
     """Tras la batería solo puede quedar el tenant de laboratorio (usuario +
     actor self). Cualquier otra fila indica una limpieza incompleta."""
@@ -1343,9 +1703,10 @@ def test_c27_99_sin_residuos(lab) -> None:
                (SELECT count(*) FROM gapto.hechos_financieros WHERE owner_user_id = %(o)s),
                (SELECT count(*) FROM gapto.reglas_financieras WHERE owner_user_id = %(o)s),
                (SELECT count(*) FROM gapto.presupuestos WHERE owner_user_id = %(o)s),
-               (SELECT count(*) FROM gapto.categorias_financieras WHERE owner_user_id = %(o)s)
+               (SELECT count(*) FROM gapto.categorias_financieras WHERE owner_user_id = %(o)s),
+               (SELECT count(*) FROM gapto.entidades WHERE owner_user_id = %(o)s)
     """, {"o": OWNER_LAB})[0]
-    assert tuple(fila) == (0, 0, 0, 0, 0, 0, 0, 0), (
+    assert tuple(fila) == (0, 0, 0, 0, 0, 0, 0, 0, 0), (
         "residuo en el laboratorio (cuentas, participaciones, terceros, actores no self, "
-        f"hechos, reglas, presupuestos, categorias) = {tuple(fila)}"
+        f"hechos, reglas, presupuestos, categorias, entidades) = {tuple(fila)}"
     )

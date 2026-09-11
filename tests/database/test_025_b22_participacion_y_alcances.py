@@ -22,7 +22,10 @@
 #              cualquier otra huella sigue siendo drift.
 #
 # PRECONDICIÓN: requiere 0190 (B16).
-# Versión: 0.1.2  -- acepta las huellas sucesoras de 0250 y 0260.
+# Versión: 0.1.3  -- el recuento de triggers acepta exactamente la sucesora de
+#                   0270 (39 no internos, 23 constraint, 7 guards) además del
+#                   baseline B22 (Working Method 12C.5).
+#                   v0.1.2: acepta las huellas sucesoras de 0250 y 0260.
 # ============================================================
 
 from __future__ import annotations
@@ -126,7 +129,8 @@ def test_b22_trigger_de_alcances_existe_y_no_cubre_delete(db: psycopg.Connection
 
 
 def test_b22_recuento_de_triggers(db: psycopg.Connection) -> None:
-    """34 triggers no internos: 19 constraint triggers, 7 guards, 8 ordinarios."""
+    """Baseline B22: 34 triggers no internos (19 constraint, 7 guards, 8
+    ordinarios). Sucesora 0270: 39 (23 constraint, 7 guards, 9 ordinarios)."""
     with db.cursor() as cursor:
         cursor.execute("""
             SELECT count(*),
@@ -138,7 +142,7 @@ def test_b22_recuento_de_triggers(db: psycopg.Connection) -> None:
              WHERE n.nspname='gapto' AND NOT t.tgisinternal
         """)
         total, constraint, guards = cursor.fetchone()
-    assert (total, constraint, guards) == (34, 19, 7)
+    assert (total, constraint, guards) in ((34, 19, 7), (39, 23, 7))
 
 
 # ------------------------------------------------------------

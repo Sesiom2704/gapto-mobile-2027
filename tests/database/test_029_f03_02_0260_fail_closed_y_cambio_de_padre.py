@@ -23,7 +23,9 @@
 #              revierte siempre.
 #
 # PRECONDICIÓN: requiere 0260.
-# Versión: 0.1.0
+# Versión: 0.2.0  -- las huellas aceptan exactamente {0260, sucesora 0270} en
+#                   las cuatro funciones que 0270 reescribe (T6 y R-INV); el
+#                   resto sigue fijado a 0260 (Working Method 12C.5).
 # ============================================================
 
 from __future__ import annotations
@@ -41,6 +43,13 @@ HUELLAS_0260 = {
     "fn_check_participacion_suma": ("b76161555c227a8aa19c3ab513aa4687", 3082),
     "fn_check_reversion_movimiento": ("00161f7875783230311834ca84e472e2", 2208),
     "fn_check_transferencia_estructura": ("e956eb54ec62b7ac7b9bcf11ca3f107e", 2392),
+}
+
+SUCESORAS_0270 = {
+    "fn_check_hecho_mov_tesoreria_suma": {("808128976910a4333fd8c6843d0b9919", 1986)},
+    "fn_check_inversion_asignacion_suma": {("128a6bd0e45f5fe3632c83b25cbfa371", 2129)},
+    "fn_check_reversion_movimiento": {("91a33cb088ab4ff8d9c56c29fc3d12c2", 2466)},
+    "fn_check_transferencia_estructura": {("545db95496409a5adf01fbb98e4b161a", 2722)},
 }
 
 OWNER = "c0260000-0000-4000-8000-000000000001"
@@ -130,8 +139,9 @@ def test_0260_huella(db: psycopg.Connection, funcion: str) -> None:
              WHERE n.nspname = 'gapto' AND p.proname = %s
         """, (funcion,))
         fila = cursor.fetchone()
-    assert fila is not None and tuple(fila) == HUELLAS_0260[funcion], (
-        f"{funcion}: huella {fila} != {HUELLAS_0260[funcion]}"
+    aceptadas = {HUELLAS_0260[funcion]} | SUCESORAS_0270.get(funcion, set())
+    assert fila is not None and tuple(fila) in aceptadas, (
+        f"{funcion}: huella {fila} no es ninguna de {sorted(aceptadas)}"
     )
 
 

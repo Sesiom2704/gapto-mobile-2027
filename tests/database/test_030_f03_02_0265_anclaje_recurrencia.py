@@ -23,13 +23,14 @@
 #                importe_modo=CALENDARIO_ENTIDAD;
 #              - CALENDARIO conserva todas las combinaciones previas;
 #              - las constraints previas de regla_versiones siguen actuando;
-#                se documenta con xfail estricto un defecto previo de 0030
-#                (VENTANA con días NULL aceptada) que no forma parte de D-126;
+#                el defecto previo de 0030 (VENTANA con días NULL aceptada,
+#                A8) queda corregido por 0270 y su test pasa a ser normal;
 #              - FORCE RLS sigue activo y gapto_runtime puede escribir la
 #                columna.
 #
-# PRECONDICIÓN: requiere 0265.
-# Versión: 0.1.0
+# PRECONDICIÓN: requiere 0265; test_0265_ventana_sin_dias_se_rechaza requiere 0270.
+# Versión: 0.2.0  -- A8 corregido por 0270: el xfail estricto pasa a test normal
+#                   y exige el nombre del CHECK nuevo.
 # ============================================================
 
 from __future__ import annotations
@@ -193,13 +194,10 @@ def test_0265_ventana_fuera_de_rango_sigue_rechazandose(db: psycopg.Connection) 
                   dia_desde=0, dia_hasta=5)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "Defecto previo en 0030 (congelada): ck_regla_versiones__ventana evalúa a NULL "
-    "cuando dia_desde/dia_hasta son NULL y un CHECK con resultado NULL se acepta. El "
-    "canon exige ambos días con VENTANA. Pendiente de corrección forward-only fuera "
-    "de D-126; strict=True obliga a revisar este test cuando se corrija."))
-def test_0265_ventana_sin_dias_deberia_rechazarse(db: psycopg.Connection) -> None:
-    with pytest.raises(psycopg.errors.CheckViolation, match="ventana"):
+def test_0265_ventana_sin_dias_se_rechaza(db: psycopg.Connection) -> None:
+    """A8: el CHECK congelado de 0030 evalúa a NULL sin días y aceptaba la fila;
+    0270 añade ck_regla_versiones__ventana_dias_obligatorios."""
+    with pytest.raises(psycopg.errors.CheckViolation, match="ventana_dias_obligatorios"):
         _intentar(db, periodicidad="MENSUAL", anclaje="CALENDARIO", fecha_modo="VENTANA")
 
 
