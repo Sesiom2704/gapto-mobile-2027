@@ -42,6 +42,29 @@
 #                C5  EXCLUDE temporal con periodos incompatibles (regla_versiones)
 #                C6  EXCLUDE temporal con periodos compatibles (vivacidad)
 #                C7  deadlock multi-padre deliberado y reintento en orden fijo
+#                C8  reversión autorreferente: dos reversiones que juntas superan
+#                    el original (misma tabla, FK autorreferente), con barrera
+#                C8b reversión autorreferente, control de vivacidad: dos
+#                    reversiones que juntas caben; orden natural, sin espera
+#                C9  transferencia: orden determinista de los DOS locks. Una
+#                    tercera sesión (H) retiene el movimiento de salida para
+#                    forzar la contención; el par invertido provocaría deadlock
+#                    si los locks se tomaran por columna y no por LEAST/GREATEST
+#                C10 BOLSA desde presupuesto_lineas: empate de prioridad, con barrera
+#                C11 BOLSA desde presupuesto_linea_alcances: aparición del cruce
+#                    de alcances, con barrera
+#
+#              Matriz de cobertura por TOPOLOGÍA de lock (no por tabla):
+#                un padre + suma de hijas ........................ C1-C4b
+#                padre e hijas en la misma tabla (autorreferencia) C8, C8b
+#                dos padres bloqueados en orden determinista ..... C9
+#                conflicto por JOIN provocado desde la línea ..... C10
+#                conflicto por JOIN provocado desde el alcance ... C11
+#                deadlock multi-padre inevitable ................. C7
+#              entidad_participaciones, inversion_asignaciones_efecto y
+#              hecho_movimientos_tesoreria se aceptan por EQUIVALENCIA
+#              ESTRUCTURAL verificada estáticamente en test_028, no por prueba
+#              empírica concurrente.
 #
 #              BARRERA. En C1/C4/C4b, A ejecuta SET CONSTRAINTS ALL IMMEDIATE:
 #              su validación se ejecuta en ese instante y toma el lock del
@@ -60,7 +83,9 @@
 #              test verifica que no queda residuo.
 #
 # PRECONDICIÓN: cadena 0001..0240 aplicada en gapto2027_cleanroom.
-# Versión: 0.1.0
+# Versión: 0.2.0  -- añade C8, C8b, C9, C10 y C11 (topologías de lock no
+#                   cubiertas por C1-C7) y la sesión H para C9.
+#                   v0.1.0: C1-C7.
 # ============================================================
 
 from __future__ import annotations
@@ -121,6 +146,21 @@ INS_RV = (
     "(regla_id, vigente_desde, vigente_hasta, tipo_hecho_id, flujo_tesoreria_esperado, "
     " moneda, fecha_modo, importe_modo, presupuestable) "
     "VALUES (%s, %s, %s, %s, 'SIN_MOVIMIENTO', 'EUR', 'ANCLA', 'MANUAL', true)"
+)
+INS_REVERSION = (
+    "INSERT INTO gapto.movimientos_tesoreria "
+    "(cuenta_id, fecha_movimiento, importe, confirmado_at, clase_movimiento, "
+    " reversion_de_movimiento_id) "
+    "VALUES (%s, CURRENT_DATE, %s, now(), 'OPERACION', %s)"
+)
+INS_TRANSFERENCIA = (
+    "INSERT INTO gapto.transferencias (movimiento_salida_id, movimiento_entrada_id) "
+    "VALUES (%s, %s)"
+)
+UPD_LINEA_PRIORIDAD = "UPDATE gapto.presupuesto_lineas SET prioridad_consumo = %s WHERE id = %s"
+INS_ALCANCE = (
+    "INSERT INTO gapto.presupuesto_linea_alcances (presupuesto_linea_id, categoria_id) "
+    "VALUES (%s, %s)"
 )
 SET_IMMEDIATE = ("SET CONSTRAINTS ALL IMMEDIATE", None)
 SET_DEFERRED = ("SET CONSTRAINTS ALL DEFERRED", None)
@@ -338,6 +378,7 @@ class Laboratorio:
         statement_ms = int((self.espera_maxima + 15) * 1000)
         self.a = Sesion("A", lock_timeout_ms, statement_ms)
         self.b = Sesion("B", lock_timeout_ms, statement_ms)
+        self.h = Sesion("H", lock_timeout_ms, statement_ms)
         self.monitor = Monitor(Sesion("MON", 10000, 10000))
         self.creados: dict[str, list[str]] = {}
         self._asegurar_tenant()
@@ -481,6 +522,77 @@ class Laboratorio:
         )])
         return regla
 
+    def nuevo_movimiento(self, cuenta: str, importe: Decimal,
+                         reversion_de: str | None = None) -> str:
+        movimiento = str(uuid.uuid4())
+        self.tx_owner([(
+            "INSERT INTO gapto.movimientos_tesoreria (id, cuenta_id, fecha_movimiento, "
+            "importe, confirmado_at, clase_movimiento, reversion_de_movimiento_id) "
+            "VALUES (%s, %s, CURRENT_DATE, %s, now(), 'OPERACION', %s)",
+            (movimiento, cuenta, importe, reversion_de),
+        )])
+        return movimiento
+
+    def nuevo_presupuesto(self) -> str:
+        presupuesto = self._anotar("presupuestos", str(uuid.uuid4()))
+        self.tx_owner([(
+            "INSERT INTO gapto.presupuestos (id, owner_user_id, periodo_desde, periodo_hasta, "
+            "moneda, perspectiva, version_presupuesto) "
+            "VALUES (%s, %s, DATE '2026-01-01', DATE '2026-12-31', 'EUR', 'TOTAL', 1)",
+            (presupuesto, OWNER_LAB),
+        )])
+        return presupuesto
+
+    def nueva_categoria(self) -> str:
+        categoria = self._anotar("categorias", str(uuid.uuid4()))
+        self.tx_owner([(
+            "INSERT INTO gapto.categorias_financieras (id, owner_user_id, nombre, ambito, "
+            "presupuestable_default) VALUES (%s, %s, %s, 'GASTO', true)",
+            (categoria, OWNER_LAB, f"Categoria C027 {categoria}"),
+        )])
+        return categoria
+
+    def nueva_bolsa(self, presupuesto: str, prioridad: int, categorias: list[str]) -> str:
+        linea = str(uuid.uuid4())
+        sentencias = [(
+            "INSERT INTO gapto.presupuesto_lineas (id, presupuesto_id, tipo_linea, "
+            "naturaleza_economica, prioridad_consumo, importe_objetivo, metodo_estimacion) "
+            "VALUES (%s, %s, 'BOLSA', 'GASTO', %s, 100, 'MANUAL')",
+            (linea, presupuesto, prioridad),
+        )]
+        sentencias += [(INS_ALCANCE, (linea, categoria)) for categoria in categorias]
+        self.tx_owner(sentencias)
+        return linea
+
+    def reversiones(self, original: str) -> tuple:
+        return self.leer(
+            "SELECT abs(o.importe), COALESCE(sum(abs(r.importe)) "
+            "       FILTER (WHERE r.estado = 'ACTIVO'), 0) "
+            "FROM gapto.movimientos_tesoreria o "
+            "LEFT JOIN gapto.movimientos_tesoreria r ON r.reversion_de_movimiento_id = o.id "
+            "WHERE o.id = %s GROUP BY o.importe", (original,))[0]
+
+    def transferencias(self, movimientos: list[str]) -> list[tuple]:
+        return self.leer(
+            "SELECT movimiento_salida_id::text, movimiento_entrada_id::text "
+            "FROM gapto.transferencias "
+            "WHERE movimiento_salida_id = ANY(%s::uuid[]) "
+            "   OR movimiento_entrada_id = ANY(%s::uuid[])", (movimientos, movimientos))
+
+    def empates_bolsa(self, presupuesto: str) -> int:
+        return self.leer("""
+            SELECT count(*)
+              FROM gapto.presupuesto_lineas l1
+              JOIN gapto.presupuesto_lineas l2
+                ON l2.presupuesto_id = l1.presupuesto_id AND l2.id > l1.id
+               AND l2.tipo_linea = 'BOLSA' AND l1.tipo_linea = 'BOLSA'
+               AND l2.prioridad_consumo = l1.prioridad_consumo
+              JOIN gapto.presupuesto_linea_alcances a1 ON a1.presupuesto_linea_id = l1.id
+              JOIN gapto.presupuesto_linea_alcances a2 ON a2.presupuesto_linea_id = l2.id
+               AND (a1.categoria_id = a2.categoria_id OR a1.entidad_id = a2.entidad_id)
+             WHERE l1.presupuesto_id = %s
+        """, (presupuesto,))[0][0]
+
     def participaciones(self, cuenta: str) -> list[tuple]:
         return self.leer(
             "SELECT vigente_desde, vigente_hasta, porcentaje "
@@ -510,7 +622,25 @@ class Laboratorio:
              (c.get("hechos", []),)),
             ("DELETE FROM gapto.cuenta_participaciones WHERE cuenta_id = ANY(%s::uuid[])",
              (c.get("cuentas", []),)),
+            ("DELETE FROM gapto.transferencias WHERE movimiento_salida_id IN "
+             "(SELECT id FROM gapto.movimientos_tesoreria WHERE cuenta_id = ANY(%s::uuid[])) "
+             "OR movimiento_entrada_id IN "
+             "(SELECT id FROM gapto.movimientos_tesoreria WHERE cuenta_id = ANY(%s::uuid[]))",
+             (c.get("cuentas", []), c.get("cuentas", []))),
+            ("DELETE FROM gapto.movimientos_tesoreria WHERE cuenta_id = ANY(%s::uuid[]) "
+             "AND reversion_de_movimiento_id IS NOT NULL", (c.get("cuentas", []),)),
+            ("DELETE FROM gapto.movimientos_tesoreria WHERE cuenta_id = ANY(%s::uuid[])",
+             (c.get("cuentas", []),)),
             ("DELETE FROM gapto.cuentas WHERE id = ANY(%s::uuid[])", (c.get("cuentas", []),)),
+            ("DELETE FROM gapto.presupuesto_linea_alcances WHERE presupuesto_linea_id IN "
+             "(SELECT id FROM gapto.presupuesto_lineas WHERE presupuesto_id = ANY(%s::uuid[]))",
+             (c.get("presupuestos", []),)),
+            ("DELETE FROM gapto.presupuesto_lineas WHERE presupuesto_id = ANY(%s::uuid[])",
+             (c.get("presupuestos", []),)),
+            ("DELETE FROM gapto.presupuestos WHERE id = ANY(%s::uuid[])",
+             (c.get("presupuestos", []),)),
+            ("DELETE FROM gapto.categorias_financieras WHERE id = ANY(%s::uuid[])",
+             (c.get("categorias", []),)),
             ("DELETE FROM gapto.regla_versiones WHERE regla_id = ANY(%s::uuid[])",
              (c.get("reglas", []),)),
             ("DELETE FROM gapto.reglas_financieras WHERE id = ANY(%s::uuid[])",
@@ -583,7 +713,7 @@ class Laboratorio:
 
     def cerrar(self) -> None:
         self.monitor.detener()
-        for sesion in (self.a, self.b, self.monitor.sesion, self.admin):
+        for sesion in (self.a, self.b, self.h, self.monitor.sesion, self.admin):
             try:
                 sesion.conn.close()
             except Exception:
@@ -612,10 +742,12 @@ def caso(lab):
     """Garantiza sesiones limpias antes y limpieza completa después de cada caso."""
     lab.a.abortar()
     lab.b.abortar()
+    lab.h.abortar()
     yield lab
     lab.monitor.detener()
     lab.a.abortar()
     lab.b.abortar()
+    lab.h.abortar()
     lab.limpiar()
 
 
@@ -1031,6 +1163,173 @@ def test_c27_c7_deadlock_multi_padre(caso, record_testsuite_property) -> None:
     emitir(record_testsuite_property, "C7", "FAIL_LIVENESS", detalle)
 
 
+def test_c27_c8_reversion_autorreferente(caso, record_testsuite_property) -> None:
+    """Original de -100. A y B revierten +60 cada una: cada reversión cabe
+    sola, juntas suman 120 frente a 100. Padre e hijas viven en la misma
+    tabla (FK autorreferente reversion_de_movimiento_id)."""
+    lab = caso
+    cuenta = lab.nueva_cuenta()
+    original = lab.nuevo_movimiento(cuenta, Decimal("-100.0000"))
+
+    def valido() -> bool:
+        importe, revertido = lab.reversiones(original)
+        return revertido <= importe
+
+    _caso_con_barrera(
+        lab, record_testsuite_property, "C8",
+        [(INS_REVERSION, (cuenta, Decimal("60.0000"), original))],
+        [(INS_REVERSION, (cuenta, Decimal("60.0000"), original))],
+        valido,
+    )
+
+
+def test_c27_c8b_reversion_control_vivacidad(caso, record_testsuite_property) -> None:
+    """Original de -100. A revierte +60 y B +40: juntas caben exactamente.
+    Orden natural, sin barrera: ambas deben confirmar sin espera apreciable."""
+    lab = caso
+    cuenta = lab.nueva_cuenta()
+    original = lab.nuevo_movimiento(cuenta, Decimal("-100.0000"))
+
+    lab.monitor.iniciar([lab.a.pid, lab.b.pid])
+    lab.a.abrir_runtime()
+    preparar_a = lab.ejecutar(lab.a, [(INS_REVERSION, (cuenta, Decimal("60.0000"), original))])
+    lab.b.abrir_runtime()
+    preparar_b = lab.ejecutar(lab.b, [(INS_REVERSION, (cuenta, Decimal("40.0000"), original))])
+    fin_a = lab.lote(lab.a, [COMMIT])
+    estado_fin_a = lab.observar(fin_a)
+    fin_b = lab.lote(lab.b, [COMMIT])
+    lab.esperar(fin_a, fin_b)
+    lab.monitor.detener()
+
+    importe, revertido = lab.reversiones(original)
+    umbral = 0.25 * lab.deadlock_s
+    espera = lab.monitor.segundos(lab.a.pid) + lab.monitor.segundos(lab.b.pid)
+    detalle = {
+        "modo_lock": lab.modo_lock,
+        "preparar": f"{_op(preparar_a)}/{_op(preparar_b)}",
+        "commit_A": estado_fin_a,
+        "A": _op(fin_a),
+        "B": _op(fin_b),
+        "espera_A": lab.monitor.resumen(lab.a.pid),
+        "espera_B": lab.monitor.resumen(lab.b.pid),
+        "revertido": f"{revertido}/{importe}",
+        "estado_final_valido": revertido <= importe,
+    }
+    if not (preparar_a.ok and preparar_b.ok):
+        emitir(record_testsuite_property, "C8b", "NO_CLASIFICABLE", detalle)
+    if revertido > importe:
+        emitir(record_testsuite_property, "C8b", "FAIL_INTEGRITY", detalle)
+    if fin_a.ok and fin_b.ok and espera < umbral and revertido == importe:
+        emitir(record_testsuite_property, "C8b", "PASS", detalle)
+        return
+    emitir(record_testsuite_property, "C8b", "FAIL_LIVENESS", detalle)
+
+
+def test_c27_c9_transferencia_orden_de_locks(caso, record_testsuite_property) -> None:
+    """Dos locks sobre movimientos_tesoreria en orden LEAST/GREATEST.
+
+    H retiene con FOR NO KEY UPDATE el movimiento de SALIDA de A. A inserta
+    la transferencia válida (salida=Mout, entrada=Min) y valida; B inserta el
+    par invertido (salida=Min, entrada=Mout) y valida. Ambas quedan en
+    contención y H libera.
+
+    Con locks ordenados por identificador, ninguna retiene un movimiento
+    mientras espera el otro en orden opuesto: cero deadlock, A confirma y B
+    se rechaza por la invariante (su salida es positiva). Si los locks se
+    tomaran por columna (salida y luego entrada), B retendría Min esperando
+    Mout, A obtendría Mout esperando Min, y habría 40P01. Por eso este caso
+    discrimina el orden, cosa que dos COMMIT sucesivos no harían."""
+    lab = caso
+    cuenta_x, cuenta_y = lab.nueva_cuenta(), lab.nueva_cuenta()
+    m_out = lab.nuevo_movimiento(cuenta_x, Decimal("-100.0000"))
+    m_in = lab.nuevo_movimiento(cuenta_y, Decimal("100.0000"))
+
+    lab.monitor.iniciar([lab.a.pid, lab.b.pid])
+    lab.h.sql("BEGIN")
+    lab.h.sql("SET LOCAL ROLE gapto_owner")
+    lab.h.sql("SELECT set_config('gapto.owner_user_id', %s, true)", (OWNER_LAB,))
+    lab.h.sql("SELECT 1 FROM gapto.movimientos_tesoreria WHERE id = %s FOR NO KEY UPDATE",
+              (m_out,))
+
+    lab.a.abrir_runtime()
+    preparar_a = lab.ejecutar(lab.a, [(INS_TRANSFERENCIA, (m_out, m_in))])
+    validar_a = lab.lote(lab.a, [SET_IMMEDIATE])
+    estado_a = lab.observar(validar_a)
+    lab.b.abrir_runtime()
+    preparar_b = lab.ejecutar(lab.b, [(INS_TRANSFERENCIA, (m_in, m_out))])
+    validar_b = lab.lote(lab.b, [SET_IMMEDIATE])
+    estado_b = lab.observar(validar_b)
+
+    lab.h.sql("ROLLBACK")
+    lab.esperar(validar_a)
+    fin_a = lab.ejecutar(lab.a, [COMMIT]) if validar_a.ok else validar_a
+    lab.esperar(validar_b)
+    fin_b = lab.ejecutar(lab.b, [COMMIT]) if validar_b.ok else validar_b
+    lab.monitor.detener()
+
+    filas = lab.transferencias([m_out, m_in])
+    detalle = {
+        "modo_lock": lab.modo_lock,
+        "preparar": f"{_op(preparar_a)}/{_op(preparar_b)}",
+        "validar_A": estado_a,
+        "validar_B": estado_b,
+        "A": _op(fin_a),
+        "B": _op(fin_b),
+        "espera_A": lab.monitor.resumen(lab.a.pid),
+        "espera_B": lab.monitor.resumen(lab.b.pid),
+        "transferencias_finales": len(filas),
+    }
+    if not (preparar_a.ok and preparar_b.ok):
+        emitir(record_testsuite_property, "C9", "NO_CLASIFICABLE", detalle)
+    if len(filas) > 1 or (filas and filas[0] != (m_out, m_in)):
+        emitir(record_testsuite_property, "C9", "FAIL_INTEGRITY", detalle)
+    if SQLSTATE_DEADLOCK in (fin_a.sqlstate, fin_b.sqlstate) or not fin_a.ok:
+        emitir(record_testsuite_property, "C9", "FAIL_LIVENESS", detalle)
+    if estado_a != "BLOQUEADA" or estado_b != "BLOQUEADA":
+        emitir(record_testsuite_property, "C9", "NO_CLASIFICABLE", detalle)
+    if fin_b.sqlstate == SQLSTATE_INVARIANTE:
+        emitir(record_testsuite_property, "C9", "PASS", detalle)
+        return
+    if fin_b.sqlstate in SQLSTATES_VIVACIDAD:
+        emitir(record_testsuite_property, "C9", "FAIL_LIVENESS", detalle)
+    emitir(record_testsuite_property, "C9", "NO_CLASIFICABLE", detalle)
+
+
+def test_c27_c10_bolsa_empate_desde_linea(caso, record_testsuite_property) -> None:
+    """Dos BOLSA con alcance cruzado y prioridades 10 y 20 (válido). A sube
+    la primera a 30; B sube la segunda a 30. Cada cambio es válido frente al
+    estado inicial; juntos empatan. Ejercita fn_check_bolsa_prioridad."""
+    lab = caso
+    presupuesto = lab.nuevo_presupuesto()
+    categoria = lab.nueva_categoria()
+    linea_1 = lab.nueva_bolsa(presupuesto, 10, [categoria])
+    linea_2 = lab.nueva_bolsa(presupuesto, 20, [categoria])
+    _caso_con_barrera(
+        lab, record_testsuite_property, "C10",
+        [(UPD_LINEA_PRIORIDAD, (30, linea_1))],
+        [(UPD_LINEA_PRIORIDAD, (30, linea_2))],
+        lambda: lab.empates_bolsa(presupuesto) == 0,
+    )
+
+
+def test_c27_c11_bolsa_cruce_desde_alcance(caso, record_testsuite_property) -> None:
+    """Dos BOLSA con la misma prioridad y alcances disjuntos (A y B, válido).
+    A añade la categoría C a la primera; B añade C a la segunda. Cada alta es
+    válida frente al estado inicial; juntas crean el cruce con empate.
+    Ejercita fn_check_bolsa_prioridad_alcance (la segunda vía de D-108)."""
+    lab = caso
+    presupuesto = lab.nuevo_presupuesto()
+    cat_a, cat_b, cat_c = lab.nueva_categoria(), lab.nueva_categoria(), lab.nueva_categoria()
+    linea_1 = lab.nueva_bolsa(presupuesto, 10, [cat_a])
+    linea_2 = lab.nueva_bolsa(presupuesto, 10, [cat_b])
+    _caso_con_barrera(
+        lab, record_testsuite_property, "C11",
+        [(INS_ALCANCE, (linea_1, cat_c))],
+        [(INS_ALCANCE, (linea_2, cat_c))],
+        lambda: lab.empates_bolsa(presupuesto) == 0,
+    )
+
+
 def test_c27_99_sin_residuos(lab) -> None:
     """Tras la batería solo puede quedar el tenant de laboratorio (usuario +
     actor self). Cualquier otra fila indica una limpieza incompleta."""
@@ -1042,9 +1341,11 @@ def test_c27_99_sin_residuos(lab) -> None:
                (SELECT count(*) FROM gapto.actores_financieros
                  WHERE owner_user_id = %(o)s AND tercero_id IS NOT NULL),
                (SELECT count(*) FROM gapto.hechos_financieros WHERE owner_user_id = %(o)s),
-               (SELECT count(*) FROM gapto.reglas_financieras WHERE owner_user_id = %(o)s)
+               (SELECT count(*) FROM gapto.reglas_financieras WHERE owner_user_id = %(o)s),
+               (SELECT count(*) FROM gapto.presupuestos WHERE owner_user_id = %(o)s),
+               (SELECT count(*) FROM gapto.categorias_financieras WHERE owner_user_id = %(o)s)
     """, {"o": OWNER_LAB})[0]
-    assert tuple(fila) == (0, 0, 0, 0, 0, 0), (
+    assert tuple(fila) == (0, 0, 0, 0, 0, 0, 0, 0), (
         "residuo en el laboratorio (cuentas, participaciones, terceros, actores no self, "
-        f"hechos, reglas) = {tuple(fila)}"
+        f"hechos, reglas, presupuestos, categorias) = {tuple(fila)}"
     )

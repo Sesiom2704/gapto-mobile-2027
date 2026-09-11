@@ -18,8 +18,17 @@
 #              propiedad: cualquier función futura que la reintroduzca debe
 #              justificarse y ajustar este test de forma explícita.
 #
+#              EQUIVALENCIA ESTRUCTURAL (v0.2.0). entidad_participaciones,
+#              inversion_asignaciones_efecto y hecho_movimientos_tesoreria no
+#              tienen caso concurrente propio en test_027: se aceptan por
+#              equivalencia con topologías ya probadas (C1-C4b). Esa
+#              equivalencia se verifica aquí, no se presume: trigger CONSTRAINT
+#              AFTER DEFERRABLE INITIALLY DEFERRED sobre INSERT/UPDATE/DELETE,
+#              función esperada, un único FOR NO KEY UPDATE sobre el padre
+#              situado ANTES del primer agregado, y ningún otro lock de fila.
+#
 # PRECONDICIÓN: requiere 0250.
-# Versión: 0.1.0
+# Versión: 0.2.0  -- añade la verificación de equivalencia estructural.
 # ============================================================
 
 from __future__ import annotations
@@ -76,3 +85,57 @@ def test_0250_huella_y_modo_de_lock(db: psycopg.Connection, funcion: str) -> Non
     assert volatilidad == "v", f"{funcion}: debe seguir VOLATILE (instantánea nueva por sentencia)"
     assert secdef is False, f"{funcion}: no debe ser SECURITY DEFINER"
     assert propietario == "gapto_owner", f"{funcion}: propietario {propietario}"
+
+
+# tabla hija -> (trigger, función, argumentos del trigger)
+EQUIVALENCIAS = {
+    "entidad_participaciones": (
+        "trg_entidad_participaciones__suma_100", "fn_check_participacion_suma",
+        ["entidad_id", "entidades"],
+    ),
+    "inversion_asignaciones_efecto": (
+        "trg_inversion_asignaciones_efecto__suma", "fn_check_inversion_asignacion_suma", [],
+    ),
+    "hecho_movimientos_tesoreria": (
+        "trg_hecho_movimientos_tesoreria__suma", "fn_check_hecho_mov_tesoreria_suma", [],
+    ),
+}
+
+
+@pytest.mark.parametrize("tabla", sorted(EQUIVALENCIAS))
+def test_0250_equivalencia_estructural(db: psycopg.Connection, tabla: str) -> None:
+    trigger, funcion, argumentos = EQUIVALENCIAS[tabla]
+    with db.cursor() as cursor:
+        cursor.execute("""
+            SELECT p.proname, t.tgconstraint <> 0, t.tgdeferrable, t.tginitdeferred,
+                   (t.tgtype & 2) = 0, (t.tgtype & 4) <> 0, (t.tgtype & 16) <> 0,
+                   (t.tgtype & 8) <> 0, t.tgenabled, t.tgargs, p.prosrc
+              FROM pg_catalog.pg_trigger t
+              JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid
+              JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+              JOIN pg_catalog.pg_proc p ON p.oid = t.tgfoid
+             WHERE n.nspname = 'gapto' AND c.relname = %s AND t.tgname = %s
+        """, (tabla, trigger))
+        fila = cursor.fetchone()
+    assert fila is not None, f"{tabla}: no existe {trigger}"
+    (nombre, es_constraint, diferible, diferido, after, ins, upd, dele,
+     habilitado, args, fuente) = fila
+    assert nombre == funcion, f"{tabla}: llama a {nombre}, se esperaba {funcion}"
+    assert (es_constraint, diferible, diferido, after) == (True, True, True, True), (
+        f"{tabla}: debe ser CONSTRAINT TRIGGER AFTER DEFERRABLE INITIALLY DEFERRED"
+    )
+    assert (ins, upd, dele) == (True, True, True), f"{tabla}: debe cubrir INSERT, UPDATE y DELETE"
+    assert habilitado == "O", f"{tabla}: trigger no habilitado ({habilitado})"
+    decodificados = [a.decode() for a in bytes(args).split(b"\x00") if a]
+    assert decodificados == argumentos, f"{tabla}: argumentos {decodificados} != {argumentos}"
+
+    texto = fuente.lower()
+    assert texto.count("for no key update") == 1, f"{funcion}: debe tener un único lock de padre"
+    for otro in ("for update", "for share", "for key share", "pg_advisory"):
+        assert otro not in texto.replace("for no key update", ""), (
+            f"{funcion}: segunda topología de lock ({otro})"
+        )
+    posicion_lock = texto.index("for no key update")
+    agregados = [texto.index(a) for a in ("sum(", "count(") if a in texto]
+    assert agregados, f"{funcion}: no se encuentra el agregado"
+    assert posicion_lock < min(agregados), f"{funcion}: el lock del padre no precede al agregado"
