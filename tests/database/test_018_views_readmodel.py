@@ -10,7 +10,8 @@
 #              Incluye prueba funcional real: desglose correcto por
 #              tipo_efecto sin fusionar naturalezas, y aislamiento
 #              cross-tenant efectivo a traves de la vista.
-# Versión: 0.1.0
+# Versión: 0.1.1  -- estado_atribucion explícito en el efecto de prueba: 0260
+#                   elimina el DEFAULT (D-a); el valor mantiene la semántica previa.
 # ============================================================
 
 from __future__ import annotations
@@ -65,9 +66,10 @@ def test_v_hechos_resumen_breaks_down_by_tipo_efecto_without_merging(db: psycopg
             (tipo_gasto_id,),
         )
         cursor.execute(
-            "INSERT INTO gapto.hecho_efectos (id, hecho_id, tipo_efecto, importe_delta) "
+            "INSERT INTO gapto.hecho_efectos "
+            "(id, hecho_id, tipo_efecto, importe_delta, estado_atribucion) "
             "VALUES ('99999999-e3e3-e3e3-e3e3-e3e3e3e3e3e3',"
-            "'99999999-e2e2-e2e2-e2e2-e2e2e2e2e2e2','GASTO',-60.00)"
+            "'99999999-e2e2-e2e2-e2e2-e2e2e2e2e2e2','GASTO',-60.00,'COMPLETA')"
         )
         cursor.execute(
             "SELECT total_gasto, total_ingreso, total_deuda, total_derecho_cobro, "

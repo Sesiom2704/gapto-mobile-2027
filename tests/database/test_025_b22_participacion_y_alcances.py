@@ -22,7 +22,7 @@
 #              cualquier otra huella sigue siendo drift.
 #
 # PRECONDICIÓN: requiere 0190 (B16).
-# Versión: 0.1.1  -- acepta la huella sucesora de 0250.
+# Versión: 0.1.2  -- acepta las huellas sucesoras de 0250 y 0260.
 # ============================================================
 
 from __future__ import annotations
@@ -34,10 +34,12 @@ HUELLAS = {
     "fn_check_participacion_suma": {
         ("c909c04f4e0131a32c6552efe601d370", 2436),  # 0240 (baseline)
         ("d01fd963789d8adf4b29cbb007604414", 2443),  # 0250 (sucesora)
+        ("b76161555c227a8aa19c3ab513aa4687", 3082),  # 0260 (sucesora)
     },
     "fn_check_bolsa_prioridad_alcance": {
         ("0eb39ed53b28a3c4657e032f3aaaa037", 1524),  # 0240 (baseline)
         ("7d9abf8d58b812b88d8c58e9968a50fe", 1531),  # 0250 (sucesora)
+        ("7c876f1970c850e791af25226da520b1", 1947),  # 0260 (sucesora)
     },
 }
 

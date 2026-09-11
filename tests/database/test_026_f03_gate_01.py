@@ -19,7 +19,9 @@
 #
 # PRECONDICIÓN: requiere 0190 (B16). Debe ejecutarse desde la raiz del
 #              repositorio, porque G6 inspecciona migrations/ y tests/.
-# Versión: 0.1.0
+# Versión: 0.1.1  -- G6 inspecciona solo ficheros regulares (is_file): un
+#                   directorio que encaje con el patrón (p. ej. __pycache__)
+#                   ya no se intenta leer como fichero.
 # ============================================================
 
 from __future__ import annotations
@@ -212,7 +214,7 @@ def _ficheros(subruta: str, patron: str) -> list[Path]:
     carpeta = RAIZ / subruta
     if not carpeta.is_dir():
         pytest.skip(f"{carpeta} no accesible; ejecuta pytest desde la raiz del repositorio")
-    return sorted(carpeta.glob(patron))
+    return sorted(fichero for fichero in carpeta.glob(patron) if fichero.is_file())
 
 
 def test_gate_g6_inventario_de_migrations() -> None:

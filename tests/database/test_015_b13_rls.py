@@ -8,7 +8,8 @@
 #              append-only). Incluye la prueba funcional real del caso
 #              Ana/Berto: un intento de referenciar el actor real de otro
 #              owner en efecto_atribuciones debe bloquearse por RLS.
-# Versión: 0.1.0
+# Versión: 0.1.1  -- estado_atribucion explícito en el efecto de prueba: 0260
+#                   elimina el DEFAULT (D-a); el valor mantiene la semántica previa.
 # ============================================================
 
 from __future__ import annotations
@@ -111,9 +112,9 @@ def test_b13_cross_tenant_actor_reference_is_blocked(db: psycopg.Connection) -> 
         )
         cursor.execute(
             "INSERT INTO gapto.hecho_efectos "
-            "(id, hecho_id, tipo_efecto, importe_delta) VALUES "
+            "(id, hecho_id, tipo_efecto, importe_delta, estado_atribucion) VALUES "
             "('99999999-a4a4-a4a4-a4a4-a4a4a4a4a4a4',"
-            "'99999999-a3a3-a3a3-a3a3-a3a3a3a3a3a3','GASTO',-50.00)"
+            "'99999999-a3a3-a3a3-a3a3-a3a3a3a3a3a3','GASTO',-50.00,'COMPLETA')"
         )
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             cursor.execute(

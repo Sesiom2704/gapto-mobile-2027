@@ -28,7 +28,9 @@
 #              situado ANTES del primer agregado, y ningún otro lock de fila.
 #
 # PRECONDICIÓN: requiere 0250.
-# Versión: 0.2.0  -- añade la verificación de equivalencia estructural.
+# Versión: 0.3.0  -- las huellas aceptan la sucesora de 0260 (fail-closed y
+#                   cambio de padre); el modo de lock se sigue afirmando.
+#                   v0.2.0: añade la verificación de equivalencia estructural.
 # ============================================================
 
 from __future__ import annotations
@@ -36,16 +38,16 @@ from __future__ import annotations
 import psycopg
 import pytest
 
-# (md5 de prosrc, bytes, apariciones de FOR NO KEY UPDATE) tras 0250.
+# ({(md5 de prosrc, bytes) aceptados: 0250 y sucesora 0260}, apariciones de FOR NO KEY UPDATE).
 HUELLAS_0250 = {
-    "fn_check_atribucion_suma": ("1875c05dfd509221eb2acd2665ec3477", 1556, 1),
-    "fn_check_bolsa_prioridad": ("e0640d1e1af1a043cb5585ae69c4b89b", 1147, 1),
-    "fn_check_bolsa_prioridad_alcance": ("7d9abf8d58b812b88d8c58e9968a50fe", 1531, 1),
-    "fn_check_hecho_mov_tesoreria_suma": ("693fa7086767b581a6bd45eadc8944c2", 993, 1),
-    "fn_check_inversion_asignacion_suma": ("9a59512f3e0109689af70e79e78159ee", 1281, 1),
-    "fn_check_participacion_suma": ("d01fd963789d8adf4b29cbb007604414", 2443, 1),
-    "fn_check_reversion_movimiento": ("859f7f7e9a5b0b518e6272c410bedf83", 1775, 1),
-    "fn_check_transferencia_estructura": ("a6c74336f91ddb4239914672cab01c97", 1876, 2),
+    "fn_check_atribucion_suma": ({("1875c05dfd509221eb2acd2665ec3477", 1556), ("31f04f601350a6dbc7baa3ec8919e980", 2222)}, 1),
+    "fn_check_bolsa_prioridad": ({("e0640d1e1af1a043cb5585ae69c4b89b", 1147), ("a583bbd419cb337152617b0c19a1cc42", 1395)}, 1),
+    "fn_check_bolsa_prioridad_alcance": ({("7d9abf8d58b812b88d8c58e9968a50fe", 1531), ("7c876f1970c850e791af25226da520b1", 1947)}, 1),
+    "fn_check_hecho_mov_tesoreria_suma": ({("693fa7086767b581a6bd45eadc8944c2", 993), ("2b9483c066e3f637f24d396babe27720", 1670)}, 1),
+    "fn_check_inversion_asignacion_suma": ({("9a59512f3e0109689af70e79e78159ee", 1281), ("182087c02d004ca2c2f0d38bd00f10ff", 1957)}, 1),
+    "fn_check_participacion_suma": ({("d01fd963789d8adf4b29cbb007604414", 2443), ("b76161555c227a8aa19c3ab513aa4687", 3082)}, 1),
+    "fn_check_reversion_movimiento": ({("859f7f7e9a5b0b518e6272c410bedf83", 1775), ("00161f7875783230311834ca84e472e2", 2208)}, 1),
+    "fn_check_transferencia_estructura": ({("a6c74336f91ddb4239914672cab01c97", 1876), ("e956eb54ec62b7ac7b9bcf11ca3f107e", 2392)}, 2),
 }
 
 
@@ -64,7 +66,7 @@ def test_0250_ninguna_funcion_gapto_usa_for_update(db: psycopg.Connection) -> No
 
 @pytest.mark.parametrize("funcion", sorted(HUELLAS_0250))
 def test_0250_huella_y_modo_de_lock(db: psycopg.Connection, funcion: str) -> None:
-    md5_esperado, bytes_esperados, apariciones = HUELLAS_0250[funcion]
+    aceptadas, apariciones = HUELLAS_0250[funcion]
     with db.cursor() as cursor:
         cursor.execute("""
             SELECT md5(p.prosrc), length(p.prosrc),
@@ -78,8 +80,8 @@ def test_0250_huella_y_modo_de_lock(db: psycopg.Connection, funcion: str) -> Non
         fila = cursor.fetchone()
     assert fila is not None, f"{funcion} no existe"
     md5_real, bytes_reales, no_key, volatilidad, secdef, propietario = fila
-    assert (md5_real, bytes_reales) == (md5_esperado, bytes_esperados), (
-        f"{funcion}: huella {(md5_real, bytes_reales)} != {(md5_esperado, bytes_esperados)}"
+    assert (md5_real, bytes_reales) in aceptadas, (
+        f"{funcion}: huella {(md5_real, bytes_reales)} no es ninguna de {sorted(aceptadas)}"
     )
     assert no_key == apariciones, f"{funcion}: {no_key} FOR NO KEY UPDATE, se esperaban {apariciones}"
     assert volatilidad == "v", f"{funcion}: debe seguir VOLATILE (instantánea nueva por sentencia)"
