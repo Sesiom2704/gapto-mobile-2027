@@ -32,7 +32,13 @@
 # ROLE DRIFT, que es correcto y deliberado. En ese caso se usa --desde 0002
 # y el clean-room demuestra reproducibilidad DE LA BASE, no de la instancia.
 # Reproducir tambien la instancia exige un proyecto nuevo.
-# Versión: 0.3.0  -- soporta los dos modos y se niega a mezclarlos: BOOTSTRAP DE
+# Versión: 0.4.0  -- F03-02 / migration 0250: las huellas esperadas de
+#                   fn_check_participacion_suma y fn_check_bolsa_prioridad_alcance
+#                   pasan a las de 0250 (FOR NO KEY UPDATE), porque el runner
+#                   aplica siempre la cadena completa del repositorio. El texto
+#                   de alcance cita la ultima migration realmente aplicada en
+#                   lugar de 0240 fijo.
+#                   v0.3.0: soporta los dos modos y se niega a mezclarlos: BOOTSTRAP DE
 #                   INSTANCIA aplicando 0001 sobre una instancia sin roles, con
 #                   postflight de los cinco roles creados; y CLEAN-ROOM DE BASE
 #                   arrancando en 0002 sobre instancia ya provisionada, con
@@ -78,8 +84,8 @@ CONTRATO = {
 
 HUELLAS = {
     "fn_registrar_auditoria": "5a9e6ce8e8dc402b3123e3bf5c718725",
-    "fn_check_participacion_suma": "c909c04f4e0131a32c6552efe601d370",
-    "fn_check_bolsa_prioridad_alcance": "0eb39ed53b28a3c4657e032f3aaaa037",
+    "fn_check_participacion_suma": "d01fd963789d8adf4b29cbb007604414",
+    "fn_check_bolsa_prioridad_alcance": "7d9abf8d58b812b88d8c58e9968a50fe",
 }
 
 CONSULTA_CONTRATO = """
@@ -405,7 +411,7 @@ def main() -> int:
         print("completo desde cero. Ninguno de los cinco roles gapto existia antes de")
         print("empezar; los ha creado 0001 durante esta misma ejecucion, y el postflight")
         print("confirma que quedan con los atributos esperados. La cadena completa")
-        print("0001..0240 se aplica sin SET search_path manual, sin parches temporales y")
+        print(f"0001..{ficheros[-1].name[:4]} se aplica sin SET search_path manual, sin parches temporales y")
         print("sin ningun paso manual.")
     else:
         print("ALCANCE DE ESTA EVIDENCIA: clean-room DE BASE sobre una instancia")
