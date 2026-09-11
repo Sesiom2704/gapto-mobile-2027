@@ -32,7 +32,10 @@
 # ROLE DRIFT, que es correcto y deliberado. En ese caso se usa --desde 0002
 # y el clean-room demuestra reproducibilidad DE LA BASE, no de la instancia.
 # Reproducir tambien la instancia exige un proyecto nuevo.
-# Versión: 0.4.0  -- F03-02 / migration 0250: las huellas esperadas de
+# Versión: 0.5.0  -- F03-02 / migration 0260: huellas esperadas de
+#                   fn_check_participacion_suma y fn_check_bolsa_prioridad_alcance
+#                   pasan a las de 0260 (fail-closed y cambio de padre).
+#                   v0.4.0: F03-02 / migration 0250: las huellas esperadas de
 #                   fn_check_participacion_suma y fn_check_bolsa_prioridad_alcance
 #                   pasan a las de 0250 (FOR NO KEY UPDATE), porque el runner
 #                   aplica siempre la cadena completa del repositorio. El texto
@@ -84,8 +87,8 @@ CONTRATO = {
 
 HUELLAS = {
     "fn_registrar_auditoria": "5a9e6ce8e8dc402b3123e3bf5c718725",
-    "fn_check_participacion_suma": "d01fd963789d8adf4b29cbb007604414",
-    "fn_check_bolsa_prioridad_alcance": "7d9abf8d58b812b88d8c58e9968a50fe",
+    "fn_check_participacion_suma": "b76161555c227a8aa19c3ab513aa4687",
+    "fn_check_bolsa_prioridad_alcance": "7c876f1970c850e791af25226da520b1",
 }
 
 CONSULTA_CONTRATO = """
