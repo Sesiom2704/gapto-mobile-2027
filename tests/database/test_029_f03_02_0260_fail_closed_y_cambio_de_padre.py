@@ -23,7 +23,10 @@
 #              revierte siempre.
 #
 # PRECONDICIÓN: requiere 0260.
-# Versión: 0.2.1  -- fn_check_reversion_movimiento acepta además exactamente la
+# Versión: 0.2.2  -- las dos funciones BOLSA aceptan además exactamente la
+#                   sucesora de 0285 (D-121 con jerarquía, naturaleza y
+#                   same-owner).
+#                   v0.2.1: fn_check_reversion_movimiento acepta además exactamente la
 #                   sucesora de 0280.
 #                   v0.2.0: las huellas aceptan exactamente {0260, sucesora 0270} en
 #                   las cuatro funciones que 0270 reescribe (T6 y R-INV); el
@@ -47,7 +50,10 @@ HUELLAS_0260 = {
     "fn_check_transferencia_estructura": ("e956eb54ec62b7ac7b9bcf11ca3f107e", 2392),
 }
 
+# Sucesoras conocidas posteriores a 0260: 0270, 0280 y 0285.
 SUCESORAS_0270 = {
+    "fn_check_bolsa_prioridad": {("e34503a7cd0f87c1bbf9ee9b8a99d759", 4503)},
+    "fn_check_bolsa_prioridad_alcance": {("d1d83d6e38a15190244a26be50d90ad4", 3793)},
     "fn_check_hecho_mov_tesoreria_suma": {("808128976910a4333fd8c6843d0b9919", 1986)},
     "fn_check_inversion_asignacion_suma": {("128a6bd0e45f5fe3632c83b25cbfa371", 2129)},
     "fn_check_reversion_movimiento": {("91a33cb088ab4ff8d9c56c29fc3d12c2", 2466),

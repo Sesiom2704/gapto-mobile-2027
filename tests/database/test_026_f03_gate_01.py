@@ -19,7 +19,9 @@
 #
 # PRECONDICIÓN: requiere 0190 (B16). Debe ejecutarse desde la raiz del
 #              repositorio, porque G6 inspecciona migrations/ y tests/.
-# Versión: 0.3.0  -- G2 acepta además EXACTAMENTE la sucesora 0280 (funciones
+# Versión: 0.4.0  -- G2 acepta además EXACTAMENTE la sucesora 0285 (funciones
+#                   25, triggers 48, constraint triggers 31).
+#                   v0.3.0: G2 acepta además EXACTAMENTE la sucesora 0280 (funciones
 #                   21, triggers 40, constraint triggers 30, UNIQUE 40).
 #                   v0.2.0: G2 acepta el contrato del gate o EXACTAMENTE su sucesora
 #                   conocida 0270 (funciones 19, triggers 39, constraint
@@ -62,6 +64,12 @@ SUCESORA_0270 = {**CONTRATO_ESPERADO, "funciones": 19, "triggers_no_internos": 3
 
 SUCESORA_0280 = {**CONTRATO_ESPERADO, "funciones": 21, "triggers_no_internos": 40,
                  "constraint_triggers": 30, "unique_constraints": 40}
+
+# Sucesora conocida: 0285 (D-121, D-122 E(c), congelacion F(a), same-owner de
+# alcances y owner inmutable). Anade 4 funciones y 8 triggers, de los cuales
+# uno es constraint trigger (la revalidacion BOLSA del reparenting).
+SUCESORA_0285 = {**SUCESORA_0280, "funciones": 25, "triggers_no_internos": 48,
+                 "constraint_triggers": 31}
 
 MATRIZ_RUNTIME = {"SELECT": 79, "INSERT": 73, "UPDATE": 67, "DELETE": 36}
 
@@ -135,14 +143,14 @@ def test_gate_g2_contrato_fisico(db: psycopg.Connection) -> None:
              WHERE n.nspname='gapto' AND NOT t.tgisinternal
                AND t.tgname LIKE '%%guard%%'"""),
     }
-    if obtenido in (SUCESORA_0270, SUCESORA_0280):
+    if obtenido in (SUCESORA_0270, SUCESORA_0280, SUCESORA_0285):
         return
     diferencias = {
         k: (CONTRATO_ESPERADO[k], obtenido[k])
         for k in CONTRATO_ESPERADO if obtenido[k] != CONTRATO_ESPERADO[k]
     }
     assert diferencias == {}, (
-        f"contrato fisico desviado del gate y de la sucesora 0270 (esperado, obtenido): {diferencias}"
+        f"contrato fisico desviado del gate y de sus sucesoras conocidas (esperado, obtenido): {diferencias}"
     )
 
 

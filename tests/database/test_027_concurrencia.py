@@ -119,9 +119,25 @@
 #              demás que crea cada caso se borra en su finally; el último
 #              test verifica que no queda residuo.
 #
-# PRECONDICIÓN: cadena 0001..0270 aplicada en gapto2027_cleanroom (C1-C11
-#              requieren 0250; C12-C17, 0270; C18-C25, 0280).
-# Versión: 0.4.0  -- añade C18-C25 (0280). _caso_segunda_bloqueada admite
+# PRECONDICIÓN: cadena 0001..0285 aplicada en gapto2027_cleanroom (C1-C11
+#              requieren 0250; C12-C17, 0270; C18-C25, 0280; C26-C31, 0285).
+# Versión: 0.5.0  -- añade C26-C31 (0285). C10 y C11 CAMBIAN DE TOPOLOGÍA: la
+#                   congelación F(a) es un BEFORE que toma la fila del
+#                   presupuesto con FOR NO KEY UPDATE durante el propio DML, de
+#                   modo que la segunda sesión ya no puede preparar su
+#                   escritura en paralelo y queda bloqueada antes de la
+#                   barrera; pasan de _caso_con_barrera a
+#                   _caso_segunda_bloqueada, sin perder la invariante que
+#                   demuestran. El oráculo `empates_bolsa` pasa al predicado
+#                   D-121 de 0285 (jerarquía, naturaleza, entidad conservadora
+#                   y prioridad NULL). Nuevo helper de presupuesto por owner y
+#                   limpieza de líneas/alcances del segundo owner. C30a retira
+#                   los alcances antes de borrar la línea (FK RESTRICT: sin eso
+#                   la sesión A abortaba con 23503 y el caso no demostraba
+#                   nada). El caso "deriva D-122 x activación" no es ejecutable
+#                   aquí por residuo imborrable y se sustituye por equivalencia
+#                   estructural documentada junto a C30b.
+#                   v0.4.0: añade C18-C25 (0280). _caso_segunda_bloqueada admite
 #                   SQLSTATE de rechazo configurables (23505 solo en C25), el
 #                   resultado SIN_BLOQUEO (C20) y el owner de la sesión B; un
 #                   segundo owner temporal (usuario sin actor self) se crea y
@@ -206,6 +222,15 @@ INS_TRANSFERENCIA = (
     "VALUES (%s, %s)"
 )
 UPD_LINEA_PRIORIDAD = "UPDATE gapto.presupuesto_lineas SET prioridad_consumo = %s WHERE id = %s"
+INS_ALCANCE_DESC = ("INSERT INTO gapto.presupuesto_linea_alcances (presupuesto_linea_id, categoria_id, "
+                    "incluir_descendientes) VALUES (%s, %s, %s)")
+UPD_LINEA_NATURALEZA = "UPDATE gapto.presupuesto_lineas SET naturaleza_economica = %s WHERE id = %s"
+UPD_PRESUPUESTO_ESTADO = "UPDATE gapto.presupuestos SET estado = %s WHERE id = %s"
+DEL_LINEA = "DELETE FROM gapto.presupuesto_lineas WHERE id = %s"
+DEL_ALCANCES_DE_LINEA = "DELETE FROM gapto.presupuesto_linea_alcances WHERE presupuesto_linea_id = %s"
+INS_LINEA_BOLSA = ("INSERT INTO gapto.presupuesto_lineas (presupuesto_id, tipo_linea, naturaleza_economica, "
+                   "prioridad_consumo, importe_objetivo, metodo_estimacion) "
+                   "VALUES (%s, 'BOLSA', 'GASTO', %s, 100, 'MANUAL')")
 INS_ALCANCE = (
     "INSERT INTO gapto.presupuesto_linea_alcances (presupuesto_linea_id, categoria_id) "
     "VALUES (%s, %s)"
@@ -621,6 +646,39 @@ class Laboratorio:
         )])
         return presupuesto
 
+    def nuevo_presupuesto_de(self, owner: str, anio: int = 2028) -> str:
+        """Presupuesto BORRADOR de un owner concreto (C29 usa el segundo)."""
+        presupuesto = self._anotar("presupuestos" if owner == OWNER_LAB else "presupuestos2", str(uuid.uuid4()))
+        self.tx_owner([(
+            "INSERT INTO gapto.presupuestos (id, owner_user_id, periodo_desde, periodo_hasta, "
+            "moneda, perspectiva, version_presupuesto) "
+            "VALUES (%s, %s, make_date(%s, 1, 1), make_date(%s, 12, 31), 'EUR', 'TOTAL', 1)",
+            (presupuesto, owner, anio, anio),
+        )], owner=owner)
+        return presupuesto
+
+    def nueva_bolsa_de(self, presupuesto: str, prioridad: int | None, alcances: list[tuple],
+                       owner: str = OWNER_LAB, naturaleza: str = "GASTO") -> str:
+        """alcances: lista de (categoria_id, incluir_descendientes)."""
+        linea = str(uuid.uuid4())
+        sentencias = [(
+            "INSERT INTO gapto.presupuesto_lineas (id, presupuesto_id, tipo_linea, "
+            "naturaleza_economica, prioridad_consumo, importe_objetivo, metodo_estimacion) "
+            "VALUES (%s, %s, 'BOLSA', %s, %s, 100, 'MANUAL')",
+            (linea, presupuesto, naturaleza, prioridad),
+        )]
+        sentencias += [(INS_ALCANCE_DESC, (linea, categoria, descendientes))
+                       for categoria, descendientes in alcances]
+        self.tx_owner(sentencias, owner=owner)
+        return linea
+
+    def estado_presupuesto(self, presupuesto: str) -> str:
+        return self.leer("SELECT estado FROM gapto.presupuestos WHERE id = %s", (presupuesto,))[0][0]
+
+    def lineas_de(self, presupuesto: str) -> int:
+        return self.leer("SELECT count(*) FROM gapto.presupuesto_lineas WHERE presupuesto_id = %s",
+                         (presupuesto,))[0][0]
+
     def nueva_categoria(self, padre: str | None = None, owner: str = OWNER_LAB) -> str:
         categoria = self._anotar("categorias" if owner == OWNER_LAB else "categorias2", str(uuid.uuid4()))
         self.tx_owner([(
@@ -750,18 +808,35 @@ class Laboratorio:
             "   OR movimiento_entrada_id = ANY(%s::uuid[])", (movimientos, movimientos))
 
     def empates_bolsa(self, presupuesto: str) -> int:
+        """Pares de BOLSAS que violan D-121 con el predicado exacto de 0285:
+        misma naturaleza, categoría compatible con jerarquía, entidad que
+        nunca demuestra disjunción y prioridad NULL o repetida."""
         return self.leer("""
+            WITH RECURSIVE d(raiz, cat) AS (
+                SELECT c.parent_id, c.id FROM gapto.categorias_financieras c
+                 WHERE c.parent_id IN (SELECT a.categoria_id FROM gapto.presupuesto_linea_alcances a
+                                         JOIN gapto.presupuesto_lineas l ON l.id = a.presupuesto_linea_id
+                                        WHERE l.presupuesto_id = %(p)s AND a.incluir_descendientes)
+                UNION ALL
+                SELECT d.raiz, c.id FROM d JOIN gapto.categorias_financieras c ON c.parent_id = d.cat
+            ) CYCLE cat SET es_ciclo USING ruta
             SELECT count(*)
               FROM gapto.presupuesto_lineas l1
               JOIN gapto.presupuesto_lineas l2
                 ON l2.presupuesto_id = l1.presupuesto_id AND l2.id > l1.id
-               AND l2.tipo_linea = 'BOLSA' AND l1.tipo_linea = 'BOLSA'
-               AND l2.prioridad_consumo = l1.prioridad_consumo
-              JOIN gapto.presupuesto_linea_alcances a1 ON a1.presupuesto_linea_id = l1.id
-              JOIN gapto.presupuesto_linea_alcances a2 ON a2.presupuesto_linea_id = l2.id
-               AND (a1.categoria_id = a2.categoria_id OR a1.entidad_id = a2.entidad_id)
-             WHERE l1.presupuesto_id = %s
-        """, (presupuesto,))[0][0]
+               AND l2.tipo_linea = 'BOLSA' AND l2.naturaleza_economica = l1.naturaleza_economica
+             WHERE l1.presupuesto_id = %(p)s AND l1.tipo_linea = 'BOLSA'
+               AND (l1.prioridad_consumo IS NULL OR l2.prioridad_consumo IS NULL
+                    OR l1.prioridad_consumo = l2.prioridad_consumo)
+               AND EXISTS (
+                   SELECT 1 FROM gapto.presupuesto_linea_alcances a1
+                     JOIN gapto.presupuesto_linea_alcances a2 ON a2.presupuesto_linea_id = l2.id
+                    WHERE a1.presupuesto_linea_id = l1.id
+                      AND (a1.categoria_id IS NULL OR a2.categoria_id IS NULL
+                           OR a1.categoria_id = a2.categoria_id
+                           OR (a1.incluir_descendientes AND EXISTS (SELECT 1 FROM d WHERE d.raiz = a1.categoria_id AND d.cat = a2.categoria_id))
+                           OR (a2.incluir_descendientes AND EXISTS (SELECT 1 FROM d WHERE d.raiz = a2.categoria_id AND d.cat = a1.categoria_id))))
+        """, {"p": presupuesto})[0][0]
 
     def participaciones(self, cuenta: str) -> list[tuple]:
         return self.leer(
@@ -784,6 +859,13 @@ class Laboratorio:
         c = self.creados
         if c.get("owner2"):
             self.tx_owner([
+                ("DELETE FROM gapto.presupuesto_linea_alcances WHERE presupuesto_linea_id IN "
+                 "(SELECT id FROM gapto.presupuesto_lineas WHERE presupuesto_id = ANY(%s::uuid[]))",
+                 (c.get("presupuestos2", []),)),
+                ("DELETE FROM gapto.presupuesto_lineas WHERE presupuesto_id = ANY(%s::uuid[])",
+                 (c.get("presupuestos2", []),)),
+                ("DELETE FROM gapto.presupuestos WHERE id = ANY(%s::uuid[])",
+                 (c.get("presupuestos2", []),)),
                 ("DELETE FROM gapto.categorias_financieras WHERE id = ANY(%s::uuid[])",
                  (c.get("categorias2", []),)),
                 ("DELETE FROM gapto.usuarios WHERE id = %s", (OWNER_LAB2,)),
@@ -1554,36 +1636,46 @@ def test_c27_c9_transferencia_orden_de_locks(caso, record_testsuite_property) ->
 
 def test_c27_c10_bolsa_empate_desde_linea(caso, record_testsuite_property) -> None:
     """Dos BOLSA con alcance cruzado y prioridades 10 y 20 (válido). A sube
-    la primera a 30; B sube la segunda a 30. Cada cambio es válido frente al
-    estado inicial; juntos empatan. Ejercita fn_check_bolsa_prioridad."""
+    la primera a 30 y valida (barrera); B sube la segunda a 30. Cada cambio es
+    válido frente al estado inicial; juntos empatan. Ejercita
+    fn_check_bolsa_prioridad.
+
+    TOPOLOGÍA CAMBIADA EN 0285: la congelación F(a) es un BEFORE que toma la
+    fila del presupuesto con FOR NO KEY UPDATE durante el propio DML, así que
+    B ya no puede preparar su UPDATE en paralelo: queda bloqueada desde su
+    primera sentencia. El caso deja de ser _caso_con_barrera y pasa a
+    _caso_segunda_bloqueada, que exige observar ese bloqueo y el rechazo
+    posterior por la invariante."""
     lab = caso
     presupuesto = lab.nuevo_presupuesto()
     categoria = lab.nueva_categoria()
     linea_1 = lab.nueva_bolsa(presupuesto, 10, [categoria])
     linea_2 = lab.nueva_bolsa(presupuesto, 20, [categoria])
-    _caso_con_barrera(
+    _caso_segunda_bloqueada(
         lab, record_testsuite_property, "C10",
         [(UPD_LINEA_PRIORIDAD, (30, linea_1))],
         [(UPD_LINEA_PRIORIDAD, (30, linea_2))],
-        lambda: lab.empates_bolsa(presupuesto) == 0,
+        lambda: lab.empates_bolsa(presupuesto) == 0, "RECHAZO",
     )
 
 
 def test_c27_c11_bolsa_cruce_desde_alcance(caso, record_testsuite_property) -> None:
     """Dos BOLSA con la misma prioridad y alcances disjuntos (A y B, válido).
-    A añade la categoría C a la primera; B añade C a la segunda. Cada alta es
-    válida frente al estado inicial; juntas crean el cruce con empate.
-    Ejercita fn_check_bolsa_prioridad_alcance (la segunda vía de D-108)."""
+    A añade la categoría C a la primera y valida; B añade C a la segunda. Cada
+    alta es válida frente al estado inicial; juntas crean el cruce con empate.
+    Ejercita fn_check_bolsa_prioridad_alcance (la segunda vía de D-108).
+
+    Misma topología cambiada que C10: con 0285 B bloquea en su INSERT."""
     lab = caso
     presupuesto = lab.nuevo_presupuesto()
     cat_a, cat_b, cat_c = lab.nueva_categoria(), lab.nueva_categoria(), lab.nueva_categoria()
     linea_1 = lab.nueva_bolsa(presupuesto, 10, [cat_a])
     linea_2 = lab.nueva_bolsa(presupuesto, 10, [cat_b])
-    _caso_con_barrera(
+    _caso_segunda_bloqueada(
         lab, record_testsuite_property, "C11",
         [(INS_ALCANCE, (linea_1, cat_c))],
         [(INS_ALCANCE, (linea_2, cat_c))],
-        lambda: lab.empates_bolsa(presupuesto) == 0,
+        lambda: lab.empates_bolsa(presupuesto) == 0, "RECHAZO",
     )
 
 
@@ -1898,6 +1990,185 @@ def test_c27_c25_bifurcacion_concurrente(caso, record_testsuite_property) -> Non
         _caso_segunda_bloqueada(lab, record_testsuite_property, "C25",
                                 [(INS_SUCESOR, (OWNER_LAB, 2, p))], [(INS_SUCESOR, (OWNER_LAB, 3, p))],
                                 valido, "RECHAZO", rechazos=(SQLSTATE_INVARIANTE, SQLSTATE_UNICIDAD))
+    finally:
+        lab.creados.setdefault("presupuestos", []).extend(
+            [r[0] for r in lab.leer("SELECT id::text FROM gapto.presupuestos WHERE reemplaza_presupuesto_id = %s",
+                                    (p,))])
+
+
+# ------------------------------------------------------------
+# C26-C31: 0285 (D-121 exacto, D-122 E(c), congelacion F(a))
+#
+# EQUIVALENCIA ESTRUCTURAL (Working Method 12C.1). El caso "deriva D-122 x
+# activacion concurrente" NO puede ejecutarse aqui: para existir necesita un
+# presupuesto congelado CON linea y alcance, y ese estado final es residuo
+# imborrable por contrato: F(a) impide borrar lineas y alcances de un
+# presupuesto que no esta en BORRADOR, y la FK RESTRICT impide borrar el
+# presupuesto mientras tenga lineas. Se sustituye por C30b, que tiene la misma
+# topologia de lock: mismo lock root (la fila del presupuesto con FOR NO KEY
+# UPDATE), mismo orden lock -> espera -> relectura SQL separada -> validacion y
+# mismo comportamiento de la perdedora (P0001 tras releer ACTIVO). La
+# invariante protegida es distinta (congelacion frente a deriva semantica), asi
+# que la sustitucion cubre la topologia de lock y NO la semantica de D-122:
+# esa parte se verifica estaticamente en
+# test_0285_deriva_bloquea_presupuestos_antes_de_releer (test_033) y
+# funcionalmente en los casos E(c) de test_033.
+# ------------------------------------------------------------
+
+def test_c27_c26_bolsa_jerarquia_desde_dos_alcances(caso, record_testsuite_property) -> None:
+    """PADRE > HIJO. Dos BOLSA con prioridad 10 y alcances de categorías
+    distintas y no emparentadas con lo que ya tiene la otra. A añade a la
+    primera el alcance (PADRE, descendientes); B añade a la segunda el alcance
+    HIJO. Por separado cada alta es válida; juntas, las dos BOLSA capturan
+    cualquier efecto de HIJO con la misma prioridad. Con 0280 ambas confirman,
+    porque el predicado solo comparaba igualdad directa de categoría: es el
+    caso concurrente que demuestra la dimensión jerárquica de D-121."""
+    lab = caso
+    presupuesto = lab.nuevo_presupuesto()
+    padre = lab.nueva_categoria()
+    hijo = lab.nueva_categoria(padre=padre)
+    linea_1 = lab.nueva_bolsa_de(presupuesto, 10, [(lab.nueva_categoria(), False)])
+    linea_2 = lab.nueva_bolsa_de(presupuesto, 10, [(lab.nueva_categoria(), False)])
+    _caso_segunda_bloqueada(
+        lab, record_testsuite_property, "C26",
+        [(INS_ALCANCE_DESC, (linea_1, padre, True))],
+        [(INS_ALCANCE_DESC, (linea_2, hijo, False))],
+        lambda: lab.empates_bolsa(presupuesto) == 0, "RECHAZO",
+    )
+
+
+def test_c27_c27_reparenting_frente_a_alcance(caso, record_testsuite_property) -> None:
+    """Write-skew entre dos dominios: A mueve X bajo PADRE (con una sola BOLSA
+    existente no hay par, así que su propia validación pasa) y retiene el
+    advisory (CATEGORIAS, owner); B crea una segunda BOLSA de igual prioridad
+    con alcance X, que en su instantánea todavía cuelga de otra rama. Juntas
+    dejan dos BOLSA solapadas por jerarquía. B debe bloquearse en el advisory y
+    rechazar al releer el árbol final. Demuestra que compartir la clave
+    (CATEGORIAS, owner) entre reparenting y validación BOLSA es lo que cierra
+    la ventana."""
+    lab = caso
+    presupuesto = lab.nuevo_presupuesto()
+    padre = lab.nueva_categoria()
+    otra_rama = lab.nueva_categoria()
+    x = lab.nueva_categoria(padre=otra_rama)
+    lab.nueva_bolsa_de(presupuesto, 10, [(padre, True)])
+    linea_2 = lab.nueva_bolsa_de(presupuesto, 20, [(lab.nueva_categoria(), False)])
+    _caso_segunda_bloqueada(
+        lab, record_testsuite_property, "C27",
+        [(UPD_CAT_PADRE, (padre, x))],
+        [(UPD_LINEA_PRIORIDAD, (10, linea_2)), (INS_ALCANCE_DESC, (linea_2, x, False))],
+        lambda: lab.empates_bolsa(presupuesto) == 0, "RECHAZO",
+    )
+
+
+def test_c27_c28_reparenting_frente_a_naturaleza(caso, record_testsuite_property) -> None:
+    """A mueve X bajo PADRE; B lleva al dominio GASTO una BOLSA de alcance X
+    que hasta ahora era INGRESO y por tanto disjunta de la BOLSA (PADRE,
+    descendientes). Cada cambio es válido por separado; juntos crean el
+    solape. Ejercita el evento UPDATE OF naturaleza_economica, que 0280 no
+    cubría, frente al reparenting."""
+    lab = caso
+    presupuesto = lab.nuevo_presupuesto()
+    padre = lab.nueva_categoria()
+    x = lab.nueva_categoria(padre=lab.nueva_categoria())
+    lab.nueva_bolsa_de(presupuesto, 10, [(padre, True)])
+    linea_2 = lab.nueva_bolsa_de(presupuesto, 10, [(x, False)], naturaleza="INGRESO")
+    _caso_segunda_bloqueada(
+        lab, record_testsuite_property, "C28",
+        [(UPD_CAT_PADRE, (padre, x))],
+        [(UPD_LINEA_NATURALEZA, ("GASTO", linea_2))],
+        lambda: lab.empates_bolsa(presupuesto) == 0, "RECHAZO",
+    )
+
+
+def test_c27_c29_owners_distintos_no_se_serializan(caso, record_testsuite_property) -> None:
+    """La clave del advisory incluye el owner: una escritura BOLSA del owner
+    del laboratorio y otra del segundo owner no pueden bloquearse entre sí.
+    Si B espera, el lock serializa de más (FAIL_LIVENESS)."""
+    lab = caso
+    owner2 = lab.segundo_owner()
+    presupuesto_1 = lab.nuevo_presupuesto()
+    linea_1 = lab.nueva_bolsa_de(presupuesto_1, 10, [(lab.nueva_categoria(), True)])
+    presupuesto_2 = lab.nuevo_presupuesto_de(owner2)
+    categoria_2 = lab.nueva_categoria(owner=owner2)
+    linea_2 = lab.nueva_bolsa_de(presupuesto_2, 10, [(categoria_2, True)], owner=owner2)
+    _caso_segunda_bloqueada(
+        lab, record_testsuite_property, "C29",
+        [(UPD_LINEA_PRIORIDAD, (30, linea_1))],
+        [(UPD_LINEA_PRIORIDAD, (30, linea_2))],
+        lambda: lab.empates_bolsa(presupuesto_1) == 0 and lab.empates_bolsa(presupuesto_2) == 0,
+        "SIN_BLOQUEO", owner_b=owner2,
+    )
+
+
+def test_c27_c30a_borrado_de_linea_frente_a_activacion(caso, record_testsuite_property) -> None:
+    """Congelación x activación, orden 1: A borra los alcances y después la
+    única línea de un presupuesto BORRADOR (el DELETE de la línea exige
+    retirar antes sus alcances, FK RESTRICT) y retiene la fila; B intenta
+    activarlo. B debe
+    esperar a A y confirmar después: activar un presupuesto ya vacío es
+    legítimo. El presupuesto queda ACTIVO y sin líneas, de modo que la
+    limpieza puede borrarlo y el caso no deja residuo."""
+    lab = caso
+    presupuesto = lab.nuevo_presupuesto()
+    linea = lab.nueva_bolsa_de(presupuesto, 10, [(lab.nueva_categoria(), True)])
+
+    def valido() -> bool:
+        estado = lab.estado_presupuesto(presupuesto)
+        return lab.lineas_de(presupuesto) == 0 or estado == "BORRADOR"
+
+    _caso_segunda_bloqueada(
+        lab, record_testsuite_property, "C30a",
+        [(DEL_ALCANCES_DE_LINEA, (linea,)), (DEL_LINEA, (linea,))],
+        [(UPD_PRESUPUESTO_ESTADO, ("ACTIVO", presupuesto))],
+        valido, "CONFIRMA",
+    )
+
+
+def test_c27_c30b_activacion_frente_a_alta_de_linea(caso, record_testsuite_property) -> None:
+    """Congelación x activación, orden 2: A activa un presupuesto BORRADOR sin
+    líneas y retiene la fila; B intenta dar de alta una línea. B espera y, al
+    releer el estado tras el COMMIT de A, debe rechazar: una versión activa
+    está congelada. Sin el lock de fila B leería BORRADOR y confirmaría, que
+    es exactamente el write-skew que F(a) debe cerrar. Tampoco deja residuo:
+    el presupuesto queda ACTIVO y vacío."""
+    lab = caso
+    presupuesto = lab.nuevo_presupuesto()
+
+    def valido() -> bool:
+        return lab.estado_presupuesto(presupuesto) == "BORRADOR" or lab.lineas_de(presupuesto) == 0
+
+    _caso_segunda_bloqueada(
+        lab, record_testsuite_property, "C30b",
+        [(UPD_PRESUPUESTO_ESTADO, ("ACTIVO", presupuesto))],
+        [(INS_LINEA_BOLSA, (presupuesto, 10))],
+        valido, "RECHAZO",
+    )
+
+
+def test_c27_c31_cadena_0280_frente_a_categorias_0285(caso, record_testsuite_property) -> None:
+    """Operación mixta: A crea el sucesor de una cadena de presupuestos, que
+    usa el dominio (PRESUPUESTOS, owner) de 0280, y retiene; B hace una
+    escritura BOLSA que usa (CATEGORIAS, owner) y la fila de su propio
+    presupuesto. Son dominios distintos y presupuestos distintos, así que B no
+    debe quedar serializada detrás de A. Si apareciera un 40P01 por inversión
+    residual se clasificaría bajo D-114, pero aquí no debe haber espera."""
+    lab = caso
+    p = lab.presupuesto_version(1)
+    presupuesto = lab.nuevo_presupuesto()
+    linea = lab.nueva_bolsa_de(presupuesto, 10, [(lab.nueva_categoria(), True)])
+
+    def valido() -> bool:
+        return (lab.leer("SELECT count(*) FROM gapto.presupuestos WHERE reemplaza_presupuesto_id = %s",
+                         (p,))[0][0] <= 1 and lab.empates_bolsa(presupuesto) == 0)
+
+    try:
+        _caso_segunda_bloqueada(
+            lab, record_testsuite_property, "C31",
+            [(INS_SUCESOR, (OWNER_LAB, 2, p))],
+            [(UPD_LINEA_PRIORIDAD, (20, linea))],
+            valido, "SIN_BLOQUEO",
+        )
     finally:
         lab.creados.setdefault("presupuestos", []).extend(
             [r[0] for r in lab.leer("SELECT id::text FROM gapto.presupuestos WHERE reemplaza_presupuesto_id = %s",

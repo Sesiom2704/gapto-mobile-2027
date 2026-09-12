@@ -22,7 +22,10 @@
 #              cualquier otra huella sigue siendo drift.
 #
 # PRECONDICIÓN: requiere 0190 (B16).
-# Versión: 0.1.4  -- acepta también exactamente la sucesora de 0280 (40 no
+# Versión: 0.1.5  -- acepta también exactamente la sucesora de 0285: huella de
+#                   fn_check_bolsa_prioridad_alcance y recuento de triggers (48
+#                   no internos, 31 constraint, 7 guards).
+#                   v0.1.4: acepta también exactamente la sucesora de 0280 (40 no
 #                   internos, 30 constraint, 7 guards).
 #                   v0.1.3: el recuento de triggers acepta exactamente la sucesora de
 #                   0270 (39 no internos, 23 constraint, 7 guards) además del
@@ -45,6 +48,7 @@ HUELLAS = {
         ("0eb39ed53b28a3c4657e032f3aaaa037", 1524),  # 0240 (baseline)
         ("7d9abf8d58b812b88d8c58e9968a50fe", 1531),  # 0250 (sucesora)
         ("7c876f1970c850e791af25226da520b1", 1947),  # 0260 (sucesora)
+        ("d1d83d6e38a15190244a26be50d90ad4", 3793),  # 0285 (sucesora)
     },
 }
 
@@ -132,7 +136,11 @@ def test_b22_trigger_de_alcances_existe_y_no_cubre_delete(db: psycopg.Connection
 
 def test_b22_recuento_de_triggers(db: psycopg.Connection) -> None:
     """Baseline B22: 34 triggers no internos (19 constraint, 7 guards, 8
-    ordinarios). Sucesora 0270: 39 (23 constraint, 7 guards, 9 ordinarios)."""
+    ordinarios). Sucesora 0270: 39 (23 constraint, 7 guards, 9 ordinarios).
+    Sucesora 0280: 40 (30 constraint, 7 guards). Sucesora 0285: 48 (31
+    constraint, 7 guards): los triggers de 0285 no llevan 'guard' en el nombre
+    del trigger, solo en el de su función, así que el recuento de guards
+    append-only de B14 no varía."""
     with db.cursor() as cursor:
         cursor.execute("""
             SELECT count(*),
@@ -144,7 +152,7 @@ def test_b22_recuento_de_triggers(db: psycopg.Connection) -> None:
              WHERE n.nspname='gapto' AND NOT t.tgisinternal
         """)
         total, constraint, guards = cursor.fetchone()
-    assert (total, constraint, guards) in ((34, 19, 7), (39, 23, 7), (40, 30, 7))
+    assert (total, constraint, guards) in ((34, 19, 7), (39, 23, 7), (40, 30, 7), (48, 31, 7))
 
 
 # ------------------------------------------------------------
