@@ -32,7 +32,13 @@
 # ROLE DRIFT, que es correcto y deliberado. En ese caso se usa --desde 0002
 # y el clean-room demuestra reproducibilidad DE LA BASE, no de la instancia.
 # Reproducir tambien la instancia exige un proyecto nuevo.
-# Versión: 0.7.0  -- F03-02 / migration 0280: CONTRATO del final de la cadena
+# Versión: 0.7.1  -- F03-02 / migration 0285: CONTRATO del final de la cadena
+#                   = 25 funciones, 48 triggers no internos y 31 constraint
+#                   triggers, y la huella de fn_check_bolsa_prioridad_alcance
+#                   pasa a la de 0285. Sin capacidades nuevas del runner: la
+#                   version 0.8.0 sigue reservada al manifest del bootstrap
+#                   fresh 0001..0290.
+#                   v0.7.0: F03-02 / migration 0280: CONTRATO del final de la cadena
 #                   = 21 funciones, 40 triggers no internos, 30 constraint
 #                   triggers y 40 UNIQUE. Huellas de participacion, alcance
 #                   BOLSA y auditoria sin cambios.
@@ -81,11 +87,11 @@ CONTRATO = {
     "foreign_keys": 166,
     "unique_constraints": 40,
     "exclude_constraints": 11,
-    "funciones": 21,
+    "funciones": 25,
     "security_definer": 1,
     "vistas_security_invoker": 3,
-    "triggers_no_internos": 40,
-    "constraint_triggers": 30,
+    "triggers_no_internos": 48,
+    "constraint_triggers": 31,
     "triggers_deshabilitados": 0,
     "policies_autorreferentes": 0,
     "fk_tenant_sin_validar": 0,
@@ -98,7 +104,7 @@ CONTRATO = {
 HUELLAS = {
     "fn_registrar_auditoria": "5a9e6ce8e8dc402b3123e3bf5c718725",
     "fn_check_participacion_suma": "b76161555c227a8aa19c3ab513aa4687",
-    "fn_check_bolsa_prioridad_alcance": "7c876f1970c850e791af25226da520b1",
+    "fn_check_bolsa_prioridad_alcance": "d1d83d6e38a15190244a26be50d90ad4",
 }
 
 CONSULTA_CONTRATO = """
