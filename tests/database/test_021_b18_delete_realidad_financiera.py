@@ -14,6 +14,7 @@
 #
 # PRECONDICIÓN: requiere F03-01-B16 (migration 0190) para poder asumir
 #              gapto_runtime. Ver test_020.
+# Versión: 0.2.1  -- 0286: matriz SELECT 80 / INSERT 74 / UPDATE 68 / DELETE 36.
 # Versión: 0.2.0  -- B21 cierra D-086: DELETE pasa de 50 a 36 y la muestra de
 #                   control pasa a las tres tablas que lo conservan a proposito.
 #                   v0.1.1: corrige SET LOCAL parametrizado por set_config().
@@ -111,15 +112,18 @@ def test_b18_no_desborda_su_alcance(db: psycopg.Connection, tabla: str) -> None:
 
 def test_b18_matriz_efectiva_de_runtime(db: psycopg.Connection) -> None:
     """SELECT 79 / INSERT 73 / UPDATE 67 / DELETE 36."""
-    assert _cuenta(db, "gapto_runtime", "SELECT") == 79
-    assert _cuenta(db, "gapto_runtime", "INSERT") == 73
-    assert _cuenta(db, "gapto_runtime", "UPDATE") == 67
+    # SUCESORA 0286 / D-146: efecto_cuentas entra en el bucket A de D-093
+    # (realidad financiera y sus vinculos): SELECT + INSERT + UPDATE, sin
+    # DELETE. La matriz pasa a SELECT 80 / INSERT 74 / UPDATE 68 / DELETE 36.
+    assert _cuenta(db, "gapto_runtime", "SELECT") == 80
+    assert _cuenta(db, "gapto_runtime", "INSERT") == 74
+    assert _cuenta(db, "gapto_runtime", "UPDATE") == 68
     assert _cuenta(db, "gapto_runtime", "DELETE") == 36
 
 
 def test_b18_no_afecta_a_owner_ni_backup(db: psycopg.Connection) -> None:
     assert _priv(db, "gapto_owner", "hechos_financieros", "DELETE") is True
-    assert _cuenta(db, "gapto_backup", "SELECT") == 79
+    assert _cuenta(db, "gapto_backup", "SELECT") == 80
     for priv in ("INSERT", "UPDATE", "DELETE"):
         assert _cuenta(db, "gapto_backup", priv) == 0
 

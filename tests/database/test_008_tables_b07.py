@@ -8,6 +8,7 @@
 #              trazabilidad de importación (fuentes/registros/mapeos),
 #              tercero_personas (subtipo PK=FK) y revisión de renta.
 #              Este bloque COMPLETA el baseline físico de 79/79 tablas.
+# Versión: 0.1.2  -- el techo de tablas pasa a 80: 0286 anade efecto_cuentas (D-146).
 # Versión: 0.1.1
 #                   D-098: expectativa caducada migrada a validacion de
 #                   propiedad/baseline. El layering se sigue verificando a
@@ -45,8 +46,14 @@ def test_b07_tables_exist_and_are_owned_by_gapto_owner(db: psycopg.Connection) -
 
 
 def test_b07_baseline_79_tables_complete(db: psycopg.Connection) -> None:
-    """B07 completa el baseline fisico: exactamente 79/79 tablas, techo
-    cerrado y estable (no crece en bloques posteriores)."""
+    """B07 completó el baseline físico de F03-01 con 79/79 tablas.
+
+    SUCESORA 0286 / D-146. El techo dejó de ser 79: la reapertura controlada
+    F02-F01-R2 añade `gapto.efecto_cuentas` para representar qué cuenta generó
+    funcionalmente un efecto económico. Lo que B07 fijó y sigue vigente es que
+    las 79 tablas del baseline existen todas, pertenecen a gapto_owner y
+    ninguna desaparece; el recuento total pasa a 80 y solo puede crecer por una
+    reapertura aprobada y documentada, nunca por deriva."""
     assert len(FULL_BASELINE_79) == 79
     with db.cursor() as cursor:
         cursor.execute("""
@@ -55,7 +62,7 @@ def test_b07_baseline_79_tables_complete(db: psycopg.Connection) -> None:
              WHERE n.nspname='gapto' AND c.relkind='r'
         """)
         (total,) = cursor.fetchone()
-    assert total == 79, f"Se esperaban exactamente 79 tablas en gapto; encontradas={total}"
+    assert total == 80, f"Se esperaban exactamente 80 tablas en gapto (79 de B07 + efecto_cuentas de 0286); encontradas={total}"
 
     with db.cursor() as cursor:
         cursor.execute("""
@@ -64,7 +71,10 @@ def test_b07_baseline_79_tables_complete(db: psycopg.Connection) -> None:
              WHERE n.nspname='gapto' AND c.relkind='r'
         """)
         actual = {r[0] for r in cursor.fetchall()}
-    assert actual == FULL_BASELINE_79
+    assert actual == FULL_BASELINE_79 | {"efecto_cuentas"}, (
+        "SUCESORA 0286 / D-146: al baseline de B07 se suma efecto_cuentas y "
+        "ninguna tabla del baseline puede desaparecer"
+    )
 
 
 def test_b07_tercero_personas_uses_pk_fk_subtype(db: psycopg.Connection) -> None:

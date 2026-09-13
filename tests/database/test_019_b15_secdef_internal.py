@@ -21,6 +21,7 @@
 #              ella, los tests de camino correcto y de contexto inválido
 #              fallan con 42501 "permission denied to set role" y NO por
 #              el motivo que pretenden probar.
+# Versión: 0.1.5  -- 0286: el total de INSERT de runtime pasa de 73 a 74.
 # Versión: 0.1.4  -- D-098: las lecturas de verificacion fijan el contexto de
 #                   tenant; sin el, un rol de conexion sin BYPASSRLS aborta con
 #                   22P02 al evaluar la policy de auditoria.
@@ -292,7 +293,10 @@ def test_b15_runtime_insert_directo_falla(db: psycopg.Connection, usuarios_b15) 
 
 
 def test_b15_insert_grant_total_es_73(db: psycopg.Connection) -> None:
-    """B14 concedía INSERT en 74 tablas; auditoria sale de esa lista."""
+    """B14 concedía INSERT en 74 tablas; auditoria sale de esa lista.
+
+    SUCESORA 0286 / D-146: efecto_cuentas vuelve a sumar uno, así que el total
+    es 74 con auditoria ya excluida."""
     total = _scalar(db, """
         SELECT count(*) FROM pg_catalog.pg_class c
           JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
@@ -301,7 +305,7 @@ def test_b15_insert_grant_total_es_73(db: psycopg.Connection) -> None:
          WHERE n.nspname='gapto' AND c.relkind='r'
            AND r.rolname='gapto_runtime' AND acl.privilege_type='INSERT'
     """)
-    assert total == 73
+    assert total == 74
 
 
 # ============================================================

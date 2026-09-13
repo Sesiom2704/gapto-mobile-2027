@@ -7,6 +7,7 @@
 #              gapto_backup (BYPASSRLS + SELECT=79, sin escritura), PUBLIC
 #              revocado, y 7 guard triggers append-only que bloquean
 #              UPDATE/DELETE incluso con RLS fuera de juego (BYPASSRLS).
+# Versión: 0.1.7  -- 0286: SELECT 80, UPDATE 68, backup 80. efecto_cuentas sin DELETE.
 # Versión: 0.1.6  -- B21 lleva DELETE de 50 a 36.
 #                   v0.1.5:  -- D-098: el test del guard afirma la propiedad (fila
 #                   inmutable) en vez de la capa que deniega, que difiere por
@@ -59,7 +60,8 @@ def _has_table_priv(db: psycopg.Connection, role: str, tabla: str, priv: str) ->
 
 
 def test_b14_runtime_select_on_79_tables(db: psycopg.Connection) -> None:
-    assert _grant_count(db, "gapto_runtime", "SELECT") == 79
+    # SUCESORA 0286 / D-146: 79 tablas en B14 + efecto_cuentas.
+    assert _grant_count(db, "gapto_runtime", "SELECT") == 80
 
 
 def test_b14_runtime_insert_on_tenant_tables(db: psycopg.Connection) -> None:
@@ -83,7 +85,8 @@ def test_b14_runtime_insert_on_tenant_tables(db: psycopg.Connection) -> None:
 
 
 def test_b14_runtime_update_on_67_tables(db: psycopg.Connection) -> None:
-    assert _grant_count(db, "gapto_runtime", "UPDATE") == 67
+    # SUCESORA 0286 / D-146: efecto_cuentas recibe UPDATE (bucket A: sin DELETE).
+    assert _grant_count(db, "gapto_runtime", "UPDATE") == 68
 
 
 def test_b14_runtime_delete_on_tenant_tables(db: psycopg.Connection) -> None:
@@ -107,7 +110,7 @@ def test_b14_runtime_delete_on_tenant_tables(db: psycopg.Connection) -> None:
 
 
 def test_b14_backup_select_only_on_79_tables_no_write(db: psycopg.Connection) -> None:
-    assert _grant_count(db, "gapto_backup", "SELECT") == 79
+    assert _grant_count(db, "gapto_backup", "SELECT") == 80
     for priv in ("INSERT", "UPDATE", "DELETE"):
         assert _grant_count(db, "gapto_backup", priv) == 0, (
             f"gapto_backup no debe tener {priv}"

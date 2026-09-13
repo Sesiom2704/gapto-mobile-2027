@@ -19,6 +19,7 @@
 #
 # PRECONDICIÓN: requiere 0190 (B16). Debe ejecutarse desde la raiz del
 #              repositorio, porque G6 inspecciona migrations/ y tests/.
+# Versión: 0.5.0  -- G2 acepta la sucesora 0286 y la matriz de runtime sube en 1.
 # Versión: 0.4.0  -- G2 acepta además EXACTAMENTE la sucesora 0285 (funciones
 #                   25, triggers 48, constraint triggers 31).
 #                   v0.3.0: G2 acepta además EXACTAMENTE la sucesora 0280 (funciones
@@ -71,7 +72,15 @@ SUCESORA_0280 = {**CONTRATO_ESPERADO, "funciones": 21, "triggers_no_internos": 4
 SUCESORA_0285 = {**SUCESORA_0280, "funciones": 25, "triggers_no_internos": 48,
                  "constraint_triggers": 31}
 
-MATRIZ_RUNTIME = {"SELECT": 79, "INSERT": 73, "UPDATE": 67, "DELETE": 36}
+# Sucesora conocida: 0286 (D-146 / F02-F01-R2). Anade la tabla puente
+# gapto.efecto_cuentas: +1 tabla tenant con FORCE RLS, +1 policy, +3 FK y
+# +1 UNIQUE. No anade funciones, triggers ni vistas: la tabla es inerte.
+SUCESORA_0286 = {**SUCESORA_0285, "tablas": 80, "tenant_force_rls": 75,
+                 "policies": 82, "foreign_keys": 169, "unique_constraints": 41}
+
+# La matriz de runtime la fija B14/B18/B21; 0286 suma efecto_cuentas en
+# SELECT, INSERT y UPDATE, y NO en DELETE (bucket A de D-093).
+MATRIZ_RUNTIME = {"SELECT": 80, "INSERT": 74, "UPDATE": 68, "DELETE": 36}
 
 
 def _uno(db: psycopg.Connection, sql: str, params: tuple | None = None):
@@ -143,7 +152,7 @@ def test_gate_g2_contrato_fisico(db: psycopg.Connection) -> None:
              WHERE n.nspname='gapto' AND NOT t.tgisinternal
                AND t.tgname LIKE '%%guard%%'"""),
     }
-    if obtenido in (SUCESORA_0270, SUCESORA_0280, SUCESORA_0285):
+    if obtenido in (SUCESORA_0270, SUCESORA_0280, SUCESORA_0285, SUCESORA_0286):
         return
     diferencias = {
         k: (CONTRATO_ESPERADO[k], obtenido[k])

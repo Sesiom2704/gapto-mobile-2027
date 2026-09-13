@@ -29,6 +29,7 @@
 #
 # PRECONDICIÓN: requiere 0190 (B16) para asumir `gapto_runtime` y 0210
 #              (B19), sin el cual cuatro tablas no admiten INSERT bajo RLS.
+# Versión: 0.2.1  -- 0286: 75 tablas tenant y desempate de FK que comparten columna.
 # Versión: 0.2.0  -- v0.1.1 insertaba los catalogos globales como gapto_owner
 #                   en vez de con el rol de conexion, porque en Supabase el rol
 #                   postgres no tiene escritura sobre gapto.paises.
@@ -175,8 +176,17 @@ class _Contexto:
         """FK simple gana sobre compuesta: una compuesta reutiliza columnas
         que ya tienen su propio padre y falsearía el destino."""
         fk = {}
+        # Gana la ultima que escribe cada columna. Entre FK de la misma
+        # longitud el orden de pg_constraint no es estable, asi que se
+        # desempata dejando para el final la que apunta a la PK del padre: es
+        # la unica que da un destino real. Lo destapo 0286/D-146:
+        # efecto_cuentas.hecho_id lo reclaman la FK al hecho (id) y la FK al
+        # efecto (hecho_id), y quedarse con la segunda fabricaba un hecho
+        # inexistente.
         for f in sorted(self.M[tabla]["fks"], key=lambda x: -len(x["cols"])):
             for c, fc in zip(f["cols"], f["fcols"]):
+                if fk.get(c, (None, None))[1] == "id" and fc != "id":
+                    continue
                 fk[c] = (f["ftable"], fc)
         return fk
 
@@ -415,7 +425,8 @@ def test_b17_alcance_cubierto(db: psycopg.Connection, escenario) -> None:
     """El bloque debe cubrir las tablas que D-090 identificó."""
     derivadas = _derivadas(escenario)
     directas = [t for t, v in escenario.M.items() if v["rls"] and v["has_owner"]]
-    assert len(derivadas) + len(directas) == 74
+    # SUCESORA 0286 / D-146: efecto_cuentas es tenant con owner propio.
+    assert len(derivadas) + len(directas) == 75
     assert len(derivadas) == 52, "51 con ownership derivado + usuarios como raíz"
 
 

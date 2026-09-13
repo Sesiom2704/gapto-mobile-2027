@@ -8,6 +8,7 @@
 #              append-only). Incluye la prueba funcional real del caso
 #              Ana/Berto: un intento de referenciar el actor real de otro
 #              owner en efecto_atribuciones debe bloquearse por RLS.
+# Versión: 0.1.2  -- 0286: 82 policies y 75 tablas tenant con ENABLE + FORCE.
 # Versión: 0.1.1  -- estado_atribucion explícito en el efecto de prueba: 0260
 #                   elimina el DEFAULT (D-a); el valor mantiene la semántica previa.
 # ============================================================
@@ -31,7 +32,8 @@ def test_b13_exactly_74_tables_with_rls_and_force(db: psycopg.Connection) -> Non
                AND c.relrowsecurity AND c.relforcerowsecurity
         """)
         (count,) = cursor.fetchone()
-    assert count == 74
+    # SUCESORA 0286 / D-146: efecto_cuentas es tenant con ENABLE + FORCE.
+    assert count == 75
 
 
 def test_b13_exactly_5_catalogs_without_rls(db: psycopg.Connection) -> None:
@@ -49,7 +51,9 @@ def test_b13_exactly_81_policies(db: psycopg.Connection) -> None:
     with db.cursor() as cursor:
         cursor.execute("SELECT count(*) FROM pg_catalog.pg_policies WHERE schemaname='gapto'")
         (count,) = cursor.fetchone()
-    assert count == 81
+    # SUCESORA 0286 / D-146: B13 cerró 81 policies; efecto_cuentas añade la
+    # suya (tenant_isolation por owner_user_id), así que el contrato pasa a 82.
+    assert count == 82
 
 
 def test_b13_append_only_tables_have_only_select_and_insert(db: psycopg.Connection) -> None:

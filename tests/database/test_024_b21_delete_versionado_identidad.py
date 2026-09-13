@@ -12,6 +12,7 @@
 #              Matriz resultante: SELECT 79 / INSERT 73 / UPDATE 67 / DELETE 36.
 #
 # PRECONDICIÓN: requiere 0190 (B16) para poder asumir gapto_runtime.
+# Versión: 0.1.1  -- 0286: matriz SELECT 80 / INSERT 74 / UPDATE 68 / DELETE 36.
 # Versión: 0.1.0
 # ============================================================
 
@@ -137,9 +138,12 @@ def test_b21_esas_tres_siguen_sin_ciclo_de_vida(db: psycopg.Connection) -> None:
 
 def test_b21_matriz_efectiva_de_runtime(db: psycopg.Connection) -> None:
     """SELECT 79 / INSERT 73 / UPDATE 67 / DELETE 36."""
-    assert _cuenta(db, "gapto_runtime", "SELECT") == 79
-    assert _cuenta(db, "gapto_runtime", "INSERT") == 73
-    assert _cuenta(db, "gapto_runtime", "UPDATE") == 67
+    # SUCESORA 0286 / D-146: efecto_cuentas entra en el bucket A de D-093
+    # (realidad financiera y sus vinculos): SELECT + INSERT + UPDATE, sin
+    # DELETE. La matriz pasa a SELECT 80 / INSERT 74 / UPDATE 68 / DELETE 36.
+    assert _cuenta(db, "gapto_runtime", "SELECT") == 80
+    assert _cuenta(db, "gapto_runtime", "INSERT") == 74
+    assert _cuenta(db, "gapto_runtime", "UPDATE") == 68
     assert _cuenta(db, "gapto_runtime", "DELETE") == 36
 
 
@@ -166,6 +170,6 @@ def test_b21_delete_real_denegado(db: psycopg.Connection) -> None:
 def test_b21_no_afecta_a_owner_ni_backup(db: psycopg.Connection) -> None:
     for tabla in ("usuarios", "regla_versiones", "documentos"):
         assert _priv(db, "gapto_owner", tabla, "DELETE") is True
-    assert _cuenta(db, "gapto_backup", "SELECT") == 79
+    assert _cuenta(db, "gapto_backup", "SELECT") == 80
     for priv in ("INSERT", "UPDATE", "DELETE"):
         assert _cuenta(db, "gapto_backup", priv) == 0

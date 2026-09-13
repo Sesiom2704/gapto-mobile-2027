@@ -12,6 +12,7 @@
 #              corrección es de impersonación, no de privilegios. Ni
 #              gapto_runtime ni gapto_backup ganan nada, y gapto_migrator
 #              no hereda pasivamente sus privilegios (INHERIT FALSE).
+# Versión: 0.1.4  -- 0286: SELECT 80 / INSERT 74 / UPDATE 68 / backup 80.
 # Versión: 0.1.3  -- B21 lleva DELETE de 50 a 36.
 #                   v0.1.2:  -- corrige el SET LOCAL parametrizado que quedo sin migrar
 #                   a set_config() en v0.1.1.
@@ -92,12 +93,13 @@ def test_b16_no_concede_privilegios_nuevos(db: psycopg.Connection) -> None:
                AND r.rolname=%s AND acl.privilege_type=%s
         """, (rol, priv))
 
-    assert cuenta("gapto_runtime", "SELECT") == 79
-    assert cuenta("gapto_runtime", "INSERT") == 73
-    assert cuenta("gapto_runtime", "UPDATE") == 67  # B18 no toca UPDATE
+    # SUCESORA 0286 / D-146: +1 tabla (efecto_cuentas), SELECT/INSERT/UPDATE.
+    assert cuenta("gapto_runtime", "SELECT") == 80
+    assert cuenta("gapto_runtime", "INSERT") == 74
+    assert cuenta("gapto_runtime", "UPDATE") == 68  # B18 no toca UPDATE
     # B18 revoca el DELETE del Bucket A; se admiten ambos baselines.
     assert cuenta("gapto_runtime", "DELETE") in (36, 50, 67)
-    assert cuenta("gapto_backup", "SELECT") == 79
+    assert cuenta("gapto_backup", "SELECT") == 80
     for priv in ("INSERT", "UPDATE", "DELETE"):
         assert cuenta("gapto_backup", priv) == 0
 
