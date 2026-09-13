@@ -32,6 +32,8 @@
 # ROLE DRIFT, que es correcto y deliberado. En ese caso se usa --desde 0002
 # y el clean-room demuestra reproducibilidad DE LA BASE, no de la instancia.
 # Reproducir tambien la instancia exige un proyecto nuevo.
+# Versión: 0.7.2  -- F03-02 / migration 0286: CONTRATO del final de la cadena
+#                    pasa a 80 tablas, 82 policies, 169 FK y 41 UNIQUE.
 # Versión: 0.7.1  -- F03-02 / migration 0285: CONTRATO del final de la cadena
 #                   = 25 funciones, 48 triggers no internos y 31 constraint
 #                   triggers, y la huella de fn_check_bolsa_prioridad_alcance
@@ -77,15 +79,17 @@ except ImportError:  # pragma: no cover
     sys.exit("Falta psycopg. Instala con: python -m pip install \"psycopg[binary]\"")
 
 
-# Contrato fisico esperado al final de la cadena (0280). Base: D-109; 0270
+# Contrato fisico esperado al final de la cadena (0286). Base: D-109; 0270
 # anade 4 funciones, 5 triggers y 4 constraint triggers; 0280 cambia 1 funcion
-# por 3, 6 triggers BEFORE por 7 constraint triggers y anade 3 UNIQUE.
+# por 3, 6 triggers BEFORE por 7 constraint triggers y anade 3 UNIQUE; 0286
+# anade la tabla puente efecto_cuentas (+1 tabla, +1 policy, +3 FK, +1 UNIQUE,
+# +1 SELECT/INSERT/UPDATE de runtime, sin funciones ni triggers).
 CONTRATO = {
-    "tablas": 79,
-    "force_rls": 74,
-    "policies": 81,
-    "foreign_keys": 166,
-    "unique_constraints": 40,
+    "tablas": 80,
+    "force_rls": 75,
+    "policies": 82,
+    "foreign_keys": 169,
+    "unique_constraints": 41,
     "exclude_constraints": 11,
     "funciones": 25,
     "security_definer": 1,
@@ -95,9 +99,9 @@ CONTRATO = {
     "triggers_deshabilitados": 0,
     "policies_autorreferentes": 0,
     "fk_tenant_sin_validar": 0,
-    "runtime_select": 79,
-    "runtime_insert": 73,
-    "runtime_update": 67,
+    "runtime_select": 80,
+    "runtime_insert": 74,
+    "runtime_update": 68,
     "runtime_delete": 36,
 }
 
