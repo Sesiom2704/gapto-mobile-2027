@@ -12,7 +12,14 @@
 #              DEFERRED, así que el rechazo se provoca con
 #              `SET CONSTRAINTS ALL IMMEDIATE` dentro de un savepoint y el
 #              montaje multi-paso se valida con `_validar_montaje`.
-# Versión: 0.1.0
+# Versión: 0.2.0  -- la mutación local reveló DOS casos que pasaban por el
+#              motivo equivocado y que 12C.2 obliga a rehacer: el efecto sin
+#              principal ni asignaciones no dejaba ningún evento pendiente, así
+#              que no ejercitaba validador alguno; y el fail-closed lo
+#              satisfacía el validador de suma de 0270, no el de D-080. Ambos se
+#              rehacen para que el único evento pendiente sea el de D-080. Se
+#              añade además la equivalencia demostrada de las dos señales
+#              parent-side. Versión anterior: 0.1.0.
 # ============================================================
 from __future__ import annotations
 
@@ -361,6 +368,11 @@ def test_0290_misma_entidad_dos_relaciones_principales_rechazada(esc: Escenario)
 # ------------------------------------------------------------
 
 def test_0290_efecto_sin_principal_y_sin_asignaciones_valido(esc: Escenario) -> None:
+    """La relación con `principal = false` está para que quede un evento de
+    D-080 pendiente. Sin ella el caso no ejercitaría ningún validador y pasaría
+    por el motivo equivocado: la mutación que exige principal SIEMPRE, y no solo
+    con reparto, sobrevivía a este caso."""
+    esc.principal(esc.plan, marca=False)
     _acepta(esc.db)
 
 
@@ -469,13 +481,16 @@ def test_0290_transicion_de_subtipo_crea_la_segunda_principal(esc: Escenario) ->
     está confirmada cuando todavía es una PROPIEDAD y no cuenta para D-080; la
     transición posterior a INVERSION la convierte en la segunda principal.
 
-    NOTA DE EQUIVALENCIA. Este caso ejercita la familia parent-side completa,
-    no un trigger aislado. `trg_inversiones__d080_alta_subtipo` no es
-    discriminable por separado: para que `inversiones INSERT` fuese la ÚNICA
-    señal, la entidad tendría que estar confirmada con `tipo_entidad='INVERSION'`
-    y sin fila en `inversiones`, estado que D-124 ya prohíbe en cualquier estado
-    confirmado. Se conserva como defensa en profundidad y se documenta como
-    evento equivalente, sin inventar una invariante para matarlo (12C.5)."""
+    EQUIVALENCIA DEMOSTRADA POR MUTACIÓN (12C.5). Las dos señales parent-side
+    de subtipo son individualmente equivalentes y conjuntamente necesarias:
+    retirar `trg_inversiones__d080_alta_subtipo` o `trg_entidades__d080_subtipo`
+    por separado NO hace fallar ningún caso, porque la otra cubre la transición;
+    retirar las dos sí hace fallar este caso. El motivo es estructural: el
+    predicado depende de la existencia de una fila en `inversiones`, cuyo INSERT
+    cubre la primera señal y cuyo DELETE está bloqueado por FK RESTRICT
+    justamente cuando cambiaría el resultado, mientras que `tipo_entidad` nunca
+    altera el predicado por sí solo. Se conservan ambas como defensa en
+    profundidad; no se inventa una invariante para matarlas por separado."""
     esc.principal(esc.plan)
     futura = esc.entidad(OWNER_A, "PROPIEDAD")
     esc.db.execute("INSERT INTO gapto.propiedades (entidad_id, tipo_propiedad) "
@@ -562,9 +577,13 @@ def test_0290_rama_acotada_al_owner(esc: Escenario) -> None:
 
 
 def test_0290_fail_closed_por_visibilidad(esc: Escenario) -> None:
-    """D-118: si el efecto que motiva el evento no es visible, se falla cerrado."""
+    """D-118: si el efecto que motiva el evento no es visible, se falla cerrado.
+
+    El evento es exclusivamente de `hecho_entidades`, que es la única de las
+    superficies de D-080 sin trigger del validador de suma. Con una asignación
+    de por medio el caso lo satisfacía el fail-closed de 0270 y sobrevivía la
+    mutación que retira el de D-080."""
     esc.principal(esc.plan)
-    esc.asignacion(esc.hija)
     _tenant(esc.db, OWNER_B)
     esc.db.execute("SAVEPOINT v")
     try:
