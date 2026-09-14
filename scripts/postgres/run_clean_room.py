@@ -26,12 +26,48 @@
 #     --solo-verificar  no aplica nada; solo comprueba el contrato
 #     --permitir-sucia  aplica aunque el schema gapto ya exista
 #
+#   Manifest del bootstrap fresh de instancia (D-131 refinada por D-136):
+#     --head 0290           migration final declarada; compone el veredicto
+#     --junit RUTA.xml      JUnit de la suite completa ejecutada contra la base
+#     --proyecto ID         identificador del proyecto Neon nuevo (declarado)
+#     --commit SHA          commit candidato al cierre de fase (declarado)
+#     --manifiesto RUTA.json  escribe el manifest con el veredicto
+#     --completar-manifiesto RUTA.json  segunda fase: adjunta el JUnit
+#
+#   El bootstrap tiene dos fases porque la suite no existe hasta que la cadena
+#   esta aplicada. Fase 1: se aplica 0001..HEAD y se escribe el manifest con
+#   resultado PENDIENTE_SUITE, dejando constancia observada de que los roles
+#   los creo esta ejecucion y de que la base estaba virgen. Fase 2: se ejecuta
+#   la suite y se completa el mismo manifest con --completar-manifiesto, que
+#   vuelve a leer el catalogo y exige que las ocho huellas no hayan cambiado
+#   entre ambas fases. Sin esa comprobacion, la fase 2 no probaria que la suite
+#   se ejecuto contra el estado certificado en la fase 1.
+#
+#   El manifest separa SIEMPRE lo observado de lo declarado. Observado es lo
+#   que este script lee del catalogo y del JUnit. Declarado es lo que el
+#   operador afirma y el script NO puede comprobar: que el proyecto es nuevo,
+#   cual es su identificador y sobre que commit se ejecuta. Esa separacion es
+#   el requisito explicito de D-136 y evita que el manifest parezca probar mas
+#   de lo que prueba.
+#
 # NOTA SOBRE 0001. El provisioning de roles es de INSTANCIA, no de base. Si
 # la base virgen vive en la misma instancia que una base ya provisionada,
 # los cinco roles gapto ya existen y 0001 aborta con su propio postcheck de
 # ROLE DRIFT, que es correcto y deliberado. En ese caso se usa --desde 0002
 # y el clean-room demuestra reproducibilidad DE LA BASE, no de la instancia.
 # Reproducir tambien la instancia exige un proyecto nuevo.
+# Versión: 0.8.0  -- F03-02 / migration 0290: el CONTRATO del final de la cadena
+#                    pasa a 26 funciones, 54 triggers no internos y 37
+#                    constraint triggers (D-080: una funcion y seis constraint
+#                    triggers). Se anade la huella de fn_check_inversion_principal
+#                    y se actualiza la de fn_check_inversion_asignacion_suma tras
+#                    la reescritura de P4. Ademas, manifest del bootstrap fresh de
+#                    instancia 0001..0290
+#                    (D-131 refinada por D-136): --head, --junit, --proyecto,
+#                    --commit y --manifiesto. Anade la lectura de las ocho
+#                    huellas D-111 y del JUnit de la suite, y compone el
+#                    veredicto unico PASS_INSTANCE_BOOTSTRAP_F03_0001_<head>.
+#                    Respecto de v0.7.3 cambia el contrato por 0290.
 # Versión: 0.7.3  -- F03-02 / migration 0288: el CONTRATO sube a 174 FK.
 # Versión: 0.7.2  -- F03-02 / migration 0286: CONTRATO del final de la cadena
 #                    pasa a 80 tablas, 82 policies, 169 FK y 41 UNIQUE.
@@ -70,6 +106,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+import xml.etree.ElementTree as ET
 import os
 import sys
 from pathlib import Path
@@ -80,11 +118,14 @@ except ImportError:  # pragma: no cover
     sys.exit("Falta psycopg. Instala con: python -m pip install \"psycopg[binary]\"")
 
 
-# Contrato fisico esperado al final de la cadena (0286). Base: D-109; 0270
+# Contrato fisico esperado al final de la cadena (0290). Base: D-109; 0270
 # anade 4 funciones, 5 triggers y 4 constraint triggers; 0280 cambia 1 funcion
 # por 3, 6 triggers BEFORE por 7 constraint triggers y anade 3 UNIQUE; 0286
 # anade la tabla puente efecto_cuentas (+1 tabla, +1 policy, +3 FK, +1 UNIQUE,
-# +1 SELECT/INSERT/UPDATE de runtime, sin funciones ni triggers).
+# +1 SELECT/INSERT/UPDATE de runtime, sin funciones ni triggers); 0288 sube a
+# 174 FK sin tocar funciones ni triggers; 0290 anade la funcion
+# fn_check_inversion_principal y seis constraint triggers de D-080, y reescribe
+# fn_check_inversion_asignacion_suma dejando el advisory como unico lock root.
 CONTRATO = {
     "tablas": 80,
     "force_rls": 75,
@@ -92,11 +133,11 @@ CONTRATO = {
     "foreign_keys": 174,
     "unique_constraints": 41,
     "exclude_constraints": 11,
-    "funciones": 25,
+    "funciones": 26,
     "security_definer": 1,
     "vistas_security_invoker": 3,
-    "triggers_no_internos": 48,
-    "constraint_triggers": 31,
+    "triggers_no_internos": 54,
+    "constraint_triggers": 37,
     "triggers_deshabilitados": 0,
     "policies_autorreferentes": 0,
     "fk_tenant_sin_validar": 0,
@@ -110,6 +151,8 @@ HUELLAS = {
     "fn_registrar_auditoria": "5a9e6ce8e8dc402b3123e3bf5c718725",
     "fn_check_participacion_suma": "b76161555c227a8aa19c3ab513aa4687",
     "fn_check_bolsa_prioridad_alcance": "d1d83d6e38a15190244a26be50d90ad4",
+    "fn_check_inversion_asignacion_suma": "3ffd4236dea6f3ad75ad5ffacc5dd247",
+    "fn_check_inversion_principal": "1f2cbd5647ae5a013121bdadc41b6c8a",
 }
 
 CONSULTA_CONTRATO = """
@@ -370,6 +413,69 @@ def comparar(obtenido: dict, esperado: dict, titulo: str) -> list[str]:
     return fallos
 
 
+def leer_huellas_d111(conexion) -> dict:
+    """Las ocho huellas D-111, calculadas con el mismo script canonico que se
+    usa contra los proveedores. Son OBSERVADAS: salen del catalogo."""
+    fichero = raiz_repositorio() / "scripts" / "postgres" / "huellas_d111.sql"
+    with conexion.cursor() as cursor:
+        cursor.execute(fichero.read_text(encoding="utf-8"))
+        fila = cursor.fetchone()
+        nombres = [d.name for d in cursor.description]
+    return dict(zip(nombres, fila))
+
+
+def leer_junit(ruta: Path) -> dict:
+    """Resultado de la suite completa. Es OBSERVADO, pero de segunda mano: lo
+    produjo pytest, no este script. Se registra tal cual, sin interpretarlo."""
+    raiz = ET.parse(ruta).getroot()
+    suites = [raiz] if raiz.tag == "testsuite" else list(raiz.iter("testsuite"))
+    total = {"tests": 0, "failures": 0, "errors": 0, "skipped": 0}
+    for s in suites:
+        for clave in total:
+            total[clave] += int(s.get(clave, 0) or 0)
+    total["fichero"] = ruta.name
+    return total
+
+
+def veredicto(head: str, fallos: list[str], incluye_0001: bool,
+              junit: dict | None, base_virgen: bool) -> tuple[str, list[str]]:
+    """Un unico resultado, y las razones exactas si no es PASS. No se emite
+    PASS si falta cualquiera de las condiciones de D-136."""
+    razones = list(fallos)
+    if not incluye_0001:
+        razones.append("la cadena no incluyo 0001: esto no es bootstrap de instancia")
+    if not base_virgen:
+        razones.append("la base no estaba virgen al empezar")
+    faltan_junit = junit is None
+    if faltan_junit:
+        razones.append("no se aporto el JUnit de la suite completa (--junit)")
+    if not faltan_junit:
+        if junit["tests"] == 0:
+            razones.append("el JUnit no contiene ningun test")
+        if junit["failures"] or junit["errors"]:
+            razones.append(
+                f"la suite no esta verde: failures={junit['failures']} errors={junit['errors']}")
+    etiqueta = f"PASS_INSTANCE_BOOTSTRAP_F03_0001_{head}"
+    return (etiqueta if not razones else f"FALLO_INSTANCE_BOOTSTRAP_F03_0001_{head}"), razones
+
+
+def escribir_manifiesto(ruta: Path, observado: dict, declarado: dict,
+                        resultado: str, razones: list[str]) -> None:
+    contenido = {
+        "artefacto": "run_clean_room.py",
+        "version": "0.8.0",
+        "decision": "D-131 refinada por D-136",
+        "resultado": resultado,
+        "razones": razones,
+        "observado": observado,
+        "declarado": declarado,
+        "nota": ("declarado = afirmaciones del operador que este script no puede "
+                 "verificar; observado = leido del catalogo de la base y del JUnit"),
+    }
+    ruta.write_text(json.dumps(contenido, indent=2, ensure_ascii=False, default=str),
+                    encoding="utf-8")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Clean-room de GaptoMobile 2027")
     parser.add_argument("--desde", default=None,
@@ -378,7 +484,28 @@ def main() -> int:
                         help="no aplica migrations; solo comprueba el contrato")
     parser.add_argument("--permitir-sucia", action="store_true",
                         help="aplica aunque el schema gapto ya exista")
+    parser.add_argument("--head", default=None,
+                        help="migration final declarada, p.ej. 0290; activa el manifest")
+    parser.add_argument("--junit", default=None,
+                        help="JUnit de la suite completa ejecutada contra esta base")
+    parser.add_argument("--proyecto", default=None,
+                        help="identificador del proyecto nuevo (declarado)")
+    parser.add_argument("--commit", default=None,
+                        help="commit candidato al cierre de fase (declarado)")
+    parser.add_argument("--manifiesto", default=None,
+                        help="ruta del manifest JSON a escribir (fase 1)")
+    parser.add_argument("--completar-manifiesto", default=None, dest="completar",
+                        help="ruta de un manifest de fase 1 al que adjuntar el JUnit")
     args = parser.parse_args()
+
+    if args.manifiesto and not args.head:
+        sys.exit("--manifiesto exige --head: el veredicto se compone con la migration final declarada.")
+    if args.completar:
+        if not args.junit:
+            sys.exit("--completar-manifiesto exige --junit con la suite completa.")
+        args.solo_verificar = True
+        args.head = args.head or json.loads(
+            Path(args.completar).read_text(encoding="utf-8"))["declarado"]["head_declarado"]
 
     dsn = os.getenv("GAPTO_CLEANROOM_URL")
     if not dsn:
@@ -397,6 +524,7 @@ def main() -> int:
         ficheros = migrations(args.desde)
         incluye_0001 = any(f.name.startswith("0001") for f in ficheros)
 
+        vacia = False
         if args.solo_verificar:
             incluye_0001 = False
         else:
@@ -416,6 +544,7 @@ def main() -> int:
 
         contrato = leer_contrato(conexion)
         huellas = leer_huellas(conexion)
+        huellas_d111 = leer_huellas_d111(conexion) if args.head else None
 
     fallos = list(problemas_rol)
     fallos += comparar(contrato, CONTRATO, "CONTRATO FISICO")
@@ -430,6 +559,59 @@ def main() -> int:
 
     print("RESULTADO: OK.")
     print()
+
+    if args.head:
+        junit = leer_junit(Path(args.junit)) if args.junit else None
+        fase1 = None
+        if args.completar:
+            fase1 = json.loads(Path(args.completar).read_text(encoding="utf-8"))
+            if fase1["observado"]["huellas_d111"] != huellas_d111:
+                print("VEREDICTO: FALLO_INSTANCE_BOOTSTRAP_F03_0001_" + args.head)
+                print("  - las ocho huellas han cambiado entre la fase 1 y la fase 2")
+                return 1
+        creo_roles = (fase1["observado"]["roles_creados_en_esta_ejecucion"] if fase1
+                      else incluye_0001)
+        virgen = fase1["observado"]["base_virgen_al_empezar"] if fase1 else vacia
+        resultado, razones = veredicto(args.head, fallos, creo_roles, junit, virgen)
+        observado = {
+            "base": base,
+            "motor": version.split(" on ")[0],
+            "migrations_aplicadas": (fase1["observado"]["migrations_aplicadas"] if fase1
+                                     else [f.name for f in ficheros]),
+            "head_observado": (fase1["observado"]["head_observado"] if fase1
+                               else ficheros[-1].name[:4]),
+            "contrato_fisico": contrato,
+            "huellas_d111": huellas_d111,
+            "huellas_prosrc": huellas,
+            "roles_creados_en_esta_ejecucion": creo_roles,
+            "base_virgen_al_empezar": virgen,
+            "suite": junit,
+        }
+        declarado = {
+            "head_declarado": args.head,
+            "proyecto": args.proyecto or (fase1["declarado"]["proyecto"] if fase1 else None),
+            "commit": args.commit or (fase1["declarado"]["commit"] if fase1 else None),
+            "proyecto_nuevo_sin_roles_gapto_previos": bool(
+                args.proyecto or (fase1 and fase1["declarado"]["proyecto"])) and creo_roles,
+        }
+        if not args.completar and args.manifiesto and junit is None:
+            resultado, razones = "PENDIENTE_SUITE", [
+                "fase 1 completada; falta ejecutar la suite y completar el manifest "
+                "con --completar-manifiesto y --junit"]
+        if observado["head_observado"] != args.head:
+            razones.append(
+                f"head observado {observado['head_observado']} != head declarado {args.head}")
+            resultado = f"FALLO_INSTANCE_BOOTSTRAP_F03_0001_{args.head}"
+        print(f"VEREDICTO: {resultado}")
+        for r in razones:
+            print(f"  - {r}")
+        destino = args.completar or args.manifiesto
+        if destino:
+            escribir_manifiesto(Path(destino), observado, declarado, resultado, razones)
+            print(f"Manifest escrito en {destino}")
+        if razones and resultado != "PENDIENTE_SUITE":
+            return 1
+        print()
     if incluye_0001:
         print("ALCANCE DE ESTA EVIDENCIA: clean-room DE INSTANCIA, es decir bootstrap")
         print("completo desde cero. Ninguno de los cinco roles gapto existia antes de")
