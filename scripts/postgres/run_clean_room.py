@@ -32,6 +32,7 @@
 # ROLE DRIFT, que es correcto y deliberado. En ese caso se usa --desde 0002
 # y el clean-room demuestra reproducibilidad DE LA BASE, no de la instancia.
 # Reproducir tambien la instancia exige un proyecto nuevo.
+# Versión: 0.7.3  -- F03-02 / migration 0288: el CONTRATO sube a 174 FK.
 # Versión: 0.7.2  -- F03-02 / migration 0286: CONTRATO del final de la cadena
 #                    pasa a 80 tablas, 82 policies, 169 FK y 41 UNIQUE.
 # Versión: 0.7.1  -- F03-02 / migration 0285: CONTRATO del final de la cadena
@@ -88,7 +89,7 @@ CONTRATO = {
     "tablas": 80,
     "force_rls": 75,
     "policies": 82,
-    "foreign_keys": 169,
+    "foreign_keys": 174,
     "unique_constraints": 41,
     "exclude_constraints": 11,
     "funciones": 25,
