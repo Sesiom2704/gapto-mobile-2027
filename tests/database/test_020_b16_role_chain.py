@@ -12,6 +12,13 @@
 #              corrección es de impersonación, no de privilegios. Ni
 #              gapto_runtime ni gapto_backup ganan nada, y gapto_migrator
 #              no hereda pasivamente sus privilegios (INHERIT FALSE).
+# Versión: 0.1.5  -- los dos filtros de rol dejan de usar el prefijo `gapto%` y
+#              pasan a los cinco nombres exactos. El prefijo no es portable: en un
+#              bootstrap de instancia el proveedor deriva el nombre del rol
+#              propietario del de la base, y un rol legítimo como
+#              `gapto2027_bootstrap_owner` entraba en el filtro y hacía fallar la
+#              invariante NOLOGIN sin que nada del modelo estuviera mal.
+#              Detectado por el bootstrap fresh de F03-CLOSE-01.
 # Versión: 0.1.4  -- 0286: SELECT 80 / INSERT 74 / UPDATE 68 / backup 80.
 # Versión: 0.1.3  -- B21 lleva DELETE de 50 a 36.
 #                   v0.1.2:  -- corrige el SET LOCAL parametrizado que quedo sin migrar
@@ -25,6 +32,16 @@ from __future__ import annotations
 
 import psycopg
 import pytest
+
+# Los cinco roles conceptuales del modelo. Se enumeran explícitamente porque el
+# prefijo `gapto%` puede capturar roles ajenos creados por el proveedor.
+ROLES_DEL_MODELO = [
+    "gapto_owner",
+    "gapto_migrator",
+    "gapto_internal",
+    "gapto_runtime",
+    "gapto_backup",
+]
 
 ROLES_ASUMIBLES = ("gapto_migrator", "gapto_owner", "gapto_internal",
                    "gapto_runtime", "gapto_backup")
@@ -65,8 +82,8 @@ def test_b16_membresias_con_set_y_sin_inherit(db: psycopg.Connection) -> None:
               JOIN pg_catalog.pg_roles r ON r.oid = am.roleid
               JOIN pg_catalog.pg_roles m ON m.oid = am.member
              WHERE m.rolname = 'gapto_migrator'
-               AND r.rolname LIKE 'gapto%'
-        """)
+               AND r.rolname = ANY (%(roles)s)
+        """, {"roles": ROLES_DEL_MODELO})
         filas = {nombre: (set_opt, inh) for nombre, set_opt, inh in cursor.fetchall()}
 
     esperados = {"gapto_owner", "gapto_internal", "gapto_runtime", "gapto_backup"}
@@ -108,13 +125,20 @@ def test_b16_no_concede_privilegios_nuevos(db: psycopg.Connection) -> None:
 
 
 def test_b16_roles_siguen_nologin(db: psycopg.Connection) -> None:
-    """0190 no convierte ningún rol conceptual en rol de conexión."""
+    """0190 no convierte ningún rol conceptual en rol de conexión.
+
+    El filtro enumera los CINCO roles del modelo en lugar de usar el prefijo
+    `gapto%`: el prefijo no es portable. En un bootstrap de instancia el
+    proveedor deriva el nombre del rol propietario del nombre de la base, de
+    modo que un rol legítimo y ajeno al modelo puede empezar por `gapto` y
+    hacer fallar esta invariante sin que nada del modelo esté mal.
+    """
     with db.cursor() as cursor:
         cursor.execute("""
             SELECT rolname, rolcanlogin, rolsuper, rolbypassrls
               FROM pg_catalog.pg_roles
-             WHERE rolname LIKE 'gapto%' ORDER BY rolname
-        """)
+             WHERE rolname = ANY (%(roles)s) ORDER BY rolname
+        """, {"roles": ROLES_DEL_MODELO})
         filas = cursor.fetchall()
 
     esperado_bypassrls = {"gapto_backup"}
