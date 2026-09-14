@@ -121,7 +121,13 @@
 #
 # PRECONDICIÓN: cadena 0001..0285 aplicada en gapto2027_cleanroom (C1-C11
 #              requieren 0250; C12-C17, 0270; C18-C25, 0280; C26-C31, 0285).
-# Versión: 0.5.1  -- 0288: INS_ASIG_INV informa owner_user_id y hecho_id.
+# Versión: 0.6.0  -- 0290/D-080: casos C32..C38 sobre inversión principal,
+#              destinos dentro de la rama y el advisory (INVERSIONES, owner)
+#              como único lock root tras P4. La limpieza cubre ahora
+#              hecho_entidades y deshace la jerarquía de inversiones antes
+#              de borrar entidades, porque inversion_padre_entidad_id es
+#              RESTRICT. 0.5.1 -- 0288: INS_ASIG_INV informa owner_user_id
+#              y hecho_id.
 # Versión: 0.5.0  -- añade C26-C31 (0285). C10 y C11 CAMBIAN DE TOPOLOGÍA: la
 #                   congelación F(a) es un BEFORE que toma la fila del
 #                   presupuesto con FOR NO KEY UPDATE durante el propio DML, de
@@ -247,6 +253,22 @@ INS_ASIG_INV = (
     "INSERT INTO gapto.inversion_asignaciones_efecto (efecto_inversion_id, "
     "inversion_entidad_id, importe_asignado, owner_user_id, hecho_id) "
     "VALUES (%s, %s, %s, %s, %s)"
+)
+INS_PRINCIPAL_INV = (
+    "INSERT INTO gapto.hecho_entidades (owner_user_id, hecho_id, efecto_id, entidad_id, "
+    "tipo_relacion, principal) VALUES (%s, %s, %s, %s, 'AFECTA_A', true)"
+)
+UPD_PRINCIPAL_OFF = (
+    "UPDATE gapto.hecho_entidades SET principal = false "
+    "WHERE efecto_id = %s AND entidad_id = %s"
+)
+UPD_INV_PADRE = (
+    "UPDATE gapto.inversiones SET inversion_padre_entidad_id = %s WHERE entidad_id = %s"
+)
+UPD_EFECTO_TIPO = "UPDATE gapto.hecho_efectos SET tipo_efecto = %s WHERE id = %s"
+UPD_ASIG_EFECTO = (
+    "UPDATE gapto.inversion_asignaciones_efecto SET efecto_inversion_id = %s, hecho_id = %s "
+    "WHERE efecto_inversion_id = %s AND inversion_entidad_id = %s"
 )
 INS_MOVIMIENTO = (
     "INSERT INTO gapto.movimientos_tesoreria (cuenta_id, fecha_movimiento, importe, "
@@ -749,8 +771,81 @@ class Laboratorio:
             ("INSERT INTO gapto.hecho_efectos (id, hecho_id, tipo_efecto, importe_delta, "
              "estado_atribucion) VALUES (%s, %s, 'INVERSION', %s, 'PARCIAL')",
              (efecto, hecho, importe)),
+            # 0290/D-080: con asignaciones el efecto exige una inversion principal.
+            # Solo cambia el montaje; la propiedad que prueba C13 es la misma.
+            (INS_PRINCIPAL_INV, (OWNER_LAB, hecho, efecto, entidad)),
         ])
         return entidad, efecto, hecho
+
+    def nuevo_arbol_inversion(self, importe: Decimal, owner: str = OWNER_LAB) -> dict:
+        """PLAN (contenedor) -> HIJA (posicion), AJENA suelta, y un efecto
+        INVERSION del mismo owner. Sin principal y sin asignaciones."""
+        clase_e = "entidades" if owner == OWNER_LAB else "entidades2"
+        clase_h = "hechos" if owner == OWNER_LAB else "hechos2"
+        plan = self._anotar(clase_e, str(uuid.uuid4()))
+        hija = self._anotar(clase_e, str(uuid.uuid4()))
+        ajena = self._anotar(clase_e, str(uuid.uuid4()))
+        hecho = self._anotar(clase_h, str(uuid.uuid4()))
+        efecto = str(uuid.uuid4())
+        sentencias = []
+        for ent, rol, padre in ((plan, "CONTENEDOR", None), (hija, "POSICION", plan),
+                                (ajena, "POSICION", None)):
+            sentencias += [
+                ("INSERT INTO gapto.entidades (id, owner_user_id, tipo_entidad, nombre) "
+                 "VALUES (%s, %s, 'INVERSION', 'Inv C027')", (ent, owner)),
+                ("INSERT INTO gapto.inversiones (entidad_id, inversion_padre_entidad_id, "
+                 "rol_estructura, tipo_producto, moneda, estado) "
+                 "VALUES (%s, %s, %s, 'FONDO', 'EUR', 'ACTIVA')", (ent, padre, rol)),
+            ]
+        sentencias += [
+            ("INSERT INTO gapto.hechos_financieros (id, owner_user_id, tipo_hecho_id, "
+             "fecha_hecho, concepto, moneda, estado_localizacion, presupuestable) "
+             "VALUES (%s, %s, %s, CURRENT_DATE, 'Hecho C027', 'EUR', 'NO_APLICA', true)",
+             (hecho, owner, self.tipo_gasto)),
+            ("INSERT INTO gapto.hecho_efectos (id, hecho_id, tipo_efecto, importe_delta, "
+             "estado_atribucion) VALUES (%s, %s, 'INVERSION', %s, 'PARCIAL')",
+             (efecto, hecho, importe)),
+        ]
+        self.tx_owner(sentencias, owner=owner)
+        return {"plan": plan, "hija": hija, "ajena": ajena,
+                "hecho": hecho, "efecto": efecto, "owner": owner}
+
+    def marcar_principal(self, arbol: dict, entidad: str) -> None:
+        self.tx_owner([(INS_PRINCIPAL_INV,
+                        (arbol["owner"], arbol["hecho"], arbol["efecto"], entidad))],
+                      owner=arbol["owner"])
+
+    def asignar(self, arbol: dict, entidad: str, importe: Decimal) -> None:
+        self.tx_owner([(INS_ASIG_INV,
+                        (arbol["efecto"], entidad, importe, arbol["owner"], arbol["hecho"]))],
+                      owner=arbol["owner"])
+
+    def d080_valido(self, efecto: str) -> bool:
+        """Reimplementa el predicado de D-080 como oráculo independiente."""
+        fila = self.leer(
+            "WITH pr AS ("
+            "  SELECT he.entidad_id FROM gapto.hecho_entidades he"
+            "    JOIN gapto.hecho_efectos e ON e.id = he.efecto_id AND e.hecho_id = he.hecho_id"
+            "    JOIN gapto.inversiones i ON i.entidad_id = he.entidad_id"
+            "   WHERE he.efecto_id = %s AND he.principal AND e.tipo_efecto = 'INVERSION'),"
+            " asg AS (SELECT inversion_entidad_id AS d FROM gapto.inversion_asignaciones_efecto"
+            "          WHERE efecto_inversion_id = %s),"
+            " rama AS ("
+            "  WITH RECURSIVE d(n) AS ("
+            "    SELECT entidad_id FROM pr"
+            "    UNION ALL"
+            "    SELECT i.entidad_id FROM d JOIN gapto.inversiones i"
+            "           ON i.inversion_padre_entidad_id = d.n"
+            "  ) CYCLE n SET c USING r SELECT n FROM d)"
+            " SELECT (SELECT count(*) FROM pr), (SELECT count(*) FROM asg),"
+            "        (SELECT count(*) FROM asg WHERE d NOT IN (SELECT n FROM rama))",
+            (efecto, efecto))[0]
+        principales, asignadas, fuera = int(fila[0]), int(fila[1]), int(fila[2])
+        if principales > 1:
+            return False
+        if asignadas == 0:
+            return True
+        return principales == 1 and fuera == 0
 
     def nuevo_tercero_persona_sin_datos(self) -> str:
         tercero = self._anotar("terceros", str(uuid.uuid4()))
@@ -862,6 +957,14 @@ class Laboratorio:
         c = self.creados
         if c.get("owner2"):
             self.tx_owner([
+                ("DELETE FROM gapto.hecho_entidades WHERE hecho_id = ANY(%s::uuid[])",
+                 (c.get("hechos2", []),)),
+                ("DELETE FROM gapto.inversion_asignaciones_efecto "
+                 "WHERE inversion_entidad_id = ANY(%s::uuid[])", (c.get("entidades2", []),)),
+                ("UPDATE gapto.inversiones SET inversion_padre_entidad_id = NULL "
+                 "WHERE entidad_id = ANY(%s::uuid[])", (c.get("entidades2", []),)),
+            ], owner=OWNER_LAB2)
+            self.tx_owner([
                 ("DELETE FROM gapto.presupuesto_linea_alcances WHERE presupuesto_linea_id IN "
                  "(SELECT id FROM gapto.presupuesto_lineas WHERE presupuesto_id = ANY(%s::uuid[]))",
                  (c.get("presupuestos2", []),)),
@@ -871,12 +974,37 @@ class Laboratorio:
                  (c.get("presupuestos2", []),)),
                 ("DELETE FROM gapto.categorias_financieras WHERE id = ANY(%s::uuid[])",
                  (c.get("categorias2", []),)),
+                ("DELETE FROM gapto.hecho_entidades WHERE hecho_id = ANY(%s::uuid[])",
+                 (c.get("hechos2", []),)),
+                ("DELETE FROM gapto.inversion_asignaciones_efecto "
+                 "WHERE inversion_entidad_id = ANY(%s::uuid[])", (c.get("entidades2", []),)),
+                ("DELETE FROM gapto.hecho_efectos WHERE hecho_id = ANY(%s::uuid[])",
+                 (c.get("hechos2", []),)),
+                ("DELETE FROM gapto.hechos_financieros WHERE id = ANY(%s::uuid[])",
+                 (c.get("hechos2", []),)),
+                ("DELETE FROM gapto.entidades WHERE id = ANY(%s::uuid[])",
+                 (c.get("entidades2", []),)),
                 ("DELETE FROM gapto.usuarios WHERE id = %s", (OWNER_LAB2,)),
             ], owner=OWNER_LAB2)
+        # Los vinculos del hecho y la jerarquia de inversiones se retiran en una
+        # transaccion PROPIA y previa: el unparent dispara la aciclicidad D-123 y
+        # D-080, que son fail-closed y necesitan ver las filas de inversiones
+        # todavia existentes. Hacerlo en el mismo lote que el DELETE de entidades
+        # provoca VISIBILIDAD al validar en el COMMIT.
+        self.tx_owner([
+            ("DELETE FROM gapto.hecho_entidades WHERE hecho_id = ANY(%s::uuid[])",
+             (c.get("hechos", []),)),
+            ("DELETE FROM gapto.inversion_asignaciones_efecto "
+             "WHERE inversion_entidad_id = ANY(%s::uuid[])", (c.get("entidades", []),)),
+            ("UPDATE gapto.inversiones SET inversion_padre_entidad_id = NULL "
+             "WHERE entidad_id = ANY(%s::uuid[])", (c.get("entidades", []),)),
+        ])
         self.tx_owner([
             ("DELETE FROM gapto.hecho_relaciones WHERE hecho_origen_id = ANY(%s::uuid[]) "
              "OR hecho_destino_id = ANY(%s::uuid[])", (c.get("hechos", []), c.get("hechos", []))),
             ("DELETE FROM gapto.hecho_movimientos_tesoreria WHERE hecho_id = ANY(%s::uuid[])",
+             (c.get("hechos", []),)),
+            ("DELETE FROM gapto.hecho_entidades WHERE hecho_id = ANY(%s::uuid[])",
              (c.get("hechos", []),)),
             ("DELETE FROM gapto.inversion_asignaciones_efecto WHERE inversion_entidad_id = ANY(%s::uuid[])",
              (c.get("entidades", []),)),
@@ -2198,4 +2326,146 @@ def test_c27_99_sin_residuos(lab) -> None:
     assert tuple(fila) == (0, 0, 0, 0, 0, 0, 0, 0, 0), (
         "residuo en el laboratorio (cuentas, participaciones, terceros, actores no self, "
         f"hechos, reglas, presupuestos, categorias, entidades) = {tuple(fila)}"
+    )
+
+
+# ------------------------------------------------------------
+# D-080 / 0290 -- inversion principal, rama y advisory unico
+# ------------------------------------------------------------
+
+def test_c27_c32_asignacion_frente_a_retirada_de_principal(caso, record_testsuite_property) -> None:
+    """Efecto con principal PLAN y sin asignaciones. A asigna a HIJA, que esta
+    en rama; B desmarca la principal. Cada una es valida frente al estado
+    confirmado; juntas dejan asignaciones > 0 y principal = 0."""
+    lab = caso
+    arbol = lab.nuevo_arbol_inversion(Decimal("1000.0000"))
+    lab.marcar_principal(arbol, arbol["plan"])
+    _caso_con_barrera(
+        lab, record_testsuite_property, "C32",
+        [(INS_ASIG_INV, (arbol["efecto"], arbol["hija"], Decimal("100.0000"),
+                         OWNER_LAB, arbol["hecho"]))],
+        [(UPD_PRINCIPAL_OFF, (arbol["efecto"], arbol["plan"]))],
+        lambda: lab.d080_valido(arbol["efecto"]),
+    )
+
+
+def test_c27_c33_dos_principales_concurrentes(caso, record_testsuite_property) -> None:
+    """Efecto sin principal. A marca PLAN y B marca AJENA. Cada una por
+    separado es valida; juntas dejan dos principales para el mismo efecto."""
+    lab = caso
+    arbol = lab.nuevo_arbol_inversion(Decimal("1000.0000"))
+    _caso_con_barrera(
+        lab, record_testsuite_property, "C33",
+        [(INS_PRINCIPAL_INV, (OWNER_LAB, arbol["hecho"], arbol["efecto"], arbol["plan"]))],
+        [(INS_PRINCIPAL_INV, (OWNER_LAB, arbol["hecho"], arbol["efecto"], arbol["ajena"]))],
+        lambda: lab.d080_valido(arbol["efecto"]),
+    )
+
+
+def test_c27_c34_asignacion_frente_a_reparenting_que_saca_el_destino(
+        caso, record_testsuite_property) -> None:
+    """Principal PLAN, HIJA cuelga de PLAN. A asigna a HIJA; B saca HIJA de la
+    rama. Este es el write-skew que la fila del efecto NO podia serializar: los
+    conjuntos de filas de A y B son disjuntos y solo el advisory por owner los
+    obliga a atravesar el mismo punto."""
+    lab = caso
+    arbol = lab.nuevo_arbol_inversion(Decimal("1000.0000"))
+    lab.marcar_principal(arbol, arbol["plan"])
+    _caso_con_barrera(
+        lab, record_testsuite_property, "C34",
+        [(INS_ASIG_INV, (arbol["efecto"], arbol["hija"], Decimal("100.0000"),
+                         OWNER_LAB, arbol["hecho"]))],
+        [(UPD_INV_PADRE, (None, arbol["hija"]))],
+        lambda: lab.d080_valido(arbol["efecto"]),
+    )
+
+
+def test_c27_c35_cambio_de_principal_con_asignaciones_bajo_la_anterior(
+        caso, record_testsuite_property) -> None:
+    """Principal PLAN y sin asignaciones. A traslada la principal de PLAN a
+    AJENA, valido por si solo porque no hay reparto. B asigna a HIJA, valido
+    por si solo porque HIJA cuelga de PLAN. Juntas dejan la principal en AJENA
+    y un destino que sigue colgando de la anterior."""
+    lab = caso
+    arbol = lab.nuevo_arbol_inversion(Decimal("1000.0000"))
+    lab.marcar_principal(arbol, arbol["plan"])
+    _caso_con_barrera(
+        lab, record_testsuite_property, "C35",
+        [(UPD_PRINCIPAL_OFF, (arbol["efecto"], arbol["plan"])),
+         (INS_PRINCIPAL_INV, (OWNER_LAB, arbol["hecho"], arbol["efecto"], arbol["ajena"]))],
+        [(INS_ASIG_INV, (arbol["efecto"], arbol["hija"], Decimal("100.0000"),
+                         OWNER_LAB, arbol["hecho"]))],
+        lambda: lab.d080_valido(arbol["efecto"]),
+    )
+
+
+def test_c27_c36_mover_una_asignacion_entre_efectos(caso, record_testsuite_property) -> None:
+    """La asignacion pasa del efecto 1 al efecto 2, que no tiene principal.
+    D-125 obliga a revalidar el efecto antiguo y el nuevo; el destino ademas
+    queda fuera de la rama del efecto 2."""
+    lab = caso
+    a1 = lab.nuevo_arbol_inversion(Decimal("1000.0000"))
+    a2 = lab.nuevo_arbol_inversion(Decimal("1000.0000"))
+    lab.marcar_principal(a1, a1["plan"])
+    lab.asignar(a1, a1["hija"], Decimal("100.0000"))
+    _caso_segunda_bloqueada(
+        lab, record_testsuite_property, "C36",
+        [(INS_PRINCIPAL_INV, (OWNER_LAB, a2["hecho"], a2["efecto"], a2["plan"]))],
+        [(UPD_ASIG_EFECTO, (a2["efecto"], a2["hecho"], a1["efecto"], a1["hija"]))],
+        lambda: lab.d080_valido(a1["efecto"]) and lab.d080_valido(a2["efecto"]),
+        "RECHAZO",
+    )
+
+
+def test_c27_c37_owners_distintos_no_comparten_advisory(caso, record_testsuite_property) -> None:
+    """La clave es (INVERSIONES, owner). Un alta de principal de otro owner no
+    debe esperar al advisory que retiene A."""
+    lab = caso
+    owner2 = lab.segundo_owner()
+    a1 = lab.nuevo_arbol_inversion(Decimal("1000.0000"))
+    a2 = lab.nuevo_arbol_inversion(Decimal("1000.0000"), owner=owner2)
+    _caso_segunda_bloqueada(
+        lab, record_testsuite_property, "C37",
+        [(INS_PRINCIPAL_INV, (OWNER_LAB, a1["hecho"], a1["efecto"], a1["plan"]))],
+        [(INS_PRINCIPAL_INV, (owner2, a2["hecho"], a2["efecto"], a2["plan"]))],
+        lambda: lab.d080_valido(a1["efecto"]) and lab.d080_valido(a2["efecto"]),
+        "SIN_BLOQUEO", owner_b=owner2,
+    )
+
+
+def test_c27_c38_edicion_del_efecto_frente_a_alta_de_asignacion(
+        caso, record_testsuite_property) -> None:
+    """Topologia que motivo P4. Antes de retirar el row lock, A editaba
+    hecho_efectos y tomaba fila -> advisory mientras B tomaba advisory -> fila:
+    40P01 sistematico sobre un unico owner y un unico efecto, 5 de 5 en la
+    replica. Con el advisory como unico lock root, B espera a A y confirma.
+    Un 40P01 aqui es FAIL_LIVENESS, nunca PASS_WITH_EXPECTED_DEADLOCK."""
+    lab = caso
+    arbol = lab.nuevo_arbol_inversion(Decimal("1000.0000"))
+    lab.marcar_principal(arbol, arbol["plan"])
+    _caso_segunda_bloqueada(
+        lab, record_testsuite_property, "C38",
+        [(UPD_EFECTO_IMPORTE, (Decimal("900.0000"), arbol["efecto"]))],
+        [(INS_ASIG_INV, (arbol["efecto"], arbol["hija"], Decimal("100.0000"),
+                         OWNER_LAB, arbol["hecho"]))],
+        lambda: lab.d080_valido(arbol["efecto"]),
+        "CONFIRMA",
+    )
+
+
+def test_c27_c38b_cambio_de_tipo_efecto_frente_a_alta_de_principal(
+        caso, record_testsuite_property) -> None:
+    """Senal P1 bajo concurrencia: A pasa el efecto de GASTO a INVERSION
+    mientras B anade una segunda principal. Misma topologia de edicion del
+    efecto; tampoco debe producir 40P01."""
+    lab = caso
+    arbol = lab.nuevo_arbol_inversion(Decimal("1000.0000"))
+    lab.marcar_principal(arbol, arbol["plan"])
+    lab.tx_owner([(UPD_EFECTO_TIPO, ("GASTO", arbol["efecto"]))])
+    _caso_segunda_bloqueada(
+        lab, record_testsuite_property, "C38b",
+        [(UPD_EFECTO_TIPO, ("INVERSION", arbol["efecto"]))],
+        [(INS_PRINCIPAL_INV, (OWNER_LAB, arbol["hecho"], arbol["efecto"], arbol["ajena"]))],
+        lambda: lab.d080_valido(arbol["efecto"]),
+        "RECHAZO",
     )
