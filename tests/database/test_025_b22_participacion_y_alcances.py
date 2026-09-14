@@ -22,7 +22,8 @@
 #              cualquier otra huella sigue siendo drift.
 #
 # PRECONDICIÓN: requiere 0190 (B16).
-# Versión: 0.1.5  -- acepta también exactamente la sucesora de 0285: huella de
+# Versión: 0.1.6  -- 0290/D-080 anade seis constraint triggers: sucesora
+#              (54, 37, 7). Version anterior: 0.1.5.  -- acepta también exactamente la sucesora de 0285: huella de
 #                   fn_check_bolsa_prioridad_alcance y recuento de triggers (48
 #                   no internos, 31 constraint, 7 guards).
 #                   v0.1.4: acepta también exactamente la sucesora de 0280 (40 no
@@ -140,7 +141,8 @@ def test_b22_recuento_de_triggers(db: psycopg.Connection) -> None:
     Sucesora 0280: 40 (30 constraint, 7 guards). Sucesora 0285: 48 (31
     constraint, 7 guards): los triggers de 0285 no llevan 'guard' en el nombre
     del trigger, solo en el de su función, así que el recuento de guards
-    append-only de B14 no varía."""
+    append-only de B14 no varía. Sucesora 0290: 54 (37 constraint, 7 guards);
+    los seis triggers de D-080 tampoco llevan 'guard' en su nombre."""
     with db.cursor() as cursor:
         cursor.execute("""
             SELECT count(*),
@@ -152,7 +154,8 @@ def test_b22_recuento_de_triggers(db: psycopg.Connection) -> None:
              WHERE n.nspname='gapto' AND NOT t.tgisinternal
         """)
         total, constraint, guards = cursor.fetchone()
-    assert (total, constraint, guards) in ((34, 19, 7), (39, 23, 7), (40, 30, 7), (48, 31, 7))
+    assert (total, constraint, guards) in ((34, 19, 7), (39, 23, 7), (40, 30, 7),
+                                          (48, 31, 7), (54, 37, 7))
 
 
 # ------------------------------------------------------------

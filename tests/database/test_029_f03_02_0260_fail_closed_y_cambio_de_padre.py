@@ -23,7 +23,8 @@
 #              revierte siempre.
 #
 # PRECONDICIÓN: requiere 0260.
-# Versión: 0.2.2  -- las dos funciones BOLSA aceptan además exactamente la
+# Versión: 0.2.3  -- sucesora 0290: nueva huella del validador de suma tras
+#              la reescritura de P4. Version anterior: 0.2.2.  -- las dos funciones BOLSA aceptan además exactamente la
 #                   sucesora de 0285 (D-121 con jerarquía, naturaleza y
 #                   same-owner).
 #                   v0.2.1: fn_check_reversion_movimiento acepta además exactamente la
@@ -55,7 +56,8 @@ SUCESORAS_0270 = {
     "fn_check_bolsa_prioridad": {("e34503a7cd0f87c1bbf9ee9b8a99d759", 4503)},
     "fn_check_bolsa_prioridad_alcance": {("d1d83d6e38a15190244a26be50d90ad4", 3793)},
     "fn_check_hecho_mov_tesoreria_suma": {("808128976910a4333fd8c6843d0b9919", 1986)},
-    "fn_check_inversion_asignacion_suma": {("128a6bd0e45f5fe3632c83b25cbfa371", 2129)},
+    "fn_check_inversion_asignacion_suma": {("128a6bd0e45f5fe3632c83b25cbfa371", 2129),
+                                          ("3ffd4236dea6f3ad75ad5ffacc5dd247", 3194)},
     "fn_check_reversion_movimiento": {("91a33cb088ab4ff8d9c56c29fc3d12c2", 2466),
                                       ("bd4ab19984492486f595cb539f78d263", 3057)},
     "fn_check_transferencia_estructura": {("545db95496409a5adf01fbb98e4b161a", 2722)},

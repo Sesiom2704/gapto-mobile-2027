@@ -40,7 +40,13 @@
 #              situado ANTES del primer agregado, y ningún otro lock de fila.
 #
 # PRECONDICIÓN: requiere 0250.
-# Versión: 0.4.2  -- 0285: las huellas de las dos funciones BOLSA aceptan además
+# Versión: 0.5.0  -- 0290/P4 revoca la equivalencia estructural historica de
+#              `inversion_asignaciones_efecto`: deja de pertenecer a la
+#              topologia 'un padre + FOR NO KEY UPDATE' y pasa a la familia
+#              D-123, 'advisory (INVERSIONES, owner) + relectura final'. El
+#              test deja de exigirle un row lock y le exige el advisory y la
+#              ausencia total de clausulas de bloqueo de fila.
+#              Version anterior: 0.4.2.  -- 0285: las huellas de las dos funciones BOLSA aceptan además
 #                   exactamente la sucesora de 0285; ambas conservan un único
 #                   FOR NO KEY UPDATE sobre el presupuesto.
 #                   v0.4.1: 0280: la huella de fn_check_reversion_movimiento acepta
@@ -56,6 +62,8 @@
 
 from __future__ import annotations
 
+import hashlib
+
 import psycopg
 import pytest
 
@@ -67,7 +75,7 @@ HUELLAS_0250 = {
     "fn_check_bolsa_prioridad_alcance": ({("7d9abf8d58b812b88d8c58e9968a50fe", 1531), ("7c876f1970c850e791af25226da520b1", 1947),
                                           ("d1d83d6e38a15190244a26be50d90ad4", 3793)}, 1),
     "fn_check_hecho_mov_tesoreria_suma": ({("693fa7086767b581a6bd45eadc8944c2", 993), ("2b9483c066e3f637f24d396babe27720", 1670), ("808128976910a4333fd8c6843d0b9919", 1986)}, 1),
-    "fn_check_inversion_asignacion_suma": ({("9a59512f3e0109689af70e79e78159ee", 1281), ("182087c02d004ca2c2f0d38bd00f10ff", 1957), ("128a6bd0e45f5fe3632c83b25cbfa371", 2129)}, 1),
+    "fn_check_inversion_asignacion_suma": ({("9a59512f3e0109689af70e79e78159ee", 1281), ("182087c02d004ca2c2f0d38bd00f10ff", 1957), ("128a6bd0e45f5fe3632c83b25cbfa371", 2129), ("3ffd4236dea6f3ad75ad5ffacc5dd247", 3194)}, 1),
     "fn_check_participacion_suma": ({("d01fd963789d8adf4b29cbb007604414", 2443), ("b76161555c227a8aa19c3ab513aa4687", 3082)}, 1),
     "fn_check_reversion_movimiento": ({("859f7f7e9a5b0b518e6272c410bedf83", 1775), ("00161f7875783230311834ca84e472e2", 2208), ("91a33cb088ab4ff8d9c56c29fc3d12c2", 2466),
                                       ("bd4ab19984492486f595cb539f78d263", 3057)}, 1),
@@ -98,6 +106,12 @@ def test_0250_ninguna_funcion_gapto_usa_for_update(db: psycopg.Connection) -> No
 @pytest.mark.parametrize("funcion", sorted(HUELLAS_0250))
 def test_0250_huella_y_modo_de_lock(db: psycopg.Connection, funcion: str) -> None:
     aceptadas, apariciones = HUELLAS_0250[funcion]
+    # 0290/P4: una sucesora puede cambiar deliberadamente su numero de row locks.
+    # El numero se fija por HUELLA concreta, no por funcion, para que la
+    # afirmacion siga siendo exacta en cada estado reconocido.
+    apariciones_por_huella = {
+        ("3ffd4236dea6f3ad75ad5ffacc5dd247", 3194): 0,
+    }
     with db.cursor() as cursor:
         cursor.execute("""
             SELECT md5(p.prosrc), length(p.prosrc),
@@ -114,30 +128,52 @@ def test_0250_huella_y_modo_de_lock(db: psycopg.Connection, funcion: str) -> Non
     assert (md5_real, bytes_reales) in aceptadas, (
         f"{funcion}: huella {(md5_real, bytes_reales)} no es ninguna de {sorted(aceptadas)}"
     )
-    assert no_key == apariciones, f"{funcion}: {no_key} FOR NO KEY UPDATE, se esperaban {apariciones}"
+    esperadas = apariciones_por_huella.get((md5_real, bytes_reales), apariciones)
+    assert no_key == esperadas, f"{funcion}: {no_key} FOR NO KEY UPDATE, se esperaban {esperadas}"
     assert volatilidad == "v", f"{funcion}: debe seguir VOLATILE (instantánea nueva por sentencia)"
     assert secdef is False, f"{funcion}: no debe ser SECURITY DEFINER"
     assert propietario == "gapto_owner", f"{funcion}: propietario {propietario}"
 
 
-# tabla hija -> (trigger, función, argumentos del trigger)
+# tabla hija -> (trigger, función, argumentos del trigger, topología de lock)
+#
+# FILA     = D-115 original: un único padre bloqueado con FOR NO KEY UPDATE
+#            antes del agregado.
+# ADVISORY = familia D-123 tras 0290/P4: la serialización la da
+#            pg_advisory_xact_lock(INVERSIONES, owner) y el validador NO
+#            bloquea filas. El cambio no debilita la garantía: el advisory es
+#            estrictamente más grueso que la fila del efecto y además cubre el
+#            reparenting del árbol, que la fila nunca pudo serializar porque
+#            los conjuntos de filas de ambas transacciones son disjuntos.
 EQUIVALENCIAS = {
     "entidad_participaciones": (
         "trg_entidad_participaciones__suma_100", "fn_check_participacion_suma",
-        ["entidad_id", "entidades"],
+        ["entidad_id", "entidades"], "FILA",
     ),
     "inversion_asignaciones_efecto": (
         "trg_inversion_asignaciones_efecto__suma", "fn_check_inversion_asignacion_suma", [],
+        "ADVISORY",
     ),
     "hecho_movimientos_tesoreria": (
         "trg_hecho_movimientos_tesoreria__suma", "fn_check_hecho_mov_tesoreria_suma", [],
+        "FILA",
     ),
+}
+
+# Cuando una función cambia deliberadamente de topología, la esperada se resuelve
+# por su HUELLA concreta y no por la tabla: así el test sigue siendo exacto en
+# cada estado reconocido de la cadena en lugar de aceptar cualquiera de las dos.
+TOPOLOGIA_POR_HUELLA = {
+    "9a59512f3e0109689af70e79e78159ee": "FILA",       # 0250
+    "182087c02d004ca2c2f0d38bd00f10ff": "FILA",       # 0260
+    "128a6bd0e45f5fe3632c83b25cbfa371": "FILA",       # 0270
+    "3ffd4236dea6f3ad75ad5ffacc5dd247": "ADVISORY",   # 0290 / P4
 }
 
 
 @pytest.mark.parametrize("tabla", sorted(EQUIVALENCIAS))
 def test_0250_equivalencia_estructural(db: psycopg.Connection, tabla: str) -> None:
-    trigger, funcion, argumentos = EQUIVALENCIAS[tabla]
+    trigger, funcion, argumentos, topologia = EQUIVALENCIAS[tabla]
     with db.cursor() as cursor:
         cursor.execute("""
             SELECT p.proname, t.tgconstraint <> 0, t.tgdeferrable, t.tginitdeferred,
@@ -163,15 +199,26 @@ def test_0250_equivalencia_estructural(db: psycopg.Connection, tabla: str) -> No
     assert decodificados == argumentos, f"{tabla}: argumentos {decodificados} != {argumentos}"
 
     texto = fuente.lower()
-    assert texto.count("for no key update") == 1, f"{funcion}: debe tener un único lock de padre"
-    for otro in ("for update", "for share", "for key share", "pg_advisory"):
-        assert otro not in texto.replace("for no key update", ""), (
-            f"{funcion}: segunda topología de lock ({otro})"
-        )
-    posicion_lock = texto.index("for no key update")
+    topologia = TOPOLOGIA_POR_HUELLA.get(hashlib.md5(fuente.encode()).hexdigest(), topologia)
     agregados = [texto.index(a) for a in ("sum(", "count(") if a in texto]
     assert agregados, f"{funcion}: no se encuentra el agregado"
-    assert posicion_lock < min(agregados), f"{funcion}: el lock del padre no precede al agregado"
+
+    if topologia == "FILA":
+        assert texto.count("for no key update") == 1, f"{funcion}: debe tener un único lock de padre"
+        for otro in ("for update", "for share", "for key share", "pg_advisory"):
+            assert otro not in texto.replace("for no key update", ""), (
+                f"{funcion}: segunda topología de lock ({otro})"
+            )
+        posicion = texto.index("for no key update")
+    else:
+        for otro in ("for update", "for no key update", "for share", "for key share"):
+            assert otro not in texto, (
+                f"{funcion}: topología ADVISORY, no debe bloquear filas ({otro})"
+            )
+        clave = "pg_advisory_xact_lock(hashtext('gapto:inversiones')"
+        assert texto.count(clave) == 1, f"{funcion}: debe tomar el advisory (INVERSIONES, owner)"
+        posicion = texto.index(clave)
+    assert posicion < min(agregados), f"{funcion}: el lock no precede al agregado"
 
 
 def test_0270_c15b_equivalencia_con_c15a(db: psycopg.Connection) -> None:

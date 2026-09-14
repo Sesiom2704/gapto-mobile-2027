@@ -11,7 +11,9 @@
 #              Todos los casos se ejecutan con el rol de conexión, sea cual
 #              sea, creando los datos bajo SET ROLE gapto_owner (D-137), y las
 #              transacciones se revierten siempre.
-# Versión: 0.1.1  -- el contrato de FK sube a 174 por 0288.
+# Versión: 0.1.2  -- sucesora 0290: la afirmación pasa de igualdad a suelo,
+#              porque 0290 añade legítimamente una función y seis triggers.
+#              Version anterior: 0.1.1.  -- el contrato de FK sube a 174 por 0288.
 # Versión: 0.1.0
 # ============================================================
 from __future__ import annotations
@@ -460,10 +462,18 @@ def test_0286_contrato_fisico(db: psycopg.Connection) -> None:
 
 
 def test_0286_no_cambia_funciones_ni_triggers(db: psycopg.Connection) -> None:
-    """0286 es puramente declarativa: el recuento de 0285 no se mueve."""
+    """0286 es puramente declarativa: no añade funciones ni triggers propios.
+
+    Se expresa como suelo y no como igualdad, con el criterio de D-073: una
+    migration posterior legítima —0290 añade una función y seis triggers— no
+    debe hacer fallar la afirmación histórica de que 0286 no los tocó."""
     assert _uno(db, "SELECT count(*) FROM pg_catalog.pg_proc p "
-                    "WHERE p.pronamespace = 'gapto'::pg_catalog.regnamespace") == 25
+                    "WHERE p.pronamespace = 'gapto'::pg_catalog.regnamespace") >= 25
     assert _uno(db, """
         SELECT count(*) FROM pg_catalog.pg_trigger t
           JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid
-         WHERE c.relnamespace = 'gapto'::pg_catalog.regnamespace AND NOT t.tgisinternal""") == 48
+         WHERE c.relnamespace = 'gapto'::pg_catalog.regnamespace AND NOT t.tgisinternal""") >= 48
+    assert _uno(db, """
+        SELECT count(*) FROM pg_catalog.pg_trigger t
+         WHERE t.tgrelid = 'gapto.efecto_cuentas'::pg_catalog.regclass
+           AND NOT t.tgisinternal""") == 0

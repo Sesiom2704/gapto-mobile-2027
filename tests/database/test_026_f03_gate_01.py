@@ -19,7 +19,8 @@
 #
 # PRECONDICIÓN: requiere 0190 (B16). Debe ejecutarse desde la raiz del
 #              repositorio, porque G6 inspecciona migrations/ y tests/.
-# Versión: 0.6.0  -- G2 acepta la sucesora 0288 (174 FK).
+# Versión: 0.7.0  -- sucesora 0290: +1 funcion y +6 constraint triggers por
+#              D-080. Version anterior: 0.6.0.  -- G2 acepta la sucesora 0288 (174 FK).
 # Versión: 0.5.0  -- G2 acepta la sucesora 0286 y la matriz de runtime sube en 1.
 # Versión: 0.4.0  -- G2 acepta además EXACTAMENTE la sucesora 0285 (funciones
 #                   25, triggers 48, constraint triggers 31).
@@ -83,6 +84,10 @@ SUCESORA_0286 = {**SUCESORA_0285, "tablas": 80, "tenant_force_rls": 75,
 # hecho_entidades e inversion_asignaciones_efecto: +5 FK compuestas contra los
 # anchors. No cambia ninguna otra magnitud del contrato.
 SUCESORA_0288 = {**SUCESORA_0286, "foreign_keys": 174}
+# 0290 materializa D-080: una funcion nueva y seis constraint triggers. No
+# toca tablas, FK, UNIQUE, EXCLUDE, policies, vistas ni la matriz runtime.
+SUCESORA_0290 = {**SUCESORA_0288, "funciones": 26,
+                 "triggers_no_internos": 54, "constraint_triggers": 37}
 
 # La matriz de runtime la fija B14/B18/B21; 0286 suma efecto_cuentas en
 # SELECT, INSERT y UPDATE, y NO en DELETE (bucket A de D-093).
@@ -158,7 +163,8 @@ def test_gate_g2_contrato_fisico(db: psycopg.Connection) -> None:
              WHERE n.nspname='gapto' AND NOT t.tgisinternal
                AND t.tgname LIKE '%%guard%%'"""),
     }
-    if obtenido in (SUCESORA_0270, SUCESORA_0280, SUCESORA_0285, SUCESORA_0286, SUCESORA_0288):
+    if obtenido in (SUCESORA_0270, SUCESORA_0280, SUCESORA_0285, SUCESORA_0286,
+                    SUCESORA_0288, SUCESORA_0290):
         return
     diferencias = {
         k: (CONTRATO_ESPERADO[k], obtenido[k])

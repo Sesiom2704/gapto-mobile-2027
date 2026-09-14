@@ -34,7 +34,12 @@
 #              el montaje.
 #
 # PRECONDICIÓN: requiere 0270.
-# Versión: 0.1.2  -- 0288 anade owner_user_id y hecho_id a
+# Versión: 0.1.3  -- sucesora 0290: nueva huella del validador de suma; el
+#              montaje de efecto con asignaciones informa ahora la inversion
+#              principal que exige D-080, sin alterar las propiedades que
+#              fija 0270; y la VISIBILIDAD del efecto puede emitirla
+#              cualquiera de los dos validadores de hecho_efectos.
+#              Version anterior: 0.1.2.  -- 0288 anade owner_user_id y hecho_id a
 #                    inversion_asignaciones_efecto; el montaje los informa.
 # Versión: 0.1.1  -- 0280 reescribe fn_check_reversion_movimiento (profundidad
 #                   1): su huella 0270 pasa a histórica y el test acepta
@@ -63,6 +68,9 @@ HUELLAS_0270 = {
 
 # Sucesora conocida: 0280 reescribe la función de reversión (profundidad 1).
 SUCESORAS_0280 = {"fn_check_reversion_movimiento": {("bd4ab19984492486f595cb539f78d263", 3057)}}
+# 0290/P4 reescribe el validador de suma: advisory en lugar de row lock.
+SUCESORAS_0290 = {"fn_check_inversion_asignacion_suma":
+                  {("3ffd4236dea6f3ad75ad5ffacc5dd247", 3194)}}
 
 # tabla -> (trigger, función, eventos UPDATE OF, constraint diferido)
 TRIGGERS_0270 = {
@@ -155,6 +163,16 @@ def _efecto_inversion(cursor, importe: str = "100") -> None:
                    (EFECTO_INV, HECHO, Decimal(importe)))
 
 
+def _principal_inversion(cursor) -> None:
+    """SUCESORA 0290 / D-080: un efecto INVERSION con asignaciones exige una
+    inversión principal a nivel de efecto. Es montaje; las propiedades que fija
+    0270 (suma, signo, tipo del efecto, fail-closed) no cambian."""
+    cursor.execute("INSERT INTO gapto.hecho_entidades (owner_user_id, hecho_id, efecto_id, "
+                   "entidad_id, tipo_relacion, principal) "
+                   "VALUES (%s, %s, %s, %s, 'AFECTA_A', true)",
+                   (OWNER, HECHO, EFECTO_INV, ENT_INV))
+
+
 def _asignacion_inversion(cursor, importe: str) -> None:
     # SUCESORA 0288: la tabla lleva los localizadores de tenant owner_user_id y
     # hecho_id, NOT NULL, que sostienen las FK compuestas contra los anchors.
@@ -163,6 +181,7 @@ def _asignacion_inversion(cursor, importe: str) -> None:
                    "inversion_entidad_id, importe_asignado, owner_user_id, hecho_id) "
                    "VALUES (%s, %s, %s, %s, %s)",
                    (EFECTO_INV, ENT_INV, Decimal(importe), OWNER, HECHO))
+    _principal_inversion(cursor)
 
 
 def _tercero_persona(cursor) -> None:
@@ -244,7 +263,8 @@ def test_0270_huella_y_atributos(db: psycopg.Connection, funcion: str) -> None:
         """, (funcion,))
         fila = cursor.fetchone()
     assert fila is not None, f"{funcion} no existe"
-    aceptadas = {HUELLAS_0270[funcion]} | SUCESORAS_0280.get(funcion, set())
+    aceptadas = ({HUELLAS_0270[funcion]} | SUCESORAS_0280.get(funcion, set())
+                 | SUCESORAS_0290.get(funcion, set()))
     assert (fila[0], fila[1]) in aceptadas, f"{funcion}: huella {fila[:2]}"
     assert fila[2:] == (False, "v", None, "gapto_owner"), f"{funcion}: atributos {fila[2:]}"
     assert "--" not in _fuente(db, funcion), f"{funcion}: comentario dentro del cuerpo"
@@ -725,4 +745,8 @@ def test_0270_efecto_con_contexto_cambiado_falla(db: psycopg.Connection) -> None
         cursor.execute("UPDATE gapto.hecho_efectos SET tipo_efecto = 'INVERSION' WHERE id = %s",
                        (EFECTO_INV,))
         cursor.execute("SELECT set_config('gapto.owner_user_id', %s, true)", (OTRO_OWNER,))
-        _rechaza(cursor, "hecho_efectos: VISIBILIDAD - el efecto .* asignacion de inversion")
+        # Sobre hecho_efectos hay ahora dos validadores fail-closed: el de suma,
+        # que no ve el efecto, y el de D-080, que no puede resolver el owner.
+        # Cualquiera de los dos es una denegación correcta; el test afirma la
+        # propiedad, no cuál de los dos gana la carrera ni con qué redacción.
+        _rechaza(cursor, "hecho_efectos: VISIBILIDAD")

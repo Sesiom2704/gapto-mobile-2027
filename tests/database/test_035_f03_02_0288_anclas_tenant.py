@@ -9,7 +9,10 @@
 #              compuestas contra los anchors. Todos los casos cross-tenant se
 #              comprueban con FORCE RLS levantado dentro de la transacción,
 #              que es como se simula un rol BYPASSRLS (D-137).
-# Versión: 0.1.0
+# Versión: 0.1.1  -- sucesora 0290: `hecho_entidades` e
+#              `inversion_asignaciones_efecto` reciben los triggers de D-080.
+#              La propiedad que fija 0288 sigue siendo que ELLA no añadió
+#              ninguno. Version anterior: 0.1.0.
 # ============================================================
 from __future__ import annotations
 
@@ -179,8 +182,11 @@ def test_0288_force_rls_restaurado(db: psycopg.Connection) -> None:
 
 
 def test_0288_sin_triggers_nuevos(db: psycopg.Connection) -> None:
-    """El endurecimiento es declarativo: el único trigger de las dos tablas
-    sigue siendo el de suma de asignaciones, que ya existía."""
+    """El endurecimiento de 0288 es declarativo: no añadió ningún trigger.
+
+    SUCESORA 0290: D-080 sí añade triggers a las dos tablas. La afirmación se
+    reformula como conjunto cerrado de sucesoras conocidas, no como igualdad
+    con el estado de 0288, aplicando 12C.5."""
     nombres = {
         r[0] for r in db.execute("""
             SELECT t.tgname FROM pg_catalog.pg_trigger t
@@ -188,7 +194,12 @@ def test_0288_sin_triggers_nuevos(db: psycopg.Connection) -> None:
                                  'gapto.inversion_asignaciones_efecto'::pg_catalog.regclass)
                AND NOT t.tgisinternal""").fetchall()
     }
-    assert nombres == {"trg_inversion_asignaciones_efecto__suma"}
+    assert nombres in (
+        {"trg_inversion_asignaciones_efecto__suma"},
+        {"trg_inversion_asignaciones_efecto__suma",
+         "trg_inversion_asignaciones_efecto__d080",
+         "trg_hecho_entidades__d080"},
+    ), f"triggers no reconocidos sobre los dos puentes: {sorted(nombres)}"
 
 
 def test_0288_fk_simples_conservadas(db: psycopg.Connection) -> None:
