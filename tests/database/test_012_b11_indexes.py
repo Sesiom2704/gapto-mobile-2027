@@ -6,6 +6,7 @@
 #              FK + patrones de acceso compuestos + 6 GIN pg_trgm),
 #              excluyendo explícitamente los índices que EXCLUDE (B10)
 #              ya crea automáticamente por sí mismo.
+# Versión: 0.1.2  -- 0288 anade 3 indices de cobertura de FK.
 # Versión: 0.1.1  -- 0286 anade 2 indices secundarios y la cobertura de sus 3 FK.
 # Versión: 0.1.0
 # ============================================================
@@ -37,7 +38,9 @@ def test_b11_exactly_134_secondary_indexes(db: psycopg.Connection) -> None:
     """SUCESORA 0286 / D-146: B11 cerró 134 índices secundarios; efecto_cuentas
     añade el único parcial de unicidad de cuenta generadora y sus dos índices
     de cobertura de FK."""
-    assert _non_exclude_secondary_index_count(db) == 136
+    # SUCESORA 0288: +3 indices de cobertura de las FK compuestas de tenant
+    # en hecho_entidades e inversion_asignaciones_efecto.
+    assert _non_exclude_secondary_index_count(db) == 139
 
 
 def test_b11_gin_trgm_indexes_on_expected_columns(db: psycopg.Connection) -> None:

@@ -34,6 +34,8 @@
 #              el montaje.
 #
 # PRECONDICIÓN: requiere 0270.
+# Versión: 0.1.2  -- 0288 anade owner_user_id y hecho_id a
+#                    inversion_asignaciones_efecto; el montaje los informa.
 # Versión: 0.1.1  -- 0280 reescribe fn_check_reversion_movimiento (profundidad
 #                   1): su huella 0270 pasa a histórica y el test acepta
 #                   exactamente {0270, 0280} para esa función.
@@ -154,9 +156,13 @@ def _efecto_inversion(cursor, importe: str = "100") -> None:
 
 
 def _asignacion_inversion(cursor, importe: str) -> None:
+    # SUCESORA 0288: la tabla lleva los localizadores de tenant owner_user_id y
+    # hecho_id, NOT NULL, que sostienen las FK compuestas contra los anchors.
+    # El caso que fija este test (0270) no cambia; solo se informan.
     cursor.execute("INSERT INTO gapto.inversion_asignaciones_efecto (efecto_inversion_id, "
-                   "inversion_entidad_id, importe_asignado) VALUES (%s, %s, %s)",
-                   (EFECTO_INV, ENT_INV, Decimal(importe)))
+                   "inversion_entidad_id, importe_asignado, owner_user_id, hecho_id) "
+                   "VALUES (%s, %s, %s, %s, %s)",
+                   (EFECTO_INV, ENT_INV, Decimal(importe), OWNER, HECHO))
 
 
 def _tercero_persona(cursor) -> None:

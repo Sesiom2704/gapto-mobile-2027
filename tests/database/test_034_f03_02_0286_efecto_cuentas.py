@@ -11,6 +11,7 @@
 #              Todos los casos se ejecutan con el rol de conexión, sea cual
 #              sea, creando los datos bajo SET ROLE gapto_owner (D-137), y las
 #              transacciones se revierten siempre.
+# Versión: 0.1.1  -- el contrato de FK sube a 174 por 0288.
 # Versión: 0.1.0
 # ============================================================
 from __future__ import annotations
@@ -27,7 +28,8 @@ OWNER_B = "c0286000-0000-4000-8000-000000000002"
 HUELLAS_0286 = {
     "tablas": 80,
     "policies": 82,
-    "foreign_keys": 169,
+    # SUCESORA 0288: +5 FK compuestas de tenant fuera de esta tabla.
+    "foreign_keys": 174,
     "unique_constraints": 41,
 }
 

@@ -29,6 +29,7 @@
 #
 # PRECONDICIÓN: requiere 0190 (B16) para asumir `gapto_runtime` y 0210
 #              (B19), sin el cual cuatro tablas no admiten INSERT bajo RLS.
+# Versión: 0.2.2  -- 0288: dos tablas pasan de derivadas a directas.
 # Versión: 0.2.1  -- 0286: 75 tablas tenant y desempate de FK que comparten columna.
 # Versión: 0.2.0  -- v0.1.1 insertaba los catalogos globales como gapto_owner
 #                   en vez de con el rol de conexion, porque en Supabase el rol
@@ -427,7 +428,10 @@ def test_b17_alcance_cubierto(db: psycopg.Connection, escenario) -> None:
     directas = [t for t, v in escenario.M.items() if v["rls"] and v["has_owner"]]
     # SUCESORA 0286 / D-146: efecto_cuentas es tenant con owner propio.
     assert len(derivadas) + len(directas) == 75
-    assert len(derivadas) == 52, "51 con ownership derivado + usuarios como raíz"
+    # SUCESORA 0288: hecho_entidades e inversion_asignaciones_efecto pasan a
+    # llevar owner_user_id propio (anclas declarativas de tenant), asi que el
+    # motor las clasifica como directas. El total no cambia.
+    assert len(derivadas) == 50, "eran 52 antes de 0288; dos pasan a directas"
 
 
 def test_b17_insert_propio_como_runtime(db: psycopg.Connection, escenario) -> None:

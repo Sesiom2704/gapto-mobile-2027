@@ -121,6 +121,7 @@
 #
 # PRECONDICIÓN: cadena 0001..0285 aplicada en gapto2027_cleanroom (C1-C11
 #              requieren 0250; C12-C17, 0270; C18-C25, 0280; C26-C31, 0285).
+# Versión: 0.5.1  -- 0288: INS_ASIG_INV informa owner_user_id y hecho_id.
 # Versión: 0.5.0  -- añade C26-C31 (0285). C10 y C11 CAMBIAN DE TOPOLOGÍA: la
 #                   congelación F(a) es un BEFORE que toma la fila del
 #                   presupuesto con FOR NO KEY UPDATE durante el propio DML, de
@@ -242,8 +243,10 @@ INS_HMT = (
 UPD_MOV_IMPORTE = "UPDATE gapto.movimientos_tesoreria SET importe = %s WHERE id = %s"
 UPD_MOV_CUENTA = "UPDATE gapto.movimientos_tesoreria SET cuenta_id = %s WHERE id = %s"
 INS_ASIG_INV = (
+    # 0288 anade los localizadores de tenant owner_user_id y hecho_id, NOT NULL.
     "INSERT INTO gapto.inversion_asignaciones_efecto (efecto_inversion_id, "
-    "inversion_entidad_id, importe_asignado) VALUES (%s, %s, %s)"
+    "inversion_entidad_id, importe_asignado, owner_user_id, hecho_id) "
+    "VALUES (%s, %s, %s, %s, %s)"
 )
 INS_MOVIMIENTO = (
     "INSERT INTO gapto.movimientos_tesoreria (cuenta_id, fecha_movimiento, importe, "
@@ -729,7 +732,7 @@ class Laboratorio:
         )])
         return hecho
 
-    def nuevo_efecto_inversion(self, importe: Decimal) -> tuple[str, str]:
+    def nuevo_efecto_inversion(self, importe: Decimal) -> tuple[str, str, str]:
         """Entidad INVERSION con su subtipo y un efecto INVERSION PARCIAL."""
         entidad = self._anotar("entidades", str(uuid.uuid4()))
         hecho = self._anotar("hechos", str(uuid.uuid4()))
@@ -747,7 +750,7 @@ class Laboratorio:
              "estado_atribucion) VALUES (%s, %s, 'INVERSION', %s, 'PARCIAL')",
              (efecto, hecho, importe)),
         ])
-        return entidad, efecto
+        return entidad, efecto, hecho
 
     def nuevo_tercero_persona_sin_datos(self) -> str:
         tercero = self._anotar("terceros", str(uuid.uuid4()))
@@ -1705,7 +1708,7 @@ def test_c27_c13_inversion_frente_a_importe_delta(caso, record_testsuite_propert
     """Efecto INVERSION de 100. A asigna 100 a la inversión; B reduce
     importe_delta a 50. Misma topología que C12 sobre hecho_efectos."""
     lab = caso
-    entidad, efecto = lab.nuevo_efecto_inversion(Decimal("100.0000"))
+    entidad, efecto, hecho = lab.nuevo_efecto_inversion(Decimal("100.0000"))
 
     def valido() -> bool:
         importe, suma = lab.asignado_inversion(efecto)
@@ -1713,7 +1716,7 @@ def test_c27_c13_inversion_frente_a_importe_delta(caso, record_testsuite_propert
 
     _caso_segunda_bloqueada(
         lab, record_testsuite_property, "C13",
-        [(INS_ASIG_INV, (efecto, entidad, Decimal("100.0000")))],
+        [(INS_ASIG_INV, (efecto, entidad, Decimal("100.0000"), OWNER_LAB, hecho))],
         [(UPD_EFECTO_IMPORTE, (Decimal("50.0000"), efecto))],
         valido, "RECHAZO",
     )
