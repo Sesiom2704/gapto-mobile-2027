@@ -76,6 +76,31 @@
 #                    predecesor frente a UPDATE de versión del sucesor
 #                    (write-skew que solo evita el advisory lock)
 #                C25 bifurcación concurrente: la arbitra la UNIQUE (23505)
+#                --- R7 / 0310 (D-169, D-170, D-171, D-172 §11) ---
+#                C39 60 + 60 sobre porcion 100: write-skew canonico de D-169.
+#                    Cada fila cabe; solo la suma delata. Con barrera.
+#                C40 UPDATE concurrente de dos aportaciones ya confirmadas que
+#                    juntas pasan de 80 a 160 sobre 100. Con barrera.
+#                C41 relink concurrente: dos aportaciones que se mueven a la
+#                    misma conciliacion destino; cada una cabe, juntas no.
+#                C42 importe_asignado frente a aportacion confirmada: la
+#                    violacion se crea DESDE EL PADRE (parent-side).
+#                C43 hechos_financieros.moneda frente a conciliacion nueva sobre
+#                    OTRO movimiento. Es el contraejemplo que descarto el
+#                    movimiento como lock root: con root en el movimiento los
+#                    conjuntos de locks son disjuntos y ambas confirman.
+#                C44 movimientos_tesoreria.cuenta_id frente a INSERT de HMT
+#                    sobre ese mismo movimiento (D-171 §9). La serializacion NO
+#                    la aporta 0310: la aporta el anchor (cuenta_id, id) de
+#                    0220/D-099, que hace de cuenta_id columna KEY y convierte
+#                    el UPDATE en FOR UPDATE, incompatible con el FOR KEY SHARE
+#                    del INSERT de la HMT.
+#                C45 multi-hecho H1/H2 en orden de entrada INVERSO: la
+#                    canonicalizacion de Hs ordena por uuid, de modo que el
+#                    orden del array de entrada no debe introducir deadlock.
+#                C46 residual H <-> M: el UPDATE de cuenta_id retiene M por el
+#                    propio DML y pide H despues, mientras la otra via toma H y
+#                    luego M. Ciclo aceptado por D-171 §7 bajo D-114/D-143/D-159.
 #              Clasificaciones, inversiones y regiones se cubren por equivalencia
 #              estructural con C18-C20 (test_032, D-115).
 #              C15b (moneda frente al primer cierre_saldos_cuenta) se acepta por
@@ -121,6 +146,15 @@
 #
 # PRECONDICIÓN: cadena 0001..0285 aplicada en gapto2027_cleanroom (C1-C11
 #              requieren 0250; C12-C17, 0270; C18-C25, 0280; C26-C31, 0285).
+# Versión: 0.7.0  -- R7 / 0310. Casos C39..C46 sobre la invariante agregada de
+#              aportaciones frente a porcion conciliada (D-169/D-170/D-171).
+#              Lock root: la fila de hechos_financieros con FOR NO KEY UPDATE.
+#              CORRECCION NECESARIA DE limpiar(): hecho_aportaciones_pago es
+#              hija de hecho_movimientos_tesoreria con ON DELETE RESTRICT y no
+#              se borraba. Sin este arreglo el primer caso de R7 dejaria el
+#              laboratorio bloqueado para todos los siguientes.
+#              nueva_cuenta y nuevo_hecho aceptan moneda; por defecto 'EUR', de
+#              modo que ningun caso anterior cambia de comportamiento.
 # Versión: 0.6.0  -- 0290/D-080: casos C32..C38 sobre inversión principal,
 #              destinos dentro de la rama y el advisory (INVERSIONES, owner)
 #              como único lock root tras P4. La limpieza cubre ahora
@@ -248,6 +282,17 @@ INS_HMT = (
 )
 UPD_MOV_IMPORTE = "UPDATE gapto.movimientos_tesoreria SET importe = %s WHERE id = %s"
 UPD_MOV_CUENTA = "UPDATE gapto.movimientos_tesoreria SET cuenta_id = %s WHERE id = %s"
+# --- R7 / 0310 ---
+INS_APORTACION = (
+    "INSERT INTO gapto.hecho_aportaciones_pago "
+    "(id, hecho_id, actor_id, importe, criterio_aportacion, hecho_movimiento_tesoreria_id) "
+    "VALUES (%s, %s, %s, %s, 'MANUAL', %s)")
+UPD_APORTACION_IMPORTE = "UPDATE gapto.hecho_aportaciones_pago SET importe = %s WHERE id = %s"
+UPD_APORTACION_HMT = (
+    "UPDATE gapto.hecho_aportaciones_pago SET hecho_movimiento_tesoreria_id = %s WHERE id = %s")
+UPD_HMT_ASIGNADO = (
+    "UPDATE gapto.hecho_movimientos_tesoreria SET importe_asignado = %s WHERE id = %s")
+UPD_HECHO_MONEDA = "UPDATE gapto.hechos_financieros SET moneda = %s WHERE id = %s"
 INS_ASIG_INV = (
     # 0288 anade los localizadores de tenant owner_user_id y hecho_id, NOT NULL.
     "INSERT INTO gapto.inversion_asignaciones_efecto (efecto_inversion_id, "
@@ -602,13 +647,13 @@ class Laboratorio:
         self.creados.setdefault(clase, []).append(identificador)
         return identificador
 
-    def nueva_cuenta(self) -> str:
+    def nueva_cuenta(self, moneda: str = "EUR") -> str:
         cuenta = self._anotar("cuentas", str(uuid.uuid4()))
         self.tx_owner([(
             "INSERT INTO gapto.cuentas (id, owner_user_id, nombre, tipo, naturaleza, moneda, "
             "computa_liquidez, computa_patrimonio, permite_negativo) "
-            "VALUES (%s, %s, 'Cuenta C027', 'CORRIENTE', 'ACTIVO', 'EUR', true, true, false)",
-            (cuenta, OWNER_LAB),
+            "VALUES (%s, %s, 'Cuenta C027', 'CORRIENTE', 'ACTIVO', %s, true, true, false)",
+            (cuenta, OWNER_LAB, moneda),
         )])
         return cuenta
 
@@ -744,15 +789,58 @@ class Laboratorio:
         self.tx_owner(sentencias)
         return linea
 
-    def nuevo_hecho(self) -> str:
+    def nuevo_hecho(self, moneda: str = "EUR") -> str:
         hecho = self._anotar("hechos", str(uuid.uuid4()))
         self.tx_owner([(
             "INSERT INTO gapto.hechos_financieros (id, owner_user_id, tipo_hecho_id, "
             "fecha_hecho, concepto, moneda, estado_localizacion, presupuestable) "
-            "VALUES (%s, %s, %s, CURRENT_DATE, 'Hecho C027', 'EUR', 'NO_APLICA', true)",
-            (hecho, OWNER_LAB, self.tipo_gasto),
+            "VALUES (%s, %s, %s, CURRENT_DATE, 'Hecho C027', %s, 'NO_APLICA', true)",
+            (hecho, OWNER_LAB, self.tipo_gasto, moneda),
         )])
         return hecho
+
+    # ---------- R7 / 0310: conciliaciones y aportaciones ----------
+
+    def nueva_conciliacion(self, hecho: str, movimiento: str, importe: Decimal) -> str:
+        """Conciliacion ya confirmada. El UNIQUE (hecho_id, movimiento_tesoreria_id)
+        de 0080 admite UNA sola por par, asi que dos conciliaciones del mismo
+        hecho exigen movimientos distintos."""
+        conciliacion = str(uuid.uuid4())
+        self.tx_owner([(
+            "INSERT INTO gapto.hecho_movimientos_tesoreria "
+            "(id, hecho_id, movimiento_tesoreria_id, importe_asignado) "
+            "VALUES (%s, %s, %s, %s)",
+            (conciliacion, hecho, movimiento, importe))])
+        return conciliacion
+
+    def nueva_aportacion(self, hecho: str, actor: str, conciliacion: str | None,
+                         importe: Decimal) -> str:
+        """Aportacion ya confirmada."""
+        aportacion = str(uuid.uuid4())
+        self.tx_owner([(INS_APORTACION, (aportacion, hecho, actor, importe, conciliacion))])
+        return aportacion
+
+    def d169_valido(self, hecho: str) -> bool:
+        """Oraculo de D-169/D-170 leido del estado CONFIRMADO.
+
+        Evalua la comparabilidad POR CONCILIACION y sobre el estado resultante:
+        una conciliacion en multidivisa no se compara nominalmente (D-170 §8).
+        Devuelve False en cuanto alguna conciliacion comparable del hecho tiene
+        SUM(aportaciones vinculadas) > ABS(importe_asignado).
+        """
+        filas = self.leer(
+            "SELECT r.id, pg_catalog.abs(r.importe_asignado), "
+            "       COALESCE(sum(a.importe), 0), (h.moneda = c.moneda) "
+            "  FROM gapto.hecho_movimientos_tesoreria r "
+            "  JOIN gapto.hechos_financieros    h ON h.id = r.hecho_id "
+            "  JOIN gapto.movimientos_tesoreria m ON m.id = r.movimiento_tesoreria_id "
+            "  JOIN gapto.cuentas               c ON c.id = m.cuenta_id "
+            "  LEFT JOIN gapto.hecho_aportaciones_pago a "
+            "         ON a.hecho_movimiento_tesoreria_id = r.id "
+            " WHERE r.hecho_id = %s "
+            " GROUP BY r.id, r.importe_asignado, h.moneda, c.moneda", (hecho,))
+        return all(not comparable or suma <= porcion
+                   for _, porcion, suma, comparable in filas)
 
     def nuevo_efecto_inversion(self, importe: Decimal) -> tuple[str, str, str]:
         """Entidad INVERSION con su subtipo y un efecto INVERSION PARCIAL."""
@@ -1002,6 +1090,11 @@ class Laboratorio:
         self.tx_owner([
             ("DELETE FROM gapto.hecho_relaciones WHERE hecho_origen_id = ANY(%s::uuid[]) "
              "OR hecho_destino_id = ANY(%s::uuid[])", (c.get("hechos", []), c.get("hechos", []))),
+            # 0310: hecho_aportaciones_pago es hija de hecho_movimientos_tesoreria
+            # con ON DELETE RESTRICT (FK simple y FK compuesta de 0300). Borrarla
+            # DESPUES dejaria el laboratorio bloqueado para el resto de la bateria.
+            ("DELETE FROM gapto.hecho_aportaciones_pago WHERE hecho_id = ANY(%s::uuid[])",
+             (c.get("hechos", []),)),
             ("DELETE FROM gapto.hecho_movimientos_tesoreria WHERE hecho_id = ANY(%s::uuid[])",
              (c.get("hechos", []),)),
             ("DELETE FROM gapto.hecho_entidades WHERE hecho_id = ANY(%s::uuid[])",
@@ -1807,6 +1900,225 @@ def test_c27_c11_bolsa_cruce_desde_alcance(caso, record_testsuite_property) -> N
         [(INS_ALCANCE, (linea_1, cat_c))],
         [(INS_ALCANCE, (linea_2, cat_c))],
         lambda: lab.empates_bolsa(presupuesto) == 0, "RECHAZO",
+    )
+
+
+# ------------------------------------------------------------
+# R7 / 0310 — invariante agregada aportaciones vs porcion conciliada
+# (D-169 semantica, D-170 estado resultante, D-171 lock root en el hecho)
+# ------------------------------------------------------------
+
+def test_c27_c39_write_skew_60_mas_60_sobre_100(caso, record_testsuite_property) -> None:
+    """Caso canonico de D-169: porcion 100 EUR/EUR, dos aportaciones de 60 de
+    actores distintos. Cada fila cabe; solo la SUMA delata la violacion, asi que
+    una validacion fila a fila no discriminaria. Con barrera: A valida ya y
+    retiene el lock del hecho, B debe esperarlo y rechazar tras releer."""
+    lab = caso
+    cuenta = lab.nueva_cuenta("EUR")
+    movimiento = lab.nuevo_movimiento(cuenta, Decimal("-1000.0000"))
+    hecho = lab.nuevo_hecho("EUR")
+    conc = lab.nueva_conciliacion(hecho, movimiento, Decimal("-100.0000"))
+    actor_a, actor_b = lab.nuevo_actor(), lab.nuevo_actor()
+
+    _caso_con_barrera(
+        lab, record_testsuite_property, "C39",
+        [(INS_APORTACION, (str(uuid.uuid4()), hecho, actor_a, Decimal("60.0000"), conc))],
+        [(INS_APORTACION, (str(uuid.uuid4()), hecho, actor_b, Decimal("60.0000"), conc))],
+        lambda: lab.d169_valido(hecho),
+    )
+
+
+def test_c27_c40_update_concurrente_de_aportaciones(caso, record_testsuite_property) -> None:
+    """Dos aportaciones de 40 ya CONFIRMADAS sobre porcion 100. Cada sesion sube
+    la suya a 80: por separado el estado resultante cabria; juntas suman 160.
+    La violacion no la crea ningun INSERT, sino dos UPDATE de importe."""
+    lab = caso
+    cuenta = lab.nueva_cuenta("EUR")
+    movimiento = lab.nuevo_movimiento(cuenta, Decimal("-1000.0000"))
+    hecho = lab.nuevo_hecho("EUR")
+    conc = lab.nueva_conciliacion(hecho, movimiento, Decimal("-100.0000"))
+    ap_a = lab.nueva_aportacion(hecho, lab.nuevo_actor(), conc, Decimal("40.0000"))
+    ap_b = lab.nueva_aportacion(hecho, lab.nuevo_actor(), conc, Decimal("40.0000"))
+
+    _caso_con_barrera(
+        lab, record_testsuite_property, "C40",
+        [(UPD_APORTACION_IMPORTE, (Decimal("80.0000"), ap_a))],
+        [(UPD_APORTACION_IMPORTE, (Decimal("80.0000"), ap_b))],
+        lambda: lab.d169_valido(hecho),
+    )
+
+
+def test_c27_c41_relink_concurrente_a_la_misma_conciliacion(caso, record_testsuite_property) -> None:
+    """Destino vacio con porcion 100. Dos aportaciones de 60 viven en otra
+    conciliacion del MISMO hecho y cada sesion mueve una al destino. Cada relink
+    por separado cabe; juntos dan 120. Gracias a la FK compuesta de 0300 ambas
+    conciliaciones pertenecen al mismo hecho, que es lo que hace del hecho un
+    cierre suficiente para el relink."""
+    lab = caso
+    cuenta = lab.nueva_cuenta("EUR")
+    mov_origen = lab.nuevo_movimiento(cuenta, Decimal("-1000.0000"))
+    mov_destino = lab.nuevo_movimiento(cuenta, Decimal("-1000.0000"))
+    hecho = lab.nuevo_hecho("EUR")
+    origen = lab.nueva_conciliacion(hecho, mov_origen, Decimal("-500.0000"))
+    destino = lab.nueva_conciliacion(hecho, mov_destino, Decimal("-100.0000"))
+    ap_a = lab.nueva_aportacion(hecho, lab.nuevo_actor(), origen, Decimal("60.0000"))
+    ap_b = lab.nueva_aportacion(hecho, lab.nuevo_actor(), origen, Decimal("60.0000"))
+
+    _caso_con_barrera(
+        lab, record_testsuite_property, "C41",
+        [(UPD_APORTACION_HMT, (destino, ap_a))],
+        [(UPD_APORTACION_HMT, (destino, ap_b))],
+        lambda: lab.d169_valido(hecho),
+    )
+
+
+def test_c27_c42_importe_asignado_frente_a_aportacion(caso, record_testsuite_property) -> None:
+    """PARENT-SIDE. A inserta una aportacion de 100 sobre una porcion de 100 y
+    valida, reteniendo el hecho. B baja importe_asignado a 50: queda bloqueada y,
+    al releer tras el COMMIT de A, debe rechazar. Un trigger solo en la tabla
+    hija no veria esto."""
+    lab = caso
+    cuenta = lab.nueva_cuenta("EUR")
+    movimiento = lab.nuevo_movimiento(cuenta, Decimal("-1000.0000"))
+    hecho = lab.nuevo_hecho("EUR")
+    conc = lab.nueva_conciliacion(hecho, movimiento, Decimal("-100.0000"))
+
+    _caso_segunda_bloqueada(
+        lab, record_testsuite_property, "C42",
+        [(INS_APORTACION, (str(uuid.uuid4()), hecho, lab.nuevo_actor(),
+                           Decimal("100.0000"), conc))],
+        [(UPD_HMT_ASIGNADO, (Decimal("-50.0000"), conc))],
+        lambda: lab.d169_valido(hecho), "RECHAZO",
+    )
+
+
+def test_c27_c43_moneda_del_hecho_frente_a_conciliacion_nueva(caso, record_testsuite_property) -> None:
+    """EL CONTRAEJEMPLO QUE DESCARTO EL MOVIMIENTO COMO LOCK ROOT.
+
+    Hecho USD con una conciliacion sobre cuenta EUR: multidivisa, no se compara.
+    A cambia la moneda del hecho a EUR. B crea concurrentemente OTRA conciliacion
+    sobre OTRO movimiento, con 60+60 sobre porcion 100.
+
+    Con root en el movimiento, A solo podria bloquear los movimientos existentes
+    en ese instante y B bloquearia el suyo: conjuntos DISJUNTOS, ambas confirman
+    y el estado final queda comparable e invalido. Con root en el hecho, B espera
+    a A, relee moneda EUR y rechaza.
+
+    La conciliacion preexistente tiene porcion 200 a proposito: al volverse
+    comparable debe seguir siendo valida, de modo que quien falle sea B y no A."""
+    lab = caso
+    cuenta_eur = lab.nueva_cuenta("EUR")
+    mov_1 = lab.nuevo_movimiento(cuenta_eur, Decimal("-1000.0000"))
+    mov_2 = lab.nuevo_movimiento(cuenta_eur, Decimal("-1000.0000"))
+    hecho = lab.nuevo_hecho("USD")
+    previa = lab.nueva_conciliacion(hecho, mov_1, Decimal("-200.0000"))
+    lab.nueva_aportacion(hecho, lab.nuevo_actor(), previa, Decimal("60.0000"))
+    lab.nueva_aportacion(hecho, lab.nuevo_actor(), previa, Decimal("60.0000"))
+    nueva = str(uuid.uuid4())
+
+    _caso_segunda_bloqueada(
+        lab, record_testsuite_property, "C43",
+        [(UPD_HECHO_MONEDA, ("EUR", hecho))],
+        [("INSERT INTO gapto.hecho_movimientos_tesoreria "
+          "(id, hecho_id, movimiento_tesoreria_id, importe_asignado) VALUES (%s, %s, %s, %s)",
+          (nueva, hecho, mov_2, Decimal("-100.0000"))),
+         (INS_APORTACION, (str(uuid.uuid4()), hecho, lab.nuevo_actor(),
+                           Decimal("60.0000"), nueva)),
+         (INS_APORTACION, (str(uuid.uuid4()), hecho, lab.nuevo_actor(),
+                           Decimal("60.0000"), nueva))],
+        lambda: lab.d169_valido(hecho), "RECHAZO",
+    )
+
+
+def test_c27_c44_cuenta_del_movimiento_frente_a_hmt_nueva(caso, record_testsuite_property) -> None:
+    """D-171 §9. LA SERIALIZACION AQUI NO LA APORTA 0310.
+
+    La aporta uq_movimientos_tesoreria__cuenta_anchor (cuenta_id, id) de
+    0220/D-099: al participar cuenta_id en un indice unico, el UPDATE es un key
+    update y toma un lock de tupla FOR UPDATE, incompatible con el FOR KEY SHARE
+    que toma el INSERT de la HMT por su FK al movimiento.
+
+    A mueve el movimiento de una cuenta USD a una cuenta EUR. B crea sobre ese
+    mismo movimiento una conciliacion con 60+60 sobre 100. Si el test dejara de
+    observar bloqueo, el anchor de 0220 habria dejado de existir o de ser KEY, y
+    reapareceria el write-skew."""
+    lab = caso
+    cuenta_usd = lab.nueva_cuenta("USD")
+    cuenta_eur = lab.nueva_cuenta("EUR")
+    movimiento = lab.nuevo_movimiento(cuenta_usd, Decimal("-1000.0000"))
+    hecho = lab.nuevo_hecho("EUR")
+    nueva = str(uuid.uuid4())
+
+    _caso_segunda_bloqueada(
+        lab, record_testsuite_property, "C44",
+        [(UPD_MOV_CUENTA, (cuenta_eur, movimiento))],
+        [("INSERT INTO gapto.hecho_movimientos_tesoreria "
+          "(id, hecho_id, movimiento_tesoreria_id, importe_asignado) VALUES (%s, %s, %s, %s)",
+          (nueva, hecho, movimiento, Decimal("-100.0000"))),
+         (INS_APORTACION, (str(uuid.uuid4()), hecho, lab.nuevo_actor(),
+                           Decimal("60.0000"), nueva)),
+         (INS_APORTACION, (str(uuid.uuid4()), hecho, lab.nuevo_actor(),
+                           Decimal("60.0000"), nueva))],
+        lambda: lab.d169_valido(hecho), "RECHAZO",
+    )
+
+
+def test_c27_c45_multi_hecho_en_orden_inverso(caso, record_testsuite_property) -> None:
+    """D-173 K2. A toca H1 y luego H2; B toca H2 y luego H1. Si el validador
+    bloqueara en el orden del array de entrada, este par seria un deadlock
+    determinista. La canonicalizacion de Hs ordena por uuid ascendente en un
+    unico punto, de modo que ambas adquieren en el mismo orden.
+
+    H1 se deja al limite (40 sobre 100 con dos aportaciones de 30 pendientes)
+    para que ademas haya un rechazo por invariante que clasificar, y no solo
+    ausencia de deadlock."""
+    lab = caso
+    cuenta = lab.nueva_cuenta("EUR")
+    mov_1 = lab.nuevo_movimiento(cuenta, Decimal("-1000.0000"))
+    mov_2 = lab.nuevo_movimiento(cuenta, Decimal("-1000.0000"))
+    h1, h2 = lab.nuevo_hecho("EUR"), lab.nuevo_hecho("EUR")
+    c1 = lab.nueva_conciliacion(h1, mov_1, Decimal("-100.0000"))
+    c2 = lab.nueva_conciliacion(h2, mov_2, Decimal("-500.0000"))
+    lab.nueva_aportacion(h1, lab.nuevo_actor(), c1, Decimal("40.0000"))
+
+    def valido() -> bool:
+        return lab.d169_valido(h1) and lab.d169_valido(h2)
+
+    _caso_con_barrera(
+        lab, record_testsuite_property, "C45",
+        [(INS_APORTACION, (str(uuid.uuid4()), h1, lab.nuevo_actor(), Decimal("40.0000"), c1)),
+         (INS_APORTACION, (str(uuid.uuid4()), h2, lab.nuevo_actor(), Decimal("40.0000"), c2))],
+        [(INS_APORTACION, (str(uuid.uuid4()), h2, lab.nuevo_actor(), Decimal("40.0000"), c2)),
+         (INS_APORTACION, (str(uuid.uuid4()), h1, lab.nuevo_actor(), Decimal("40.0000"), c1))],
+        valido,
+    )
+
+
+def test_c27_c46_residual_hecho_movimiento(caso, record_testsuite_property) -> None:
+    """MEDICION DEL CICLO RESIDUAL H <-> M aceptado por D-171 §7.
+
+    A hace UPDATE de cuenta_id: el propio DML retiene M y el validador diferido
+    de 0310 pide H despues (M -> H). B inserta una aportacion: 0310 pide H y el
+    validador de suma de conciliaciones pide M (H -> M). El ciclo no es
+    eliminable desde un trigger diferido.
+
+    Clasificacion esperada: PASS si el motor serializa sin ciclo, o
+    PASS_WITH_EXPECTED_DEADLOCK si aparece 40P01 y el reintento de la
+    TRANSACCION COMPLETA resuelve. Lo que NO es aceptable es estado invalido."""
+    lab = caso
+    cuenta_usd = lab.nueva_cuenta("USD")
+    cuenta_eur = lab.nueva_cuenta("EUR")
+    movimiento = lab.nuevo_movimiento(cuenta_usd, Decimal("-1000.0000"))
+    hecho = lab.nuevo_hecho("EUR")
+    conc = lab.nueva_conciliacion(hecho, movimiento, Decimal("-100.0000"))
+    lab.nueva_aportacion(hecho, lab.nuevo_actor(), conc, Decimal("60.0000"))
+
+    _caso_con_barrera(
+        lab, record_testsuite_property, "C46",
+        [(UPD_MOV_CUENTA, (cuenta_eur, movimiento))],
+        [(INS_APORTACION, (str(uuid.uuid4()), hecho, lab.nuevo_actor(),
+                           Decimal("60.0000"), conc))],
+        lambda: lab.d169_valido(hecho),
     )
 
 
