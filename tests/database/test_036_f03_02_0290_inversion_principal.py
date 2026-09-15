@@ -12,6 +12,12 @@
 #              DEFERRED, así que el rechazo se provoca con
 #              `SET CONSTRAINTS ALL IMMEDIATE` dentro de un savepoint y el
 #              montaje multi-paso se valida con `_validar_montaje`.
+# Versión: 0.2.1  -- D-173. Dos recuentos de este test los mueve 0300, no 0290:
+#              las FK (174 -> 175, FK compuesta de D-057) y los indices
+#              (284 -> 285, indice compuesto de S2/D-169). Ambos pasan a
+#              conjunto EXPLICITO Y FINITO. El de indices NO figuraba en el
+#              informe del STOP porque la asercion de FK abortaba antes de
+#              alcanzarlo; se corrige aqui y se declara.
 # Versión: 0.2.0  -- la mutación local reveló DOS casos que pasaban por el
 #              motivo equivocado y que 12C.2 obliga a rehacer: el efecto sin
 #              principal ni asignaciones no dejaba ningún evento pendiente, así
@@ -298,17 +304,31 @@ def test_0290_recuentos_como_suelo(db: psycopg.Connection) -> None:
     assert constraint_triggers >= 37
 
 
+# Estados autorizados de los dos recuentos que migrations POSTERIORES a 0290
+# mueven. Conjuntos EXPLICITOS Y FINITOS (D-173); ninguno es un rango abierto.
+#   FK       174 cierre de 0290 / 175 con la FK compuesta de D-057 (0300)
+#   indices  284 cierre de 0290 / 285 con el indice compuesto de S2/D-169 (0300)
+FK_TOTALES_AUTORIZADAS = (174, 175)
+INDICES_AUTORIZADOS = (284, 285)
+
+
 def test_0290_no_toca_superficies_ajenas(db: psycopg.Connection) -> None:
-    """0290 no crea tablas, columnas, FK, UNIQUE, EXCLUDE, índices ni policies."""
+    """0290 no crea tablas, columnas, FK, UNIQUE, EXCLUDE, índices ni policies.
+
+    Las FK y los indices los mueve 0300, no 0290: la afirmacion historica sobre
+    0290 se conserva admitiendo el estado sucesor autorizado."""
     assert _uno(db, "SELECT pg_catalog.count(*) FROM pg_catalog.pg_class c "
                     "WHERE c.relnamespace = 'gapto'::pg_catalog.regnamespace "
                     "AND c.relkind = 'r'") == 80
-    assert _uno(db, """
+    fk = _uno(db, """
         SELECT pg_catalog.count(*) FROM pg_catalog.pg_constraint k
           JOIN pg_catalog.pg_class c ON c.oid = k.conrelid
-         WHERE c.relnamespace = 'gapto'::pg_catalog.regnamespace AND k.contype = 'f'""") == 174
-    assert _uno(db, "SELECT pg_catalog.count(*) FROM pg_catalog.pg_indexes i "
-                    "WHERE i.schemaname = 'gapto'") == 284
+         WHERE c.relnamespace = 'gapto'::pg_catalog.regnamespace AND k.contype = 'f'""")
+    assert fk in FK_TOTALES_AUTORIZADAS, f"{fk} FK; autorizadas {FK_TOTALES_AUTORIZADAS}"
+    indices = _uno(db, "SELECT pg_catalog.count(*) FROM pg_catalog.pg_indexes i "
+                       "WHERE i.schemaname = 'gapto'")
+    assert indices in INDICES_AUTORIZADOS, (
+        f"{indices} indices; autorizados {INDICES_AUTORIZADOS}")
     assert _uno(db, "SELECT pg_catalog.count(*) FROM pg_catalog.pg_policies p "
                     "WHERE p.schemaname = 'gapto'") == 82
 

@@ -11,6 +11,12 @@
 #              Todos los casos se ejecutan con el rol de conexión, sea cual
 #              sea, creando los datos bajo SET ROLE gapto_owner (D-137), y las
 #              transacciones se revierten siempre.
+# Versión: 0.1.3  -- D-173. El recuento de FK sale del dict de igualdad y pasa a
+#              un conjunto EXPLICITO Y FINITO de estados autorizados: 174 hasta
+#              0288 y 175 desde 0300, que materializa la FK compuesta de D-057.
+#              El resto del contrato sigue comparandose por igualdad exacta, de
+#              modo que el test conserva su capacidad de detectar una FK 176 no
+#              autorizada. No se borra el valor historico.
 # Versión: 0.1.2  -- sucesora 0290: la afirmación pasa de igualdad a suelo,
 #              porque 0290 añade legítimamente una función y seis triggers.
 #              Version anterior: 0.1.1.  -- el contrato de FK sube a 174 por 0288.
@@ -30,10 +36,16 @@ OWNER_B = "c0286000-0000-4000-8000-000000000002"
 HUELLAS_0286 = {
     "tablas": 80,
     "policies": 82,
-    # SUCESORA 0288: +5 FK compuestas de tenant fuera de esta tabla.
-    "foreign_keys": 174,
     "unique_constraints": 41,
 }
+
+# El recuento global de FK no es una propiedad de 0286: lo mueven migrations
+# posteriores. Conjunto EXPLICITO Y FINITO de estados autorizados (D-173), cada
+# uno con su migration legitimadora. NO se usa >= ni rango abierto: una FK 176
+# no autorizada debe seguir haciendo fallar este test.
+#   174  0286/D-146 mas las 5 FK compuestas de tenant de 0288
+#   175  0300/D-168-D-169: FK compuesta de pertenencia hecho<->conciliacion (D-057)
+FK_TOTALES_AUTORIZADAS = (174, 175)
 
 
 @pytest.fixture()
@@ -458,7 +470,10 @@ def test_0286_contrato_fisico(db: psycopg.Connection) -> None:
               JOIN pg_catalog.pg_class t ON t.oid = k.conrelid
              WHERE t.relnamespace = 'gapto'::pg_catalog.regnamespace AND k.contype = 'u'"""),
     }
+    fk_totales = obtenido.pop("foreign_keys")
     assert obtenido == HUELLAS_0286
+    assert fk_totales in FK_TOTALES_AUTORIZADAS, (
+        f"{fk_totales} FK en el esquema; autorizadas {FK_TOTALES_AUTORIZADAS}")
 
 
 def test_0286_no_cambia_funciones_ni_triggers(db: psycopg.Connection) -> None:

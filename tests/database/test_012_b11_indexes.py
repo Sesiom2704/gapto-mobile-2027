@@ -6,6 +6,11 @@
 #              FK + patrones de acceso compuestos + 6 GIN pg_trgm),
 #              excluyendo explícitamente los índices que EXCLUDE (B10)
 #              ya crea automáticamente por sí mismo.
+# Versión: 0.1.3  -- D-173. Baseline + sucesoras EXPLICITAS Y FINITAS: 0300
+#              anade el indice compuesto (hecho_id, hecho_movimiento_tesoreria_id)
+#              exigido por S2 de D-169. Se conserva el estado historico 139 y se
+#              anade 140; sin >=, sin rangos abiertos. El test sigue detectando
+#              cualquier indice adicional no autorizado.
 # Versión: 0.1.2  -- 0288 anade 3 indices de cobertura de FK.
 # Versión: 0.1.1  -- 0286 anade 2 indices secundarios y la cobertura de sus 3 FK.
 # Versión: 0.1.0
@@ -34,13 +39,27 @@ def _non_exclude_secondary_index_count(db: psycopg.Connection) -> int:
     return count
 
 
+# Estados autorizados del recuento de indices secundarios no-EXCLUDE. Conjunto
+# EXPLICITO Y FINITO (D-173): cada valor tiene su migration legitimadora.
+#   139  B11 (134) + 0286/D-146 (+2 y cobertura de 3 FK) + 0288 (+3 de cobertura)
+#   140  0300/D-169 S2: indice compuesto de la FK de pertenencia hecho<->conciliacion
+INDICES_SECUNDARIOS_AUTORIZADOS = (139, 140)
+
+
 def test_b11_exactly_134_secondary_indexes(db: psycopg.Connection) -> None:
     """SUCESORA 0286 / D-146: B11 cerró 134 índices secundarios; efecto_cuentas
     añade el único parcial de unicidad de cuenta generadora y sus dos índices
-    de cobertura de FK."""
+    de cobertura de FK.
+
+    B11 NO contenia originalmente el indice compuesto de 0300: ese valor entra
+    como sucesora autorizada, no como reescritura del cierre de B11."""
     # SUCESORA 0288: +3 indices de cobertura de las FK compuestas de tenant
     # en hecho_entidades e inversion_asignaciones_efecto.
-    assert _non_exclude_secondary_index_count(db) == 139
+    obtenido = _non_exclude_secondary_index_count(db)
+    assert obtenido in INDICES_SECUNDARIOS_AUTORIZADOS, (
+        f"{obtenido} indices secundarios no-EXCLUDE; autorizados "
+        f"{INDICES_SECUNDARIOS_AUTORIZADOS}. Un valor distinto significa un "
+        "indice no autorizado, no un baseline que haya que relajar.")
 
 
 def test_b11_gin_trgm_indexes_on_expected_columns(db: psycopg.Connection) -> None:

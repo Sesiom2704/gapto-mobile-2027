@@ -9,6 +9,9 @@
 #              compuestas contra los anchors. Todos los casos cross-tenant se
 #              comprueban con FORCE RLS levantado dentro de la transacción,
 #              que es como se simula un rol BYPASSRLS (D-137).
+# Versión: 0.1.2  -- D-173. El recuento global de FK pasa a conjunto EXPLICITO Y
+#              FINITO: 174 (cierre de 0288) y 175 (0300, FK compuesta de D-057).
+#              Sigue detectando una FK 176 no autorizada. No se borra el 174.
 # Versión: 0.1.1  -- sucesora 0290: `hecho_entidades` e
 #              `inversion_asignaciones_efecto` reciben los triggers de D-080.
 #              La propiedad que fija 0288 sigue siendo que ELLA no añadió
@@ -218,11 +221,20 @@ def test_0288_fk_simples_conservadas(db: psycopg.Connection) -> None:
             "fk_inversion_asignaciones_efecto__inversion"} <= nombres
 
 
+# Estados autorizados del recuento global de FK (D-173):
+#   174  cierre de 0288
+#   175  0300: FK compuesta de pertenencia hecho<->conciliacion, aprobada por
+#        D-057 y materializada tras la reapertura D-168
+FK_TOTALES_AUTORIZADAS = (174, 175)
+
+
 def test_0288_contrato_fisico(db: psycopg.Connection) -> None:
-    assert _uno(db, """
+    obtenido = _uno(db, """
         SELECT count(*) FROM pg_catalog.pg_constraint k
           JOIN pg_catalog.pg_class c ON c.oid = k.conrelid
-         WHERE c.relnamespace = 'gapto'::pg_catalog.regnamespace AND k.contype = 'f'""") == 174
+         WHERE c.relnamespace = 'gapto'::pg_catalog.regnamespace AND k.contype = 'f'""")
+    assert obtenido in FK_TOTALES_AUTORIZADAS, (
+        f"{obtenido} FK; autorizadas {FK_TOTALES_AUTORIZADAS}")
 
 
 # ------------------------------------------------------------

@@ -26,6 +26,22 @@
 #              materializa; corresponde a 0310 y a su propio modulo.
 #
 # PRECONDICIÓN: requiere 0300 aplicada.
+# Versión: 0.1.1  -- D-173/D-174. Dos correcciones, ninguna toca 0300:
+#              (1) el centinela de triggers/funciones reconoce el estado 0310
+#                  POR NOMBRE, no por recuento: exige exactamente el unico
+#                  constraint trigger que 0310 crea sobre hecho_aportaciones_pago
+#                  y sigue delatando cualquier otro. Tambien el recuento de
+#                  funciones pasa a conjunto finito (26 y 28); ese segundo
+#                  fallo no figuraba en el informe del STOP porque la asercion
+#                  de triggers abortaba antes de alcanzarlo.
+#              (2) N4 ejecuta el ALTER TABLE ... NO FORCE ANTES de crear
+#                  ningun fixture. El escenario insertaba conciliaciones que
+#                  encolan eventos del constraint trigger diferido
+#                  trg_hecho_movimientos_tesoreria__suma -preexistente a 0310-
+#                  y PostgreSQL rechaza ALTER TABLE sobre una relacion con
+#                  eventos pendientes. El caso estaba roto desde que se
+#                  escribio: nunca llego a ejecutarse contra 0300. Es la regla
+#                  transversal aprobada como D-173.
 # Versión: 0.1.0
 # ============================================================
 
@@ -151,10 +167,21 @@ class Escenario:
         self.conc_b = self.conciliacion(self.hb, self.movimiento_b, "-100.0000")
         _tenant(self.db, OWNER_A)
 
-    def sin_force(self) -> None:
-        """Simula un rol BYPASSRLS dentro de la transacción del test."""
-        self.db.execute("ALTER TABLE gapto.hecho_aportaciones_pago NO FORCE ROW LEVEL SECURITY")
-        self.db.execute("ALTER TABLE gapto.hecho_movimientos_tesoreria NO FORCE ROW LEVEL SECURITY")
+    @staticmethod
+    def levantar_force(db: psycopg.Connection) -> None:
+        """Simula un rol BYPASSRLS dentro de la transacción del test.
+
+        DEBE invocarse ANTES de crear ningun fixture (D-173): en cuanto la
+        transaccion escribe en una tabla con constraint triggers DEFERRABLE
+        INITIALLY DEFERRED, PostgreSQL rechaza cualquier ALTER TABLE sobre ella
+        con ObjectInUse / pending trigger events. hecho_movimientos_tesoreria ya
+        llevaba trg_hecho_movimientos_tesoreria__suma antes de 0310, y 0310
+        extiende la situacion a hecho_aportaciones_pago.
+
+        El rollback del fixture db restaura FORCE ROW LEVEL SECURITY, porque
+        ALTER TABLE es transaccional en PostgreSQL."""
+        db.execute("ALTER TABLE gapto.hecho_aportaciones_pago NO FORCE ROW LEVEL SECURITY")
+        db.execute("ALTER TABLE gapto.hecho_movimientos_tesoreria NO FORCE ROW LEVEL SECURITY")
 
 
 @pytest.fixture()
@@ -242,15 +269,39 @@ def test_0300_contrato_fisico(db: psycopg.Connection) -> None:
     assert _uno(db, "SELECT count(*) FROM pg_catalog.pg_indexes WHERE schemaname = 'gapto'") == 285
 
 
+# Estados autorizados del centinela. Conjuntos EXPLICITOS Y FINITOS (D-173).
+# 0310 crea UN solo constraint trigger sobre hecho_aportaciones_pago; cualquier
+# otro nombre sigue significando que alguien ha adelantado trabajo sin
+# autorizacion. Se compara por NOMBRE, no por recuento, porque aqui se puede.
+TRIGGERS_AUTORIZADOS_EN_APORTACIONES = (
+    frozenset(),                                              # 0300: ninguno
+    frozenset({"trg_hecho_aportaciones_pago__conciliacion_suma"}),  # 0310
+)
+FUNCIONES_AUTORIZADAS = (26, 28)   # 26 en 0300; 28 con el nucleo y el despachador de 0310
+
+
 def test_0300_no_introduce_triggers_ni_funciones(db: psycopg.Connection) -> None:
-    """0300 es integridad declarativa pura. Si aparece un trigger aqui, alguien
-    ha adelantado 0310 sin autorizacion."""
-    assert _uno(db, """
-        SELECT count(*) FROM pg_catalog.pg_trigger t
-         WHERE t.tgrelid = 'gapto.hecho_aportaciones_pago'::regclass AND NOT t.tgisinternal
-    """) == 0
-    assert _uno(db, "SELECT count(*) FROM pg_catalog.pg_proc p "
-                    "WHERE p.pronamespace = 'gapto'::regnamespace") == 26
+    """0300 es integridad declarativa pura: por si sola no anade funciones ni
+    triggers procedimentales.
+
+    El centinela NO se relaja a "cualquier trigger posterior". Reconoce
+    exactamente el estado que 0310 autoriza y sigue delatando cualquier otro:
+    esa es la razon por la que este test existe y la que hizo que detectara la
+    llegada de 0310."""
+    nombres = frozenset(
+        r[0] for r in db.execute("""
+            SELECT t.tgname FROM pg_catalog.pg_trigger t
+             WHERE t.tgrelid = 'gapto.hecho_aportaciones_pago'::regclass
+               AND NOT t.tgisinternal
+        """).fetchall()
+    )
+    assert nombres in TRIGGERS_AUTORIZADOS_EN_APORTACIONES, (
+        f"triggers no autorizados en hecho_aportaciones_pago: {sorted(nombres)}")
+
+    funciones = _uno(db, "SELECT count(*) FROM pg_catalog.pg_proc p "
+                         "WHERE p.pronamespace = 'gapto'::regnamespace")
+    assert funciones in FUNCIONES_AUTORIZADAS, (
+        f"{funciones} funciones; autorizadas {FUNCIONES_AUTORIZADAS}")
 
 
 # ------------------------------------------------------------
@@ -305,11 +356,17 @@ def test_n3_delete_de_la_conciliacion_vinculada_es_restrict(esc: Escenario) -> N
                        (esc.conc1,))
 
 
-def test_n4_cross_hecho_sigue_rechazado_sin_force_rls(esc: Escenario) -> None:
+def test_n4_cross_hecho_sigue_rechazado_sin_force_rls(db: psycopg.Connection) -> None:
     """D-100: la integridad es de PostgreSQL, no de RLS. Con FORCE levantado
     (equivalente a BYPASSRLS) la policy ya no protege nada y la FK debe seguir
-    siendo la barrera."""
-    esc.sin_force()
+    siendo la barrera.
+
+    Toma db en lugar de esc para poder ejecutar el DDL ANTES del DML: el orden
+    DDL -> DML es el aprobado por D-173, y evita que el montaje del test quede
+    bloqueado por eventos diferidos ajenos a la propiedad que se prueba. No se
+    usa SET CONSTRAINTS ALL IMMEDIATE: no hace falta."""
+    Escenario.levantar_force(db)
+    esc = Escenario(db)
     with pytest.raises(psycopg.errors.ForeignKeyViolation):
         esc.aportacion(esc.h1, esc.conc2)
 
