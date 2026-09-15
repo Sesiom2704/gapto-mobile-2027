@@ -8,8 +8,12 @@
 #              hijos estrictamente dependientes sin historia propia) =
 #              141 RESTRICT + 20 CASCADE. Confirma layering: EXCLUDE
 #              (B10) todavía no materializado en este punto.
-# Versión: 0.2.0
-#                   D-098: expectativa caducada migrada a validacion de
+# Versión: 0.3.0  -- D-168/D-169: este modulo contaba FK pero no nombraba
+#                   ninguna, y por eso no pudo ver que la FK compuesta de D-057
+#                   nunca se materializo: una FK simple satisface el recuento
+#                   161 exactamente igual que la compuesta. Se anade la unica
+#                   comprobacion que discrimina, por nombre y definicion.
+#                   v0.2.0: D-098: expectativa caducada migrada a validacion de
 #                   propiedad/baseline. El layering se sigue verificando a
 #                   nivel de fichero de migration, que es donde es cierto de
 #                   forma permanente, y no contra el estado acumulado de la BD.
@@ -70,3 +74,41 @@ def test_b09_migration_has_no_exclude() -> None:
     text = migration.read_text(encoding='utf-8').upper()
     assert 'EXCLUDE USING' not in text
     assert text.count('FOREIGN KEY') >= 161
+
+
+# Pertenencias compuestas aprobadas en F03-00-E2-D (D-057), por nombre y
+# definicion. Un recuento agregado no puede sustituir a esta lista: fue
+# exactamente el hueco que permitio que la tercera entrada faltara desde 0090
+# hasta 0300 sin que ningun gate lo viera.
+PERTENENCIAS_E2D = {
+    'fk_hecho_entidades__hecho_efecto':
+        'FOREIGN KEY (hecho_id, efecto_id) REFERENCES '
+        'gapto.hecho_efectos(hecho_id, id) ON DELETE RESTRICT',
+    'fk_inversion_asignaciones_efecto__hecho_efecto':
+        'FOREIGN KEY (hecho_id, efecto_inversion_id) REFERENCES '
+        'gapto.hecho_efectos(hecho_id, id) ON DELETE RESTRICT',
+    'fk_hecho_aportaciones_pago__hecho_conciliacion':
+        'FOREIGN KEY (hecho_id, hecho_movimiento_tesoreria_id) REFERENCES '
+        'gapto.hecho_movimientos_tesoreria(hecho_id, id) ON DELETE RESTRICT',
+}
+
+
+def test_b09_pertenencias_compuestas_por_nombre(db: psycopg.Connection) -> None:
+    """D-057/D-169: las FK de pertenencia existen, estan validadas y apuntan a
+    su anchor. Baseline del gate: las dos primeras desde 0090/0288; la tercera
+    desde 0300."""
+    obtenido = {}
+    with db.cursor() as cursor:
+        cursor.execute("""
+            SELECT con.conname, pg_catalog.pg_get_constraintdef(con.oid)
+              FROM pg_catalog.pg_constraint con
+              JOIN pg_catalog.pg_class c ON c.oid=con.conrelid
+              JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+             WHERE n.nspname='gapto' AND con.contype='f' AND con.convalidated
+               AND con.conname = ANY(%s)
+        """, (sorted(PERTENENCIAS_E2D),))
+        obtenido = dict(cursor.fetchall())
+    faltan = sorted(set(PERTENENCIAS_E2D) - set(obtenido))
+    assert faltan == [], f'pertenencias compuestas ausentes o sin validar: {faltan}'
+    divergentes = {k: (v, obtenido[k]) for k, v in PERTENENCIAS_E2D.items() if obtenido[k] != v}
+    assert divergentes == {}, f'definicion inesperada (esperada, obtenida): {divergentes}'

@@ -19,7 +19,20 @@
 #
 # PRECONDICIÓN: requiere 0190 (B16). Debe ejecutarse desde la raiz del
 #              repositorio, porque G6 inspecciona migrations/ y tests/.
-# Versión: 0.7.0  -- sucesora 0290: +1 funcion y +6 constraint triggers por
+# Versión: 0.8.0  -- D-168/D-169. Sucesora 0300 (175 FK) y, sobre todo, los tres
+#              criterios del GATE DE RECIERRE F03 que el gate original no tenia
+#              y por cuya ausencia el defecto de D-057 llego hasta D-164:
+#
+#                R1  invariantes NOMBRADAS, no recuentos.
+#                R2  ningun anchor contextual (parent_id, id) queda huerfano.
+#                R3  barrido de pertenencia hecho-scoped sin FK compuesta.
+#
+#              R2 es la comprobacion decisiva: el anchor de
+#              hecho_movimientos_tesoreria existia desde 0080 SIN consumidor, y
+#              un recuento agregado no puede distinguir un anchor consumido de
+#              uno huerfano. R1, R2 y R3 deben fallar contra 0290 y pasar contra
+#              0300; si pasaran contra ambos, no discriminarian.
+#              v0.7.0: sucesora 0290: +1 funcion y +6 constraint triggers por
 #              D-080. Version anterior: 0.6.0.  -- G2 acepta la sucesora 0288 (174 FK).
 # Versión: 0.5.0  -- G2 acepta la sucesora 0286 y la matriz de runtime sube en 1.
 # Versión: 0.4.0  -- G2 acepta además EXACTAMENTE la sucesora 0285 (funciones
@@ -88,6 +101,11 @@ SUCESORA_0288 = {**SUCESORA_0286, "foreign_keys": 174}
 # toca tablas, FK, UNIQUE, EXCLUDE, policies, vistas ni la matriz runtime.
 SUCESORA_0290 = {**SUCESORA_0288, "funciones": 26,
                  "triggers_no_internos": 54, "constraint_triggers": 37}
+# 0300 repara el DEFECTO 1 de D-168: la FK compuesta de pertenencia
+# hecho<->conciliacion aprobada por D-057 y nunca materializada. +1 FK. No crea
+# funciones, triggers, policies, columnas ni GRANTs; el indice compuesto de
+# D-169/S2 no forma parte de este contrato, que no cuenta indices.
+SUCESORA_0300 = {**SUCESORA_0290, "foreign_keys": 175}
 
 # La matriz de runtime la fija B14/B18/B21; 0286 suma efecto_cuentas en
 # SELECT, INSERT y UPDATE, y NO en DELETE (bucket A de D-093).
@@ -164,7 +182,7 @@ def test_gate_g2_contrato_fisico(db: psycopg.Connection) -> None:
                AND t.tgname LIKE '%%guard%%'"""),
     }
     if obtenido in (SUCESORA_0270, SUCESORA_0280, SUCESORA_0285, SUCESORA_0286,
-                    SUCESORA_0288, SUCESORA_0290):
+                    SUCESORA_0288, SUCESORA_0290, SUCESORA_0300):
         return
     diferencias = {
         k: (CONTRATO_ESPERADO[k], obtenido[k])
@@ -261,6 +279,95 @@ def _ficheros(subruta: str, patron: str) -> list[Path]:
     if not carpeta.is_dir():
         pytest.skip(f"{carpeta} no accesible; ejecuta pytest desde la raiz del repositorio")
     return sorted(fichero for fichero in carpeta.glob(patron) if fichero.is_file())
+
+
+# ------------------------------------------------------------
+# R1/R2/R3 - gate de recierre F03 (D-168 / D-169)
+# ------------------------------------------------------------
+
+# R1. Invariantes de pertenencia aprobadas en F03-00-E2-D (D-057), por nombre.
+PERTENENCIAS_NOMBRADAS = {
+    "fk_hecho_entidades__hecho_efecto":
+        ("hecho_entidades", "hecho_efectos", "(hecho_id, efecto_id)"),
+    "fk_inversion_asignaciones_efecto__hecho_efecto":
+        ("inversion_asignaciones_efecto", "hecho_efectos", "(hecho_id, efecto_inversion_id)"),
+    "fk_hecho_aportaciones_pago__hecho_conciliacion":
+        ("hecho_aportaciones_pago", "hecho_movimientos_tesoreria",
+         "(hecho_id, hecho_movimiento_tesoreria_id)"),
+}
+
+
+@pytest.mark.parametrize("nombre", sorted(PERTENENCIAS_NOMBRADAS))
+def test_gate_r1_invariantes_nombradas(db: psycopg.Connection, nombre: str) -> None:
+    """R1. El gate historico solo contaba constraints. Un recuento no sabe QUE
+    garantiza el esquema: por eso una FK simple pudo ocupar el hueco de una
+    compuesta durante toda F03."""
+    tabla, destino, columnas = PERTENENCIAS_NOMBRADAS[nombre]
+    definicion = _uno(db, """
+        SELECT pg_catalog.pg_get_constraintdef(con.oid)
+          FROM pg_catalog.pg_constraint con
+          JOIN pg_catalog.pg_class c ON c.oid=con.conrelid
+          JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+         WHERE n.nspname='gapto' AND c.relname=%s AND con.conname=%s
+           AND con.contype='f' AND con.convalidated
+    """, (tabla, nombre))
+    assert definicion is not None, f"{nombre} ausente o sin validar en {tabla}"
+    assert columnas in definicion and destino in definicion, definicion
+
+
+def test_gate_r2_ningun_anchor_contextual_huerfano(db: psycopg.Connection) -> None:
+    """R2. Todo UNIQUE (parent_id, id) existe para que alguien lo consuma. Un
+    anchor sin consumidor es una garantia que se creo y se olvido: es la forma
+    exacta que tuvo el defecto de D-057 entre 0080 y 0300."""
+    huerfanos = _uno(db, """
+        WITH anchors AS (
+          SELECT k.conname, k.conindid
+            FROM pg_catalog.pg_constraint k
+            JOIN pg_catalog.pg_class c ON c.oid=k.conrelid
+           WHERE c.relnamespace='gapto'::pg_catalog.regnamespace AND k.contype='u'
+             AND pg_catalog.array_length(k.conkey,1)=2
+             AND (SELECT a.attname FROM pg_catalog.pg_attribute a
+                   WHERE a.attrelid=k.conrelid AND a.attnum=k.conkey[2])='id'
+        )
+        SELECT coalesce(pg_catalog.string_agg(a.conname, ', ' ORDER BY a.conname), '')
+          FROM anchors a
+         WHERE NOT EXISTS (SELECT 1 FROM pg_catalog.pg_constraint f
+                            WHERE f.contype='f' AND f.conindid=a.conindid)
+    """)
+    assert huerfanos == "", f"anchors contextuales sin consumidor: {huerfanos}"
+
+
+def test_gate_r3_pertenencia_hecho_scoped_cubierta(db: psycopg.Connection) -> None:
+    """R3. Barrido de la familia completa: toda FK simple hijo->padre en la que
+    ambos comparten hecho_id debe estar respaldada por una FK compuesta. 0220
+    audito la granularidad OWNER y 0288 dos superficies concretas; la
+    granularidad HECHO nunca se habia barrido de forma exhaustiva."""
+    descubiertos = _uno(db, """
+        WITH fk AS (
+          SELECT hijo.oid AS hijo_oid, hijo.relname AS hijo, padre.oid AS padre_oid,
+                 padre.relname AS padre, k.conname
+            FROM pg_catalog.pg_constraint k
+            JOIN pg_catalog.pg_class hijo ON hijo.oid=k.conrelid
+            JOIN pg_catalog.pg_class padre ON padre.oid=k.confrelid
+           WHERE hijo.relnamespace='gapto'::pg_catalog.regnamespace AND k.contype='f'
+             AND pg_catalog.array_length(k.conkey,1)=1
+             AND EXISTS (SELECT 1 FROM pg_catalog.pg_attribute a
+                          WHERE a.attrelid=hijo.oid AND a.attname='hecho_id'
+                            AND a.attnum>0 AND NOT a.attisdropped)
+             AND EXISTS (SELECT 1 FROM pg_catalog.pg_attribute a
+                          WHERE a.attrelid=padre.oid AND a.attname='hecho_id'
+                            AND a.attnum>0 AND NOT a.attisdropped)
+        )
+        SELECT coalesce(pg_catalog.string_agg(f.hijo||'.'||f.conname, ', ' ORDER BY f.conname), '')
+          FROM fk f
+         WHERE NOT EXISTS (SELECT 1 FROM pg_catalog.pg_constraint k2
+                            WHERE k2.contype='f' AND k2.conrelid=f.hijo_oid
+                              AND k2.confrelid=f.padre_oid
+                              AND pg_catalog.array_length(k2.conkey,1)=2)
+    """)
+    assert descubiertos == "", (
+        f"FK simples hecho-scoped sin respaldo compuesto: {descubiertos}"
+    )
 
 
 def test_gate_g6_inventario_de_migrations() -> None:
