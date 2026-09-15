@@ -56,6 +56,21 @@
 # ROLE DRIFT, que es correcto y deliberado. En ese caso se usa --desde 0002
 # y el clean-room demuestra reproducibilidad DE LA BASE, no de la instancia.
 # Reproducir tambien la instancia exige un proyecto nuevo.
+# Versión: 0.10.0 -- D-172 / migration 0310. El contrato deja de ser un unico dict
+#                    global y pasa a estar indexado por HEAD, conservando el
+#                    historico: --head 0300 compara contra el contrato de 0300 y
+#                    --head 0310 contra el de 0310 (28 funciones, 58 triggers no
+#                    internos, 41 constraint triggers), MEDIDO en Neon
+#                    gapto2027_test y no previsto. Sin --head se usa el contrato
+#                    del head vigente de la cadena, que es 0310.
+#                    Un head sin contrato declarado ABORTA con mensaje explicito
+#                    en lugar de compararse contra un contrato ajeno: es un
+#                    cambio de comportamiento deliberado frente a v0.9.0, donde
+#                    cualquier head se comparaba contra el unico contrato global.
+#                    El diccionario HUELLAS no se toca: es un sondeo curado de 5
+#                    funciones criticas para diagnostico temprano, no un contrato
+#                    exhaustivo; la cobertura completa de prosrc vive en la
+#                    huella h6_funciones de D-111.
 # Versión: 0.9.0  -- F03 REABIERTA / D-168 + D-169 / migration 0300: el CONTRATO
 #                    del final de la cadena pasa a 175 FK. No cambian funciones
 #                    (26), triggers (54), constraint triggers (37), UNIQUE (41),
@@ -139,7 +154,8 @@ except ImportError:  # pragma: no cover
 # aprobada por D-057 y nunca materializada, subiendo a 175 FK sin tocar
 # funciones, triggers, policies ni columnas. El indice compuesto que 0300 anade
 # no figura aqui porque este CONTRATO no cuenta indices; lo cubre la huella h3.
-CONTRATO = {
+# Desde v0.10.0 el contrato esta indexado por head: ver CONTRATOS_POR_HEAD.
+CONTRATO_0300 = {
     "tablas": 80,
     "force_rls": 75,
     "policies": 82,
@@ -159,6 +175,37 @@ CONTRATO = {
     "runtime_update": 68,
     "runtime_delete": 36,
 }
+
+# 0310 (D-169/D-170/D-171) materializa la invariante agregada de aportaciones
+# frente a porcion conciliada: dos funciones nuevas y cuatro constraint
+# triggers diferidos. No toca tablas, FK, UNIQUE, EXCLUDE, policies, vistas,
+# GRANTs ni la matriz runtime. Contrato MEDIDO, no previsto.
+CONTRATO_0310 = {**CONTRATO_0300, "funciones": 28,
+                 "triggers_no_internos": 58, "constraint_triggers": 41}
+
+# Conjunto EXPLICITO Y FINITO de heads con contrato declarado. No se acepta
+# "cualquier sucesor": un head desconocido aborta en lugar de compararse
+# contra un contrato que no es el suyo.
+CONTRATOS_POR_HEAD = {
+    "0300": CONTRATO_0300,
+    "0310": CONTRATO_0310,
+}
+
+# Head vigente de la cadena cuando no se declara --head.
+CONTRATO_POR_DEFECTO = CONTRATO_0310
+
+
+def contrato_de(head):
+    """Contrato fisico esperado para el head declarado."""
+    if head is None:
+        return CONTRATO_POR_DEFECTO
+    if head not in CONTRATOS_POR_HEAD:
+        sys.exit(
+            f"--head {head} no tiene contrato fisico declarado en este runner. "
+            f"Heads con contrato: {', '.join(sorted(CONTRATOS_POR_HEAD))}. "
+            "Declarar uno nuevo es una decision arquitectonica, no un ajuste del runner."
+        )
+    return CONTRATOS_POR_HEAD[head]
 
 HUELLAS = {
     "fn_registrar_auditoria": "5a9e6ce8e8dc402b3123e3bf5c718725",
@@ -560,7 +607,7 @@ def main() -> int:
         huellas_d111 = leer_huellas_d111(conexion) if args.head else None
 
     fallos = list(problemas_rol)
-    fallos += comparar(contrato, CONTRATO, "CONTRATO FISICO")
+    fallos += comparar(contrato, contrato_de(args.head), "CONTRATO FISICO")
     fallos += comparar(huellas, HUELLAS, "HUELLAS DE FUNCION (md5 de prosrc)")
 
     print()
