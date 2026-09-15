@@ -146,6 +146,12 @@
 #
 # PRECONDICIÓN: cadena 0001..0285 aplicada en gapto2027_cleanroom (C1-C11
 #              requieren 0250; C12-C17, 0270; C18-C25, 0280; C26-C31, 0285).
+# Versión: 0.7.1  -- C40 partia de 40+40 sobre porcion 100 y subia cada
+#              aportacion a 80: 80+40=120, de modo que cada UPDATE violaba la
+#              invariante POR SI SOLO y ambas sesiones eran rechazadas sin
+#              contender (FAIL_LIVENESS correcto del arnes, error aritmetico del
+#              caso). Pasa a 20+20 subiendo cada una a 60: 60+20=80 cabe y
+#              60+60=120 no. Sin cambios en el resto.
 # Versión: 0.7.0  -- R7 / 0310. Casos C39..C46 sobre la invariante agregada de
 #              aportaciones frente a porcion conciliada (D-169/D-170/D-171).
 #              Lock root: la fila de hechos_financieros con FOR NO KEY UPDATE.
@@ -1929,21 +1935,28 @@ def test_c27_c39_write_skew_60_mas_60_sobre_100(caso, record_testsuite_property)
 
 
 def test_c27_c40_update_concurrente_de_aportaciones(caso, record_testsuite_property) -> None:
-    """Dos aportaciones de 40 ya CONFIRMADAS sobre porcion 100. Cada sesion sube
-    la suya a 80: por separado el estado resultante cabria; juntas suman 160.
-    La violacion no la crea ningun INSERT, sino dos UPDATE de importe."""
+    """Dos aportaciones de 20 ya CONFIRMADAS sobre porcion 100. Cada sesion sube
+    la suya a 60. La violacion no la crea ningun INSERT, sino dos UPDATE.
+
+    La aritmetica es la condicion del caso, no un detalle: hace falta que cada
+    UPDATE por separado quepa y que juntos no. 60 + 20 = 80 <= 100 cabe;
+    60 + 60 = 120 > 100 no. Si el estado de partida fuese 40 + 40, un solo
+    UPDATE a 80 ya daria 120 y ambas sesiones serian rechazadas por si mismas
+    sin llegar a contender: el caso no mediria write-skew, y el arnes lo
+    clasificaria FAIL_LIVENESS por no poder confirmar ninguna operacion
+    legitima, con razon."""
     lab = caso
     cuenta = lab.nueva_cuenta("EUR")
     movimiento = lab.nuevo_movimiento(cuenta, Decimal("-1000.0000"))
     hecho = lab.nuevo_hecho("EUR")
     conc = lab.nueva_conciliacion(hecho, movimiento, Decimal("-100.0000"))
-    ap_a = lab.nueva_aportacion(hecho, lab.nuevo_actor(), conc, Decimal("40.0000"))
-    ap_b = lab.nueva_aportacion(hecho, lab.nuevo_actor(), conc, Decimal("40.0000"))
+    ap_a = lab.nueva_aportacion(hecho, lab.nuevo_actor(), conc, Decimal("20.0000"))
+    ap_b = lab.nueva_aportacion(hecho, lab.nuevo_actor(), conc, Decimal("20.0000"))
 
     _caso_con_barrera(
         lab, record_testsuite_property, "C40",
-        [(UPD_APORTACION_IMPORTE, (Decimal("80.0000"), ap_a))],
-        [(UPD_APORTACION_IMPORTE, (Decimal("80.0000"), ap_b))],
+        [(UPD_APORTACION_IMPORTE, (Decimal("60.0000"), ap_a))],
+        [(UPD_APORTACION_IMPORTE, (Decimal("60.0000"), ap_b))],
         lambda: lab.d169_valido(hecho),
     )
 
