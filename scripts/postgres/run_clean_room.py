@@ -56,7 +56,16 @@
 # ROLE DRIFT, que es correcto y deliberado. En ese caso se usa --desde 0002
 # y el clean-room demuestra reproducibilidad DE LA BASE, no de la instancia.
 # Reproducir tambien la instancia exige un proyecto nuevo.
-# Versión: 0.8.0  -- F03-02 / migration 0290: el CONTRATO del final de la cadena
+# Versión: 0.9.0  -- F03 REABIERTA / D-168 + D-169 / migration 0300: el CONTRATO
+#                    del final de la cadena pasa a 175 FK. No cambian funciones
+#                    (26), triggers (54), constraint triggers (37), UNIQUE (41),
+#                    EXCLUDE (11), policies (82), vistas (3) ni la matriz de
+#                    runtime, porque 0300 es integridad declarativa pura. El
+#                    diccionario HUELLAS no cambia: 0300 no toca el prosrc de
+#                    ninguna funcion. Usar --head 0300.
+#                    ATENCION: 0310 (segunda invariante de D-169) NO esta
+#                    autorizada; cuando lo este, este contrato volvera a moverse.
+#                    v0.8.0: F03-02 / migration 0290: el CONTRATO del final de la cadena
 #                    pasa a 26 funciones, 54 triggers no internos y 37
 #                    constraint triggers (D-080: una funcion y seis constraint
 #                    triggers). Se anade la huella de fn_check_inversion_principal
@@ -125,12 +134,16 @@ except ImportError:  # pragma: no cover
 # +1 SELECT/INSERT/UPDATE de runtime, sin funciones ni triggers); 0288 sube a
 # 174 FK sin tocar funciones ni triggers; 0290 anade la funcion
 # fn_check_inversion_principal y seis constraint triggers de D-080, y reescribe
-# fn_check_inversion_asignacion_suma dejando el advisory como unico lock root.
+# fn_check_inversion_asignacion_suma dejando el advisory como unico lock root;
+# 0300 (D-168/D-169) repara la FK compuesta de pertenencia hecho<->conciliacion
+# aprobada por D-057 y nunca materializada, subiendo a 175 FK sin tocar
+# funciones, triggers, policies ni columnas. El indice compuesto que 0300 anade
+# no figura aqui porque este CONTRATO no cuenta indices; lo cubre la huella h3.
 CONTRATO = {
     "tablas": 80,
     "force_rls": 75,
     "policies": 82,
-    "foreign_keys": 174,
+    "foreign_keys": 175,
     "unique_constraints": 41,
     "exclude_constraints": 11,
     "funciones": 26,
