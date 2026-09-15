@@ -19,7 +19,14 @@
 #
 # PRECONDICIÓN: requiere 0190 (B16). Debe ejecutarse desde la raiz del
 #              repositorio, porque G6 inspecciona migrations/ y tests/.
-# Versión: 0.8.0  -- D-168/D-169. Sucesora 0300 (175 FK) y, sobre todo, los tres
+# Versión: 0.9.0  -- D-172. Se anade la sucesora conocida 0310 (D-169/D-170/D-171):
+#              la invariante agregada aportaciones <= porcion conciliada anade
+#              2 funciones y 4 constraint triggers, de 26/54/37 a 28/58/41. NO
+#              sustituye el contrato de 0300: los estados aceptados siguen
+#              siendo un conjunto EXPLICITO Y FINITO, sin >=, sin rangos
+#              abiertos y sin aceptacion generica de cualquier sucesor. Un
+#              historico legitimo no debe convertirse en drift.
+#              v0.8.0: D-168/D-169. Sucesora 0300 (175 FK) y, sobre todo, los tres
 #              criterios del GATE DE RECIERRE F03 que el gate original no tenia
 #              y por cuya ausencia el defecto de D-057 llego hasta D-164:
 #
@@ -106,6 +113,16 @@ SUCESORA_0290 = {**SUCESORA_0288, "funciones": 26,
 # funciones, triggers, policies, columnas ni GRANTs; el indice compuesto de
 # D-169/S2 no forma parte de este contrato, que no cuenta indices.
 SUCESORA_0300 = {**SUCESORA_0290, "foreign_keys": 175}
+# 0310 repara el DEFECTO 2 de D-168, aprobado como contrato fisico por D-169 y
+# precisado por D-170: la invariante agregada SUM(aportaciones vinculadas) <=
+# ABS(importe_asignado) en moneda comparable. Anade el nucleo
+# fn_validar_aportaciones_conciliacion y el despachador
+# fn_check_aportaciones_conciliacion, mas cuatro CONSTRAINT TRIGGER DEFERRABLE
+# INITIALLY DEFERRED sobre las cuatro superficies vivas. No crea tablas, FK,
+# indices, UNIQUE, EXCLUDE, policies, vistas ni GRANTs, y no toca la matriz
+# runtime. Contrato MEDIDO en Neon gapto2027_test, no previsto.
+SUCESORA_0310 = {**SUCESORA_0300, "funciones": 28,
+                 "triggers_no_internos": 58, "constraint_triggers": 41}
 
 # La matriz de runtime la fija B14/B18/B21; 0286 suma efecto_cuentas en
 # SELECT, INSERT y UPDATE, y NO en DELETE (bucket A de D-093).
@@ -182,7 +199,7 @@ def test_gate_g2_contrato_fisico(db: psycopg.Connection) -> None:
                AND t.tgname LIKE '%%guard%%'"""),
     }
     if obtenido in (SUCESORA_0270, SUCESORA_0280, SUCESORA_0285, SUCESORA_0286,
-                    SUCESORA_0288, SUCESORA_0290, SUCESORA_0300):
+                    SUCESORA_0288, SUCESORA_0290, SUCESORA_0300, SUCESORA_0310):
         return
     diferencias = {
         k: (CONTRATO_ESPERADO[k], obtenido[k])
