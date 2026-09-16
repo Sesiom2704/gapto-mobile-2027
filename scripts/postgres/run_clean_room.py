@@ -56,6 +56,21 @@
 # ROLE DRIFT, que es correcto y deliberado. En ese caso se usa --desde 0002
 # y el clean-room demuestra reproducibilidad DE LA BASE, no de la instancia.
 # Reproducir tambien la instancia exige un proyecto nuevo.
+# Versión: 0.10.1 -- D-177 §2 (K7). La comprobacion de virginidad miraba UNICAMENTE
+#                    el schema gapto. Un residuo en gapto_ext, o las extensiones
+#                    btree_gist / pg_trgm ya instaladas, pasaban el preflight y
+#                    hacian fallar 0002, que crea ambos schemas con CREATE SCHEMA
+#                    sin IF NOT EXISTS y las extensiones WITH SCHEMA gapto_ext.
+#                    La frontera correcta NO es "gapto_ext siempre ausente": es
+#                    condicional al tramo que se va a aplicar.
+#                      cadena que INCLUYE 0002 -> gapto y gapto_ext deben estar
+#                        AUSENTES, y btree_gist / pg_trgm no deben existir en
+#                        ninguna parte de la base;
+#                      cadena que EMPIEZA DESPUES de 0002 -> ambos schemas deben
+#                        estar PRESENTES, porque 0002 ya los creo.
+#                    --permitir-sucia conserva exactamente su semantica: sigue
+#                    siendo la unica forma de saltarse la comprobacion, y no se
+#                    debilita.
 # Versión: 0.10.0 -- D-172 / migration 0310. El contrato deja de ser un unico dict
 #                    global y pasa a estar indexado por HEAD, conservando el
 #                    historico: --head 0300 compara contra el contrato de 0300 y
@@ -416,11 +431,63 @@ def postflight_roles(conexion) -> list[str]:
     return comprobar_roles(leer_roles(conexion))
 
 
-def base_esta_vacia(conexion) -> bool:
+# Frontera de provisioning. 0002 crea gapto_ext, instala btree_gist y pg_trgm
+# dentro de el, y crea gapto. Todo con CREATE ... sin IF NOT EXISTS, de modo que
+# cualquier residuo hace fallar la migration.
+NAMESPACES_DE_APLICACION = ("gapto", "gapto_ext")
+EXTENSIONES_DE_APLICACION = ("btree_gist", "pg_trgm")
+
+
+def estado_de_provisioning(conexion) -> dict:
+    """Lee la frontera real, no solo el schema gapto."""
     with conexion.cursor() as cursor:
-        cursor.execute("SELECT count(*) FROM pg_catalog.pg_namespace WHERE nspname='gapto'")
-        (existe,) = cursor.fetchone()
-    return existe == 0
+        cursor.execute(
+            "SELECT nspname FROM pg_catalog.pg_namespace WHERE nspname = ANY(%s)",
+            (list(NAMESPACES_DE_APLICACION),))
+        presentes = {fila[0] for fila in cursor.fetchall()}
+        cursor.execute(
+            "SELECT e.extname, n.nspname FROM pg_catalog.pg_extension e "
+            "  JOIN pg_catalog.pg_namespace n ON n.oid = e.extnamespace "
+            " WHERE e.extname = ANY(%s)",
+            (list(EXTENSIONES_DE_APLICACION),))
+        extensiones = dict(cursor.fetchall())
+    return {
+        "schemas": {nombre: (nombre in presentes) for nombre in NAMESPACES_DE_APLICACION},
+        "extensiones": {nombre: extensiones.get(nombre) for nombre in EXTENSIONES_DE_APLICACION},
+    }
+
+
+def problemas_de_frontera(estado: dict, incluye_0002: bool) -> list[str]:
+    """Discrepancias entre el estado observado y el esperado en ese punto.
+
+    Lista vacia = la base esta en la frontera contractual correcta.
+
+    NO se impone "gapto_ext siempre ausente": si el tramo empieza despues de
+    0002, ambos schemas DEBEN existir ya, y su ausencia es tan sospechosa como
+    su presencia cuando 0002 va a crearlos.
+    """
+    problemas: list[str] = []
+    for nombre, presente in estado["schemas"].items():
+        if incluye_0002 and presente:
+            problemas.append(
+                f"el schema {nombre} YA existe y 0002 lo crea con CREATE SCHEMA "
+                "sin IF NOT EXISTS")
+        if not incluye_0002 and not presente:
+            problemas.append(
+                f"el schema {nombre} NO existe y el tramo empieza despues de 0002, "
+                "que es quien lo crea")
+    if incluye_0002:
+        for nombre, schema in estado["extensiones"].items():
+            if schema is not None:
+                problemas.append(
+                    f"la extension {nombre} ya esta instalada en el schema {schema} "
+                    "y 0002 la crea WITH SCHEMA gapto_ext")
+    return problemas
+
+
+def base_esta_vacia(conexion) -> bool:
+    """Compatibilidad: virginidad para un tramo que incluye 0002."""
+    return not problemas_de_frontera(estado_de_provisioning(conexion), True)
 
 
 def aplicar(conexion, ficheros: list[Path]) -> None:
@@ -589,12 +656,21 @@ def main() -> int:
             incluye_0001 = False
         else:
             preflight_roles(conexion, incluye_0001)
-            vacia = base_esta_vacia(conexion)
-            if not vacia and not args.permitir_sucia:
+            incluye_0002 = any(f.name.startswith("0002") for f in ficheros)
+            estado = estado_de_provisioning(conexion)
+            problemas_frontera = problemas_de_frontera(estado, incluye_0002)
+            vacia = not problemas_frontera
+            print("\nFrontera de provisioning "
+                  f"({'la cadena incluye 0002' if incluye_0002 else 'el tramo empieza despues de 0002'}):")
+            for nombre, presente in estado["schemas"].items():
+                print(f"  schema {nombre:<10} {'presente' if presente else 'ausente'}")
+            for nombre, schema in estado["extensiones"].items():
+                print(f"  extension {nombre:<10} {schema or 'ausente'}")
+            if problemas_frontera and not args.permitir_sucia:
+                detalle = "".join(f"\n  - {p}" for p in problemas_frontera)
                 sys.exit(
-                    f"\nLa base '{base}' YA contiene el schema gapto. Me niego a "
-                    "aplicar migrations encima. Usa una base virgen, o --permitir-sucia "
-                    "si sabes lo que haces."
+                    f"\nLa base '{base}' NO esta en la frontera contractual esperada:{detalle}"
+                    "\n\nUsa una base virgen, o --permitir-sucia si sabes lo que haces."
                 )
             print(f"\nAplicando {len(ficheros)} migrations desde "
                   f"{ficheros[0].name} hasta {ficheros[-1].name}:\n")
