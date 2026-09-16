@@ -56,6 +56,16 @@
 # ROLE DRIFT, que es correcto y deliberado. En ese caso se usa --desde 0002
 # y el clean-room demuestra reproducibilidad DE LA BASE, no de la instancia.
 # Reproducir tambien la instancia exige un proyecto nuevo.
+# Versión: 0.10.2 -- D-177 §3 (durabilidad de evidencia). K2 ocurrio porque cuatro
+#                    ejecuciones distintas reutilizaron el mismo nombre de fichero
+#                    y cada una sobrescribio la anterior, y porque los artefactos
+#                    se escribian en logs/, dentro del repositorio, que esta en
+#                    .gitignore y desaparece con cada descarga. Ahora el runner:
+#                      - SE NIEGA a sobrescribir un manifest existente;
+#                      - SE NIEGA a escribir evidencia DENTRO del repositorio;
+#                      - registra run_id y marca UTC en el propio manifest;
+#                      - avisa si el JUnit que se le pasa vive en el repositorio.
+#                    La politica deja de depender de que el operador se acuerde.
 # Versión: 0.10.1 -- D-177 §2 (K7). La comprobacion de virginidad miraba UNICAMENTE
 #                    el schema gapto. Un residuo en gapto_ext, o las extensiones
 #                    btree_gist / pg_trgm ya instaladas, pasaban el preflight y
@@ -146,6 +156,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import uuid
+from datetime import datetime, timezone
 import xml.etree.ElementTree as ET
 import os
 import sys
@@ -330,8 +342,44 @@ SELECT
 """
 
 
+# Identidad unica de esta ejecucion (D-177 §3). Se registra en el manifest para
+# que dos ejecuciones nunca sean confundibles aunque compartan entorno y head.
+RUN_ID = uuid.uuid4().hex[:12]
+AHORA_UTC = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def raiz_repositorio() -> Path:
     return Path(__file__).resolve().parent.parent.parent
+
+
+def problemas_de_ruta_de_evidencia(ruta: Path, raiz: Path, debe_existir: bool) -> list[str]:
+    """Discrepancias de una ruta de artefacto frente a la politica de D-177 §3.
+
+    Lista vacia = la ruta es aceptable. Funcion pura sobre rutas: no toca disco
+    salvo para resolver y comprobar existencia, de modo que es verificable.
+
+    Dos reglas, y ninguna es cosmetica:
+      1. la evidencia se escribe FUERA del repositorio. Escribirla dentro y
+         moverla despues fue exactamente lo que perdio cuatro artefactos del
+         clean-room: logs/ esta en .gitignore y se borra con cada descarga.
+      2. un manifest nuevo NO puede sobrescribir uno existente. Reutilizar un
+         nombre fijo para ejecuciones distintas fue lo que borro el log de la
+         ejecucion anomala de R7.
+    """
+    problemas: list[str] = []
+    resuelta = ruta.resolve()
+    if resuelta.is_relative_to(raiz.resolve()):
+        problemas.append(
+            f"{resuelta} esta DENTRO del repositorio ({raiz}); la evidencia del gate "
+            "se escribe directamente fuera, no se mueve despues")
+    if debe_existir:
+        if not resuelta.is_file():
+            problemas.append(f"{resuelta} no existe y se esperaba un manifest de fase 1")
+    elif resuelta.exists():
+        problemas.append(
+            f"{resuelta} YA existe; un artefacto de evidencia nunca se sobrescribe. "
+            "Usa un nombre unico (marca UTC + run_id + entorno + tipo)")
+    return problemas
 
 
 def migrations(desde: str | None) -> list[Path]:
@@ -590,8 +638,10 @@ def escribir_manifiesto(ruta: Path, observado: dict, declarado: dict,
                         resultado: str, razones: list[str]) -> None:
     contenido = {
         "artefacto": "run_clean_room.py",
-        "version": "0.8.0",
-        "decision": "D-131 refinada por D-136",
+        "version": "0.10.2",
+        "decision": "D-131 refinada por D-136, D-172, D-177",
+        "run_id": RUN_ID,
+        "generado_utc": AHORA_UTC,
         "resultado": resultado,
         "razones": razones,
         "observado": observado,
@@ -627,6 +677,22 @@ def main() -> int:
 
     if args.manifiesto and not args.head:
         sys.exit("--manifiesto exige --head: el veredicto se compone con la migration final declarada.")
+
+    raiz = raiz_repositorio()
+    for etiqueta, ruta, debe_existir in (
+            ("--manifiesto", args.manifiesto, False),
+            ("--completar-manifiesto", args.completar, True)):
+        if not ruta:
+            continue
+        problemas = problemas_de_ruta_de_evidencia(Path(ruta), raiz, debe_existir)
+        if problemas:
+            detalle = "".join(f"\n  - {p}" for p in problemas)
+            sys.exit(f"\nRuta de evidencia no aceptable para {etiqueta}:{detalle}")
+    if args.junit and Path(args.junit).resolve().is_relative_to(raiz.resolve()):
+        print(f"AVISO: el JUnit {args.junit} vive dentro del repositorio. Se leera "
+              "igualmente, pero no sobrevivira a una descarga limpia: conservalo "
+              "fuera antes de cerrar el paquete de evidencia.")
+
     if args.completar:
         if not args.junit:
             sys.exit("--completar-manifiesto exige --junit con la suite completa.")
