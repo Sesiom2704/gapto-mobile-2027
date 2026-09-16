@@ -2,7 +2,7 @@
 # GAPTO MOBILE 2027
 # Fichero: test_039_k7_frontera_de_provisioning.py
 # Ruta: tests/database/test_039_k7_frontera_de_provisioning.py
-# Descripción: D-177 §2. Regresión de la comprobación de virginidad de
+# Descripción: D-177 §2 y §3. Regresión de la comprobación de virginidad de
 #              scripts/postgres/run_clean_room.py, corregida en v0.10.1 (K7).
 #
 #              EL DEFECTO. Hasta v0.10.0 la comprobación miraba ÚNICAMENTE el
@@ -32,8 +32,15 @@
 #              Este fichero NO requiere conexión: es el único de la suite que
 #              puede correr sin base de datos.
 #
-# Decision: D-177 §2 (K7)
-# Versión: 0.1.0
+#              D-177 §3 — DURABILIDAD DE EVIDENCIA. Se añade la regresión de
+#              `problemas_de_ruta_de_evidencia`, que es la contrapartida de K2:
+#              el runner deja de aceptar que un manifest se escriba dentro del
+#              repositorio o que sobrescriba a otro existente. La política deja
+#              de depender de que el operador se acuerde.
+#
+# Decision: D-177 §2 (K7) y §3 (durabilidad)
+# Versión: 0.2.0  -- añade la regresión de rutas de evidencia (§3).
+#              v0.1.0: solo la frontera de provisioning (§2).
 # ============================================================
 
 from __future__ import annotations
@@ -152,3 +159,84 @@ def test_permitir_sucia_sigue_siendo_la_unica_salida(runner) -> None:
     import inspect
     firma = inspect.signature(runner.problemas_de_frontera)
     assert list(firma.parameters) == ["estado", "incluye_0002"]
+
+
+# ------------------------------------------------------------
+# D-177 §3 — durabilidad de la evidencia
+#
+# K2 ocurrió porque cuatro ejecuciones de R7 reutilizaron el mismo nombre de
+# fichero, y K1 porque los artefactos se escribían en logs/, dentro del
+# repositorio, que está en .gitignore. Ambas son ahora condiciones que el
+# runner rechaza por sí mismo.
+# ------------------------------------------------------------
+
+def test_ruta_nueva_fuera_del_repositorio_es_aceptable(runner, tmp_path) -> None:
+    repo = tmp_path / "repo"
+    (repo / "logs").mkdir(parents=True)
+    fuera = tmp_path / "evidencia"
+    fuera.mkdir()
+    destino = fuera / "manifiesto_20260916-120000_ab12cd34.json"
+    assert runner.problemas_de_ruta_de_evidencia(destino, repo, debe_existir=False) == []
+
+
+def test_ruta_dentro_del_repositorio_es_rechazada(runner, tmp_path) -> None:
+    """K1 EXACTAMENTE. logs/ del repositorio se borra en cada descarga."""
+    repo = tmp_path / "repo"
+    (repo / "logs").mkdir(parents=True)
+    problemas = runner.problemas_de_ruta_de_evidencia(
+        repo / "logs" / "manifiesto.json", repo, debe_existir=False)
+    assert len(problemas) == 1
+    assert "DENTRO del repositorio" in problemas[0]
+
+
+def test_no_se_sobrescribe_un_manifest_existente(runner, tmp_path) -> None:
+    """K2 EXACTAMENTE. Reutilizar un nombre fijo borró el log de la ejecución
+    anómala de R7, que ya no es recuperable."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    fuera = tmp_path / "evidencia"
+    fuera.mkdir()
+    ya_esta = fuera / "manifiesto.json"
+    ya_esta.write_text("{}", encoding="utf-8")
+    problemas = runner.problemas_de_ruta_de_evidencia(ya_esta, repo, debe_existir=False)
+    assert len(problemas) == 1
+    assert "YA existe" in problemas[0]
+
+
+def test_completar_exige_que_el_manifest_exista(runner, tmp_path) -> None:
+    """La fase 2 adjunta el JUnit a un manifest de fase 1: si no está, algo se
+    perdió y no debe crearse uno nuevo en su lugar."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    fuera = tmp_path / "evidencia"
+    fuera.mkdir()
+    problemas = runner.problemas_de_ruta_de_evidencia(
+        fuera / "no_esta.json", repo, debe_existir=True)
+    assert len(problemas) == 1
+    assert "no existe" in problemas[0]
+
+
+def test_completar_un_manifest_existente_fuera_es_aceptable(runner, tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    fuera = tmp_path / "evidencia"
+    fuera.mkdir()
+    ya_esta = fuera / "manifiesto.json"
+    ya_esta.write_text("{}", encoding="utf-8")
+    assert runner.problemas_de_ruta_de_evidencia(ya_esta, repo, debe_existir=True) == []
+
+
+def test_se_acumulan_las_discrepancias_de_ruta(runner, tmp_path) -> None:
+    """Dentro del repositorio Y ausente: dos motivos, ambos reportados."""
+    repo = tmp_path / "repo"
+    (repo / "logs").mkdir(parents=True)
+    problemas = runner.problemas_de_ruta_de_evidencia(
+        repo / "logs" / "manifiesto.json", repo, debe_existir=True)
+    assert len(problemas) == 2
+
+
+def test_el_manifest_lleva_identidad_unica_de_ejecucion(runner) -> None:
+    """D-177 §3: timestamp UTC y run_id, para que dos ejecuciones nunca sean
+    confundibles aunque compartan entorno y head."""
+    assert len(runner.RUN_ID) == 12
+    assert runner.AHORA_UTC.endswith("Z") and len(runner.AHORA_UTC) == 20
