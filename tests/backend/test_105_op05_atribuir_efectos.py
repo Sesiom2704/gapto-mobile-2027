@@ -7,6 +7,10 @@
 #   independencia frente a participacion de cuenta y pago (INV-03/INV-04),
 #   idempotencia de lote (F04-D006), carrera real sobre la version de la raiz
 #   (INV-20), auditoria y atomicidad.
+# Version: 0.3.0
+#   0.3.0 (F04-04): el recuento de posiciones se acota al tenant. Contarlas
+#   globalmente era una expresion incorrecta de INV-04 y rompia en cuanto otra
+#   subfase creo posiciones legitimas en la misma base.
 # Version: 0.2.0
 #   0.2.0 (F04-02): cobertura de F04-D007, signo por fila en OP-05.
 # Version: 0.1.0
@@ -471,8 +475,14 @@ def test_la_atribucion_no_crea_aportacion_tesoreria_ni_posicion(
     fila = leer_fila(
         admin,
         contexto.owner_user_id,
-        "SELECT count(*) FROM gapto.derechos_obligaciones_financieras",
-        (),
+        # Acotado al tenant: la conexion de verificacion tiene BYPASSRLS, y
+        # ademas F04-04 crea posiciones legitimas en la misma base. Lo que
+        # INV-04 prohibe es que ESTA operacion cree una posicion a ESTE
+        # usuario, no que existan posiciones en el mundo.
+        "SELECT count(*) FROM gapto.derechos_obligaciones_financieras p "
+        "JOIN gapto.entidades e ON e.id = p.entidad_id "
+        "WHERE e.owner_user_id = %s",
+        (contexto.owner_user_id,),
     )
     assert fila == (0,)
 

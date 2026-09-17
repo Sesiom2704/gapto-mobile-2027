@@ -19,6 +19,12 @@
 #   Los tests exigen GAPTO_TEST_DATABASE_URL. No se apunta implicitamente a
 #   ninguna base: una suite que se autoconfigura acaba escribiendo donde no
 #   debe.
+# Version: 0.4.0
+#   0.4.0 (F04-04): fixtures de posicion. `contraparte` depende de `actor_a` a
+#   proposito: `fn_check_actor_self_unico` exige que cada owner tenga
+#   EXACTAMENTE UN actor self, de modo que insertar primero una contraparte con
+#   tercero falla con "encontrados=0". La dependencia fuerza el orden correcto
+#   en vez de dejarlo al azar del grafo de fixtures.
 # Version: 0.3.0
 #   0.3.0 (F04-03): fixtures de cuentas y del servicio de tesoreria. `cuenta_usd`
 #   existe para probar multidivisa: D-169 solo compara cuando la moneda del
@@ -52,6 +58,7 @@ from app.core.contexto import ContextoOperacion  # noqa: E402
 from app.core.unidad_trabajo import UnidadDeTrabajo  # noqa: E402
 from app.services.efectos_service import EfectosService  # noqa: E402
 from app.services.hechos_service import HechosService  # noqa: E402
+from app.services.posiciones_service import PosicionesService  # noqa: E402
 from app.services.tesoreria_service import TesoreriaService  # noqa: E402
 
 ROL_RUNTIME = "gapto_runtime"
@@ -329,3 +336,27 @@ def anular_movimiento(
         finally:
             cursor.execute("RESET ROLE")
             cursor.execute("RESET ALL")
+
+
+@pytest.fixture()
+def servicio_posiciones(unidad: UnidadDeTrabajo) -> PosicionesService:
+    return PosicionesService(unidad)
+
+
+@pytest.fixture()
+def contraparte(
+    admin: psycopg.Connection, owner: uuid.UUID, actor_a: uuid.UUID
+) -> uuid.UUID:
+    """Actor con tercero, valido como contraparte de una posicion.
+
+    `actor_a` es el self del owner y debe existir antes: lo exige el contrato
+    fisico, no una preferencia de orden.
+    """
+    return _crear_actor(admin, owner, con_tercero=True)
+
+
+@pytest.fixture()
+def contraparte_ajena(
+    admin: psycopg.Connection, otro_owner: uuid.UUID, actor_ajeno: uuid.UUID
+) -> uuid.UUID:
+    return _crear_actor(admin, otro_owner, con_tercero=True)

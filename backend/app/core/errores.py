@@ -15,6 +15,11 @@
 #   operacion y reintentar no la hara posible". Fusionarlos haria que la UX
 #   reintentase indefinidamente algo imposible, o que abandonase algo que solo
 #   necesitaba otro intento.
+# Version: 0.4.0
+#   0.4.0 (F04-04): errores de posicion financiera. Se conserva
+#   EXCEDE_SALDO_DEL_DERECHO como codigo canonico de OP-14 y se anade
+#   EXCEDE_SALDO_POSICION para la reduccion generica: no se unifican porque la
+#   operacion intentada es parte de la informacion.
 # Version: 0.3.0
 #   0.3.0 (F04-03): errores canonicos de OP-06 a OP-09. `SIGNO_INCOMPATIBLE` se
 #   reutiliza en OP-09 con el mismo significado que en F04-02 —un importe que no
@@ -100,6 +105,31 @@ class CodigoError(str, enum.Enum):
     EXCEDE_IMPORTE_MOVIMIENTO = "EXCEDE_IMPORTE_MOVIMIENTO"
     MOVIMIENTO_ANULADO = "MOVIMIENTO_ANULADO"
     YA_CONCILIADO = "YA_CONCILIADO"
+
+    # --- F04-04 · alta y ciclo de vida de posicion -------------------------
+    # Una posicion NUNCA nace de una diferencia calculada (INV-04): exige
+    # declaracion explicita del llamante.
+    POSICION_SIN_JUSTIFICACION = "POSICION_SIN_JUSTIFICACION"
+    CONTRAPARTE_REQUERIDA = "CONTRAPARTE_REQUERIDA"
+    CONTRAPARTE_SELF_NO_PERMITIDA = "CONTRAPARTE_SELF_NO_PERMITIDA"
+    NATURALEZA_INCOMPATIBLE = "NATURALEZA_INCOMPATIBLE"
+    APERTURA_INCONSISTENTE = "APERTURA_INCONSISTENTE"
+    CIERRE_SIN_MOTIVO = "CIERRE_SIN_MOTIVO"
+    POSICION_CERRADA = "POSICION_CERRADA"
+
+    # --- F04-04 · reduccion de saldo --------------------------------------
+    # Dos codigos distintos a proposito: EXCEDE_SALDO_DEL_DERECHO es el
+    # canonico de OP-14 y se conserva tal cual; EXCEDE_SALDO_POSICION cubre la
+    # reduccion generica de una obligacion. Unificarlos perderia la traza de
+    # que operacion se intento.
+    EXCEDE_SALDO_DEL_DERECHO = "EXCEDE_SALDO_DEL_DERECHO"
+    EXCEDE_SALDO_POSICION = "EXCEDE_SALDO_POSICION"
+    SIN_DERECHO_PREVIO = "SIN_DERECHO_PREVIO"
+
+    # --- F04-04 · fronteras economicas ------------------------------------
+    INGRESO_NO_PERMITIDO = "INGRESO_NO_PERMITIDO"
+    GASTO_DUPLICADO = "GASTO_DUPLICADO"
+    CONDONACION_OBLIGACION_NO_SOPORTADA = "CONDONACION_OBLIGACION_NO_SOPORTADA"
 
     # --- Transversales ----------------------------------------------------
     ENTRADA_INVALIDA = "ENTRADA_INVALIDA"
