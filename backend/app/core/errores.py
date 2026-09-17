@@ -15,7 +15,11 @@
 #   operacion y reintentar no la hara posible". Fusionarlos haria que la UX
 #   reintentase indefinidamente algo imposible, o que abandonase algo que solo
 #   necesitaba otro intento.
-# Version: 0.1.0
+# Version: 0.2.0
+#   0.2.0 (F04-02): se anaden los errores canonicos de OP-04 y OP-05 y el error
+#   estable de F04-D004. Se RETIRA `DECISION_DIFERIDA_F04_02`, que era
+#   transitorio: ningun camino vigente puede emitirlo y conservarlo invitaria a
+#   leer una frontera ya aprobada como una decision todavia pendiente.
 # ============================================================
 
 from __future__ import annotations
@@ -49,10 +53,26 @@ class CodigoError(str, enum.Enum):
     CORRECCION_IMPROCEDENTE_ES_REALIDAD_NUEVA = "CORRECCION_IMPROCEDENTE_ES_REALIDAD_NUEVA"
     MOTIVO_AUSENTE = "MOTIVO_AUSENTE"
     CAMPO_INMUTABLE = "CAMPO_INMUTABLE"
-    DECISION_DIFERIDA_F04_02 = "DECISION_DIFERIDA_F04_02"
+
+    # --- F04-D004 ---------------------------------------------------------
+    # Sustituye al transitorio DECISION_DIFERIDA_F04_02. La frontera dejo de
+    # ser una decision pendiente y es una regla aprobada: corregir el tipo de
+    # un hecho con efectos exige correccion agregada explicita (F04-06).
+    CORRECCION_AGREGADA_REQUERIDA = "CORRECCION_AGREGADA_REQUERIDA"
 
     # --- OP-03 ------------------------------------------------------------
     HECHO_CON_REALIDAD_ASOCIADA = "HECHO_CON_REALIDAD_ASOCIADA"
+
+    # --- OP-04 ------------------------------------------------------------
+    DELTA_CERO = "DELTA_CERO"
+    NATURALEZA_INVALIDA = "NATURALEZA_INVALIDA"
+    VALOR_ACTIVO_SIN_ACONTECIMIENTO = "VALOR_ACTIVO_SIN_ACONTECIMIENTO"
+
+    # --- OP-05 ------------------------------------------------------------
+    SUMA_NO_CUADRA = "SUMA_NO_CUADRA"
+    SIGNO_INCOMPATIBLE = "SIGNO_INCOMPATIBLE"
+    NO_DISPONIBLE_CON_FILAS = "NO_DISPONIBLE_CON_FILAS"
+    ACTOR_DESCONOCIDO = "ACTOR_DESCONOCIDO"
 
     # --- Transversales ----------------------------------------------------
     ENTRADA_INVALIDA = "ENTRADA_INVALIDA"

@@ -10,6 +10,9 @@
 #   Incluye tambien la frontera diferida a F04-02: corregir tipo_hecho_id con
 #   efectos dependientes debe fallar cerrado en vez de inventar que ocurre con
 #   esos efectos.
+# Version: 0.2.0
+#   0.2.0 (F04-02): F04-D004 sustituye el error transitorio
+#   DECISION_DIFERIDA_F04_02 por CORRECCION_AGREGADA_REQUERIDA.
 # Version: 0.1.0
 # ============================================================
 
@@ -403,7 +406,7 @@ def test_hecho_con_tesoreria_vinculada_no_se_anula(
 # Frontera diferida a F04-02
 # ------------------------------------------------------------------
 
-def test_corregir_tipo_hecho_con_efectos_dependientes_falla_cerrado(
+def test_corregir_tipo_hecho_con_efectos_dependientes_falla_cerrado(  # F04-D004
     servicio: HechosService,
     contexto: ContextoOperacion,
     admin: psycopg.Connection,
@@ -438,7 +441,7 @@ def test_corregir_tipo_hecho_con_efectos_dependientes_falla_cerrado(
             campos=CamposCorreccion(tipo_hecho_id=fila[0]),
             motivo="arquetipo equivocado",
         )
-    assert excinfo.value.codigo is CodigoError.DECISION_DIFERIDA_F04_02
+    assert excinfo.value.codigo is CodigoError.CORRECCION_AGREGADA_REQUERIDA
 
 
 # ------------------------------------------------------------------

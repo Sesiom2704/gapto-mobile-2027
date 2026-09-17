@@ -15,10 +15,15 @@
 #   para decidir, ni modifica efectos economicos, atribuciones, aportaciones ni
 #   tesoreria. Solo comprueba su EXISTENCIA en dos puntos, y en ambos para
 #   negarse a seguir, nunca para decidir su semantica:
-#     - OP-02, al corregir tipo_hecho_id con efectos dependientes: la decision
-#       esta diferida a F04-02, asi que se falla cerrado en vez de inventarla;
+#     - OP-02, al corregir tipo_hecho_id con efectos dependientes: F04-D004
+#       prohibe el cambio escalar y reserva la correccion agregada a F04-06,
+#       asi que se falla cerrado en vez de recalcular nada;
 #     - OP-03, ante realidad ya vinculada: entonces el hecho ocurrio y lo que
 #       corresponde es devolucion o reversion, que pertenecen a F04-06.
+# Version: 0.2.0
+#   0.2.0 (F04-02): F04-D004 materializada. El error transitorio
+#   DECISION_DIFERIDA_F04_02 se sustituye por CORRECCION_AGREGADA_REQUERIDA.
+#   Ninguna otra semantica de OP-01/02/03 cambia.
 # Version: 0.1.0
 # ============================================================
 
@@ -190,9 +195,11 @@ class HechosService:
 
             if "tipo_hecho_id" in cambios and repo.tiene_efectos(sesion, hecho_id):
                 raise ErrorMotor(
-                    CodigoError.DECISION_DIFERIDA_F04_02,
-                    "Corregir el tipo de hecho con efectos dependientes exige "
-                    "una decision diferida a F04-02; F04-01 no la anticipa.",
+                    CodigoError.CORRECCION_AGREGADA_REQUERIDA,
+                    "Corregir el tipo de un hecho con efectos dependientes "
+                    "exige una correccion agregada explicita; el cambio "
+                    "escalar no puede reinterpretar los efectos ya "
+                    "materializados.",
                 )
 
             if row_version_actual != row_version_esperada:

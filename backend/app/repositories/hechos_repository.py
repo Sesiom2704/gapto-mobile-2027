@@ -24,6 +24,10 @@
 #   4) El snapshot EXCLUYE created_at, updated_at y row_version: son volatiles
 #      y romperian la comparabilidad entre el snapshot solicitado y el
 #      auditado. Exclusion deliberada.
+# Version: 0.2.0
+#   0.2.0 (F04-02): se anade `tocar_raiz`, que incrementa UNA vez la version de
+#   la raiz del agregado con la guarda en SQL. Lo usan OP-04 y OP-05, cuyas
+#   tablas hijas no tienen `row_version` propia (INV-20).
 # Version: 0.1.0
 # ============================================================
 
@@ -450,3 +454,31 @@ def anulacion_ya_registrada(
         (hecho_id, request_id),
     )
     return bool(fila and fila[0])
+
+
+def tocar_raiz(
+    sesion: SesionMotor, hecho_id: uuid.UUID, row_version_esperada: int
+) -> int | None:
+    """Incrementa la version del hecho raiz sin tocar sus campos funcionales.
+
+    Es el punto unico donde una operacion sobre tablas hijas materializa su
+    control optimista: la guarda `AND h.row_version = %s` vive en el WHERE, de
+    modo que una escritura ajena confirmada entre la lectura y este UPDATE hace
+    que no case ninguna fila. Comprobarlo antes en Python no protege nada.
+
+    Devuelve la nueva version, o None si la version esperada ya fue consumida
+    o el hecho no esta ACTIVO.
+    """
+    fila = sesion.uno(
+        """
+        UPDATE gapto.hechos_financieros AS h
+           SET updated_at = CURRENT_TIMESTAMP,
+               row_version = h.row_version + 1
+         WHERE h.id = %s::uuid
+           AND h.row_version = %s
+           AND h.estado = 'ACTIVO'
+        RETURNING h.row_version
+        """,
+        (hecho_id, row_version_esperada),
+    )
+    return None if fila is None else fila[0]

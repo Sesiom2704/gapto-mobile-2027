@@ -19,6 +19,11 @@
 #   Los tests exigen GAPTO_TEST_DATABASE_URL. No se apunta implicitamente a
 #   ninguna base: una suite que se autoconfigura acaba escribiendo donde no
 #   debe.
+# Version: 0.2.0
+#   0.2.0 (F04-02): fixtures de actores y del servicio de efectos. El segundo
+#   actor se crea con tercero porque
+#   `uq_actores_financieros__owner_tercero UNIQUE NULLS NOT DISTINCT` solo
+#   admite UN actor con tercero NULL por owner: el self.
 # Version: 0.1.0
 # ============================================================
 
@@ -40,6 +45,7 @@ if str(_RAIZ_BACKEND) not in sys.path:
 
 from app.core.contexto import ContextoOperacion  # noqa: E402
 from app.core.unidad_trabajo import UnidadDeTrabajo  # noqa: E402
+from app.services.efectos_service import EfectosService  # noqa: E402
 from app.services.hechos_service import HechosService  # noqa: E402
 
 ROL_RUNTIME = "gapto_runtime"
@@ -188,3 +194,61 @@ def leer_fila(admin: psycopg.Connection, owner: uuid.UUID, sql: str, params: tup
             return cursor.fetchone()
         finally:
             cursor.execute("RESET ALL")
+
+
+@pytest.fixture()
+def servicio_efectos(unidad: UnidadDeTrabajo) -> EfectosService:
+    return EfectosService(unidad)
+
+
+def _crear_actor(
+    admin: psycopg.Connection, owner: uuid.UUID, con_tercero: bool
+) -> uuid.UUID:
+    actor_id = uuid.uuid4()
+    with admin.cursor() as cursor:
+        cursor.execute("RESET ROLE")
+        cursor.execute("SET ROLE gapto_owner")
+        try:
+            cursor.execute(
+                "SELECT set_config('gapto.owner_user_id', %s, false)", (str(owner),)
+            )
+            if con_tercero:
+                tercero_id = uuid.uuid4()
+                cursor.execute(
+                    "INSERT INTO gapto.terceros (id, owner_user_id, nombre) "
+                    "VALUES (%s, %s, 'Tercero F04-02')",
+                    (tercero_id, owner),
+                )
+                cursor.execute(
+                    "INSERT INTO gapto.actores_financieros "
+                    "(id, owner_user_id, tercero_id) VALUES (%s, %s, %s)",
+                    (actor_id, owner, tercero_id),
+                )
+            else:
+                cursor.execute(
+                    "INSERT INTO gapto.actores_financieros (id, owner_user_id) "
+                    "VALUES (%s, %s)",
+                    (actor_id, owner),
+                )
+        finally:
+            cursor.execute("RESET ROLE")
+            cursor.execute("RESET ALL")
+    return actor_id
+
+
+@pytest.fixture()
+def actor_a(admin: psycopg.Connection, owner: uuid.UUID) -> uuid.UUID:
+    """Actor self del tenant (tercero_id NULL)."""
+    return _crear_actor(admin, owner, con_tercero=False)
+
+
+@pytest.fixture()
+def actor_b(admin: psycopg.Connection, owner: uuid.UUID) -> uuid.UUID:
+    """Segundo actor, necesariamente con tercero."""
+    return _crear_actor(admin, owner, con_tercero=True)
+
+
+@pytest.fixture()
+def actor_ajeno(admin: psycopg.Connection, otro_owner: uuid.UUID) -> uuid.UUID:
+    """Actor de OTRO tenant, para probar que no hay fuga."""
+    return _crear_actor(admin, otro_owner, con_tercero=False)
