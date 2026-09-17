@@ -19,6 +19,11 @@
 #   Los tests exigen GAPTO_TEST_DATABASE_URL. No se apunta implicitamente a
 #   ninguna base: una suite que se autoconfigura acaba escribiendo donde no
 #   debe.
+# Version: 0.3.0
+#   0.3.0 (F04-03): fixtures de cuentas y del servicio de tesoreria. `cuenta_usd`
+#   existe para probar multidivisa: D-169 solo compara cuando la moneda del
+#   hecho coincide con la de la cuenta, y sin una cuenta en otra divisa esa
+#   rama no se ejercita nunca.
 # Version: 0.2.0
 #   0.2.0 (F04-02): fixtures de actores y del servicio de efectos. El segundo
 #   actor se crea con tercero porque
@@ -47,6 +52,7 @@ from app.core.contexto import ContextoOperacion  # noqa: E402
 from app.core.unidad_trabajo import UnidadDeTrabajo  # noqa: E402
 from app.services.efectos_service import EfectosService  # noqa: E402
 from app.services.hechos_service import HechosService  # noqa: E402
+from app.services.tesoreria_service import TesoreriaService  # noqa: E402
 
 ROL_RUNTIME = "gapto_runtime"
 
@@ -252,3 +258,74 @@ def actor_b(admin: psycopg.Connection, owner: uuid.UUID) -> uuid.UUID:
 def actor_ajeno(admin: psycopg.Connection, otro_owner: uuid.UUID) -> uuid.UUID:
     """Actor de OTRO tenant, para probar que no hay fuga."""
     return _crear_actor(admin, otro_owner, con_tercero=False)
+
+
+@pytest.fixture()
+def servicio_tesoreria(unidad: UnidadDeTrabajo) -> TesoreriaService:
+    return TesoreriaService(unidad)
+
+
+def _crear_cuenta(
+    admin: psycopg.Connection, owner: uuid.UUID, moneda: str = "EUR"
+) -> uuid.UUID:
+    cuenta_id = uuid.uuid4()
+    with admin.cursor() as cursor:
+        cursor.execute("RESET ROLE")
+        cursor.execute("SET ROLE gapto_owner")
+        try:
+            cursor.execute(
+                "SELECT set_config('gapto.owner_user_id', %s, false)", (str(owner),)
+            )
+            cursor.execute(
+                "INSERT INTO gapto.cuentas (id, owner_user_id, nombre, tipo, "
+                "naturaleza, moneda, computa_liquidez, computa_patrimonio, "
+                "permite_negativo) VALUES (%s, %s, %s, 'CORRIENTE', 'ACTIVO', %s, "
+                "true, true, false)",
+                (cuenta_id, owner, f"Cuenta {moneda} F04-03", moneda),
+            )
+        finally:
+            cursor.execute("RESET ROLE")
+            cursor.execute("RESET ALL")
+    return cuenta_id
+
+
+@pytest.fixture()
+def cuenta(admin: psycopg.Connection, owner: uuid.UUID) -> uuid.UUID:
+    return _crear_cuenta(admin, owner, "EUR")
+
+
+@pytest.fixture()
+def cuenta_usd(admin: psycopg.Connection, owner: uuid.UUID) -> uuid.UUID:
+    """Cuenta en otra divisa: D-169 no compara nominalmente contra ella."""
+    return _crear_cuenta(admin, owner, "USD")
+
+
+@pytest.fixture()
+def cuenta_ajena(admin: psycopg.Connection, otro_owner: uuid.UUID) -> uuid.UUID:
+    return _crear_cuenta(admin, otro_owner, "EUR")
+
+
+def anular_movimiento(
+    admin: psycopg.Connection, owner: uuid.UUID, movimiento_id: uuid.UUID
+) -> None:
+    """Anula un movimiento para montar escenarios.
+
+    F04-03 no implementa la anulacion de movimientos —pertenece a F04-06— asi
+    que el estado se monta desde el fixture, no inventando una operacion.
+    """
+    with admin.cursor() as cursor:
+        cursor.execute("RESET ROLE")
+        cursor.execute("SET ROLE gapto_owner")
+        try:
+            cursor.execute(
+                "SELECT set_config('gapto.owner_user_id', %s, false)", (str(owner),)
+            )
+            cursor.execute(
+                "UPDATE gapto.movimientos_tesoreria SET estado = 'ANULADO', "
+                "anulado_at = CURRENT_TIMESTAMP, row_version = row_version + 1 "
+                "WHERE id = %s",
+                (movimiento_id,),
+            )
+        finally:
+            cursor.execute("RESET ROLE")
+            cursor.execute("RESET ALL")

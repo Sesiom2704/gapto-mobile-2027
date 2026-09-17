@@ -15,6 +15,10 @@
 #   operacion y reintentar no la hara posible". Fusionarlos haria que la UX
 #   reintentase indefinidamente algo imposible, o que abandonase algo que solo
 #   necesitaba otro intento.
+# Version: 0.3.0
+#   0.3.0 (F04-03): errores canonicos de OP-06 a OP-09. `SIGNO_INCOMPATIBLE` se
+#   reutiliza en OP-09 con el mismo significado que en F04-02 —un importe que no
+#   hereda el signo de su referencia—, de modo que no se duplica el concepto.
 # Version: 0.2.0
 #   0.2.0 (F04-02): se anaden los errores canonicos de OP-04 y OP-05 y el error
 #   estable de F04-D004. Se RETIRA `DECISION_DIFERIDA_F04_02`, que era
@@ -73,6 +77,29 @@ class CodigoError(str, enum.Enum):
     SIGNO_INCOMPATIBLE = "SIGNO_INCOMPATIBLE"
     NO_DISPONIBLE_CON_FILAS = "NO_DISPONIBLE_CON_FILAS"
     ACTOR_DESCONOCIDO = "ACTOR_DESCONOCIDO"
+
+    # --- OP-06 ------------------------------------------------------------
+    IMPORTE_NO_POSITIVO = "IMPORTE_NO_POSITIVO"
+    CRITERIO_INVALIDO = "CRITERIO_INVALIDO"
+
+    # --- OP-06 / OP-07 ----------------------------------------------------
+    # Una aportacion financia una SALIDA. Vincularla a una entrada convertiria
+    # "quien pago" en "quien cobro", que son dimensiones distintas.
+    USO_EN_COBRO_NO_PERMITIDO = "USO_EN_COBRO_NO_PERMITIDO"
+
+    # --- OP-07 ------------------------------------------------------------
+    CONCILIACION_DE_OTRO_HECHO = "CONCILIACION_DE_OTRO_HECHO"
+    SUMA_EXCEDE_PORCION = "SUMA_EXCEDE_PORCION"
+    VINCULO_NO_CORRESPONDE_A_ESA_SALIDA = "VINCULO_NO_CORRESPONDE_A_ESA_SALIDA"
+
+    # --- OP-08 ------------------------------------------------------------
+    IMPORTE_CERO = "IMPORTE_CERO"
+    CUENTA_DESCONOCIDA = "CUENTA_DESCONOCIDA"
+
+    # --- OP-09 ------------------------------------------------------------
+    EXCEDE_IMPORTE_MOVIMIENTO = "EXCEDE_IMPORTE_MOVIMIENTO"
+    MOVIMIENTO_ANULADO = "MOVIMIENTO_ANULADO"
+    YA_CONCILIADO = "YA_CONCILIADO"
 
     # --- Transversales ----------------------------------------------------
     ENTRADA_INVALIDA = "ENTRADA_INVALIDA"

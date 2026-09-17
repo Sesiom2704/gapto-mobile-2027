@@ -56,6 +56,17 @@
 # ROLE DRIFT, que es correcto y deliberado. En ese caso se usa --desde 0002
 # y el clean-room demuestra reproducibilidad DE LA BASE, no de la instancia.
 # Reproducir tambien la instancia exige un proyecto nuevo.
+# Versión: 0.11.0 -- D-180. El veredicto pasa a estar TIPADO POR ALCANCE:
+#                    INSTANCE_BOOTSTRAP frente a BASE_CLEANROOM, con etiquetas
+#                    PASS_/FALLO_ propias y un campo `scope` explicito en el
+#                    manifest. Antes, un clean-room de base correcto terminaba
+#                    siempre como FALLO por no haber aplicado 0001, cosa
+#                    imposible en una instancia ya provisionada. No se relaja
+#                    ninguna condicion del PASS de instancia: virginidad,
+#                    JUnit presente y con tests, suite verde y contrato sin
+#                    discrepancias se exigen igual en ambos alcances. Los
+#                    manifests historicos NO se reescriben y la etiqueta de
+#                    instancia conserva su forma exacta.
 # Versión: 0.10.2 -- D-177 §3 (durabilidad de evidencia). K2 ocurrio porque cuatro
 #                    ejecuciones distintas reutilizaron el mismo nombre de fichero
 #                    y cada una sobrescribio la anterior, y porque los artefactos
@@ -612,13 +623,44 @@ def leer_junit(ruta: Path) -> dict:
     return total
 
 
-def veredicto(head: str, fallos: list[str], incluye_0001: bool,
+SCOPE_INSTANCIA = "INSTANCE_BOOTSTRAP"
+SCOPE_BASE = "BASE_CLEANROOM"
+
+
+def alcance_de(creo_roles: bool) -> str:
+    """El alcance lo determina un unico hecho OBSERVADO: si esta ejecucion creo
+    los roles (es decir, si aplico 0001) o si ya existian."""
+    return SCOPE_INSTANCIA if creo_roles else SCOPE_BASE
+
+
+def etiqueta_veredicto(scope: str, primera: str, head: str, ok: bool) -> str:
+    """Etiqueta tipada por alcance (D-180).
+
+    La etiqueta de instancia conserva exactamente su forma historica
+    (`..._F03_0001_<head>`), de modo que los manifests anteriores siguen siendo
+    comparables y no hay que reescribir ninguno.
+    """
+    return f"{'PASS' if ok else 'FALLO'}_{scope}_F03_{primera}_{head}"
+
+
+def veredicto(head: str, primera: str, scope: str, fallos: list[str],
               junit: dict | None, base_virgen: bool) -> tuple[str, list[str]]:
-    """Un unico resultado, y las razones exactas si no es PASS. No se emite
-    PASS si falta cualquiera de las condiciones de D-136."""
+    """Un unico resultado, y las razones exactas si no es PASS.
+
+    D-180. Hasta 0.10.2 solo existia el veredicto de instancia, de modo que un
+    clean-room DE BASE correcto acababa etiquetado FALLO por la unica razon de
+    no haber aplicado 0001 — algo que en una instancia ya provisionada es
+    imposible por diseno, porque 0001 abortaria con su propio ROLE DRIFT. Eso
+    hacia ilegible la evidencia: obligaba a leer las razones para descubrir que
+    no habia fallado nada.
+
+    Ahora el alcance va en la ETIQUETA y deja de ser una razon de fallo. Lo que
+    NO cambia es ninguna condicion del PASS: virginidad, JUnit presente, JUnit
+    con tests, suite verde y contrato sin discrepancias se siguen exigiendo
+    igual en ambos alcances. Un PASS de BASE no afirma nada sobre la instancia,
+    y su propia etiqueta lo dice.
+    """
     razones = list(fallos)
-    if not incluye_0001:
-        razones.append("la cadena no incluyo 0001: esto no es bootstrap de instancia")
     if not base_virgen:
         razones.append("la base no estaba virgen al empezar")
     faltan_junit = junit is None
@@ -630,18 +672,18 @@ def veredicto(head: str, fallos: list[str], incluye_0001: bool,
         if junit["failures"] or junit["errors"]:
             razones.append(
                 f"la suite no esta verde: failures={junit['failures']} errors={junit['errors']}")
-    etiqueta = f"PASS_INSTANCE_BOOTSTRAP_F03_0001_{head}"
-    return (etiqueta if not razones else f"FALLO_INSTANCE_BOOTSTRAP_F03_0001_{head}"), razones
+    return etiqueta_veredicto(scope, primera, head, not razones), razones
 
 
 def escribir_manifiesto(ruta: Path, observado: dict, declarado: dict,
-                        resultado: str, razones: list[str]) -> None:
+                        resultado: str, razones: list[str], scope: str) -> None:
     contenido = {
         "artefacto": "run_clean_room.py",
-        "version": "0.10.2",
-        "decision": "D-131 refinada por D-136, D-172, D-177",
+        "version": "0.11.0",
+        "decision": "D-131 refinada por D-136, D-172, D-177, D-180",
         "run_id": RUN_ID,
         "generado_utc": AHORA_UTC,
+        "scope": scope,
         "resultado": resultado,
         "razones": razones,
         "observado": observado,
@@ -767,14 +809,20 @@ def main() -> int:
         fase1 = None
         if args.completar:
             fase1 = json.loads(Path(args.completar).read_text(encoding="utf-8"))
-            if fase1["observado"]["huellas_d111"] != huellas_d111:
-                print("VEREDICTO: FALLO_INSTANCE_BOOTSTRAP_F03_0001_" + args.head)
-                print("  - las ocho huellas han cambiado entre la fase 1 y la fase 2")
-                return 1
+        # El alcance se hereda de la fase 1: en la fase 2 el script corre en
+        # modo solo-verificar y no puede volver a observar quien creo los roles.
         creo_roles = (fase1["observado"]["roles_creados_en_esta_ejecucion"] if fase1
                       else incluye_0001)
+        scope = (fase1.get("scope") if fase1 else None) or alcance_de(creo_roles)
+        primera = (fase1["observado"]["migrations_aplicadas"][0][:4] if fase1
+                   else ficheros[0].name[:4])
+        if fase1 and fase1["observado"]["huellas_d111"] != huellas_d111:
+            print("VEREDICTO: " + etiqueta_veredicto(scope, primera, args.head, False))
+            print("  - las ocho huellas han cambiado entre la fase 1 y la fase 2")
+            return 1
         virgen = fase1["observado"]["base_virgen_al_empezar"] if fase1 else vacia
-        resultado, razones = veredicto(args.head, fallos, creo_roles, junit, virgen)
+        resultado, razones = veredicto(
+            args.head, primera, scope, fallos, junit, virgen)
         observado = {
             "base": base,
             "motor": version.split(" on ")[0],
@@ -803,13 +851,15 @@ def main() -> int:
         if observado["head_observado"] != args.head:
             razones.append(
                 f"head observado {observado['head_observado']} != head declarado {args.head}")
-            resultado = f"FALLO_INSTANCE_BOOTSTRAP_F03_0001_{args.head}"
+            resultado = etiqueta_veredicto(scope, primera, args.head, False)
+        print(f"ALCANCE:   {scope}")
         print(f"VEREDICTO: {resultado}")
         for r in razones:
             print(f"  - {r}")
         destino = args.completar or args.manifiesto
         if destino:
-            escribir_manifiesto(Path(destino), observado, declarado, resultado, razones)
+            escribir_manifiesto(Path(destino), observado, declarado, resultado,
+                                razones, scope)
             print(f"Manifest escrito en {destino}")
         if razones and resultado != "PENDIENTE_SUITE":
             return 1
