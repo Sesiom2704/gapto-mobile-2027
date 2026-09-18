@@ -1052,3 +1052,146 @@ def test_el_recalculo_no_mueve_la_identidad_con_ventana(
             "FROM gapto.previsiones WHERE id = %s",
             (mapa[objetivo],),
         ) == (objetivo, objetivo.replace(day=5), D("900.0000"))
+
+
+def test_una_realizacion_no_desplaza_el_calendario(
+    servicio_previsiones: PrevisionesService,
+    servicio: HechosService,
+    contexto: ContextoOperacion,
+    admin: psycopg.Connection,
+    regla,
+) -> None:
+    """CALENDARIO se ancla en el ORIGEN, nunca en la fecha real.
+
+    Enero se realiza el dia 14 frente a un objetivo del dia 10. Las
+    ocurrencias generadas DESPUES de esa realizacion deben seguir cayendo en
+    el dia 10: si el motor reanclase en la realidad, abril pasaria a ser el 14
+    y el calendario derivaria con cada desviacion.
+
+    El orden importa: primero se realiza, despues se genera. Generar todo de
+    una vez antes de cualquier realizacion no discriminaria nada.
+    """
+    identificador, _, _ = regla
+    primeros = mapa_mensual(2027, range(1, 4))
+    servicio_previsiones.generar_calendario(
+        contexto,
+        regla_id=identificador,
+        uuids_por_objetivo=primeros,
+        hasta_fecha=F("2027-03-31"),
+    )
+
+    enero = primeros[F("2027-01-10")]
+    estado = servicio_previsiones.estado_de(contexto, enero)
+    hecho_id = uuid.uuid4()
+    servicio.crear_hecho(
+        contexto,
+        DatosCreacionHecho(
+            hecho_id=hecho_id,
+            fecha_hecho=F("2027-01-14"),
+            moneda="EUR",
+            presupuestable=True,
+            estado_localizacion="NO_APLICA",
+            tipo_hecho_codigo="GASTO",
+        ),
+    )
+    servicio_previsiones.vincular_realidad(
+        contexto,
+        prevision_id=enero,
+        row_version_esperada=estado.row_version,
+        datos=DatosVinculo(
+            vinculo_id=uuid.uuid4(),
+            hecho_id=hecho_id,
+            importe_asignado=D("800.0000"),
+            marcar_realizada=True,
+        ),
+    )
+
+    siguientes = mapa_mensual(2027, range(4, 7))
+    resultado = servicio_previsiones.generar_calendario(
+        contexto,
+        regla_id=identificador,
+        uuids_por_objetivo=siguientes,
+        hasta_fecha=F("2027-06-30"),
+        desde_fecha=F("2027-04-01"),
+    )
+    assert resultado.total_creadas == 3
+    for objetivo, identidad in siguientes.items():
+        assert leer_fila(
+            admin,
+            contexto.owner_user_id,
+            "SELECT fecha_objetivo_regla FROM gapto.previsiones WHERE id = %s",
+            (identidad,),
+        ) == (objetivo,)
+
+
+def test_una_abierta_parcial_no_entra_en_la_muestra_historica(
+    servicio_reglas: ReglasService,
+    servicio_previsiones: PrevisionesService,
+    servicio: HechosService,
+    contexto: ContextoOperacion,
+    regla,
+) -> None:
+    """La muestra son ocurrencias REALIZADAS, no realidad a medias.
+
+    Enero se realiza por 60. Febrero recibe 10 pero sigue ABIERTA, porque
+    nadie declaro la ocurrencia completa. La media de marzo debe ser 60: si
+    febrero entrase en la muestra, seria 35 y el motor estaria estimando con
+    una realidad que todavia no se ha cerrado.
+    """
+    identificador, primera, creada = regla
+    servicio_reglas.crear_version(
+        contexto,
+        regla_id=identificador,
+        regla_row_version_esperada=creada.regla_row_version,
+        version=version(
+            vigente_desde=F("2027-01-11"),
+            importe_modo="MEDIA_HISTORICA",
+            importe_fijo=None,
+        ),
+        cerrar_version_id=primera.version_id,
+        cerrar_vigente_hasta=F("2027-01-10"),
+    )
+    mapa = mapa_mensual(2027, range(1, 5))
+    servicio_previsiones.generar_calendario(
+        contexto,
+        regla_id=identificador,
+        uuids_por_objetivo=mapa,
+        hasta_fecha=F("2027-04-30"),
+    )
+
+    for objetivo, asignado, cerrar in (
+        (F("2027-01-10"), "60.0000", True),
+        (F("2027-02-10"), "10.0000", False),
+    ):
+        hecho_id = uuid.uuid4()
+        servicio.crear_hecho(
+            contexto,
+            DatosCreacionHecho(
+                hecho_id=hecho_id,
+                fecha_hecho=objetivo,
+                moneda="EUR",
+                presupuestable=True,
+                estado_localizacion="NO_APLICA",
+                tipo_hecho_codigo="GASTO",
+            ),
+        )
+        estado = servicio_previsiones.estado_de(contexto, mapa[objetivo])
+        servicio_previsiones.vincular_realidad(
+            contexto,
+            prevision_id=mapa[objetivo],
+            row_version_esperada=estado.row_version,
+            datos=DatosVinculo(
+                vinculo_id=uuid.uuid4(),
+                hecho_id=hecho_id,
+                importe_asignado=D(asignado),
+                marcar_realizada=cerrar,
+            ),
+        )
+    assert servicio_previsiones.estado_de(contexto, mapa[F("2027-02-10")]).estado == ABIERTA
+
+    servicio_previsiones.recalcular_futuras(
+        contexto, regla_id=identificador, desde_fecha=F("2027-03-01")
+    )
+    assert servicio_previsiones.estado_de(
+        contexto, mapa[F("2027-03-10")]
+    ).importe_esperado == D("60")

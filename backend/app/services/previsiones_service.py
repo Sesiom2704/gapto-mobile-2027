@@ -31,6 +31,12 @@
 #   sigue siendo ABIERTA: no hay estado PARCIAL persistido. Y el primer hecho
 #   ACTIVO congela la expectativa poniendo `recalculo_automatico=false`, de
 #   modo que una version posterior de la regla ya no reescribe ese importe.
+# Version: 0.3.0
+#   0.3.0 (F04-05, remediacion): OP-17 rechaza la pareja repetida con su codigo
+#   canonico PREVISION_YA_MATERIALIZADA_POR_ESTA_REALIDAD en vez de uno
+#   generico; la correccion terminal admite las TRES terminales (F04-D024.3) y
+#   rechaza el tramo con TRAMO_RODANTE_REQUIERE_REVISION (F04-D024.9); AMB-009
+#   bloquea la generacion aunque exista sucesor abierto (F04-D018.4).
 # Version: 0.2.0
 #   0.2.0 (F04-05): F04-D022 expone la revision como lectura derivada y falla
 #   cerrada en el write-path; F04-D023 ancla la transicion CALENDARIO -> RODANTE
@@ -330,6 +336,18 @@ class PrevisionesService:
             )
         segmento = segmentos[-1]
         cadencia = segmento["cadencia"]
+
+        # F04-D018.4 y F04-D023.6. Una REALIZADA sin realidad ACTIVA bloquea
+        # la generacion automatica de la cadena ENTERA, exista o no un sucesor
+        # ya materializado: no aporta ancla y la inconsistencia debe resolverse
+        # con una decision explicita antes de continuar.
+        rota = repo_prev.realizada_sin_realidad_activa(sesion, regla_id)
+        if rota is not None:
+            raise ErrorMotor(
+                CodigoError.CABEZA_RODANTE_BLOQUEADA,
+                "La cadena tiene una ocurrencia REALIZADA que perdio su "
+                "realidad ACTIVA: queda bloqueada hasta revision explicita.",
+            )
 
         cabeza = repo_prev.cabeza_rodante(sesion, regla_id)
         if cabeza is not None and cabeza["abiertas"] > 1:
@@ -762,9 +780,15 @@ class PrevisionesService:
             if repo_prev.vinculo_de_pareja(
                 sesion, prevision_id, datos.hecho_id
             ) is not None:
+                # Esta previsión ya esta materializada por ESTA realidad. Un
+                # segundo vinculo contaria dos veces la misma porcion, que es
+                # justo lo que prohibe el contrato de OP-17. La autoridad
+                # fisica es `uq_prevision_hechos__prevision_hecho`; aqui solo
+                # se traduce a su codigo canonico.
                 raise ErrorMotor(
-                    CodigoError.OPERACION_NO_PERMITIDA_EN_ESTADO,
-                    "Esa previsión y ese hecho ya estan vinculados.",
+                    CodigoError.PREVISION_YA_MATERIALIZADA_POR_ESTA_REALIDAD,
+                    "Esa previsión ya esta materializada por ese hecho: "
+                    "vincularlo de nuevo contaria dos veces la misma realidad.",
                 )
 
             nueva_version = self._tocar(sesion, prevision_id, row_version_esperada)
@@ -1206,10 +1230,12 @@ class PrevisionesService:
         NO es una operacion ordinaria: solo corrige un estado que NUNCA fue
         cierto. Exige motivo explicito, version esperada y auditoria.
 
-        CANCELADA nunca se reabre (F04-D024). Su identidad es tombstone
-        permanente y reabrirla resucitaria una ocurrencia que alguien decidio
-        cancelar; ademas obligaria a decidir que pasa con el sucesor que nunca
-        nacio, y esa semantica no esta cerrada.
+        Las TRES terminales se reabren por esta via, CANCELADA incluida
+        (F04-D024.3). El tombstone es permanente para la generacion y el
+        lifecycle ORDINARIOS, pero no convierte un error documentado en
+        irreversible: su recuperacion existe solo a traves de este flujo
+        auditado, y un read-model no debe confundirla con la reutilizacion
+        ordinaria de una identidad cancelada.
 
         Los vinculos se CONSERVAN. Si el error fue marcar REALIZADA demasiado
         pronto, la realidad vinculada sigue siendo verdadera: la previsión
@@ -1218,9 +1244,12 @@ class PrevisionesService:
 
         Si existe sucesor RODANTE, solo se admite cuando esta ABIERTA, sin
         realidad y recalculable: entonces se CANCELA en la misma transaccion.
-        Si ya es terminal o tiene realidad, la correccion se rechaza con
-        REVISION_DERIVADA_REQUERIDA: propagar en silencio sobre una cadena que
-        ya avanzo destruiria realidad registrada.
+        Si ya es terminal o tiene realidad, la correccion se rechaza
+        ATOMICAMENTE con TRAMO_RODANTE_REQUIERE_REVISION (F04-D024.9):
+        propagar en silencio sobre una cadena que ya avanzo destruiria realidad
+        registrada. Ese codigo es propio de la correccion PREVISIONAL y no se
+        confunde con el impacto derivado que OP-02/OP-03 devuelven sin
+        rollback: F04-D024.10 separa expresamente las dos vias.
         """
         if not (motivo or "").strip():
             raise ErrorMotor(
@@ -1242,13 +1271,6 @@ class PrevisionesService:
                     "La previsión ya esta ABIERTA: no hay estado terminal que "
                     "corregir.",
                 )
-            if estado == CANCELADA:
-                raise ErrorMotor(
-                    CodigoError.REAPERTURA_NO_PERMITIDA,
-                    "Una ocurrencia CANCELADA no se reabre: su identidad es "
-                    "un tombstone permanente.",
-                )
-
             sucesor = self._sucesor_reabrible(
                 sesion, regla_id, prevision["fecha_objetivo_regla"]
             )
@@ -1324,15 +1346,15 @@ class PrevisionesService:
             )
             if posterior is not None:
                 raise ErrorMotor(
-                    CodigoError.REVISION_DERIVADA_REQUERIDA,
+                    CodigoError.TRAMO_RODANTE_REQUIERE_REVISION,
                     "La cadena ya avanzo a un estado terminal posterior: la "
-                    "correccion exige revision explicita.",
+                    "correccion previsional se rechaza atomicamente.",
                 )
             return None
         realidad = repo_prev.resumen_realidad(sesion, cabeza["id"])
         if realidad["hechos_activos"] > 0:
             raise ErrorMotor(
-                CodigoError.REVISION_DERIVADA_REQUERIDA,
+                CodigoError.TRAMO_RODANTE_REQUIERE_REVISION,
                 "El sucesor ya tiene realidad ACTIVA vinculada: cancelarlo "
                 "destruiria realidad registrada.",
             )
@@ -1714,3 +1736,101 @@ class PrevisionesService:
         resultado = self._unidad.ejecutar_con_traza(contexto, operacion, nombre=nombre)
         self.ultima_traza = resultado.traza
         return resultado.valor
+
+
+# ==================================================================
+# F04-D022 — impacto de una correccion de realidad sobre la cadena
+# ==================================================================
+
+def impacto_correccion_ancla(
+    sesion: SesionMotor, hecho_id: uuid.UUID
+) -> dict[str, Any]:
+    """Propaga lo que sea seguro y DEVUELVE el impacto derivado.
+
+    Esta funcion es el colaborador que OP-02 y OP-03 inyectan. Vive aqui
+    —dominio de previsiones— y opera sobre la MISMA sesion y la MISMA
+    transaccion de la correccion, de modo que `hechos_service` no adquiere
+    ninguna dependencia hacia F04-05.
+
+    F04-D022: la realidad manda. Esta funcion NUNCA levanta para impedir la
+    correccion de un hecho. Devuelve:
+
+      - `propagadas`: sucesores cuya VENTANA se actualizo con la nueva ancla.
+        Su `fecha_objetivo_regla` NO se toca: la identidad es inmutable y solo
+        se recalcula lo recalculable (mandato 60).
+      - `afectadas` + `requiere_revision`: tramos que no pueden propagarse sin
+        reescribir historia. No se persiste marca alguna; el read-model deriva
+        la revision de estos mismos datos.
+
+    Se propaga solo cuando el sucesor esta ABIERTA, sin realidad ACTIVA, con
+    `recalculo_automatico=true` y sin tramo terminal posterior. Cualquier otra
+    situacion se senala en vez de reescribirse.
+    """
+    propagadas: list[uuid.UUID] = []
+    afectadas: list[uuid.UUID] = []
+
+    for fila in repo_prev.rodantes_realizadas_de_hecho(sesion, hecho_id):
+        prevision_id = fila["prevision_id"]
+        regla_id = fila["regla_id"]
+        objetivo = fila["fecha_objetivo"]
+        cadencia = Cadencia(
+            fila["periodicidad"], fila["intervalo"], fila["anclaje_recurrencia"]
+        )
+        if not cadencia.recurrente:  # pragma: no cover - RODANTE siempre la tiene
+            continue
+
+        realidad = repo_prev.resumen_realidad(sesion, prevision_id)
+        if realidad["hechos_activos"] == 0 or realidad["fecha_real_maxima"] is None:
+            # AMB-009: sin realidad ACTIVA no hay ancla defendible y el
+            # objetivo canonico NO sirve de respaldo.
+            afectadas.append(prevision_id)
+            continue
+
+        sucesor = repo_prev.sucesor_inmediato(sesion, regla_id, objetivo)
+        if sucesor is None:
+            continue
+        if repo_prev.terminal_posterior(sesion, regla_id, sucesor["fecha_objetivo"]):
+            afectadas.append(sucesor["id"])
+            continue
+        if sucesor["estado"] != ABIERTA or not sucesor["recalculo_automatico"]:
+            afectadas.append(sucesor["id"])
+            continue
+        if repo_prev.resumen_realidad(sesion, sucesor["id"])["hechos_activos"] > 0:
+            afectadas.append(sucesor["id"])
+            continue
+
+        nueva = rec.ocurrencia(realidad["fecha_real_maxima"], cadencia, 1)
+        detalle = repo_prev.leer_prevision(sesion, sucesor["id"])
+        assert detalle is not None
+        if (
+            detalle["fecha_esperada_desde"] == nueva
+            and detalle["fecha_esperada_hasta"] == nueva
+        ):
+            continue
+
+        repo_prev.tocar_prevision(sesion, sucesor["id"], detalle["row_version"])
+        actualizada = repo_prev.actualizar_prevision(
+            sesion,
+            sucesor["id"],
+            {"fecha_esperada_desde": nueva, "fecha_esperada_hasta": nueva},
+        )
+        if actualizada is not None:
+            auditoria.registrar(
+                sesion,
+                tabla=repo_prev.TABLA_PREVISIONES,
+                registro_id=sucesor["id"],
+                accion=auditoria.ACCION_ACTUALIZAR,
+                datos_antes_json=actualizada[0],
+                datos_despues_json=actualizada[1],
+                motivo="ventana recalculada por correccion del ancla real",
+            )
+            propagadas.append(sucesor["id"])
+
+    return {
+        "propagadas": tuple(propagadas),
+        "afectadas": tuple(afectadas),
+        "requiere_revision": bool(afectadas),
+        "motivo": (
+            CodigoError.REVISION_DERIVADA_REQUERIDA.value if afectadas else None
+        ),
+    }

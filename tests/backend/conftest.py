@@ -103,15 +103,14 @@ def unidad(proveedor_conexion) -> UnidadDeTrabajo:
 def servicio(unidad: UnidadDeTrabajo) -> HechosService:
     """HechosService con el colaborador de F04-05 cableado.
 
-    La guarda de ancla vive en el repositorio de previsiones y se inyecta:
-    `hechos_service` no importa nada de F04-05.
+    El calculo del impacto sobre la cadena vive en `previsiones_service` y se
+    inyecta: `hechos_service` no importa nada de F04-05. La dependencia es
+    OBLIGATORIA, de modo que no existe construccion valida que deje OP-02 y
+    OP-03 incumpliendo F04-D022 en silencio.
     """
-    from app.repositories import previsiones_repository as repo_previsiones
+    from app.services.previsiones_service import impacto_correccion_ancla
 
-    return HechosService(
-        unidad,
-        ancla_de_cadena=repo_previsiones.es_ancla_de_cadena_con_sucesor,
-    )
+    return HechosService(unidad, impacto_ancla=impacto_correccion_ancla)
 
 
 @pytest.fixture(scope="session")
@@ -312,6 +311,12 @@ def _crear_cuenta(
 
 @pytest.fixture()
 def cuenta(admin: psycopg.Connection, owner: uuid.UUID) -> uuid.UUID:
+    return _crear_cuenta(admin, owner, "EUR")
+
+
+@pytest.fixture()
+def cuenta_destino(admin: psycopg.Connection, owner: uuid.UUID) -> uuid.UUID:
+    """Segunda cuenta EUR del mismo owner: destino de una transferencia."""
     return _crear_cuenta(admin, owner, "EUR")
 
 

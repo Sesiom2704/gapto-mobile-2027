@@ -428,7 +428,10 @@ def test_pareja_duplicada_rechazada(
     vincular(servicio_previsiones, contexto, cadena["cabeza"], hecho_id, "20.0000")
     with pytest.raises(ErrorMotor) as excinfo:
         vincular(servicio_previsiones, contexto, cadena["cabeza"], hecho_id, "5.0000")
-    assert excinfo.value.codigo is CodigoError.OPERACION_NO_PERMITIDA_EN_ESTADO
+    assert (
+        excinfo.value.codigo
+        is CodigoError.PREVISION_YA_MATERIALIZADA_POR_ESTA_REALIDAD
+    )
 
 
 def test_hecho_anulado_no_es_realidad(
@@ -1168,9 +1171,19 @@ def test_d024_los_vinculos_se_conservan(
     assert fila == (1, D("30.0000"))
 
 
-def test_d024_cancelada_nunca_se_reabre(
-    servicio_previsiones: PrevisionesService, contexto, cadena
+def test_d024_cancelada_se_reabre_solo_por_correccion_auditada(
+    servicio_previsiones: PrevisionesService,
+    contexto: ContextoOperacion,
+    admin: psycopg.Connection,
+    cadena,
 ) -> None:
+    """F04-D024.3. El tombstone es permanente para el lifecycle ORDINARIO.
+
+    No convierte un error documentado en irreversible: la cancelacion tambien
+    pudo ser un error de captura, y entonces se corrige por este flujo
+    explicito, versionado y auditado. Lo que sigue prohibido es reutilizar esa
+    identidad por la via ordinaria de generacion.
+    """
     estado = servicio_previsiones.estado_de(contexto, cadena["cabeza"])
     servicio_previsiones.cancelar(
         contexto,
@@ -1179,14 +1192,45 @@ def test_d024_cancelada_nunca_se_reabre(
         motivo="baja",
     )
     actual = servicio_previsiones.estado_de(contexto, cadena["cabeza"])
-    with pytest.raises(ErrorMotor) as excinfo:
-        servicio_previsiones.corregir_estado_terminal(
-            contexto,
-            prevision_id=cadena["cabeza"],
-            row_version_esperada=actual.row_version,
-            motivo="me equivoque",
-        )
-    assert excinfo.value.codigo is CodigoError.REAPERTURA_NO_PERMITIDA
+    resultado = servicio_previsiones.corregir_estado_terminal(
+        contexto,
+        prevision_id=cadena["cabeza"],
+        row_version_esperada=actual.row_version,
+        motivo="la cancelacion fue un error de captura",
+    )
+    assert resultado.estado == ABIERTA
+    # F04-D024.5: una reapertura NUNCA reactiva el recalculo automatico.
+    assert resultado.recalculo_automatico is False
+
+    fila = leer_fila(
+        admin,
+        contexto.owner_user_id,
+        "SELECT accion, datos_antes->>'estado', datos_despues->>'estado' "
+        "FROM gapto.auditoria WHERE registro_id = %s AND accion = 'ACTUALIZAR' "
+        "ORDER BY created_at DESC LIMIT 1",
+        (cadena["cabeza"],),
+    )
+    assert fila == ("ACTUALIZAR", CANCELADA, ABIERTA)
+
+
+def test_la_generacion_ordinaria_sigue_sin_reutilizar_un_tombstone(
+    servicio_previsiones: PrevisionesService,
+    contexto: ContextoOperacion,
+    cadena,
+) -> None:
+    """La reapertura auditada no relaja la via ordinaria."""
+    estado = servicio_previsiones.estado_de(contexto, cadena["cabeza"])
+    servicio_previsiones.cancelar(
+        contexto,
+        prevision_id=cadena["cabeza"],
+        row_version_esperada=estado.row_version,
+        motivo="baja",
+    )
+    resultado = servicio_previsiones.generar_rodante(
+        contexto, regla_id=cadena["regla_id"], uuid_nuevo=uuid.uuid4()
+    )
+    assert resultado.total_creadas == 0
+    assert F("2027-01-10") in resultado.canceladas_encontradas
 
 
 def test_d024_sucesor_con_realidad_exige_revision(
@@ -1219,7 +1263,7 @@ def test_d024_sucesor_con_realidad_exige_revision(
             motivo="x",
             sucesor_row_version_esperada=estado_sucesor.row_version,
         )
-    assert excinfo.value.codigo is CodigoError.REVISION_DERIVADA_REQUERIDA
+    assert excinfo.value.codigo is CodigoError.TRAMO_RODANTE_REQUIERE_REVISION
 
 
 def test_d024_exige_motivo(
@@ -1258,10 +1302,14 @@ def test_d024_abierta_no_tiene_nada_que_corregir(
 
 
 # ==================================================================
-# C-22 — GIMNASIO RODANTE COMPLETO
+# VECTOR D-126 — CADENA RODANTE DE TRES ESLABONES
+#
+# NO es C-22. El caso canonico C-22 es "transferencia prevista" (OP-10 + 17,
+# INV-15 + INV-16) y vive en su propia suite. Esto es el vector de cadencia
+# RODANTE de D-126, que comprueba el anclaje en la fecha REAL.
 # ==================================================================
 
-def test_c22_gimnasio_rodante(
+def test_vector_d126_cadena_rodante_de_tres_eslabones(
     servicio: HechosService,
     servicio_previsiones: PrevisionesService,
     contexto: ContextoOperacion,
@@ -1269,6 +1317,8 @@ def test_c22_gimnasio_rodante(
     cadena,
 ) -> None:
     """Cadena de tres eslabones con desviacion y anclaje en realidad.
+
+    Vector de D-126, no caso canonico C-22.
 
     Objetivo 10/01 -> realidad 02/02 (50,00) -> sucesor 09/03 -> realidad
     15/03 (45,00) -> sucesor 19/04. Cada ancla es la fecha REAL anterior, y
@@ -1378,7 +1428,22 @@ def test_media_historica_sobre_ocurrencias_de_la_misma_regla(
 
 
 # ==================================================================
-# Interleavings
+# INTERLEAVINGS CONTRACTUALES C1..C7 (mandato 79)
+#
+#   C1 doble generador RODANTE
+#   C2 doble generacion CALENDARIO
+#   C3 REALIZADA frente a OMITIDA
+#   C4 REALIZADA frente a CANCELADA
+#   C5 doble OP-17 sobre la misma pareja
+#   C6 nueva version frente a generador
+#   C7 anulacion del hecho ancla frente a generacion del siguiente RODANTE
+#
+#   Los que no estan en esa lista se conservan como ADICIONALES E-INT-nn: son
+#   utiles, pero no sustituyen a un contractual.
+#
+#   Todos usan `threading.Barrier`, sin `sleep`: una carrera sincronizada por
+#   espera temporal no es determinista y puede pasar en verde sin haber
+#   coincidido nunca.
 # ==================================================================
 
 def _competir(objetivo, veces: int = 2) -> list[Any]:
@@ -1404,16 +1469,17 @@ def _competir(objetivo, veces: int = 2) -> list[Any]:
     return resultados
 
 
-def test_c1_dos_generaciones_rodantes_concurrentes(
+def test_e_int_01_dos_generaciones_con_cabeza_abierta(
     servicio_previsiones: PrevisionesService,
     contexto: ContextoOperacion,
     admin: psycopg.Connection,
     cadena,
 ) -> None:
-    """No hay UNIQUE fisico: la unica defensa es el lock de regla.
+    """Adicional. Con cabeza ABIERTA ninguna de las dos crea sucesor.
 
-    Las dos generaciones ven la misma cabeza ABIERTA y ninguna crea sucesor;
-    lo que NO puede pasar es que nazcan dos cabezas.
+    OJO: esta carrera NO discrimina el lock de regla. Con la cabeza abierta,
+    la guarda de identidad devuelve la existente tanto con lock como sin el.
+    El contractual C1 es la otra, sobre cabeza ya terminada.
     """
     identificadores = [uuid.uuid4(), uuid.uuid4()]
 
@@ -1437,14 +1503,21 @@ def test_c1_dos_generaciones_rodantes_concurrentes(
     assert fila == (1,)
 
 
-def test_c2_dos_sucesores_concurrentes_tras_realizar(
+def test_c1_doble_generador_rodante_sobre_cabeza_terminada(
     servicio: HechosService,
     servicio_previsiones: PrevisionesService,
     contexto: ContextoOperacion,
     admin: psycopg.Connection,
     cadena,
 ) -> None:
-    """Cabeza terminada y dos generaciones a la vez: una sola cabeza nueva."""
+    """C1. Doble generador RODANTE. Discrimina el lock de regla.
+
+    Con la cabeza ya terminada, las dos generaciones calculan el MISMO
+    candidato y ninguna encuentra todavia esa identidad: sin el lock las dos
+    insertarian, y no hay UNIQUE fisica que lo impida (R-F04-017). Es la
+    carrera que de verdad prueba el protocolo
+    `LOCK -> releer -> calcular -> comprobar -> insertar`.
+    """
     hecho_id = crear_hecho(servicio, contexto, F("2027-02-02"))
     vincular(
         servicio_previsiones, contexto, cadena["cabeza"], hecho_id, "45.0000",
@@ -1471,7 +1544,7 @@ def test_c2_dos_sucesores_concurrentes_tras_realizar(
     assert fila == (1,)
 
 
-def test_c3_dos_generaciones_calendario_concurrentes(
+def test_c2_dos_generaciones_calendario_concurrentes(
     servicio_reglas: ReglasService,
     servicio_previsiones: PrevisionesService,
     contexto: ContextoOperacion,
@@ -1507,7 +1580,7 @@ def test_c3_dos_generaciones_calendario_concurrentes(
     assert fila == (4, 4)
 
 
-def test_c4_dos_realizaciones_concurrentes(
+def test_e_int_02_dos_realizaciones_con_hechos_distintos(
     servicio: HechosService,
     servicio_previsiones: PrevisionesService,
     contexto: ContextoOperacion,
@@ -1536,7 +1609,7 @@ def test_c4_dos_realizaciones_concurrentes(
     assert resultados.count("OK") == 1, resultados
 
 
-def test_c5_omision_y_realizacion_concurrentes(
+def test_c3_realizada_frente_a_omitida(
     servicio: HechosService,
     servicio_previsiones: PrevisionesService,
     contexto: ContextoOperacion,
@@ -1614,7 +1687,7 @@ def test_c6_configuracion_y_generacion_concurrentes(
     assert fila == (1,)
 
 
-def test_c7_retry_concurrente_del_mismo_vinculo(
+def test_c5_doble_op17_sobre_la_misma_pareja(
     servicio: HechosService,
     servicio_previsiones: PrevisionesService,
     contexto: ContextoOperacion,
@@ -1653,17 +1726,19 @@ def test_c7_retry_concurrente_del_mismo_vinculo(
 # Impacto de OP-02 sobre el ancla (mandato 82)
 # ==================================================================
 
-def test_op02_no_puede_mover_el_ancla_de_una_cadena_con_sucesor(
+def test_op02_confirma_y_devuelve_revision_derivada(
     servicio: HechosService,
     servicio_previsiones: PrevisionesService,
     contexto: ContextoOperacion,
     admin: psycopg.Connection,
     cadena,
 ) -> None:
-    """Falla cerrado en vez de propagar (F04-D022).
+    """F04-D022. LA REALIDAD MANDA: OP-02 no hace rollback por la cadena.
 
-    Mover la fecha economica del hecho ancla dejaria el sucesor calculado
-    desde una fecha que ya no es cierta, y su identidad NO puede moverse.
+    El sucesor tiene realidad ACTIVA, de modo que la propagacion no es segura.
+    La correccion del hecho CONFIRMA igualmente y el impacto se devuelve como
+    conclusion derivada, con motivo estable e identificadores afectados. Nada
+    de eso se persiste.
     """
     from app.core.modelos import CamposCorreccion
 
@@ -1673,32 +1748,126 @@ def test_op02_no_puede_mover_el_ancla_de_una_cadena_con_sucesor(
         servicio_previsiones, contexto, cadena["cabeza"], hecho_id, "45.0000",
         realizar=True, sucesor=sucesor,
     )
+    otro = crear_hecho(servicio, contexto, F("2027-03-10"))
+    vincular(servicio_previsiones, contexto, sucesor, otro, "45.0000")
+
     fila = leer_fila(
         admin,
         contexto.owner_user_id,
         "SELECT row_version FROM gapto.hechos_financieros WHERE id = %s",
         (hecho_id,),
     )
-    with pytest.raises(ErrorMotor) as excinfo:
-        servicio.corregir_hecho(
-            contexto,
-            hecho_id=hecho_id,
-            row_version_esperada=fila[0],
-            campos=CamposCorreccion(fecha_hecho=F("2027-02-20")),
-            motivo="fecha mal capturada",
-        )
-    assert excinfo.value.codigo is CodigoError.REVISION_DERIVADA_REQUERIDA
+    resultado = servicio.corregir_hecho(
+        contexto,
+        hecho_id=hecho_id,
+        row_version_esperada=fila[0],
+        campos=CamposCorreccion(fecha_hecho=F("2027-02-20")),
+        motivo="fecha mal capturada",
+    )
 
-    # Ni el hecho ni la identidad del sucesor se han movido.
+    # La realidad queda corregida.
     assert leer_fila(
         admin,
         contexto.owner_user_id,
-        "SELECT fecha_hecho, row_version FROM gapto.hechos_financieros WHERE id = %s",
+        "SELECT fecha_hecho FROM gapto.hechos_financieros WHERE id = %s",
         (hecho_id,),
-    ) == (F("2027-02-02"), fila[0])
+    ) == (F("2027-02-20"),)
+
+    # Y el impacto viaja en un resultado EXITOSO.
+    assert resultado.requiere_revision is True
+    assert resultado.motivo_revision == "REVISION_DERIVADA_REQUERIDA"
+    assert sucesor in resultado.previsiones_afectadas
+    assert resultado.previsiones_propagadas == ()
+
+    # La identidad del sucesor NO se ha movido.
     assert servicio_previsiones.estado_de(
         contexto, sucesor
     ).fecha_objetivo_regla == F("2027-03-09")
+
+
+def test_op02_propaga_la_ventana_cuando_es_seguro(
+    servicio: HechosService,
+    servicio_previsiones: PrevisionesService,
+    contexto: ContextoOperacion,
+    admin: psycopg.Connection,
+    cadena,
+) -> None:
+    """Sucesor ABIERTA, sin realidad y recalculable: se recalcula su VENTANA.
+
+    Su `fecha_objetivo_regla` permanece: la identidad es inmutable y solo se
+    recalcula lo recalculable.
+    """
+    from app.core.modelos import CamposCorreccion
+
+    hecho_id = crear_hecho(servicio, contexto, F("2027-02-02"))
+    sucesor = uuid.uuid4()
+    vincular(
+        servicio_previsiones, contexto, cadena["cabeza"], hecho_id, "45.0000",
+        realizar=True, sucesor=sucesor,
+    )
+    antes = leer_fila(
+        admin,
+        contexto.owner_user_id,
+        "SELECT fecha_objetivo_regla, fecha_esperada_desde "
+        "FROM gapto.previsiones WHERE id = %s",
+        (sucesor,),
+    )
+    assert antes == (F("2027-03-09"), F("2027-03-09"))
+
+    fila = leer_fila(
+        admin,
+        contexto.owner_user_id,
+        "SELECT row_version FROM gapto.hechos_financieros WHERE id = %s",
+        (hecho_id,),
+    )
+    resultado = servicio.corregir_hecho(
+        contexto,
+        hecho_id=hecho_id,
+        row_version_esperada=fila[0],
+        campos=CamposCorreccion(fecha_hecho=F("2027-02-09")),
+        motivo="fecha mal capturada",
+    )
+    assert resultado.requiere_revision is False
+    assert sucesor in resultado.previsiones_propagadas
+
+    # 09/02 + 5 semanas = 16/03 para la VENTANA; la identidad sigue en 09/03.
+    assert leer_fila(
+        admin,
+        contexto.owner_user_id,
+        "SELECT fecha_objetivo_regla, fecha_esperada_desde, fecha_esperada_hasta "
+        "FROM gapto.previsiones WHERE id = %s",
+        (sucesor,),
+    ) == (F("2027-03-09"), F("2027-03-16"), F("2027-03-16"))
+
+
+def test_op03_confirma_y_devuelve_revision_derivada(
+    servicio: HechosService,
+    servicio_previsiones: PrevisionesService,
+    contexto: ContextoOperacion,
+    admin: psycopg.Connection,
+    cadena,
+) -> None:
+    """F04-D022 aplica igual a la anulacion: confirma y senala AMB-009."""
+    hecho_id = crear_hecho(servicio, contexto, F("2027-02-02"))
+    vincular(
+        servicio_previsiones, contexto, cadena["cabeza"], hecho_id, "45.0000",
+        realizar=True,
+    )
+    fila = leer_fila(
+        admin,
+        contexto.owner_user_id,
+        "SELECT row_version FROM gapto.hechos_financieros WHERE id = %s",
+        (hecho_id,),
+    )
+    resultado = servicio.anular_hecho(
+        contexto,
+        hecho_id=hecho_id,
+        row_version_esperada=fila[0],
+        motivo_anulacion="capturado por error",
+    )
+    assert resultado.estado == "ANULADO"
+    assert resultado.requiere_revision is True
+    assert cadena["cabeza"] in resultado.previsiones_afectadas
 
 
 def test_op02_sigue_corrigiendo_otros_campos_del_hecho_ancla(
@@ -1773,21 +1942,19 @@ def test_op02_puede_mover_la_fecha_si_la_cadena_no_avanzo(
     ) == (F("2027-02-04"),)
 
 
-def test_con_cabeza_abierta_la_cadena_no_esta_bloqueada(
+def test_amb009_bloquea_la_cadena_aunque_exista_sucesor(
     servicio: HechosService,
     servicio_previsiones: PrevisionesService,
     contexto: ContextoOperacion,
     cadena,
     admin: psycopg.Connection,
 ) -> None:
-    """AMB-009 bloquea la cadena solo si NO hay cabeza con la que trabajar.
+    """F04-D018.4 y F04-D023.6. El bloqueo es de la CADENA, no de la cabeza.
 
-    Escenario: la primera ocurrencia queda REALIZADA_SIN_REALIDAD_ACTIVA, pero
-    su sucesor ya existe y sigue ABIERTA. Generar debe devolver ese sucesor
-    como existente, NO bloquear: hay cabeza operativa y nada que decidir.
-
-    Es el caso que discrimina un motor que, teniendo cabeza abierta, se pone a
-    recalcular el sucesor desde la ultima terminal.
+    Una REALIZADA que perdio su realidad ACTIVA no aporta ancla, y mientras esa
+    inconsistencia exista la regla queda bloqueada para generar
+    automaticamente, exista o no un sucesor ya materializado. La resolucion
+    exige una decision explicita.
     """
     hecho_id = crear_hecho(servicio, contexto, F("2027-02-02"))
     sucesor = uuid.uuid4()
@@ -1811,12 +1978,11 @@ def test_con_cabeza_abierta_la_cadena_no_esta_bloqueada(
         servicio_previsiones.estado_de(contexto, cadena["cabeza"]).estado_derivado
         == REALIZADA_SIN_REALIDAD_ACTIVA
     )
-
-    resultado = servicio_previsiones.generar_rodante(
-        contexto, regla_id=cadena["regla_id"], uuid_nuevo=uuid.uuid4()
-    )
-    assert resultado.total_creadas == 0
-    assert resultado.existentes == (sucesor,)
+    with pytest.raises(ErrorMotor) as excinfo:
+        servicio_previsiones.generar_rodante(
+            contexto, regla_id=cadena["regla_id"], uuid_nuevo=uuid.uuid4()
+        )
+    assert excinfo.value.codigo is CodigoError.CABEZA_RODANTE_BLOQUEADA
 
 
 def test_un_hecho_anulado_deja_de_contar_en_el_historico(
@@ -1898,17 +2064,17 @@ def test_un_hecho_anulado_deja_de_contar_en_el_historico(
     ).importe_esperado == D("60")
 
 
-def test_version_desfasada_tiene_precedencia_sobre_la_guarda_de_ancla(
+def test_version_desfasada_sigue_teniendo_precedencia(
     servicio: HechosService,
     servicio_previsiones: PrevisionesService,
     contexto: ContextoOperacion,
     cadena,
 ) -> None:
-    """F04-D022. La guarda se evalua DESPUES del control optimista.
+    """El control optimista se evalua antes que cualquier impacto de cadena.
 
-    Con la version desfasada, el llamante debe recibir VERSION_DESFASADA como
-    en cualquier otra correccion: alterar esa precedencia cambiaria el
-    contrato de OP-02 cerrado en F04-01.
+    Con la version desfasada, el llamante recibe VERSION_DESFASADA como en
+    cualquier otra correccion, y no se calcula ni se propaga nada sobre la
+    cadena: la operacion no llego a confirmar.
     """
     from app.core.modelos import CamposCorreccion
 
@@ -1928,50 +2094,16 @@ def test_version_desfasada_tiene_precedencia_sobre_la_guarda_de_ancla(
     assert excinfo.value.codigo is CodigoError.VERSION_DESFASADA
 
 
-def test_sin_colaborador_op02_se_comporta_como_en_f04_01(
-    unidad,
-    servicio_previsiones: PrevisionesService,
-    contexto: ContextoOperacion,
-    admin: psycopg.Connection,
-    cadena,
-) -> None:
-    """La guarda es un colaborador inyectado, no una dependencia del servicio.
+def test_el_colaborador_de_impacto_es_obligatorio(unidad) -> None:
+    """F04-D022 no puede quedar sin cumplir por una construccion descuidada.
 
-    Un `HechosService` construido sin el se comporta exactamente como en
-    F04-01: `hechos_service` no importa nada de F04-05.
+    No existe `HechosService` valido sin el colaborador: si fuese opcional,
+    omitirlo dejaria a OP-02 y OP-03 incumpliendo la decision en silencio y sin
+    que ninguna prueba del propio servicio lo detectase.
     """
-    from app.core.modelos import CamposCorreccion
+    with pytest.raises(TypeError):
+        HechosService(unidad)
 
-    aislado = HechosService(unidad)
-    hecho_id = crear_hecho(aislado, contexto, F("2027-02-02"))
-    vincular(
-        servicio_previsiones, contexto, cadena["cabeza"], hecho_id, "45.0000",
-        realizar=True, sucesor=uuid.uuid4(),
-    )
-    fila = leer_fila(
-        admin,
-        contexto.owner_user_id,
-        "SELECT row_version FROM gapto.hechos_financieros WHERE id = %s",
-        (hecho_id,),
-    )
-    aislado.corregir_hecho(
-        contexto,
-        hecho_id=hecho_id,
-        row_version_esperada=fila[0],
-        campos=CamposCorreccion(fecha_hecho=F("2027-02-04")),
-        motivo="fecha mal capturada",
-    )
-    assert leer_fila(
-        admin,
-        contexto.owner_user_id,
-        "SELECT fecha_hecho FROM gapto.hechos_financieros WHERE id = %s",
-        (hecho_id,),
-    ) == (F("2027-02-04"),)
-
-
-# ==================================================================
-# E2E de los algoritmos de importe pendientes
-# ==================================================================
 
 def _regla_con_modo(
     servicio_reglas: ReglasService,
@@ -2201,3 +2333,467 @@ def test_e2e_saldo_objetivo_cumplido_no_materializa(
         hasta_fecha=F("2027-01-31"),
     )
     assert resultado.total_creadas == 0
+
+
+# ==================================================================
+# F04-D024 — evidencia de las tres reaperturas y del rechazo atomico
+# ==================================================================
+
+def _terminal_con_sucesor(
+    servicio: HechosService,
+    servicio_previsiones: PrevisionesService,
+    contexto: ContextoOperacion,
+    cadena,
+) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
+    """REALIZADA con sucesor ABIERTA automatico. Devuelve (p1, p2, hecho)."""
+    hecho_id = crear_hecho(servicio, contexto, F("2027-02-02"))
+    sucesor = uuid.uuid4()
+    vincular(
+        servicio_previsiones, contexto, cadena["cabeza"], hecho_id, "30.0000",
+        realizar=True, sucesor=sucesor,
+    )
+    return cadena["cabeza"], sucesor, hecho_id
+
+
+def test_d024_realizada_a_abierta_conserva_vinculos_y_queda_parcial(
+    servicio: HechosService,
+    servicio_previsiones: PrevisionesService,
+    contexto: ContextoOperacion,
+    admin: psycopg.Connection,
+    cadena,
+) -> None:
+    """F04-D024.4. Marcada REALIZADA demasiado pronto.
+
+    La realidad vinculada sigue siendo verdadera, de modo que la previsión
+    vuelve a ABIERTA *parcialmente realizada*: previsto 45, asignado 30. Los
+    vinculos NO se eliminan para hacer cuadrar la transicion.
+    """
+    p1, p2, _ = _terminal_con_sucesor(
+        servicio, servicio_previsiones, contexto, cadena
+    )
+    estado = servicio_previsiones.estado_de(contexto, p1)
+    estado_sucesor = servicio_previsiones.estado_de(contexto, p2)
+    resultado = servicio_previsiones.corregir_estado_terminal(
+        contexto,
+        prevision_id=p1,
+        row_version_esperada=estado.row_version,
+        motivo="marcada completa por error",
+        sucesor_row_version_esperada=estado_sucesor.row_version,
+    )
+    assert resultado.estado == ABIERTA
+    assert resultado.recalculo_automatico is False
+
+    # El vinculo verdadero sobrevive y la ocurrencia queda parcial.
+    assert leer_fila(
+        admin,
+        contexto.owner_user_id,
+        "SELECT count(*), sum(importe_asignado) FROM gapto.prevision_hechos "
+        "WHERE prevision_id = %s",
+        (p1,),
+    ) == (1, D("30.0000"))
+    assert servicio_previsiones.estado_de(
+        contexto, p1
+    ).importe_esperado == D("45.0000")
+
+
+def test_d024_omitida_a_abierta(
+    servicio_previsiones: PrevisionesService,
+    contexto: ContextoOperacion,
+    admin: psycopg.Connection,
+    cadena,
+) -> None:
+    """F04-D024.2. La omision fue un error de captura: si fue."""
+    estado = servicio_previsiones.estado_de(contexto, cadena["cabeza"])
+    sucesor = uuid.uuid4()
+    servicio_previsiones.omitir(
+        contexto,
+        prevision_id=cadena["cabeza"],
+        row_version_esperada=estado.row_version,
+        motivo="crei que no habia ido",
+        uuid_sucesor=sucesor,
+    )
+    assert servicio_previsiones.estado_de(contexto, cadena["cabeza"]).estado == OMITIDA
+
+    actual = servicio_previsiones.estado_de(contexto, cadena["cabeza"])
+    estado_sucesor = servicio_previsiones.estado_de(contexto, sucesor)
+    resultado = servicio_previsiones.corregir_estado_terminal(
+        contexto,
+        prevision_id=cadena["cabeza"],
+        row_version_esperada=actual.row_version,
+        motivo="si fui: la omision fue un error",
+        sucesor_row_version_esperada=estado_sucesor.row_version,
+    )
+    assert resultado.estado == ABIERTA
+    assert resultado.recalculo_automatico is False
+    assert servicio_previsiones.estado_de(contexto, sucesor).estado == CANCELADA
+
+
+def test_d024_cancelada_a_abierta_solo_por_correccion_auditada(
+    servicio_previsiones: PrevisionesService,
+    contexto: ContextoOperacion,
+    admin: psycopg.Connection,
+    cadena,
+) -> None:
+    """F04-D024.3. El tombstone es permanente para la via ORDINARIA.
+
+    Pero una cancelacion que fue un error de captura no puede volverse
+    irreversible. La recuperacion existe solo por este flujo, con motivo y
+    auditoria antes/despues: un read-model no debe confundirla con la
+    reutilizacion ordinaria de una identidad cancelada.
+    """
+    estado = servicio_previsiones.estado_de(contexto, cadena["cabeza"])
+    servicio_previsiones.cancelar(
+        contexto,
+        prevision_id=cadena["cabeza"],
+        row_version_esperada=estado.row_version,
+        motivo="me di de baja",
+    )
+    assert (
+        servicio_previsiones.estado_de(contexto, cadena["cabeza"]).estado == CANCELADA
+    )
+
+    actual = servicio_previsiones.estado_de(contexto, cadena["cabeza"])
+    resultado = servicio_previsiones.corregir_estado_terminal(
+        contexto,
+        prevision_id=cadena["cabeza"],
+        row_version_esperada=actual.row_version,
+        motivo="la baja fue un error de captura",
+    )
+    assert resultado.estado == ABIERTA
+    assert resultado.recalculo_automatico is False
+
+    # Auditoria antes/despues de la reapertura.
+    assert leer_fila(
+        admin,
+        contexto.owner_user_id,
+        "SELECT datos_antes->>'estado', datos_despues->>'estado' "
+        "FROM gapto.auditoria WHERE registro_id = %s AND accion = 'ACTUALIZAR' "
+        "AND motivo LIKE 'correccion de estado terminal%%'",
+        (cadena["cabeza"],),
+    ) == (CANCELADA, ABIERTA)
+
+
+def test_d024_la_generacion_ordinaria_no_reutiliza_el_tombstone(
+    servicio_previsiones: PrevisionesService,
+    contexto: ContextoOperacion,
+    cadena,
+) -> None:
+    """La reapertura auditada no relaja la via ordinaria.
+
+    Una identidad CANCELADA sigue sin regenerarse por generacion normal: son
+    dos caminos distintos y solo el explicito puede recuperarla.
+    """
+    estado = servicio_previsiones.estado_de(contexto, cadena["cabeza"])
+    servicio_previsiones.cancelar(
+        contexto,
+        prevision_id=cadena["cabeza"],
+        row_version_esperada=estado.row_version,
+        motivo="baja",
+    )
+    resultado = servicio_previsiones.generar_rodante(
+        contexto, regla_id=cadena["regla_id"], uuid_nuevo=uuid.uuid4()
+    )
+    assert resultado.total_creadas == 0
+    assert F("2027-01-10") in resultado.canceladas_encontradas
+
+
+def test_d024_sucesor_con_realidad_rechaza_sin_cambios_parciales(
+    servicio: HechosService,
+    servicio_previsiones: PrevisionesService,
+    contexto: ContextoOperacion,
+    admin: psycopg.Connection,
+    cadena,
+) -> None:
+    """F04-D024.9. Rechazo ATOMICO con el codigo canonico del tramo.
+
+    Lo que se comprueba no es solo el codigo: es que P1 conserva su estado y
+    su version, y que el sucesor sigue intacto. Una correccion que dejase a P1
+    a medias seria peor que no corregir.
+    """
+    p1, p2, _ = _terminal_con_sucesor(
+        servicio, servicio_previsiones, contexto, cadena
+    )
+    otro = crear_hecho(servicio, contexto, F("2027-03-10"))
+    vincular(servicio_previsiones, contexto, p2, otro, "45.0000")
+
+    antes_p1 = servicio_previsiones.estado_de(contexto, p1)
+    antes_p2 = servicio_previsiones.estado_de(contexto, p2)
+    with pytest.raises(ErrorMotor) as excinfo:
+        servicio_previsiones.corregir_estado_terminal(
+            contexto,
+            prevision_id=p1,
+            row_version_esperada=antes_p1.row_version,
+            motivo="marcada por error",
+            sucesor_row_version_esperada=antes_p2.row_version,
+        )
+    assert excinfo.value.codigo is CodigoError.TRAMO_RODANTE_REQUIERE_REVISION
+
+    despues_p1 = servicio_previsiones.estado_de(contexto, p1)
+    despues_p2 = servicio_previsiones.estado_de(contexto, p2)
+    assert (despues_p1.estado, despues_p1.row_version) == (
+        REALIZADA,
+        antes_p1.row_version,
+    )
+    assert (despues_p2.estado, despues_p2.row_version) == (
+        antes_p2.estado,
+        antes_p2.row_version,
+    )
+
+
+def test_d024_sucesor_terminal_posterior_tambien_rechaza(
+    servicio: HechosService,
+    servicio_previsiones: PrevisionesService,
+    contexto: ContextoOperacion,
+    cadena,
+) -> None:
+    """La cadena ya avanzo mas alla: exige revision explicita.
+
+    No basta con mirar la cabeza abierta; un terminal posterior deja un
+    agujero silencioso si se reabre el anterior.
+    """
+    p1, p2, _ = _terminal_con_sucesor(
+        servicio, servicio_previsiones, contexto, cadena
+    )
+    estado_p2 = servicio_previsiones.estado_de(contexto, p2)
+    servicio_previsiones.cancelar(
+        contexto,
+        prevision_id=p2,
+        row_version_esperada=estado_p2.row_version,
+        motivo="baja",
+    )
+    antes = servicio_previsiones.estado_de(contexto, p1)
+    with pytest.raises(ErrorMotor) as excinfo:
+        servicio_previsiones.corregir_estado_terminal(
+            contexto,
+            prevision_id=p1,
+            row_version_esperada=antes.row_version,
+            motivo="marcada por error",
+        )
+    assert excinfo.value.codigo is CodigoError.TRAMO_RODANTE_REQUIERE_REVISION
+    assert servicio_previsiones.estado_de(contexto, p1).estado == REALIZADA
+
+
+def test_d024_la_reapertura_nunca_reactiva_el_recalculo(
+    servicio_previsiones: PrevisionesService,
+    contexto: ContextoOperacion,
+    admin: psycopg.Connection,
+    cadena,
+) -> None:
+    """F04-D024.5. Incluso SIN hechos ACTIVOS queda en false.
+
+    Es una intervencion manual explicita y no debe volver al control
+    automatico del motor sin otra decision expresa. Este caso es el
+    discriminante: al no haber realidad, un motor que solo congelase por
+    realidad dejaria `recalculo_automatico` en true.
+    """
+    estado = servicio_previsiones.estado_de(contexto, cadena["cabeza"])
+    servicio_previsiones.omitir(
+        contexto,
+        prevision_id=cadena["cabeza"],
+        row_version_esperada=estado.row_version,
+        motivo="no fui",
+    )
+    actual = servicio_previsiones.estado_de(contexto, cadena["cabeza"])
+    servicio_previsiones.corregir_estado_terminal(
+        contexto,
+        prevision_id=cadena["cabeza"],
+        row_version_esperada=actual.row_version,
+        motivo="si fui",
+    )
+    assert leer_fila(
+        admin,
+        contexto.owner_user_id,
+        "SELECT estado, recalculo_automatico, "
+        "       (SELECT count(*) FROM gapto.prevision_hechos WHERE prevision_id = %s) "
+        "FROM gapto.previsiones WHERE id = %s",
+        (cadena["cabeza"], cadena["cabeza"]),
+    ) == (ABIERTA, False, 0)
+
+
+def test_c4_realizada_frente_a_cancelada(
+    servicio: HechosService,
+    servicio_previsiones: PrevisionesService,
+    contexto: ContextoOperacion,
+    admin: psycopg.Connection,
+    cadena,
+) -> None:
+    """C4. Dos terminales incompatibles sobre la misma ocurrencia.
+
+    REALIZADA exige al menos un hecho ACTIVO; CANCELADA exige cero. Confirmar
+    las dos dejaria un estado que se contradice consigo mismo, asi que solo
+    una puede consumir la version esperada.
+
+    El desenlace se comprueba sobre el ESTADO PERSISTIDO, no solo sobre los
+    codigos: si gano la realizacion debe haber un vinculo, y si gano la
+    cancelacion no puede haber ninguno.
+    """
+    hecho_id = crear_hecho(servicio, contexto, F("2027-02-02"))
+    estado = servicio_previsiones.estado_de(contexto, cadena["cabeza"])
+
+    def intentar(indice: int) -> None:
+        propio = ContextoOperacion.de_usuario(contexto.owner_user_id)
+        if indice == 0:
+            servicio_previsiones.vincular_realidad(
+                propio,
+                prevision_id=cadena["cabeza"],
+                row_version_esperada=estado.row_version,
+                datos=DatosVinculo(
+                    vinculo_id=uuid.uuid4(),
+                    hecho_id=hecho_id,
+                    importe_asignado=D("45.0000"),
+                    marcar_realizada=True,
+                ),
+            )
+        else:
+            servicio_previsiones.cancelar(
+                propio,
+                prevision_id=cadena["cabeza"],
+                row_version_esperada=estado.row_version,
+                motivo="me doy de baja",
+            )
+
+    resultados = _competir(intentar)
+    assert resultados.count("OK") == 1, resultados
+
+    final = leer_fila(
+        admin,
+        contexto.owner_user_id,
+        "SELECT p.estado, "
+        "       (SELECT count(*) FROM gapto.prevision_hechos WHERE prevision_id = p.id) "
+        "  FROM gapto.previsiones p WHERE p.id = %s",
+        (cadena["cabeza"],),
+    )
+    assert final in ((REALIZADA, 1), (CANCELADA, 0)), final
+
+
+def test_c7_anulacion_del_ancla_frente_a_generacion_del_sucesor(
+    servicio: HechosService,
+    servicio_previsiones: PrevisionesService,
+    contexto: ContextoOperacion,
+    admin: psycopg.Connection,
+    cadena,
+) -> None:
+    """C7. Discrimina F04-D018 frente a F04-D022.
+
+    Un hilo anula el hecho que ancla la cadena; el otro intenta generar el
+    sucesor. Dos desenlaces son legitimos, segun cual confirme primero:
+
+      - la generacion leyo el hecho ACTIVO y creo el sucesor;
+      - la anulacion ya habia confirmado y la generacion falla cerrada con
+        CABEZA_RODANTE_BLOQUEADA.
+
+    Lo que NUNCA es legitimo: que OP-03 haga rollback por culpa de la cadena
+    (F04-D022.3, la realidad manda) o que quede mas de una cabeza abierta.
+
+    Y termine como termine, despues de la carrera la ocurrencia deriva
+    REALIZADA_SIN_REALIDAD_ACTIVA y la cadena queda bloqueada para seguir
+    avanzando automaticamente, incluso si el sucesor alcanzo a nacer.
+    """
+    hecho_id = crear_hecho(servicio, contexto, F("2027-02-02"))
+    vincular(
+        servicio_previsiones, contexto, cadena["cabeza"], hecho_id, "45.0000",
+        realizar=True,
+    )
+    version_hecho = leer_fila(
+        admin,
+        contexto.owner_user_id,
+        "SELECT row_version FROM gapto.hechos_financieros WHERE id = %s",
+        (hecho_id,),
+    )[0]
+    sucesor = uuid.uuid4()
+    desenlaces: dict[str, Any] = {}
+
+    def intentar(indice: int) -> None:
+        propio = ContextoOperacion.de_usuario(contexto.owner_user_id)
+        if indice == 0:
+            resultado = servicio.anular_hecho(
+                propio,
+                hecho_id=hecho_id,
+                row_version_esperada=version_hecho,
+                motivo_anulacion="capturado por error",
+            )
+            desenlaces["anulacion"] = resultado
+        else:
+            desenlaces["generacion"] = servicio_previsiones.generar_rodante(
+                propio, regla_id=cadena["regla_id"], uuid_nuevo=sucesor
+            )
+
+    resultados = _competir(intentar)
+
+    # F04-D022: la correccion de la realidad SIEMPRE confirma.
+    assert "anulacion" in desenlaces, resultados
+    assert desenlaces["anulacion"].estado == "ANULADO"
+
+    # La generacion o creo el sucesor, o fallo cerrada. No hay tercera via.
+    if "generacion" in desenlaces:
+        assert desenlaces["generacion"].total_creadas in (0, 1)
+    else:
+        assert CodigoError.CABEZA_RODANTE_BLOQUEADA in resultados, resultados
+
+    # F04-D018: sin realidad ACTIVA, la ocurrencia deriva la inconsistencia...
+    derivado = servicio_previsiones.estado_de(contexto, cadena["cabeza"])
+    assert derivado.estado == REALIZADA
+    assert derivado.estado_derivado == REALIZADA_SIN_REALIDAD_ACTIVA
+
+    # ...y la cadena no avanza mas, exista o no el sucesor.
+    with pytest.raises(ErrorMotor) as excinfo:
+        servicio_previsiones.generar_rodante(
+            contexto, regla_id=cadena["regla_id"], uuid_nuevo=uuid.uuid4()
+        )
+    assert excinfo.value.codigo is CodigoError.CABEZA_RODANTE_BLOQUEADA
+
+    # Nunca mas de una cabeza abierta.
+    assert leer_fila(
+        admin,
+        contexto.owner_user_id,
+        "SELECT count(*) FROM gapto.previsiones p "
+        "JOIN gapto.regla_versiones v ON v.id = p.regla_version_id "
+        "WHERE v.regla_id = %s AND p.estado = 'ABIERTA'",
+        (cadena["regla_id"],),
+    )[0] <= 1
+
+
+def test_con_cabeza_abierta_un_cambio_de_cadencia_no_crea_una_segunda(
+    servicio_reglas: ReglasService,
+    servicio_previsiones: PrevisionesService,
+    contexto: ContextoOperacion,
+    admin: psycopg.Connection,
+    cadena,
+) -> None:
+    """La guarda de cabeza unica se comprueba ANTES de recalcular candidatos.
+
+    Con la cabeza abierta en 10/01 se abre una version nueva que rompe
+    segmento: el candidato recalculado ya no coincide con la identidad
+    existente. Un motor que no cortase por cabeza abierta y siguiese hasta el
+    calculo crearia una SEGUNDA ocurrencia abierta, y la comprobacion de
+    identidad no lo atraparia porque la fecha es otra.
+
+    Es el caso que discrimina de verdad esa guarda: mientras el candidato
+    recalculado coincide con la cabeza existente, cortar o no cortar produce
+    el mismo resultado observable.
+    """
+    servicio_reglas.crear_version(
+        contexto,
+        regla_id=cadena["regla_id"],
+        regla_row_version_esperada=cadena["regla"].regla_row_version,
+        version=version_rodante(
+            version_id=uuid.uuid4(),
+            vigente_desde=F("2027-03-01"),
+            cadencia=Cadencia(SEMANAL, 2, RODANTE),
+        ),
+        cerrar_version_id=cadena["version"].version_id,
+        cerrar_vigente_hasta=F("2027-02-28"),
+    )
+    resultado = servicio_previsiones.generar_rodante(
+        contexto, regla_id=cadena["regla_id"], uuid_nuevo=uuid.uuid4()
+    )
+    assert resultado.total_creadas == 0
+    assert resultado.existentes == (cadena["cabeza"],)
+    assert leer_fila(
+        admin,
+        contexto.owner_user_id,
+        "SELECT count(*) FROM gapto.previsiones p "
+        "JOIN gapto.regla_versiones v ON v.id = p.regla_version_id "
+        "WHERE v.regla_id = %s AND p.estado = 'ABIERTA'",
+        (cadena["regla_id"],),
+    ) == (1,)

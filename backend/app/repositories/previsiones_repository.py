@@ -711,6 +711,101 @@ def futuras_de_regla(
         ]
 
 
+def rodantes_realizadas_de_hecho(
+    sesion: SesionMotor, hecho_id: uuid.UUID
+) -> list[dict[str, Any]]:
+    """Ocurrencias RODANTE REALIZADAS que ese hecho ayuda a anclar.
+
+    Devuelve tambien la cadencia de la version que las gobierna, para poder
+    recalcular la ventana del sucesor sin volver a consultar.
+    """
+    with sesion.conexion.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT p.id, v.regla_id, p.fecha_objetivo_regla,
+                   v.periodicidad, v.intervalo, v.anclaje_recurrencia
+              FROM gapto.prevision_hechos pv
+              JOIN gapto.previsiones p ON p.id = pv.prevision_id
+              JOIN gapto.regla_versiones v ON v.id = p.regla_version_id
+             WHERE pv.hecho_id = %s::uuid
+               AND p.estado = 'REALIZADA'
+               AND v.anclaje_recurrencia = 'RODANTE'
+             ORDER BY p.fecha_objetivo_regla, p.id
+            """,
+            (hecho_id,),
+        )
+        return [
+            {
+                "prevision_id": f[0],
+                "regla_id": f[1],
+                "fecha_objetivo": f[2],
+                "periodicidad": f[3],
+                "intervalo": f[4],
+                "anclaje_recurrencia": f[5],
+            }
+            for f in cursor.fetchall()
+        ]
+
+
+def realizada_sin_realidad_activa(
+    sesion: SesionMotor, regla_id: uuid.UUID
+) -> dict[str, Any] | None:
+    """Primera ocurrencia RODANTE REALIZADA que perdio su realidad ACTIVA.
+
+    F04-D018: mientras exista, la cadena entera queda bloqueada para generacion
+    automatica. Se comprueba sobre la REGLA y no sobre la cabeza, porque una
+    ocurrencia rota anterior invalida el ancla aunque su sucesor ya exista.
+    """
+    fila = sesion.uno(
+        """
+        SELECT p.id, p.fecha_objetivo_regla
+          FROM gapto.previsiones p
+          JOIN gapto.regla_versiones v ON v.id = p.regla_version_id
+         WHERE v.regla_id = %s::uuid
+           AND p.estado = 'REALIZADA'
+           AND v.anclaje_recurrencia = 'RODANTE'
+           AND NOT EXISTS (
+               SELECT 1
+                 FROM gapto.prevision_hechos pv
+                 JOIN gapto.hechos_financieros h ON h.id = pv.hecho_id
+                WHERE pv.prevision_id = p.id
+                  AND h.estado = 'ACTIVO')
+         ORDER BY p.fecha_objetivo_regla, p.id
+         LIMIT 1
+        """,
+        (regla_id,),
+    )
+    if fila is None:
+        return None
+    return {"id": fila[0], "fecha_objetivo": fila[1]}
+
+
+def sucesor_inmediato(
+    sesion: SesionMotor, regla_id: uuid.UUID, fecha_objetivo: dt.date
+) -> dict[str, Any] | None:
+    """Siguiente ocurrencia de la regla por identidad canonica."""
+    fila = sesion.uno(
+        """
+        SELECT p.id, p.fecha_objetivo_regla, p.estado, p.recalculo_automatico
+          FROM gapto.previsiones p
+          JOIN gapto.regla_versiones v ON v.id = p.regla_version_id
+         WHERE v.regla_id = %s::uuid
+           AND p.fecha_objetivo_regla > %s::date
+         ORDER BY p.fecha_objetivo_regla, p.id
+         LIMIT 1
+        """,
+        (regla_id, fecha_objetivo),
+    )
+    if fila is None:
+        return None
+    return {
+        "id": fila[0],
+        "fecha_objetivo": fila[1],
+        "estado": fila[2],
+        "recalculo_automatico": fila[3],
+    }
+
+
 def es_ancla_de_cadena_con_sucesor(
     sesion: SesionMotor, hecho_id: uuid.UUID
 ) -> bool:

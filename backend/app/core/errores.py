@@ -15,6 +15,12 @@
 #   operacion y reintentar no la hara posible". Fusionarlos haria que la UX
 #   reintentase indefinidamente algo imposible, o que abandonase algo que solo
 #   necesitaba otro intento.
+# Version: 0.7.0
+#   0.7.0 (F04-05, auditoria): TRAMO_RODANTE_REQUIERE_REVISION como codigo
+#   canonico del rechazo atomico previsional (F04-D024.9),
+#   PREVISION_YA_MATERIALIZADA_POR_ESTA_REALIDAD para la doble materializacion
+#   de la misma porcion, y REAPERTURA_NO_PERMITIDA RETIRADO: F04-D024.3 admite
+#   CANCELADA -> ABIERTA por correccion explicita y auditada.
 # Version: 0.6.0
 #   0.6.0 (F04-05): REVISION_DERIVADA_REQUERIDA (F04-D022) y
 #   REAPERTURA_NO_PERMITIDA (F04-D024).
@@ -156,11 +162,20 @@ class CodigoError(str, enum.Enum):
 
     # --- F04-05 · lifecycle de previsiones --------------------------------
     PREVISION_BLOQUEADA = "PREVISION_BLOQUEADA"
-    # F04-D022. La operacion no puede propagar la correccion sin inventar
-    # semantica: falla cerrada y la revision se expone por lectura derivada.
+    # F04-D022. Motivo estable del impacto DERIVADO que devuelven OP-02 y
+    # OP-03 cuando la propagacion no es segura. NO es un error: viaja en un
+    # resultado exitoso. Y los comandos cuyo objetivo es generar o avanzar la
+    # cadena si fallan cerrados, con CABEZA_RODANTE_BLOQUEADA.
     REVISION_DERIVADA_REQUERIDA = "REVISION_DERIVADA_REQUERIDA"
-    # F04-D024. CANCELADA es tombstone permanente y no se reabre.
-    REAPERTURA_NO_PERMITIDA = "REAPERTURA_NO_PERMITIDA"
+    # F04-D024.9. Rechazo ATOMICO de una correccion puramente previsional
+    # cuando el tramo no puede mantenerse coherente. Distinto de la revision
+    # derivada: este SI hace rollback, y solo aplica a correcciones de
+    # previsión, nunca a OP-02/OP-03.
+    TRAMO_RODANTE_REQUIERE_REVISION = "TRAMO_RODANTE_REQUIERE_REVISION"
+    # OP-17. La misma porcion de realidad no puede materializarse dos veces.
+    PREVISION_YA_MATERIALIZADA_POR_ESTA_REALIDAD = (
+        "PREVISION_YA_MATERIALIZADA_POR_ESTA_REALIDAD"
+    )
     REALIZACION_SIN_HECHO_ACTIVO = "REALIZACION_SIN_HECHO_ACTIVO"
     ESTADO_PREVISION_INCOMPATIBLE = "ESTADO_PREVISION_INCOMPATIBLE"
 

@@ -20,6 +20,11 @@
 #       asi que se falla cerrado en vez de recalcular nada;
 #     - OP-03, ante realidad ya vinculada: entonces el hecho ocurrio y lo que
 #       corresponde es devolucion o reversion, que pertenecen a F04-06.
+# Version: 0.5.0
+#   0.5.0 (F04-05, auditoria): OP-02 y OP-03 dejan de hacer rollback por una
+#   cadena RODANTE no propagable. Conforme a F04-D022 confirman la correccion,
+#   propagan lo seguro y devuelven `requiere_revision` con motivo estable e
+#   identificadores afectados. El colaborador pasa a ser OBLIGATORIO.
 # Version: 0.4.0
 #   0.4.0 (F04-05): la guarda de ancla se INYECTA como colaborador en vez de
 #   importar el repositorio de previsiones, y se evalua despues del control
@@ -82,28 +87,29 @@ def _motivo_obligatorio(motivo: str | None, operacion: str) -> str:
 class HechosService:
     """Casos de uso de F04-01 sobre gapto.hechos_financieros."""
 
-    __slots__ = ("_unidad", "ultima_traza", "_ancla_de_cadena")
+    __slots__ = ("_unidad", "ultima_traza", "_impacto_ancla")
 
     def __init__(
         self,
         unidad: UnidadDeTrabajo,
         *,
-        ancla_de_cadena: Callable[[SesionMotor, uuid.UUID], bool] | None = None,
+        impacto_ancla: Callable[[SesionMotor, uuid.UUID], dict[str, Any]],
     ) -> None:
-        """`ancla_de_cadena` es un colaborador INYECTADO.
+        """`impacto_ancla` es un colaborador INYECTADO y OBLIGATORIO.
 
-        F04-05 necesita que OP-02 sepa si un hecho ancla una cadena RODANTE ya
-        avanzada, pero esa pregunta pertenece al dominio de previsiones. Se
-        inyecta en vez de importar el repositorio de F04-05 aqui, para que este
-        servicio —cerrado en F04-01— no adquiera una dependencia hacia una
-        subfase posterior, y sin trasladar SQL de previsiones al repositorio de
-        hechos.
+        F04-D022 exige que OP-02 y OP-03 CONFIRMEN la correccion de la realidad
+        y devuelvan el impacto derivado sobre la cadena RODANTE. Esa logica
+        pertenece al dominio de previsiones, de modo que se inyecta: este
+        servicio —cerrado en F04-01— no importa nada de F04-05 y no se traslada
+        SQL de previsiones al repositorio de hechos.
 
-        Sin colaborador, OP-01/02/03 se comportan exactamente como en F04-01.
+        Es obligatorio a proposito. Si fuese opcional, una construccion que lo
+        omitiese dejaria a OP-02/OP-03 incumpliendo D-022 en silencio, y ese
+        incumplimiento no se veria en ninguna prueba del propio servicio.
         """
         self._unidad = unidad
         self.ultima_traza: Traza | None = None
-        self._ancla_de_cadena = ancla_de_cadena
+        self._impacto_ancla = impacto_ancla
 
     # ------------------------------------------------------------------
     # OP-01 — CREAR HECHO
@@ -247,27 +253,6 @@ class HechosService:
                     "El hecho ha cambiado desde la version que conoce el llamante.",
                 )
 
-            # F04-05, mandato 82 y F04-D022. Corregir la fecha economica de
-            # un hecho que ancla una cadena RODANTE ya avanzada moveria el
-            # ancla del sucesor, cuya identidad NO puede moverse. No se propaga
-            # en silencio: la operacion falla cerrada con codigo estable y la
-            # revision se expone por lectura DERIVADA, sin persistir marca.
-            #
-            # Se evalua DESPUES del control optimista a proposito: si la
-            # version esta desfasada, el llamante debe recibir
-            # VERSION_DESFASADA como en cualquier otra correccion. Cambiar esa
-            # precedencia alteraria el contrato de OP-02 cerrado en F04-01.
-            if (
-                "fecha_hecho" in cambios
-                and self._ancla_de_cadena is not None
-                and self._ancla_de_cadena(sesion, hecho_id)
-            ):
-                raise ErrorMotor(
-                    CodigoError.REVISION_DERIVADA_REQUERIDA,
-                    "Ese hecho ancla una cadena RODANTE que ya tiene sucesor: "
-                    "mover su fecha economica exige revision explicita.",
-                )
-
             actualizado = repo.actualizar_campos(
                 sesion, hecho_id, row_version_esperada, cambios
             )
@@ -289,12 +274,22 @@ class HechosService:
                 datos_despues_json=snapshot_nuevo,
                 motivo=motivo_limpio,
             )
+
+            # F04-D022. La anulacion SIEMPRE confirma. Si el hecho anclaba una
+            # cadena RODANTE, la perdida de realidad se expone como impacto
+            # DERIVADO —AMB-009— y nunca como rollback de OP-03.
+            impacto = self._impacto_ancla(sesion, hecho_id)
+
             return ResultadoHecho(
                 hecho_id=hecho_id,
                 row_version=row_version_nueva,
                 estado=estado_nuevo,
                 idempotente=False,
                 snapshot=_a_dict(snapshot_nuevo),
+                requiere_revision=impacto["requiere_revision"],
+                motivo_revision=impacto["motivo"],
+                previsiones_afectadas=impacto["afectadas"],
+                previsiones_propagadas=impacto["propagadas"],
             )
 
         return self._ejecutar(contexto, operacion, "OP-02 corregir_hecho")
@@ -372,12 +367,22 @@ class HechosService:
                 datos_despues_json=snapshot_nuevo,
                 motivo=motivo_limpio,
             )
+
+            # F04-D022. La anulacion SIEMPRE confirma. Si el hecho anclaba una
+            # cadena RODANTE, la perdida de realidad se expone como impacto
+            # DERIVADO —AMB-009— y nunca como rollback de OP-03.
+            impacto = self._impacto_ancla(sesion, hecho_id)
+
             return ResultadoHecho(
                 hecho_id=hecho_id,
                 row_version=row_version_nueva,
                 estado=estado_nuevo,
                 idempotente=False,
                 snapshot=_a_dict(snapshot_nuevo),
+                requiere_revision=impacto["requiere_revision"],
+                motivo_revision=impacto["motivo"],
+                previsiones_afectadas=impacto["afectadas"],
+                previsiones_propagadas=impacto["propagadas"],
             )
 
         return self._ejecutar(contexto, operacion, "OP-03 anular_hecho")

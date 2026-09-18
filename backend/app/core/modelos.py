@@ -13,6 +13,11 @@
 #
 #   Estos DTO son internos de F04-01. No constituyen contrato HTTP: F04-01 no
 #   crea transporte (el mandato lo excluye expresamente).
+# Version: 0.2.0
+#   0.2.0 (F04-05): ResultadoHecho expone el impacto DERIVADO de F04-D022
+#   —requiere_revision, motivo_revision, previsiones_afectadas y
+#   previsiones_propagadas— para que OP-02 y OP-03 puedan confirmar la realidad
+#   sin rollback y sin persistir ninguna marca. Los DTO de entrada no cambian.
 # Version: 0.1.0
 # ============================================================
 
@@ -170,3 +175,12 @@ class ResultadoHecho:
     estado: str
     idempotente: bool = False
     snapshot: dict[str, Any] = field(default_factory=dict)
+    # F04-D022. La realidad manda: OP-02 y OP-03 confirman aunque la cadena
+    # RODANTE no pueda propagarse. Cuando no puede, el resultado es EXITOSO y
+    # expone el impacto DERIVADO. Nada de esto se persiste: es conclusion de
+    # aplicacion, calculada desde hechos ACTIVOS, estado de previsiones y
+    # estructura del tramo.
+    requiere_revision: bool = False
+    motivo_revision: str | None = None
+    previsiones_afectadas: tuple[uuid.UUID, ...] = ()
+    previsiones_propagadas: tuple[uuid.UUID, ...] = ()
