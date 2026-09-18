@@ -15,6 +15,13 @@
 #   operacion y reintentar no la hara posible". Fusionarlos haria que la UX
 #   reintentase indefinidamente algo imposible, o que abandonase algo que solo
 #   necesitaba otro intento.
+# Version: 0.6.0
+#   0.6.0 (F04-05): REVISION_DERIVADA_REQUERIDA (F04-D022) y
+#   REAPERTURA_NO_PERMITIDA (F04-D024).
+# Version: 0.5.0
+#   0.5.0 (F04-05): errores de reglas, previsiones y materializacion.
+#   IMPORTE_NO_POSITIVO ya existia de F04-03 y se reutiliza tal cual: el
+#   concepto es el mismo y duplicarlo crearia dos codigos para un solo caso.
 # Version: 0.4.0
 #   0.4.0 (F04-04): errores de posicion financiera. Se conserva
 #   EXCEDE_SALDO_DEL_DERECHO como codigo canonico de OP-14 y se anade
@@ -130,6 +137,37 @@ class CodigoError(str, enum.Enum):
     INGRESO_NO_PERMITIDO = "INGRESO_NO_PERMITIDO"
     GASTO_DUPLICADO = "GASTO_DUPLICADO"
     CONDONACION_OBLIGACION_NO_SOPORTADA = "CONDONACION_OBLIGACION_NO_SOPORTADA"
+
+    # --- F04-05 · reglas y versionado -------------------------------------
+    REGLA_NO_ENCONTRADA = "REGLA_NO_ENCONTRADA"
+    VERSION_REGLA_SOLAPADA = "VERSION_REGLA_SOLAPADA"
+    CADENCIA_INVALIDA = "CADENCIA_INVALIDA"
+    ANCLAJE_INVALIDO = "ANCLAJE_INVALIDO"
+    CALENDARIO_ENTIDAD_NO_SOPORTADO = "CALENDARIO_ENTIDAD_NO_SOPORTADO"
+
+    # --- F04-05 · cadena RODANTE e identidad de ocurrencia ----------------
+    # CABEZA_RODANTE_DUPLICADA no deberia poder emitirse nunca: existe para que
+    # el motor falle cerrado si el lock de regla no llego a actuar. No hay
+    # UNIQUE fisico que lo impida.
+    CABEZA_RODANTE_BLOQUEADA = "CABEZA_RODANTE_BLOQUEADA"
+    CABEZA_RODANTE_DUPLICADA = "CABEZA_RODANTE_DUPLICADA"
+    OCURRENCIA_CANCELADA = "OCURRENCIA_CANCELADA"
+    OCURRENCIA_OMITIDA = "OCURRENCIA_OMITIDA"
+
+    # --- F04-05 · lifecycle de previsiones --------------------------------
+    PREVISION_BLOQUEADA = "PREVISION_BLOQUEADA"
+    # F04-D022. La operacion no puede propagar la correccion sin inventar
+    # semantica: falla cerrada y la revision se expone por lectura derivada.
+    REVISION_DERIVADA_REQUERIDA = "REVISION_DERIVADA_REQUERIDA"
+    # F04-D024. CANCELADA es tombstone permanente y no se reabre.
+    REAPERTURA_NO_PERMITIDA = "REAPERTURA_NO_PERMITIDA"
+    REALIZACION_SIN_HECHO_ACTIVO = "REALIZACION_SIN_HECHO_ACTIVO"
+    ESTADO_PREVISION_INCOMPATIBLE = "ESTADO_PREVISION_INCOMPATIBLE"
+
+    # --- F04-05 · importe y materializacion -------------------------------
+    ASIGNACION_MULTIDIVISA_NO_DEMOSTRADA = "ASIGNACION_MULTIDIVISA_NO_DEMOSTRADA"
+    RESULTADO_SALDO_OBJETIVO_INCOMPATIBLE = "RESULTADO_SALDO_OBJETIVO_INCOMPATIBLE"
+    CORRECCION_VINCULO_NO_REPRESENTABLE = "CORRECCION_VINCULO_NO_REPRESENTABLE"
 
     # --- Transversales ----------------------------------------------------
     ENTRADA_INVALIDA = "ENTRADA_INVALIDA"

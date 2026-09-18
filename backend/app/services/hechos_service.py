@@ -20,6 +20,14 @@
 #       asi que se falla cerrado en vez de recalcular nada;
 #     - OP-03, ante realidad ya vinculada: entonces el hecho ocurrio y lo que
 #       corresponde es devolucion o reversion, que pertenecen a F04-06.
+# Version: 0.4.0
+#   0.4.0 (F04-05): la guarda de ancla se INYECTA como colaborador en vez de
+#   importar el repositorio de previsiones, y se evalua despues del control
+#   optimista para que VERSION_DESFASADA conserve su precedencia.
+# Version: 0.3.0
+#   0.3.0 (F04-05): OP-02 falla cerrado al corregir la fecha economica de un
+#   hecho que ancla una cadena RODANTE con sucesor. Cambio minimo y trazado;
+#   ninguna otra semantica de OP-01/02/03 se altera.
 # Version: 0.2.0
 #   0.2.0 (F04-02): F04-D004 materializada. El error transitorio
 #   DECISION_DIFERIDA_F04_02 se sustituye por CORRECCION_AGREGADA_REQUERIDA.
@@ -33,7 +41,7 @@ import decimal
 import json
 import re
 import uuid
-from typing import Any
+from typing import Any, Callable
 
 from app.core.contexto import ContextoOperacion
 from app.core.errores import CodigoError, ErrorMotor
@@ -74,11 +82,28 @@ def _motivo_obligatorio(motivo: str | None, operacion: str) -> str:
 class HechosService:
     """Casos de uso de F04-01 sobre gapto.hechos_financieros."""
 
-    __slots__ = ("_unidad", "ultima_traza")
+    __slots__ = ("_unidad", "ultima_traza", "_ancla_de_cadena")
 
-    def __init__(self, unidad: UnidadDeTrabajo) -> None:
+    def __init__(
+        self,
+        unidad: UnidadDeTrabajo,
+        *,
+        ancla_de_cadena: Callable[[SesionMotor, uuid.UUID], bool] | None = None,
+    ) -> None:
+        """`ancla_de_cadena` es un colaborador INYECTADO.
+
+        F04-05 necesita que OP-02 sepa si un hecho ancla una cadena RODANTE ya
+        avanzada, pero esa pregunta pertenece al dominio de previsiones. Se
+        inyecta en vez de importar el repositorio de F04-05 aqui, para que este
+        servicio —cerrado en F04-01— no adquiera una dependencia hacia una
+        subfase posterior, y sin trasladar SQL de previsiones al repositorio de
+        hechos.
+
+        Sin colaborador, OP-01/02/03 se comportan exactamente como en F04-01.
+        """
         self._unidad = unidad
         self.ultima_traza: Traza | None = None
+        self._ancla_de_cadena = ancla_de_cadena
 
     # ------------------------------------------------------------------
     # OP-01 — CREAR HECHO
@@ -220,6 +245,27 @@ class HechosService:
                 raise ErrorMotor(
                     CodigoError.VERSION_DESFASADA,
                     "El hecho ha cambiado desde la version que conoce el llamante.",
+                )
+
+            # F04-05, mandato 82 y F04-D022. Corregir la fecha economica de
+            # un hecho que ancla una cadena RODANTE ya avanzada moveria el
+            # ancla del sucesor, cuya identidad NO puede moverse. No se propaga
+            # en silencio: la operacion falla cerrada con codigo estable y la
+            # revision se expone por lectura DERIVADA, sin persistir marca.
+            #
+            # Se evalua DESPUES del control optimista a proposito: si la
+            # version esta desfasada, el llamante debe recibir
+            # VERSION_DESFASADA como en cualquier otra correccion. Cambiar esa
+            # precedencia alteraria el contrato de OP-02 cerrado en F04-01.
+            if (
+                "fecha_hecho" in cambios
+                and self._ancla_de_cadena is not None
+                and self._ancla_de_cadena(sesion, hecho_id)
+            ):
+                raise ErrorMotor(
+                    CodigoError.REVISION_DERIVADA_REQUERIDA,
+                    "Ese hecho ancla una cadena RODANTE que ya tiene sucesor: "
+                    "mover su fecha economica exige revision explicita.",
                 )
 
             actualizado = repo.actualizar_campos(

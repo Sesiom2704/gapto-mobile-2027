@@ -19,6 +19,8 @@
 #   Los tests exigen GAPTO_TEST_DATABASE_URL. No se apunta implicitamente a
 #   ninguna base: una suite que se autoconfigura acaba escribiendo donde no
 #   debe.
+# Version: 0.5.0
+#   0.5.0 (F04-05): servicios de reglas y previsiones.
 # Version: 0.4.0
 #   0.4.0 (F04-04): fixtures de posicion. `contraparte` depende de `actor_a` a
 #   proposito: `fn_check_actor_self_unico` exige que cada owner tenga
@@ -59,6 +61,8 @@ from app.core.unidad_trabajo import UnidadDeTrabajo  # noqa: E402
 from app.services.efectos_service import EfectosService  # noqa: E402
 from app.services.hechos_service import HechosService  # noqa: E402
 from app.services.posiciones_service import PosicionesService  # noqa: E402
+from app.services.previsiones_service import PrevisionesService  # noqa: E402
+from app.services.reglas_service import ReglasService  # noqa: E402
 from app.services.tesoreria_service import TesoreriaService  # noqa: E402
 
 ROL_RUNTIME = "gapto_runtime"
@@ -97,7 +101,17 @@ def unidad(proveedor_conexion) -> UnidadDeTrabajo:
 
 @pytest.fixture()
 def servicio(unidad: UnidadDeTrabajo) -> HechosService:
-    return HechosService(unidad)
+    """HechosService con el colaborador de F04-05 cableado.
+
+    La guarda de ancla vive en el repositorio de previsiones y se inyecta:
+    `hechos_service` no importa nada de F04-05.
+    """
+    from app.repositories import previsiones_repository as repo_previsiones
+
+    return HechosService(
+        unidad,
+        ancla_de_cadena=repo_previsiones.es_ancla_de_cadena_con_sucesor,
+    )
 
 
 @pytest.fixture(scope="session")
@@ -360,3 +374,13 @@ def contraparte_ajena(
     admin: psycopg.Connection, otro_owner: uuid.UUID, actor_ajeno: uuid.UUID
 ) -> uuid.UUID:
     return _crear_actor(admin, otro_owner, con_tercero=True)
+
+
+@pytest.fixture()
+def servicio_reglas(unidad: UnidadDeTrabajo) -> ReglasService:
+    return ReglasService(unidad)
+
+
+@pytest.fixture()
+def servicio_previsiones(unidad: UnidadDeTrabajo) -> PrevisionesService:
+    return PrevisionesService(unidad)
