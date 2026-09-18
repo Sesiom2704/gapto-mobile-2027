@@ -107,7 +107,11 @@
 --
 --   D-179. Esta migration NO se aplica persistentemente a Supabase durante la
 --   reapertura (D-186 §5). Supabase permanece en 0310.
--- Versión: 0.1.0
+-- Versión: 0.1.1  -- mismo defecto que 0320 v0.1.1 en los DOS recuentos de columnas
+--                   (precheck 772 y postcheck 777): contaban solo relkind='r'.
+--                   Se alinean con la definicion canonica de h1 de D-111.
+--                   Los valores esperados NO cambian.
+--                   v0.1.0: redaccion inicial.
 -- ============================================================
 
 BEGIN;
@@ -137,7 +141,11 @@ BEGIN
     SELECT pg_catalog.count(*) INTO v_n
       FROM pg_catalog.pg_attribute a
       JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
-     WHERE c.relnamespace = 'gapto'::pg_catalog.regnamespace AND c.relkind = 'r'
+     -- relkind IN ('r','v','p'): es la definicion CANONICA de la huella h1 de
+     -- D-111 (huellas_d111.sql), que incluye las columnas de las tres vistas.
+     -- Contar solo relkind='r' da 728 y NO es el 772 del contrato certificado.
+     WHERE c.relnamespace = 'gapto'::pg_catalog.regnamespace
+       AND c.relkind IN ('r','v','p')
        AND a.attnum > 0 AND NOT a.attisdropped;
     IF v_n <> 772 THEN
         v_rep := v_rep || pg_catalog.format(' columnas = %s (esperadas 772 antes de 0330);', v_n);
@@ -311,7 +319,11 @@ BEGIN
     SELECT pg_catalog.count(*) INTO v_n
       FROM pg_catalog.pg_attribute a
       JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
-     WHERE c.relnamespace = 'gapto'::pg_catalog.regnamespace AND c.relkind = 'r'
+     -- relkind IN ('r','v','p'): es la definicion CANONICA de la huella h1 de
+     -- D-111 (huellas_d111.sql), que incluye las columnas de las tres vistas.
+     -- Contar solo relkind='r' da 728 y NO es el 772 del contrato certificado.
+     WHERE c.relnamespace = 'gapto'::pg_catalog.regnamespace
+       AND c.relkind IN ('r','v','p')
        AND a.attnum > 0 AND NOT a.attisdropped;
     IF v_n <> 777 THEN
         v_rep := v_rep || pg_catalog.format(' columnas del schema = %s (esperadas 777);', v_n);
