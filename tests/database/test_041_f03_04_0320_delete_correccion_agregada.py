@@ -31,6 +31,9 @@
 #              y bajo FORCE ROW LEVEL SECURITY. Si el rol de conexión del arnés
 #              no puede asumir gapto_runtime, esos tests SE SALTAN con mensaje
 #              explícito, nunca en silencio (mismo criterio que test_038).
+# Versión: 0.1.1  -- el recuento de columnas usaba relkind='r' (728) en vez de la
+#                   definicion canonica de la huella h1 de D-111,
+#                   relkind IN ('r','v','p') (772). Mismo defecto que 0320 v0.1.1.
 # Versión: 0.1.0
 # ============================================================
 
@@ -334,9 +337,10 @@ def test_0320_es_acl_puro(db: psycopg.Connection) -> None:
     assert _uno(db, """
         SELECT count(*) FROM pg_catalog.pg_attribute a
           JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
-         WHERE c.relnamespace='gapto'::regnamespace AND c.relkind='r'
+         WHERE c.relnamespace='gapto'::regnamespace
+           AND c.relkind IN ('r','v','p')
            AND a.attnum > 0 AND NOT a.attisdropped
-    """) == 772
+    """) == 772  # definicion canonica de h1 (D-111): incluye las 3 vistas
     assert _uno(db, "SELECT count(*) FROM pg_catalog.pg_indexes WHERE schemaname='gapto'") == 285
     assert _uno(db, "SELECT count(*) FROM pg_catalog.pg_policies WHERE schemaname='gapto'") == 82
     assert _uno(db, """
