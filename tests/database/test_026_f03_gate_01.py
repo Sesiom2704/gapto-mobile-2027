@@ -19,6 +19,10 @@
 #
 # PRECONDICIÓN: requiere 0190 (B16). Debe ejecutarse desde la raiz del
 #              repositorio, porque G6 inspecciona migrations/ y tests/.
+# Versión: 0.10.0 -- SUCESORA 0320 / D-183. La matriz de runtime pasa a DELETE 48.
+#                   Los dicts SUCESORA_* no cuentan indices ni columnas, de modo
+#                   que 0330 no los mueve. El recuento exacto se conserva porque
+#                   aqui el numero SI es la afirmacion del gate (D-187 §DEC-9.2).
 # Versión: 0.9.0  -- D-172. Se anade la sucesora conocida 0310 (D-169/D-170/D-171):
 #              la invariante agregada aportaciones <= porcion conciliada anade
 #              2 funciones y 4 constraint triggers, de 26/54/37 a 28/58/41. NO
@@ -126,7 +130,8 @@ SUCESORA_0310 = {**SUCESORA_0300, "funciones": 28,
 
 # La matriz de runtime la fija B14/B18/B21; 0286 suma efecto_cuentas en
 # SELECT, INSERT y UPDATE, y NO en DELETE (bucket A de D-093).
-MATRIZ_RUNTIME = {"SELECT": 80, "INSERT": 74, "UPDATE": 68, "DELETE": 36}
+# SUCESORA 0320 / D-183: el reparto del Bucket A de B18 lleva DELETE a 48.
+MATRIZ_RUNTIME = {"SELECT": 80, "INSERT": 74, "UPDATE": 68, "DELETE": 48}
 
 
 def _uno(db: psycopg.Connection, sql: str, params: tuple | None = None):

@@ -46,6 +46,10 @@
 #              sesiones simultaneas y viven en el arnes R7.
 #
 # PRECONDICIÓN: requiere 0310 aplicada.
+# Versión: 0.1.3  -- SUCESORA 0330 / D-185. Mismo criterio que test_037: el
+#                   recuento global de indices pasa a conjunto explicito y FINITO.
+#                   La afirmacion de 0310 —que NO creo ningun indice— sigue siendo
+#                   cierta (D-073 refinado por D-187 §DEC-9.1/9.3).
 # Versión: 0.1.2  -- primera ejecución real contra Neon gapto2027_test: 39
 #              passed, 4 failed. Los cuatro fallos eran defectos DEL TEST, no de
 #              0310, y se corrigen aquí sin tocar la migration:
@@ -243,13 +247,21 @@ def test_0310_contrato_fisico(db: psycopg.Connection) -> None:
     """) == 41
 
 
+# Estados autorizados del recuento global de indices. Conjunto EXPLICITO y
+# FINITO (D-173, D-187 §DEC-9.3):
+#   285 estado de 0310, que no crea ninguno
+#   287 con los dos indices unicos parciales de presentacion de 0330
+INDICES_AUTORIZADOS = (285, 287)
+
+
 def test_0310_no_toca_fk_ni_indices(db: psycopg.Connection) -> None:
     assert _uno(db, """
         SELECT count(*) FROM pg_catalog.pg_constraint k
           JOIN pg_catalog.pg_class c ON c.oid = k.conrelid
          WHERE c.relnamespace = 'gapto'::regnamespace AND k.contype = 'f'
     """) == 175
-    assert _uno(db, "SELECT count(*) FROM pg_catalog.pg_indexes WHERE schemaname = 'gapto'") == 285
+    assert _uno(db, "SELECT count(*) FROM pg_catalog.pg_indexes WHERE schemaname = 'gapto'") \
+        in INDICES_AUTORIZADOS
 
 
 # ------------------------------------------------------------

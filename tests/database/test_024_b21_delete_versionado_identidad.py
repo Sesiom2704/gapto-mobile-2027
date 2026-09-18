@@ -12,6 +12,9 @@
 #              Matriz resultante: SELECT 79 / INSERT 73 / UPDATE 67 / DELETE 36.
 #
 # PRECONDICIÓN: requiere 0190 (B16) para poder asumir gapto_runtime.
+# Versión: 0.1.2  -- SUCESORA 0320 / D-183: la matriz pasa a DELETE 48. Los dos
+#                   buckets propios de B21 (versionado e identidad) NO se tocan:
+#                   0320 opera unicamente dentro del Bucket A de B18.
 # Versión: 0.1.1  -- 0286: matriz SELECT 80 / INSERT 74 / UPDATE 68 / DELETE 36.
 # Versión: 0.1.0
 # ============================================================
@@ -144,7 +147,9 @@ def test_b21_matriz_efectiva_de_runtime(db: psycopg.Connection) -> None:
     assert _cuenta(db, "gapto_runtime", "SELECT") == 80
     assert _cuenta(db, "gapto_runtime", "INSERT") == 74
     assert _cuenta(db, "gapto_runtime", "UPDATE") == 68
-    assert _cuenta(db, "gapto_runtime", "DELETE") == 36
+    # SUCESORA 0320 / D-183: once hijas/puentes del Bucket A de B18 mas
+    # efecto_cuentas recuperan DELETE. 36 + 12 = 48. Ninguna tabla de B21 cambia.
+    assert _cuenta(db, "gapto_runtime", "DELETE") == 48
 
 
 def test_b21_delete_real_denegado(db: psycopg.Connection) -> None:

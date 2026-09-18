@@ -12,6 +12,8 @@
 #              corrección es de impersonación, no de privilegios. Ni
 #              gapto_runtime ni gapto_backup ganan nada, y gapto_migrator
 #              no hereda pasivamente sus privilegios (INHERIT FALSE).
+# Versión: 0.1.6  -- SUCESORA 0320 / D-183: DELETE de runtime pasa a 48. Conjunto
+#                   finito y explicito conforme a D-073 refinado por D-187.
 # Versión: 0.1.5  -- los dos filtros de rol dejan de usar el prefijo `gapto%` y
 #              pasan a los cinco nombres exactos. El prefijo no es portable: en un
 #              bootstrap de instancia el proveedor deriva el nombre del rol
@@ -114,8 +116,9 @@ def test_b16_no_concede_privilegios_nuevos(db: psycopg.Connection) -> None:
     assert cuenta("gapto_runtime", "SELECT") == 80
     assert cuenta("gapto_runtime", "INSERT") == 74
     assert cuenta("gapto_runtime", "UPDATE") == 68  # B18 no toca UPDATE
-    # B18 revoca el DELETE del Bucket A; se admiten ambos baselines.
-    assert cuenta("gapto_runtime", "DELETE") in (36, 50, 67)
+    # B18 revoca el DELETE del Bucket A y 0320 lo reparte DENTRO de ese mismo
+    # bucket; se admiten los cuatro baselines conocidos.
+    assert cuenta("gapto_runtime", "DELETE") in (36, 48, 50, 67)
     assert cuenta("gapto_backup", "SELECT") == 80
     for priv in ("INSERT", "UPDATE", "DELETE"):
         assert cuenta("gapto_backup", priv) == 0

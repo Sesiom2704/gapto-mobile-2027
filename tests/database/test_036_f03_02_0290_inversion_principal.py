@@ -12,6 +12,9 @@
 #              DEFERRED, así que el rechazo se provoca con
 #              `SET CONSTRAINTS ALL IMMEDIATE` dentro de un savepoint y el
 #              montaje multi-paso se valida con `_validar_montaje`.
+# Versión: 0.2.2  -- SUCESORA 0330 / D-185. Los dos indices unicos parciales de
+#                   presentacion llevan el total a 287. Conjunto explicito y
+#                   FINITO, con cada estado nombrado (D-073 refinado por D-187).
 # Versión: 0.2.1  -- D-173. Dos recuentos de este test los mueve 0300, no 0290:
 #              las FK (174 -> 175, FK compuesta de D-057) y los indices
 #              (284 -> 285, indice compuesto de S2/D-169). Ambos pasan a
@@ -308,8 +311,9 @@ def test_0290_recuentos_como_suelo(db: psycopg.Connection) -> None:
 # mueven. Conjuntos EXPLICITOS Y FINITOS (D-173); ninguno es un rango abierto.
 #   FK       174 cierre de 0290 / 175 con la FK compuesta de D-057 (0300)
 #   indices  284 cierre de 0290 / 285 con el indice compuesto de S2/D-169 (0300)
+#            / 287 con los dos indices unicos parciales de presentacion (0330)
 FK_TOTALES_AUTORIZADAS = (174, 175)
-INDICES_AUTORIZADOS = (284, 285)
+INDICES_AUTORIZADOS = (284, 285, 287)
 
 
 def test_0290_no_toca_superficies_ajenas(db: psycopg.Connection) -> None:

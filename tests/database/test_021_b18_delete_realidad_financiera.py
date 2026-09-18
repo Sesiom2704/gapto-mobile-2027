@@ -14,6 +14,20 @@
 #
 # PRECONDICIÓN: requiere F03-01-B16 (migration 0190) para poder asumir
 #              gapto_runtime. Ver test_020.
+# Versión: 0.3.0  -- SUCESORA 0320 / D-183 + D-186. B18 NO se revoca ni se
+#                   revierte: sigue siendo cierta su afirmación de que la
+#                   realidad financiera no admite hard-delete indiscriminado.
+#                   Lo que cambia es el reparto dentro de su propio Bucket A:
+#                   once de las diecisiete son hijas o puentes SIN LIFECYCLE
+#                   cuya retirada es la única corrección honesta de un error
+#                   de captura (INV-07), y 0320 les devuelve DELETE. Las seis
+#                   restantes —las dos raíces con ACTIVO/ANULADO y los cuatro
+#                   snapshots o calendarios históricos— conservan la
+#                   revocación de B18 intacta. La matriz pasa a
+#                   SELECT 80 / INSERT 74 / UPDATE 68 / DELETE 48.
+#                   El conteo exacto se mantiene a propósito: si alguien mueve
+#                   la política de borrado, este test debe romperse y obligar a
+#                   una decisión, nunca adaptarse en silencio.
 # Versión: 0.2.1  -- 0286: matriz SELECT 80 / INSERT 74 / UPDATE 68 / DELETE 36.
 # Versión: 0.2.0  -- B21 cierra D-086: DELETE pasa de 50 a 36 y la muestra de
 #                   control pasa a las tres tablas que lo conservan a proposito.
@@ -25,9 +39,26 @@ from __future__ import annotations
 import psycopg
 import pytest
 
-# Bucket A de D-086: importes económicos, su conciliación y los snapshots.
+# Bucket A de D-086 que CONSERVA la revocación de B18 tras 0320.
+#   - hechos_financieros y movimientos_tesoreria tienen lifecycle propio
+#     ACTIVO/ANULADO: D-186 §1 confirma que OP-03 cubre el alta que nunca
+#     debió existir, así que no les falta ninguna capacidad.
+#   - los cuatro restantes son snapshots o calendarios históricos
+#     (D-043/D-044/D-045/D-046): no se corrigen borrando.
 SIN_DELETE = (
     "hechos_financieros",
+    "movimientos_tesoreria",
+    "cierres_mensuales",
+    "financiacion_cuotas",
+    "inversion_valoraciones",
+    "propiedad_valoraciones",
+)
+
+# Bucket A de D-086 al que 0320 devuelve DELETE (D-183). Son las once que B18
+# clasificó como hijas o puentes: la propia cabecera de 0200 dejó anotado como
+# CONSECUENCIA OPERATIVA CONOCIDA que eliminar un vínculo sobrante dejaba de
+# ser posible. F04-06 demostró el caso funcional que aquella nota preveía.
+DEVUELTO_POR_0320 = (
     "hecho_efectos",
     "efecto_atribuciones",
     "hecho_aportaciones_pago",
@@ -37,14 +68,12 @@ SIN_DELETE = (
     "hecho_terceros",
     "hecho_magnitudes",
     "hecho_relaciones",
-    "movimientos_tesoreria",
     "transferencias",
-    "cierres_mensuales",
-    "financiacion_cuotas",
-    "inversion_valoraciones",
     "inversion_asignaciones_efecto",
-    "propiedad_valoraciones",
 )
+
+# Las diecisiete de B18 siguen siendo diecisiete: 0320 no amplía el Bucket A.
+BUCKET_A = SIN_DELETE + DEVUELTO_POR_0320
 
 # Muestra representativa de lo que B18 deliberadamente NO toca.
 CON_DELETE = (
@@ -82,14 +111,32 @@ def _cuenta(db: psycopg.Connection, rol: str, priv: str) -> int:
     return total
 
 
+def test_b18_bucket_a_sigue_siendo_de_diecisiete() -> None:
+    """0320 reparte dentro del Bucket A; no lo amplía ni lo reduce."""
+    assert len(BUCKET_A) == 17
+    assert len(set(BUCKET_A)) == 17
+
+
 @pytest.mark.parametrize("tabla", SIN_DELETE)
 def test_b18_bucket_a_sin_delete(db: psycopg.Connection, tabla: str) -> None:
     assert _priv(db, "gapto_runtime", tabla, "DELETE") is False, (
-        f"{tabla} es realidad financiera: D-068 no admite hard-delete directo"
+        f"{tabla} es realidad financiera con lifecycle o snapshot histórico: "
+        "D-068 no admite hard-delete directo y D-183 no se lo devuelve"
     )
 
 
-@pytest.mark.parametrize("tabla", SIN_DELETE)
+@pytest.mark.parametrize("tabla", DEVUELTO_POR_0320)
+def test_b18_hijas_sin_lifecycle_recuperan_delete(db: psycopg.Connection, tabla: str) -> None:
+    """SUCESORA 0320 / D-183. B18 revocó y dejó anotada la pérdida; F04-06
+    demostró el caso legítimo e INV-07 prohíbe resolverlo con un hecho
+    compensatorio ficticio. El detalle del nuevo contrato vive en test_041.
+    """
+    assert _priv(db, "gapto_runtime", tabla, "DELETE") is True, (
+        f"{tabla} es hija o puente sin lifecycle: 0320 le devuelve DELETE"
+    )
+
+
+@pytest.mark.parametrize("tabla", BUCKET_A)
 def test_b18_bucket_a_conserva_lectura_y_correccion(db: psycopg.Connection, tabla: str) -> None:
     """Revocar DELETE no puede convertir estas tablas en inertes.
 
@@ -111,14 +158,13 @@ def test_b18_no_desborda_su_alcance(db: psycopg.Connection, tabla: str) -> None:
 
 
 def test_b18_matriz_efectiva_de_runtime(db: psycopg.Connection) -> None:
-    """SELECT 79 / INSERT 73 / UPDATE 67 / DELETE 36."""
-    # SUCESORA 0286 / D-146: efecto_cuentas entra en el bucket A de D-093
-    # (realidad financiera y sus vinculos): SELECT + INSERT + UPDATE, sin
-    # DELETE. La matriz pasa a SELECT 80 / INSERT 74 / UPDATE 68 / DELETE 36.
+    """SELECT 80 / INSERT 74 / UPDATE 68 / DELETE 48."""
+    # SUCESORA 0320 / D-183: las once hijas y puentes del Bucket A más
+    # efecto_cuentas (0286) recuperan DELETE. 36 + 12 = 48.
     assert _cuenta(db, "gapto_runtime", "SELECT") == 80
     assert _cuenta(db, "gapto_runtime", "INSERT") == 74
     assert _cuenta(db, "gapto_runtime", "UPDATE") == 68
-    assert _cuenta(db, "gapto_runtime", "DELETE") == 36
+    assert _cuenta(db, "gapto_runtime", "DELETE") == 48
 
 
 def test_b18_no_afecta_a_owner_ni_backup(db: psycopg.Connection) -> None:
@@ -162,9 +208,9 @@ def test_b18_delete_permitido_donde_procede(db: psycopg.Connection) -> None:
 
 
 def test_b18_d086_cerrado(db: psycopg.Connection) -> None:
-    """D-086 cerrado por B21: quedan 36 tablas con DELETE.
+    """D-086 cerrado por B21 y repartido por D-183: quedan 48 tablas con DELETE.
 
     Si este número cambia, es que alguien ha movido la política de borrado.
     Debe actualizarse aquí y en la documentación canónica, nunca silenciarse.
     """
-    assert _cuenta(db, "gapto_runtime", "DELETE") == 36
+    assert _cuenta(db, "gapto_runtime", "DELETE") == 48

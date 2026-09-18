@@ -11,6 +11,10 @@
 #              Todos los casos se ejecutan con el rol de conexión, sea cual
 #              sea, creando los datos bajo SET ROLE gapto_owner (D-137), y las
 #              transacciones se revierten siempre.
+# Versión: 0.1.4  -- SUCESORA 0320 / D-183: efecto_cuentas recupera DELETE. La
+#                   afirmacion de D-148 no se revoca; lo que cambia es que retirar
+#                   el vinculo "esta cuenta genero el efecto" es la correccion
+#                   honesta de un error de captura y no tiene sustituto (INV-07).
 # Versión: 0.1.3  -- D-173. El recuento de FK sale del dict de igualdad y pasa a
 #              un conjunto EXPLICITO Y FINITO de estados autorizados: 174 hasta
 #              0288 y 175 desde 0300, que materializa la FK compuesta de D-057.
@@ -440,8 +444,8 @@ def test_0286_rls_enable_y_force(db: psycopg.Connection) -> None:
 # ------------------------------------------------------------
 
 def test_0286_grants_bucket_a(db: psycopg.Connection) -> None:
-    """SELECT + INSERT + UPDATE para runtime, sin DELETE, igual que el resto de
-    los vínculos del hecho; SELECT para backup y nada más."""
+    """SELECT + INSERT + UPDATE + DELETE para runtime tras 0320, igual que el
+    resto de los vínculos del hecho; SELECT para backup y nada más."""
     privs = {
         (r[0], r[1])
         for r in db.execute("""
@@ -453,6 +457,7 @@ def test_0286_grants_bucket_a(db: psycopg.Connection) -> None:
     }
     assert privs == {
         ("gapto_runtime", "SELECT"), ("gapto_runtime", "INSERT"), ("gapto_runtime", "UPDATE"),
+        ("gapto_runtime", "DELETE"),
         ("gapto_backup", "SELECT"),
     }
 

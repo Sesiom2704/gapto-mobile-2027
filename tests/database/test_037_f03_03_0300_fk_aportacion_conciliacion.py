@@ -26,6 +26,12 @@
 #              materializa; corresponde a 0310 y a su propio modulo.
 #
 # PRECONDICIÓN: requiere 0300 aplicada.
+# Versión: 0.1.2  -- SUCESORA 0330 / D-185. El recuento global de indices deja de
+#                   ser igualdad y pasa a conjunto explicito y FINITO, con cada
+#                   estado nombrado, como ya hacen los otros dos centinelas de
+#                   este fichero. La afirmacion de 0300 es que creo UN indice
+#                   compuesto, no que el schema tenga 285 para siempre
+#                   (D-073 refinado por D-187 §DEC-9.1/9.3).
 # Versión: 0.1.1  -- D-173/D-174. Dos correcciones, ninguna toca 0300:
 #              (1) el centinela de triggers/funciones reconoce el estado 0310
 #                  POR NOMBRE, no por recuento: exige exactamente el unico
@@ -260,13 +266,21 @@ def test_0300_force_rls_restaurado(db: psycopg.Connection) -> None:
     """) is True
 
 
+# Estados autorizados del recuento global de indices. Conjunto EXPLICITO y
+# FINITO (D-173, D-187 §DEC-9.3):
+#   285 cierre de 0300 y de 0310, que no crea ninguno
+#   287 con los dos indices unicos parciales de presentacion de 0330
+INDICES_AUTORIZADOS = (285, 287)
+
+
 def test_0300_contrato_fisico(db: psycopg.Connection) -> None:
     assert _uno(db, """
         SELECT count(*) FROM pg_catalog.pg_constraint k
           JOIN pg_catalog.pg_class c ON c.oid = k.conrelid
          WHERE c.relnamespace = 'gapto'::regnamespace AND k.contype = 'f'
     """) == 175
-    assert _uno(db, "SELECT count(*) FROM pg_catalog.pg_indexes WHERE schemaname = 'gapto'") == 285
+    assert _uno(db, "SELECT count(*) FROM pg_catalog.pg_indexes WHERE schemaname = 'gapto'") \
+        in INDICES_AUTORIZADOS
 
 
 # Estados autorizados del centinela. Conjuntos EXPLICITOS Y FINITOS (D-173).
