@@ -56,6 +56,28 @@
 # ROLE DRIFT, que es correcto y deliberado. En ese caso se usa --desde 0002
 # y el clean-room demuestra reproducibilidad DE LA BASE, no de la instancia.
 # Reproducir tambien la instancia exige un proyecto nuevo.
+# Versión: 0.12.0 -- F03 REABIERTA / D-182..D-187. Se declaran los heads 0320 y
+#                    0330. 0320 mueve UNICAMENTE la matriz de runtime
+#                    (DELETE 36 -> 48). 0330 NO mueve ninguna magnitud contada
+#                    por CONTRATO: sus columnas, CHECK e indices parciales los
+#                    cubren las huellas h1, h2 y h3.
+#
+#                    D-187 DEC-8 impone la consecuencia: como CONTRATO_0320 y
+#                    CONTRATO_0330 tienen los mismos recuentos, el CONTRATO por
+#                    si solo NO discrimina 0330. Por eso el PASS de un head
+#                    pasa a exigir ademas, de forma FAIL-CLOSED:
+#                      - que los tests EXIGIDOS de ese head aparezcan en el
+#                        JUnit, hayan corrido y no esten fallidos ni saltados;
+#                      - que las ocho huellas D-111 coincidan con la REFERENCIA
+#                        aprobada para ese head.
+#                    Si el head exige referencia y no la tiene declarada, NO se
+#                    emite PASS. Es deliberado: la referencia de 0330 se mide en
+#                    local y Neon test ANTES del gate y se declara aqui en una
+#                    edicion posterior y separada, como exige D-187 DEC-8.
+#
+#                    NO se amplia CONSULTA_CONTRATO con columnas ni CHECK: eso
+#                    cambia la forma del contrato y va en commit separado con su
+#                    propio test discriminante (D-187 DEC-8, precedente D-180).
 # Versión: 0.11.0 -- D-180. El veredicto pasa a estar TIPADO POR ALCANCE:
 #                    INSTANCE_BOOTSTRAP frente a BASE_CLEANROOM, con etiquetas
 #                    PASS_/FALLO_ propias y un campo `scope` explicito en el
@@ -169,6 +191,7 @@ import argparse
 import json
 import uuid
 from datetime import datetime, timezone
+import re
 import xml.etree.ElementTree as ET
 import os
 import sys
@@ -224,13 +247,66 @@ CONTRATO_0310 = {**CONTRATO_0300, "funciones": 28,
 # Conjunto EXPLICITO Y FINITO de heads con contrato declarado. No se acepta
 # "cualquier sucesor": un head desconocido aborta en lugar de compararse
 # contra un contrato que no es el suyo.
+# 0320 (D-183) devuelve DELETE a doce tablas hijas o puente sin lifecycle
+# propio. Es ACL puro: no toca tablas, columnas, FK, UNIQUE, EXCLUDE, policies,
+# funciones, triggers ni vistas. Contrato PREVISTO; se medira en P3/P5.
+CONTRATO_0320 = {**CONTRATO_0310, "runtime_delete": 48}
+
+# 0330 (D-184/D-185) anade cinco columnas nullable, nueve CHECK y dos indices
+# unicos parciales. NINGUNA de esas tres cosas figura en este CONTRATO: las
+# columnas y los CHECK los cubren h1 y h2, y los indices h3 (ver la nota de
+# cabecera sobre por que este contrato no cuenta indices). El diccionario es
+# por tanto identico al de 0320. Se declara expresamente en vez de aliasarlo
+# para que el head 0330 sea aceptado sin ambiguedad, y la discriminacion real
+# la aportan TESTS_EXIGIDOS_POR_HEAD y HUELLAS_D111_POR_HEAD.
+CONTRATO_0330 = {**CONTRATO_0320}
+
 CONTRATOS_POR_HEAD = {
     "0300": CONTRATO_0300,
     "0310": CONTRATO_0310,
+    "0320": CONTRATO_0320,
+    "0330": CONTRATO_0330,
 }
 
 # Head vigente de la cadena cuando no se declara --head.
-CONTRATO_POR_DEFECTO = CONTRATO_0310
+CONTRATO_POR_DEFECTO = CONTRATO_0330
+
+
+# ------------------------------------------------------------
+# D-187 DEC-8 — discriminacion de head mas alla del CONTRATO
+# ------------------------------------------------------------
+# Modulos de test cuya EJECUCION EFECTIVA Y VERDE es condicion del PASS para
+# cada head. Conjunto EXPLICITO Y FINITO: un head no listado no exige ninguno,
+# y eso es una afirmacion consciente, no un descuido.
+TESTS_EXIGIDOS_POR_HEAD = {
+    "0320": ("test_041_f03_04_0320_delete_correccion_agregada",),
+    "0330": ("test_041_f03_04_0320_delete_correccion_agregada",
+             "test_042_f03_04_0330_geolocalizacion_y_presentacion"),
+}
+
+# Heads cuya certificacion exige comparar las ocho huellas D-111 contra una
+# REFERENCIA aprobada. Sin referencia declarada NO hay PASS: fail-closed.
+HEADS_QUE_EXIGEN_REFERENCIA_D111 = ("0330",)
+
+# Referencia aprobada de las ocho huellas D-111 por head. Se rellena con los
+# valores MEDIDOS en replica local y Neon test antes del gate, en una edicion
+# separada y trazable. Un head presente aqui con valor None significa
+# "referencia pendiente", y el veredicto lo trata como fallo.
+HUELLAS_D111_POR_HEAD = {
+    "0330": None,   # PENDIENTE DE MEDICION — ver D-187 DEC-8
+}
+
+
+def tests_exigidos_de(head):
+    """Modulos de test que el head declarado obliga a haber ejecutado."""
+    return TESTS_EXIGIDOS_POR_HEAD.get(head, ())
+
+
+def referencia_d111_de(head):
+    """(exige_referencia, referencia). exige=True y referencia=None es fallo."""
+    if head not in HEADS_QUE_EXIGEN_REFERENCIA_D111:
+        return False, None
+    return True, HUELLAS_D111_POR_HEAD.get(head)
 
 
 def contrato_de(head):
@@ -619,6 +695,31 @@ def leer_junit(ruta: Path) -> dict:
     for s in suites:
         for clave in total:
             total[clave] += int(s.get(clave, 0) or 0)
+    # D-187 DEC-8: ademas de los totales, se necesita saber QUE modulos
+    # corrieron y como acabaron. Sin esto, un head cuya unica diferencia
+    # observable vive en un test concreto no puede certificarse: una suite
+    # verde que simplemente no ejecuto ese test daria PASS.
+    ejecutados, con_fallo, saltados = set(), set(), set()
+    for s in suites:
+        for caso in s.iter("testcase"):
+            origen = f"{caso.get('classname', '')} {caso.get('file', '')}"
+            # classname llega como 'tests.database.test_042_x' y file como
+            # 'tests/database/test_042_x.py'. Se trocea por separador de ruta,
+            # punto Y espacio en blanco a la vez: partir solo por '.' dejaba el
+            # espacio de la union pegado al nombre y ningun modulo exigido
+            # coincidia. La extension .py cae por si sola al ser otra pieza.
+            modulo = next((z for z in re.split(r"[./\\\s]+", origen)
+                           if z.startswith("test_")), None)
+            if not modulo:
+                continue
+            ejecutados.add(modulo)
+            if caso.find("failure") is not None or caso.find("error") is not None:
+                con_fallo.add(modulo)
+            if caso.find("skipped") is not None:
+                saltados.add(modulo)
+    total["modulos_ejecutados"] = sorted(ejecutados)
+    total["modulos_con_fallo"] = sorted(con_fallo)
+    total["modulos_con_saltos"] = sorted(saltados)
     total["fichero"] = ruta.name
     return total
 
@@ -644,7 +745,8 @@ def etiqueta_veredicto(scope: str, primera: str, head: str, ok: bool) -> str:
 
 
 def veredicto(head: str, primera: str, scope: str, fallos: list[str],
-              junit: dict | None, base_virgen: bool) -> tuple[str, list[str]]:
+              junit: dict | None, base_virgen: bool,
+              huellas_d111: dict | None = None) -> tuple[str, list[str]]:
     """Un unico resultado, y las razones exactas si no es PASS.
 
     D-180. Hasta 0.10.2 solo existia el veredicto de instancia, de modo que un
@@ -659,6 +761,12 @@ def veredicto(head: str, primera: str, scope: str, fallos: list[str],
     con tests, suite verde y contrato sin discrepancias se siguen exigiendo
     igual en ambos alcances. Un PASS de BASE no afirma nada sobre la instancia,
     y su propia etiqueta lo dice.
+
+    D-187 DEC-8 anade dos condiciones mas, y ninguna relaja las anteriores:
+    los tests exigidos por el head deben haber CORRIDO y estar verdes, y las
+    ocho huellas D-111 deben coincidir con la referencia aprobada de ese head.
+    Ambas son fail-closed: ausencia de test o ausencia de referencia es fallo,
+    nunca silencio.
     """
     razones = list(fallos)
     if not base_virgen:
@@ -672,6 +780,44 @@ def veredicto(head: str, primera: str, scope: str, fallos: list[str],
         if junit["failures"] or junit["errors"]:
             razones.append(
                 f"la suite no esta verde: failures={junit['failures']} errors={junit['errors']}")
+
+    # D-187 DEC-8, condicion 1: tests exigidos por el head.
+    exigidos = tests_exigidos_de(head)
+    if exigidos and faltan_junit:
+        razones.append(
+            f"el head {head} exige la ejecucion de {', '.join(exigidos)} y no se aporto JUnit")
+    elif exigidos:
+        ejecutados = set(junit.get("modulos_ejecutados") or ())
+        con_fallo = set(junit.get("modulos_con_fallo") or ())
+        saltados = set(junit.get("modulos_con_saltos") or ())
+        for modulo in exigidos:
+            if modulo not in ejecutados:
+                razones.append(
+                    f"el head {head} exige {modulo} y el JUnit no lo contiene")
+            elif modulo in con_fallo:
+                razones.append(f"{modulo} ha fallado")
+            elif modulo in saltados:
+                razones.append(
+                    f"{modulo} tiene casos SALTADOS; la cobertura exigida por el head "
+                    f"{head} no se ha ejercitado")
+
+    # D-187 DEC-8, condicion 2: huellas D-111 contra la referencia del head.
+    exige_ref, referencia = referencia_d111_de(head)
+    if exige_ref:
+        if referencia is None:
+            razones.append(
+                f"el head {head} exige una referencia aprobada de huellas D-111 y "
+                "HUELLAS_D111_POR_HEAD no la declara; declararla es decision "
+                "arquitectonica, no ajuste de este runner")
+        elif huellas_d111 is None:
+            razones.append(f"el head {head} exige huellas D-111 y no se han leido")
+        else:
+            for clave in sorted(referencia):
+                if huellas_d111.get(clave) != referencia[clave]:
+                    razones.append(
+                        f"huella {clave}: {huellas_d111.get(clave)} != referencia "
+                        f"{referencia[clave]} del head {head}")
+
     return etiqueta_veredicto(scope, primera, head, not razones), razones
 
 
@@ -822,7 +968,7 @@ def main() -> int:
             return 1
         virgen = fase1["observado"]["base_virgen_al_empezar"] if fase1 else vacia
         resultado, razones = veredicto(
-            args.head, primera, scope, fallos, junit, virgen)
+            args.head, primera, scope, fallos, junit, virgen, huellas_d111)
         observado = {
             "base": base,
             "motor": version.split(" on ")[0],
