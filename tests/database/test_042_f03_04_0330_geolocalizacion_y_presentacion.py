@@ -30,6 +30,10 @@
 #              garantías SRV/API (D-186 §3). No hay trigger y no debe haberlo:
 #              probarlas contra el catálogo daría una falsa sensación de
 #              garantía física. Se prueban en el servicio.
+# Versión: 0.1.1  -- P3 en replica local: el fixture insertaba tambien el usuario
+#                   de OTRO_OWNER bajo el contexto de OWNER, y la RLS de usuarios
+#                   lo rechazaba. OTRO_OWNER solo se usa como contexto de tenant y
+#                   nada lo referencia, asi que deja de crearse.
 # Versión: 0.1.0
 # ============================================================
 
@@ -90,10 +94,12 @@ class Escenario:
     def __init__(self, db: psycopg.Connection) -> None:
         self.db = db
         db.execute("SELECT set_config('gapto.owner_user_id', %s, true)", (OWNER,))
-        for owner in (OWNER, OTRO_OWNER):
-            db.execute(
-                "INSERT INTO gapto.usuarios (id, email, nombre) VALUES (%s, %s, '0330') "
-                "ON CONFLICT DO NOTHING", (owner, f"{uuid.uuid4()}@example.invalid"))
+        # Solo se crea el usuario de OWNER. OTRO_OWNER se usa unicamente como
+        # contexto de tenant para comprobar aislamiento, y la RLS de usuarios
+        # rechazaria insertarlo bajo el contexto de OWNER: nada lo referencia.
+        db.execute(
+            "INSERT INTO gapto.usuarios (id, email, nombre) VALUES (%s, %s, '0330') "
+            "ON CONFLICT DO NOTHING", (OWNER, f"{uuid.uuid4()}@example.invalid"))
         self.propiedad_a = self.propiedad()
         self.propiedad_b = self.propiedad()
         self.foto = self.documento("FOTO")
