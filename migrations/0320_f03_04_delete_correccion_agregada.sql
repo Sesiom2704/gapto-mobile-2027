@@ -115,6 +115,15 @@
 --   D-179. Esta migration NO se aplica persistentemente a Supabase durante la
 --   reapertura (D-186 §5). Supabase permanece en 0310 y el gate se cierra con
 --   waiver explicito.
+-- Versión: 0.1.2  -- el precheck exigia pg_has_role(...,'USAGE') sobre gapto_owner.
+--                   Es FALSO por diseno en los entornos reales: las pertenencias
+--                   se conceden con INHERIT FALSE / SET TRUE para que nadie
+--                   herede los privilegios del propietario. El modo correcto es
+--                   'SET'. Detectado en P5 por el propio precheck, que abortó la
+--                   transaccion en Neon sin conceder nada: fail-closed. La
+--                   replica local no lo vio porque se aplicaba como superusuario,
+--                   para quien pg_has_role es siempre cierto; desde ahora se
+--                   aplica con un rol no superusuario equivalente al real.
 -- Versión: 0.1.1  -- el postcheck de columnas contaba solo relkind='r' (728) en vez
 --                   de la definicion canonica de la huella h1 de D-111,
 --                   relkind IN ('r','v','p') (772). Detectado en P1 sobre replica
@@ -130,9 +139,14 @@ DECLARE
     v_n bigint;
     v_rep text := '';
 BEGIN
-    -- El grantor debe poder asumir gapto_owner: sin eso el GRANT no falla,
+    -- El grantor debe poder ASUMIR gapto_owner: sin eso el GRANT no falla,
     -- simplemente no concede (D-150).
-    IF NOT pg_catalog.pg_has_role(current_user, 'gapto_owner', 'USAGE') THEN
+    -- El modo correcto es 'SET', no 'USAGE'. El modelo de roles concede las
+    -- pertenencias con INHERIT FALSE / SET TRUE justamente para que nadie
+    -- HEREDE los privilegios de gapto_owner: 'USAGE' pregunta por herencia y
+    -- es FALSO por diseno para neondb_owner y para el rol equivalente de
+    -- Supabase. Lo que esta migration necesita es poder asumirlo.
+    IF NOT pg_catalog.pg_has_role(current_user, 'gapto_owner', 'SET') THEN
         RAISE EXCEPTION 'F03-04-0320 PRECHECK: el rol % no puede asumir gapto_owner; no se aplica', current_user;
     END IF;
 
