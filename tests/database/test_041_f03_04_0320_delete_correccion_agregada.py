@@ -31,6 +31,17 @@
 #              y bajo FORCE ROW LEVEL SECURITY. Si el rol de conexión del arnés
 #              no puede asumir gapto_runtime, esos tests SE SALTAN con mensaje
 #              explícito, nunca en silencio (mismo criterio que test_038).
+# Versión: 0.1.2  -- P3 en replica local descubre dos defectos del propio test:
+#                   (a) los recuentos GLOBALES de columnas e indices eran igualdad
+#                       exacta y 0330 los mueve; pasan a conjunto finito y nombrado
+#                       (D-187 DEC-9.3), porque la afirmacion de 0320 es que ELLA
+#                       no crea ninguno, no que el schema se congele.
+#                   (b) los tests de borrado creaban el escenario y lo corregian en
+#                       la MISMA transaccion, de modo que el disparo diferido del
+#                       alta fallaba con VISIBILIDAD. Es la limitacion que 0310
+#                       declara y acepta, no un defecto de 0320. Se drena con
+#                       Escenario.consolidar(), que reproduce un hecho ya confirmado
+#                       sin confirmar nada.
 # Versión: 0.1.1  -- el recuento de columnas usaba relkind='r' (728) en vez de la
 #                   definicion canonica de la huella h1 de D-111,
 #                   relkind IN ('r','v','p') (772). Mismo defecto que 0320 v0.1.1.
@@ -333,15 +344,27 @@ def test_0320_matriz_efectiva_de_runtime(db: psycopg.Connection) -> None:
     assert _cuenta(db, "gapto_runtime", "DELETE") == 48
 
 
+# Estados autorizados de los dos recuentos GLOBALES que una migration
+# POSTERIOR a 0320 mueve. Conjuntos EXPLICITOS y FINITOS, con cada estado
+# nombrado (D-073 refinado por D-187 DEC-9.3). La afirmacion de 0320 es que
+# ELLA no crea columnas ni indices, no que el schema se congele en 772/285.
+#   columnas 772 estado de 0320 / 777 con las cinco de 0330
+#   indices  285 estado de 0320 / 287 con los dos parciales de 0330
+COLUMNAS_AUTORIZADAS = (772, 777)
+INDICES_AUTORIZADOS = (285, 287)
+
+
 def test_0320_es_acl_puro(db: psycopg.Connection) -> None:
+    # Definicion canonica de h1 (D-111): relkind IN ('r','v','p'), con vistas.
     assert _uno(db, """
         SELECT count(*) FROM pg_catalog.pg_attribute a
           JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
          WHERE c.relnamespace='gapto'::regnamespace
            AND c.relkind IN ('r','v','p')
            AND a.attnum > 0 AND NOT a.attisdropped
-    """) == 772  # definicion canonica de h1 (D-111): incluye las 3 vistas
-    assert _uno(db, "SELECT count(*) FROM pg_catalog.pg_indexes WHERE schemaname='gapto'") == 285
+    """) in COLUMNAS_AUTORIZADAS
+    assert _uno(db, "SELECT count(*) FROM pg_catalog.pg_indexes WHERE schemaname='gapto'") \
+        in INDICES_AUTORIZADOS
     assert _uno(db, "SELECT count(*) FROM pg_catalog.pg_policies WHERE schemaname='gapto'") == 82
     assert _uno(db, """
         SELECT count(*) FROM pg_catalog.pg_proc WHERE pronamespace='gapto'::regnamespace
@@ -395,6 +418,23 @@ class Escenario:
         self.db.execute("SET CONSTRAINTS ALL IMMEDIATE")
         self.db.execute("SET CONSTRAINTS ALL DEFERRED")
 
+    def consolidar(self) -> None:
+        """Drena los eventos diferidos que encolo el ALTA del escenario.
+
+        Sin esto, el disparo INSERT pendiente de hecho_efectos se evaluaria al
+        final de la MISMA transaccion en la que el test retira el efecto, y
+        fallaria con VISIBILIDAD al no encontrar la fila. Es exactamente la
+        limitacion que 0310 declara y acepta: "una transaccion que inserte una
+        aportacion, la borre y borre ademas el hecho sera rechazada por el
+        disparo ya encolado. Falla cerrado, no abierto."
+
+        Una correccion real de F04-06 opera sobre un hecho YA CONFIRMADO en una
+        transaccion anterior, de modo que no hay disparo de alta pendiente.
+        Drenar aqui reproduce esa condicion sin confirmar nada, que es lo que
+        exige la disciplina de tests/database.
+        """
+        self.evaluar()
+
 
 @pytest.fixture()
 def esc(db: psycopg.Connection) -> Escenario:
@@ -426,6 +466,7 @@ def test_runtime_delete_respeta_el_aislamiento_tenant(esc: Escenario) -> None:
     """Con el contexto de OTRO tenant la fila no es visible: cero filas
     afectadas, no excepción. RLS sigue gobernando el DELETE porque la policy
     es FOR ALL y su USING aplica también al borrado."""
+    esc.consolidar()
     esc.db.execute("SELECT set_config('gapto.owner_user_id', %s, true)",
                    ("0320a000-0000-4000-8000-0000000000ff",))
     _asumir_runtime(esc.db)
@@ -438,6 +479,7 @@ def test_runtime_delete_respeta_el_aislamiento_tenant(esc: Escenario) -> None:
 def test_runtime_delete_bloqueado_por_fk_restrict(esc: Escenario) -> None:
     """No se puede retirar el efecto mientras tenga hijas: 23503, no un
     estado inválido."""
+    esc.consolidar()
     _asumir_runtime(esc.db)
     with pytest.raises(psycopg.errors.ForeignKeyViolation):
         esc.db.execute("DELETE FROM gapto.hecho_efectos WHERE id = %s", (esc.efecto,))
@@ -448,6 +490,7 @@ def test_runtime_delete_en_orden_correcto_confirma(esc: Escenario) -> None:
     """Retirada completa en el orden que imponen las FK. El validador de
     atribuciones hace CONTINUE cuando el efecto ya no existe, de modo que la
     evaluación diferida no falsea un error de visibilidad."""
+    esc.consolidar()
     _asumir_runtime(esc.db)
     esc.db.execute("DELETE FROM gapto.efecto_atribuciones WHERE id = %s", (esc.atribucion,))
     esc.db.execute("DELETE FROM gapto.hecho_efectos WHERE id = %s", (esc.efecto,))
@@ -459,6 +502,7 @@ def test_runtime_delete_en_orden_correcto_confirma(esc: Escenario) -> None:
 def test_runtime_delete_no_rompe_un_efecto_completa(esc: Escenario) -> None:
     """Fail-closed conservado: retirar la atribución dejando vivo un efecto
     COMPLETA descuadra la suma y se rechaza en la evaluación diferida."""
+    esc.consolidar()
     _asumir_runtime(esc.db)
     esc.db.execute("DELETE FROM gapto.efecto_atribuciones WHERE id = %s", (esc.atribucion,))
     with pytest.raises(psycopg.errors.RaiseException) as err:
