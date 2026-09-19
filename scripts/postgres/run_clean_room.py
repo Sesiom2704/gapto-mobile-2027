@@ -56,6 +56,13 @@
 # ROLE DRIFT, que es correcto y deliberado. En ese caso se usa --desde 0002
 # y el clean-room demuestra reproducibilidad DE LA BASE, no de la instancia.
 # Reproducir tambien la instancia exige un proyecto nuevo.
+# Versión: 0.13.0 -- P5-bis. Se DECLARA la referencia aprobada de huellas D-111
+#                    del head 0330, medida de forma independiente en la replica
+#                    local (17.10) y en Neon gapto2027_test (17.11), con
+#                    coincidencia byte a byte en las ocho. Con esto el runner
+#                    deja de estar fail-closed para 0330 y puede emitir PASS,
+#                    siempre que ademas test_041 y test_042 hayan corrido y
+#                    esten verdes (D-187 DEC-8).
 # Versión: 0.12.0 -- F03 REABIERTA / D-182..D-187. Se declaran los heads 0320 y
 #                    0330. 0320 mueve UNICAMENTE la matriz de runtime
 #                    (DELETE 36 -> 48). 0330 NO mueve ninguna magnitud contada
@@ -288,12 +295,37 @@ TESTS_EXIGIDOS_POR_HEAD = {
 # REFERENCIA aprobada. Sin referencia declarada NO hay PASS: fail-closed.
 HEADS_QUE_EXIGEN_REFERENCIA_D111 = ("0330",)
 
-# Referencia aprobada de las ocho huellas D-111 por head. Se rellena con los
-# valores MEDIDOS en replica local y Neon test antes del gate, en una edicion
-# separada y trazable. Un head presente aqui con valor None significa
-# "referencia pendiente", y el veredicto lo trata como fallo.
+# Referencia aprobada de las ocho huellas D-111 por head (D-187 DEC-8).
+#
+# PROCEDENCIA. Los valores de 0330 se midieron con el script canonico
+# huellas_d111.sql, de forma independiente, en DOS entornos, y coincidieron
+# byte a byte:
+#   - replica local PostgreSQL 17.10, cadena 0002..0330 aplicada con un rol
+#     NO superusuario equivalente al real (INHERIT FALSE / SET TRUE);
+#   - Neon gapto2027_test, PostgreSQL 17.11, misma cadena.
+# La coincidencia entre dos versiones menores distintas es consistente con lo
+# que D-177 ya establecio sobre la estabilidad de estas huellas.
+#
+# QUE PRUEBA CADA UNA. h1, h2, h3 y h7 son las unicas que 0320 y 0330 mueven.
+# h4, h5, h6 y h8 valen lo MISMO que en 0310 y esa igualdad es la comprobacion
+# positiva de que ninguna de las dos migrations toco policies, triggers,
+# funciones ni vistas.
+#
+# Un head presente aqui con valor None significa "referencia pendiente", y el
+# veredicto lo trata como fallo: fail-closed.
 HUELLAS_D111_POR_HEAD = {
-    "0330": None,   # PENDIENTE DE MEDICION — ver D-187 DEC-8
+    "0330": {
+        "h1_columnas":    "77dcd15cfffb1603e87eccf735c778db",
+        "h2_constraints": "03cd8ab403586b8684fb05aa1a3bbf18",
+        "h3_indices":     "aceb34183f2156348a3c58ff033c1d53",
+        # identicas a 0310: e1b1dd81 / db650e48 / 84f053df / bc29f409
+        "h4_policies":    "e1b1dd81a40b8e10c7f1744b25611fb1",
+        "h5_triggers":    "db650e488abe0226eb33cbd1e0f63c33",
+        "h6_funciones":   "84f053df8ccca616b88bdd9ff8ceb532",
+        "h7_grants":      "ea77c87e385e3d6ce567ea46220f63d9",
+        "h8_vistas":      "bc29f409364899f99402b8ed06f77149",
+        "recuentos":      "777/644/287/82/58/28/1031/3",
+    },
 }
 
 
