@@ -19,6 +19,14 @@
 #   Los tests exigen GAPTO_TEST_DATABASE_URL. No se apunta implicitamente a
 #   ninguna base: una suite que se autoconfigura acaba escribiendo donde no
 #   debe.
+# Version: 0.9.0
+#   0.9.0 (F04-06 B5): fixture del servicio de correccion agregada.
+# Version: 0.8.0
+#   0.8.0 (F04-06 B4): fixture del servicio de realidad suplementaria.
+# Version: 0.7.0
+#   0.7.0 (F04-06 B3): fixture del servicio de devoluciones.
+# Version: 0.6.0
+#   0.6.0 (F04-06 B1): fixture del servicio de transferencias.
 # Version: 0.5.0
 #   0.5.0 (F04-05): servicios de reglas y previsiones.
 # Version: 0.4.0
@@ -64,6 +72,10 @@ from app.services.posiciones_service import PosicionesService  # noqa: E402
 from app.services.previsiones_service import PrevisionesService  # noqa: E402
 from app.services.reglas_service import ReglasService  # noqa: E402
 from app.services.tesoreria_service import TesoreriaService  # noqa: E402
+from app.services.correcciones_service import CorreccionesService  # noqa: E402
+from app.services.devoluciones_service import DevolucionesService  # noqa: E402
+from app.services.suplementos_service import SuplementosService  # noqa: E402
+from app.services.transferencias_service import TransferenciasService  # noqa: E402
 
 ROL_RUNTIME = "gapto_runtime"
 
@@ -389,3 +401,23 @@ def servicio_reglas(unidad: UnidadDeTrabajo) -> ReglasService:
 @pytest.fixture()
 def servicio_previsiones(unidad: UnidadDeTrabajo) -> PrevisionesService:
     return PrevisionesService(unidad)
+
+
+@pytest.fixture()
+def servicio_transferencias(unidad: UnidadDeTrabajo) -> TransferenciasService:
+    return TransferenciasService(unidad)
+
+
+@pytest.fixture()
+def servicio_devoluciones(unidad: UnidadDeTrabajo) -> DevolucionesService:
+    return DevolucionesService(unidad)
+
+
+@pytest.fixture()
+def servicio_suplementos(unidad: UnidadDeTrabajo) -> SuplementosService:
+    return SuplementosService(unidad)
+
+
+@pytest.fixture()
+def servicio_correcciones(unidad: UnidadDeTrabajo) -> CorreccionesService:
+    return CorreccionesService(unidad)

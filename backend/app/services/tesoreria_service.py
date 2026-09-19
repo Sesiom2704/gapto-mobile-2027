@@ -3,7 +3,8 @@
 # Fichero: tesoreria_service.py
 # Ruta: backend/app/services/tesoreria_service.py
 # Descripcion: OP-06 aportaciones reales, OP-07 vinculo aportacion-conciliacion,
-#   OP-08 movimiento real de tesoreria y OP-09 conciliacion hecho-movimiento.
+#   OP-08 movimiento real de tesoreria, OP-09 conciliacion hecho-movimiento
+#   y OP-11 reversion de tesoreria (F04-06).
 #
 #   Reutiliza integramente la infraestructura de F04-01: una transaccion por
 #   operacion, contexto tenant dentro de ella, auditoria via
@@ -31,6 +32,9 @@
 #   sustituirlo: dos transacciones concurrentes pueden ver individualmente un
 #   estado valido y solo el trigger impide que el estado final lo incumpla.
 #   En multidivisa no se compara nada: no hay FX y no se inventa ninguno.
+# Version: 0.2.0
+#   0.2.0 (F04-06 B2): OP-11 reversion de tesoreria. No crea hecho, efecto ni
+#   relacion; consume same-account (D-099) y profundidad 1 (D-133).
 # Version: 0.1.0
 # ============================================================
 
@@ -46,6 +50,8 @@ from app.core.contexto import ContextoOperacion
 from app.core.errores import CodigoError, ErrorMotor
 from app.core.modelos import ESTADO_ACTIVO
 from app.core.modelos_tesoreria import (
+    DatosReversion,
+    ResultadoReversion,
     CERO,
     CLASES_MOVIMIENTO,
     CRITERIOS_APORTACION,
@@ -678,6 +684,183 @@ class TesoreriaService:
             raise ErrorMotor(
                 CodigoError.ENTRADA_INVALIDA,
                 "confirmado_at debe ser un instante, no una fecha.",
+            )
+
+
+    # ==================================================================
+    # OP-11 — REVERSION DE TESORERIA (F04-06 / B2)
+    # ==================================================================
+    def revertir_movimiento(
+        self, contexto: ContextoOperacion, datos: DatosReversion
+    ) -> ResultadoReversion:
+        """Dinero que el banco devuelve al sitio del que salio.
+
+        NO es una devolucion economica y NO es una correccion. Una reversion de
+        tesoreria no crea hecho, ni efecto, ni `hecho_relaciones`, ni
+        transferencia inversa. El acontecimiento economico original sigue
+        siendo cierto: lo que cambia es que el apunte bancario se deshizo.
+
+        Por eso tampoco se concilia con el hecho del original: hacerlo
+        reduciria la porcion asignada y reescribiria hacia atras una realidad
+        economica que nadie ha negado.
+
+        GARANTIAS FISICAS CONSUMIDAS, NO REIMPLEMENTADAS:
+        - misma cuenta, por la FK compuesta de 0220 (D-099);
+        - profundidad maxima 1 en ambos sentidos, por 0280 (D-133);
+        - signo contrario y suma de reversiones ACTIVAS <= original;
+        - una reversion ACTIVA no apunta a un original ANULADO (D-119/T6).
+        El servicio prevalida para producir un error de dominio legible. Si
+        prevalidacion y trigger divergieran, manda el trigger.
+        """
+        self._validar_reversion(datos)
+
+        def operacion(sesion: SesionMotor) -> ResultadoReversion:
+            repo_hechos.exigir_contexto(sesion)
+
+            existente = repo_tes.leer_movimiento(sesion, datos.reversion_id)
+            if existente is not None:
+                return self._replay_reversion(sesion, datos, existente)
+
+            # El lock del original va ANTES de leer cuanto se ha revertido ya:
+            # es lo unico que impide que dos reversiones concurrentes calculen
+            # el mismo pendiente y lo agoten dos veces.
+            original = repo_tes.contexto_de_reversion(
+                sesion, datos.movimiento_original_id
+            )
+            if original is None:
+                raise ErrorMotor(
+                    CodigoError.AGREGADO_NO_ENCONTRADO,
+                    "El movimiento original no existe o no es accesible.",
+                )
+            if original["es_reversion"]:
+                raise ErrorMotor(
+                    CodigoError.REVERSION_DE_REVERSION,
+                    "Una reversion solo puede apuntar a un movimiento raiz: "
+                    "deshacer una reversion se registra como un movimiento "
+                    "ordinario nuevo, sin enlazarlo.",
+                )
+            if original["estado"] != "ACTIVO":
+                raise ErrorMotor(
+                    CodigoError.ORIGINAL_ANULADO,
+                    "No se revierte un movimiento anulado: si nunca existio, "
+                    "no hay nada que deshacer.",
+                )
+            if original["cuenta_id"] != datos.cuenta_id:
+                raise ErrorMotor(
+                    CodigoError.CUENTA_DISTINTA,
+                    "La reversion vive en la misma cuenta que el original: "
+                    "devolver el dinero a otra cuenta es una transferencia, "
+                    "no una reversion.",
+                )
+
+            magnitud = decimal.Decimal(datos.importe)
+            revertido = decimal.Decimal(original["revertido"])
+            disponible = abs(decimal.Decimal(original["importe"])) - revertido
+            if magnitud > disponible:
+                raise ErrorMotor(
+                    CodigoError.EXCEDE_IMPORTE_ORIGINAL,
+                    "La suma de reversiones activas no puede superar el "
+                    "importe del movimiento original.",
+                )
+
+            # El signo lo pone el motor a partir del original.
+            signo = -1 if decimal.Decimal(original["importe"]) > 0 else 1
+            importe = magnitud * signo
+
+            creada = repo_tes.insertar_reversion_si_no_existe(
+                sesion,
+                reversion_id=datos.reversion_id,
+                cuenta_id=datos.cuenta_id,
+                fecha_movimiento=datos.fecha_movimiento,
+                importe=importe,
+                # Conserva la clase del original: revertir un AJUSTE_SALDO no lo
+                # convierte en una operacion ordinaria.
+                clase_movimiento=original["clase_movimiento"],
+                descripcion=datos.descripcion,
+                confirmado_at=datos.confirmado_at,
+                reversion_de_movimiento_id=datos.movimiento_original_id,
+            )
+            if creada is None:
+                raise ErrorMotor(
+                    CodigoError.IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION,
+                    "El identificador reservado de la reversion ya esta en uso "
+                    "con otra intencion.",
+                )
+            row_version, snapshot = creada
+            auditoria.registrar(
+                sesion,
+                tabla=repo_tes.TABLA_MOVIMIENTOS,
+                registro_id=datos.reversion_id,
+                accion=auditoria.ACCION_CREAR,
+                datos_despues_json=snapshot,
+            )
+            return ResultadoReversion(
+                reversion_id=datos.reversion_id,
+                movimiento_original_id=datos.movimiento_original_id,
+                row_version=row_version,
+                importe=importe,
+                revertido_acumulado=revertido + magnitud,
+                pendiente=disponible - magnitud,
+            )
+
+        return self._ejecutar(contexto, operacion, "OP-11 revertir_movimiento")
+
+    def _replay_reversion(
+        self,
+        sesion: SesionMotor,
+        datos: DatosReversion,
+        existente: tuple[Any, ...],
+    ) -> ResultadoReversion:
+        """Reintento de una OP-11 cuyo COMMIT quedo en resultado desconocido.
+
+        La identidad de una reversion es a que original apunta y por cuanto. Si
+        el UUID reservado esta ocupado por otra cosa, es conflicto y no se
+        completa nada.
+        """
+        importe_actual = decimal.Decimal(existente[2])
+        if not repo_tes.creacion_reversion_previa_coincide(
+            sesion,
+            reversion_id=datos.reversion_id,
+            original_id=datos.movimiento_original_id,
+            importe=importe_actual,
+        ) or abs(importe_actual) != decimal.Decimal(datos.importe):
+            raise ErrorMotor(
+                CodigoError.IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION,
+                "El identificador reservado de la reversion ya esta en uso con "
+                "otra intencion.",
+            )
+        original = repo_tes.contexto_de_reversion(
+            sesion, datos.movimiento_original_id
+        )
+        assert original is not None
+        revertido = decimal.Decimal(original["revertido"])
+        return ResultadoReversion(
+            reversion_id=datos.reversion_id,
+            movimiento_original_id=datos.movimiento_original_id,
+            row_version=existente[0],
+            importe=importe_actual,
+            revertido_acumulado=revertido,
+            pendiente=abs(decimal.Decimal(original["importe"])) - revertido,
+            idempotente=True,
+        )
+
+    @staticmethod
+    def _validar_reversion(datos: DatosReversion) -> None:
+        if datos.reversion_id == datos.movimiento_original_id:
+            raise ErrorMotor(
+                CodigoError.AUTORREVERSION,
+                "Un movimiento no se revierte a si mismo.",
+            )
+        if datos.importe is None or decimal.Decimal(datos.importe) <= 0:
+            raise ErrorMotor(
+                CodigoError.SIGNOS_INCORRECTOS,
+                "El importe de una reversion se declara como magnitud "
+                "positiva: el signo contrario lo pone el motor.",
+            )
+        if datos.fecha_movimiento is None:
+            raise ErrorMotor(
+                CodigoError.ENTRADA_INVALIDA,
+                "Una reversion exige fecha de movimiento.",
             )
 
     def _ejecutar(

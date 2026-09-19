@@ -21,6 +21,10 @@
 #   para dar un error legible por anticipado, pero la garantia concurrente
 #   sigue siendo la fisica: una prevalidacion mejora el mensaje, no sustituye
 #   al trigger.
+#   0.2.0 (F04-06 B2): alta y lecturas de OP-11. El alta de reversion es una
+#   funcion APARTE del alta ordinaria: un movimiento ordinario nunca lleva
+#   `reversion_de_movimiento_id`.
+# Version: 0.2.0
 # Version: 0.1.0
 # ============================================================
 
@@ -460,3 +464,134 @@ def movimiento_de_conciliacion(
         (conciliacion_id,),
     )
     return None if fila is None else (fila[0], fila[1])
+
+
+# ==================================================================
+# F04-06 / B2 — OP-11 reversion de tesoreria
+# ==================================================================
+
+def insertar_reversion_si_no_existe(
+    sesion: SesionMotor,
+    *,
+    reversion_id: uuid.UUID,
+    cuenta_id: uuid.UUID,
+    fecha_movimiento: Any,
+    importe: Any,
+    clase_movimiento: str,
+    descripcion: str | None,
+    confirmado_at: Any,
+    reversion_de_movimiento_id: uuid.UUID,
+) -> tuple[int, str] | None:
+    """Inserta un movimiento que ENLAZA con el original que revierte.
+
+    Es una funcion aparte de `insertar_movimiento_si_no_existe` a proposito:
+    un movimiento ordinario NUNCA debe llevar `reversion_de_movimiento_id`, y
+    exponerlo como parametro opcional del alta ordinaria invitaria a rellenarlo
+    por conveniencia. Una reversion es una operacion distinta con su propio
+    contrato fisico (D-099 same-account, D-133 profundidad 1).
+    """
+    consulta = sql.SQL(
+        """
+        INSERT INTO gapto.movimientos_tesoreria (
+            id, cuenta_id, fecha_movimiento, importe, descripcion,
+            confirmado_at, clase_movimiento, reversion_de_movimiento_id)
+        VALUES (%s::uuid, %s::uuid, %s::date, %s::numeric, %s::varchar,
+                COALESCE(%s::timestamptz, CURRENT_TIMESTAMP), %s::varchar,
+                %s::uuid)
+        ON CONFLICT (id) DO NOTHING
+        RETURNING row_version, ({})::text
+        """
+    ).format(_snapshot_desde_fila("movimientos_tesoreria", TIPOS_SQL_MOVIMIENTO))
+    with sesion.conexion.cursor() as cursor:
+        cursor.execute(
+            consulta,
+            (
+                reversion_id,
+                cuenta_id,
+                fecha_movimiento,
+                importe,
+                descripcion,
+                confirmado_at,
+                clase_movimiento,
+                reversion_de_movimiento_id,
+            ),
+        )
+        fila = cursor.fetchone()
+    return None if fila is None else (fila[0], fila[1])
+
+
+def contexto_de_reversion(
+    sesion: SesionMotor, original_id: uuid.UUID
+) -> dict[str, Any] | None:
+    """Estado del movimiento original y de sus reversiones ya ACTIVAS.
+
+    Bloquea el original con FOR NO KEY UPDATE, el MISMO modo que usa
+    `fn_check_reversion_movimiento` tras la reescritura de 0280. Tomar aqui un
+    lock mas fuerte no anadiria seguridad y si podria bloquear lecturas que el
+    contrato fisico permite.
+
+    El lock es lo unico que serializa dos reversiones concurrentes del mismo
+    original mientras se calcula cuanto queda por revertir: la suma se lee
+    DESPUES de bloquear, nunca antes.
+    """
+    sesion.uno(
+        "SELECT 1 FROM gapto.movimientos_tesoreria WHERE id = %s::uuid "
+        "FOR NO KEY UPDATE",
+        (original_id,),
+    )
+    fila = sesion.uno(
+        """
+        SELECT m.importe, m.cuenta_id, m.estado, m.row_version,
+               (m.reversion_de_movimiento_id IS NOT NULL) AS es_reversion,
+               c.moneda, m.clase_movimiento,
+               COALESCE((SELECT sum(abs(r.importe))
+                           FROM gapto.movimientos_tesoreria r
+                          WHERE r.reversion_de_movimiento_id = m.id
+                            AND r.estado = 'ACTIVO'), 0) AS revertido,
+               EXISTS (SELECT 1 FROM gapto.movimientos_tesoreria h
+                        WHERE h.reversion_de_movimiento_id = m.id) AS tiene_hijas
+          FROM gapto.movimientos_tesoreria m
+          JOIN gapto.cuentas c ON c.id = m.cuenta_id
+         WHERE m.id = %s::uuid
+        """,
+        (original_id,),
+    )
+    if fila is None:
+        return None
+    return {
+        "importe": fila[0],
+        "cuenta_id": fila[1],
+        "estado": fila[2],
+        "row_version": fila[3],
+        "es_reversion": fila[4],
+        "moneda": fila[5],
+        "clase_movimiento": fila[6],
+        "revertido": fila[7],
+        "tiene_hijas": fila[8],
+    }
+
+
+def creacion_reversion_previa_coincide(
+    sesion: SesionMotor,
+    *,
+    reversion_id: uuid.UUID,
+    original_id: uuid.UUID,
+    importe: Any,
+) -> bool:
+    """True si la reversion existente es EXACTAMENTE la misma intencion.
+
+    La identidad de una reversion es a que original apunta y por cuanto.
+    Descripcion y fecha no la determinan: dos reversiones del mismo original
+    por el mismo importe en fechas distintas serian indistinguibles para el
+    llamante, y eso es justo lo que la identidad reservada debe evitar.
+    """
+    fila = sesion.uno(
+        """
+        SELECT m.reversion_de_movimiento_id = %s::uuid
+           AND m.importe = %s::numeric
+          FROM gapto.movimientos_tesoreria m
+         WHERE m.id = %s::uuid
+        """,
+        (original_id, importe, reversion_id),
+    )
+    return bool(fila and fila[0])

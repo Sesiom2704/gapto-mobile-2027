@@ -25,6 +25,9 @@
 #   esta conciliacion" o "desvincula", de modo que `destino=None` significa
 #   desvincular sin ambiguedad. Tener ademas un DESVINCULAR seria dar dos
 #   formas de decir lo mismo.
+#   0.2.0 (F04-06 B2): DatosReversion y ResultadoReversion para OP-11. El
+#   importe se declara como magnitud; el signo contrario lo pone el motor.
+# Version: 0.2.0
 # Version: 0.1.0
 # ============================================================
 
@@ -140,4 +143,46 @@ class ResultadoConciliacion:
     conciliacion_id: uuid.UUID
     hecho_row_version: int
     movimiento_row_version: int
+    idempotente: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class DatosReversion:
+    """Entrada de OP-11.
+
+    `importe` es una MAGNITUD POSITIVA: el signo contrario lo pone el motor a
+    partir del original. Pedirselo al llamante delegaria en el una invariante
+    que PostgreSQL ya impone, y un signo igual al original acabaria en un
+    rechazo tecnico en vez de un error de dominio.
+
+    `cuenta_id` se exige aunque sea deducible del original. No es redundancia:
+    es la declaracion del llamante sobre DONDE cree que ocurre la reversion, y
+    permite devolver CUENTA_DISTINTA en vez de aceptar en silencio una cuenta
+    que el no pretendia. La FK compuesta de 0220 lo impediria igualmente, pero
+    con un error que no es contrato.
+    """
+
+    reversion_id: uuid.UUID
+    movimiento_original_id: uuid.UUID
+    cuenta_id: uuid.UUID
+    fecha_movimiento: dt.date | None
+    importe: decimal.Decimal | None
+    descripcion: str | None = None
+    confirmado_at: dt.datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ResultadoReversion:
+    """Salida de OP-11.
+
+    `revertido_acumulado` y `pendiente` son conclusiones DERIVADAS que se
+    calculan y se devuelven; no se persiste ninguna de las dos.
+    """
+
+    reversion_id: uuid.UUID
+    movimiento_original_id: uuid.UUID
+    row_version: int
+    importe: decimal.Decimal
+    revertido_acumulado: decimal.Decimal
+    pendiente: decimal.Decimal | None
     idempotente: bool = False

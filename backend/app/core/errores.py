@@ -15,6 +15,20 @@
 #   operacion y reintentar no la hara posible". Fusionarlos haria que la UX
 #   reintentase indefinidamente algo imposible, o que abandonase algo que solo
 #   necesitaba otro intento.
+# Version: 0.12.0
+#   0.12.0 (F04-06 B5): dos codigos de OP-21. MOTIVO_AUSENTE y
+#   VERSION_DESFASADA se reutilizan de fases anteriores.
+# Version: 0.11.0
+#   0.11.0 (F04-06 B4): tres codigos de OP-18 realidad suplementaria. Son SRV
+#   puros: el fisico no distingue realidad posterior de error de captura.
+# Version: 0.10.0
+#   0.10.0 (F04-06 B3): seis codigos de OP-13. El limite acumulado NO tiene red
+#   fisica: lo protege solo el lock del hecho origen.
+# Version: 0.9.0
+#   0.9.0 (F04-06 B2): cinco codigos de OP-11 reversion de tesoreria.
+# Version: 0.8.0
+#   0.8.0 (F04-06 B1): cinco codigos de OP-10 transferencia. Se mapean desde
+#   garantias fisicas existentes; no se crea ninguna comprobacion paralela.
 # Version: 0.7.0
 #   0.7.0 (F04-05, auditoria): TRAMO_RODANTE_REQUIERE_REVISION como codigo
 #   canonico del rechazo atomico previsional (F04-D024.9),
@@ -162,6 +176,57 @@ class CodigoError(str, enum.Enum):
 
     # --- F04-05 · lifecycle de previsiones --------------------------------
     PREVISION_BLOQUEADA = "PREVISION_BLOQUEADA"
+
+    # ---- F04-06 / OP-10 transferencia ----
+    # Los cinco se MAPEAN desde garantias fisicas de 0040/0080/0170/0270: el
+    # servicio prevalida para dar un error legible, pero la autoridad sigue
+    # siendo PostgreSQL al COMMIT. Ninguno expone SQLSTATE ni constraint.
+    SIGNOS_INCORRECTOS = "SIGNOS_INCORRECTOS"
+    MISMA_CUENTA = "MISMA_CUENTA"
+    IMPORTES_NO_COINCIDEN = "IMPORTES_NO_COINCIDEN"
+    COMISION_EMBEBIDA = "COMISION_EMBEBIDA"
+    OWNER_DISTINTO = "OWNER_DISTINTO"
+
+    # ---- F04-06 / OP-11 reversion de tesoreria ----
+    # CUENTA_DISTINTA y REVERSION_DE_REVERSION se MAPEAN desde garantias
+    # fisicas: la FK compuesta same-account de 0220 (D-099) y la profundidad
+    # maxima 1 de 0280 (D-133). El servicio prevalida para dar un error
+    # legible; PostgreSQL sigue siendo la autoridad.
+    CUENTA_DISTINTA = "CUENTA_DISTINTA"
+    ORIGINAL_ANULADO = "ORIGINAL_ANULADO"
+    AUTORREVERSION = "AUTORREVERSION"
+    REVERSION_DE_REVERSION = "REVERSION_DE_REVERSION"
+    EXCEDE_IMPORTE_ORIGINAL = "EXCEDE_IMPORTE_ORIGINAL"
+
+    # ---- F04-06 / OP-13 devolucion economica ----
+    # Ninguno tiene red fisica: no existe constraint sobre el acumulado
+    # devuelto. El limite lo protege EXCLUSIVAMENTE el lock del hecho origen
+    # (F04-D030), igual que R-F04-017 protege la identidad de ocurrencia.
+    EXCEDE_CAPACIDAD_REVERSIBLE = "EXCEDE_CAPACIDAD_REVERSIBLE"
+    NATURALEZA_DISTINTA_DEL_ORIGEN = "NATURALEZA_DISTINTA_DEL_ORIGEN"
+    # INGRESO_NO_PERMITIDO se REUTILIZA de F04-04: una devolucion que se
+    # registrase como INGRESO es exactamente la misma confusion que ya
+    # vigilaba el reembolso, y duplicar el codigo daria dos contratos
+    # para una sola regla.
+    CAPACIDAD_REVERSIBLE_NO_DEMOSTRABLE = "CAPACIDAD_REVERSIBLE_NO_DEMOSTRABLE"
+    DEVOLUCION_MULTIDIVISA_NO_DEMOSTRADA = "DEVOLUCION_MULTIDIVISA_NO_DEMOSTRADA"
+    RELACION_DUPLICADA_CON_OTRA_INTENCION = "RELACION_DUPLICADA_CON_OTRA_INTENCION"
+
+    # ---- F04-06 / OP-18 realidad suplementaria ----
+    # Los tres son SRV puros: ninguna garantia fisica distingue una realidad
+    # posterior de un error de captura, porque ambos producen filas validas.
+    # La frontera la sostiene el servicio, y por eso el mutante N8 es
+    # especialmente importante.
+    FECHA_ECONOMICA_NO_DEMOSTRADA = "FECHA_ECONOMICA_NO_DEMOSTRADA"
+    EDICION_DE_ORIGINAL_NO_PERMITIDA = "EDICION_DE_ORIGINAL_NO_PERMITIDA"
+    PERIODO_CERRADO_SIN_POLITICA = "PERIODO_CERRADO_SIN_POLITICA"
+
+    # ---- F04-06 / OP-21 correccion agregada ----
+    # MOTIVO_AUSENTE y VERSION_DESFASADA se REUTILIZAN: la exigencia de motivo
+    # y el control optimista son los mismos de toda la fase, y duplicarlos
+    # daria dos contratos para una regla.
+    CORRECCION_DEJA_HECHO_SIN_EFECTOS = "CORRECCION_DEJA_HECHO_SIN_EFECTOS"
+    CORRECCION_REQUIERE_ANULACION_DE_RAIZ = "CORRECCION_REQUIERE_ANULACION_DE_RAIZ"
     # F04-D022. Motivo estable del impacto DERIVADO que devuelven OP-02 y
     # OP-03 cuando la propagacion no es segura. NO es un error: viaja en un
     # resultado exitoso. Y los comandos cuyo objetivo es generar o avanzar la
