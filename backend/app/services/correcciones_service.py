@@ -33,6 +33,11 @@
 #   D-080 · ADVISORY PRIMERO. Si la correccion toca superficies de inversion,
 #   el advisory (INVERSIONES, owner) se toma ANTES de cualquier row lock. Los
 #   locks genericos no lo sustituyen.
+# Version: 0.4.0
+#   0.4.0 (F04-D036): guarda de ESTADO FINAL de los vinculos
+#   posicion<->efecto. Corregir el `tipo_efecto` de un efecto vinculado
+#   llevaba el saldo de la posicion a CERO CONOCIDO sin cobro, sin
+#   condonacion y sin cierre.
 # Version: 0.3.0
 #   0.3.0 (F04-06 B5): revalidacion cruzada con OP-13. Una correccion no puede
 #   dejar la capacidad reversible por debajo de lo ya devuelto.
@@ -58,6 +63,7 @@ from app.repositories import correcciones_repository as repo_corr
 from app.repositories import efectos_repository as repo_efectos
 from app.repositories import hechos_repository as repo_hechos
 from app.repositories import relaciones_repository as repo_rel
+from app.services import coherencia_posicion
 
 TIPO_TRANSFERENCIA = "TRANSFERENCIA"
 
@@ -169,6 +175,14 @@ class CorreccionesService:
             #    esta guarda el motor confirmaria un estado imposible: haber
             #    devuelto mas de lo que el hecho llego a reconocer.
             self._revalidar_devoluciones(sesion, datos)
+
+            # 4bis. F04-D036. Misma logica que el paso 5: lo que se juzga es
+            # el ESTADO FINAL. Una correccion puede retirar y reinstalar un
+            # efecto dentro de la transaccion; lo que no puede es confirmar
+            # un vinculo cuya naturaleza o moneda ya no case con la posicion.
+            coherencia_posicion.exigir_vinculos_coherentes(
+                sesion, hecho_id=datos.hecho_id
+            )
 
             # 5. Guarda de estado FINAL (D-187). Se evalua aqui, no paso a
             #    paso: quedarse en cero efectos a mitad de la transaccion es

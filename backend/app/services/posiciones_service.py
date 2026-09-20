@@ -39,6 +39,13 @@
 #   un reintento legitimo en VERSION_DESFASADA y el cliente reintentaria en
 #   bucle o, peor, duplicaria la realidad con UUID nuevos. La asimetria es
 #   deliberada y esta documentada.
+#
+#   F04-D036 anade la guarda de coherencia posicion <-> efecto en los dos
+#   puntos que le pertenecen: el unico writer del vinculo (`_crear_delta`) y
+#   el calculo de saldo, que falla cerrado antes que devolver un numero
+#   derivado de un estado invalido.
+# Version: 0.2.0
+#   0.2.0 (F04-D036): coherencia monetaria del vinculo y saldo fail-closed.
 # Version: 0.1.0
 # ============================================================
 
@@ -81,6 +88,7 @@ from app.repositories import auditoria_repository as auditoria
 from app.repositories import efectos_repository as repo_efectos
 from app.repositories import hechos_repository as repo_hechos
 from app.repositories import posiciones_repository as repo_pos
+from app.services import coherencia_posicion
 from app.repositories import tesoreria_repository as repo_tes
 
 _MONEDA_VALIDA = re.compile(r"^[A-Z]{3}$")
@@ -575,6 +583,20 @@ class PosicionesService:
                 CodigoError.ENTRADA_INVALIDA,
                 "El efecto y su vinculo exigen identidades reservadas.",
             )
+        # F04-D036. Unico writer del vinculo posicion<->efecto, de modo que
+        # la guarda vive aqui y no repartida por cada operacion. En los
+        # deltas el hecho lo crea esta misma clase con la moneda de la
+        # posicion y la comprobacion es un no-op barato; en el ALTA sobre un
+        # hecho preexistente es la unica red que existe.
+        posicion_destino = repo_pos.leer_posicion(sesion, entidad_id)
+        coherencia_posicion.exigir_moneda_de_vinculo(
+            sesion,
+            hecho_id=hecho_id,
+            moneda_posicion=(
+                None if posicion_destino is None else posicion_destino["moneda"]
+            ),
+            entidad_id=entidad_id,
+        )
         creado = repo_efectos.insertar_efecto_si_no_existe(
             sesion,
             hecho_id,
@@ -793,6 +815,13 @@ class PosicionesService:
         """
         if posicion["saldo_apertura"] is None:
             return Saldo.indeterminado()
+        # F04-D036. Defensa en profundidad: antes de sumar se comprueba que
+        # todos los deltas que entrarian son de la moneda de la posicion.
+        coherencia_posicion.exigir_saldo_calculable(
+            sesion,
+            entidad_id=entidad_id,
+            tipo_efecto=EFECTO_DE_POSICION[posicion["tipo"]],
+        )
         deltas = repo_pos.saldo_deltas(
             sesion, entidad_id, EFECTO_DE_POSICION[posicion["tipo"]]
         )

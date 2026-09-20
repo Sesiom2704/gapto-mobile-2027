@@ -20,6 +20,12 @@
 #       asi que se falla cerrado en vez de recalcular nada;
 #     - OP-03, ante realidad ya vinculada: entonces el hecho ocurrio y lo que
 #       corresponde es devolucion o reversion, que pertenecen a F04-06.
+# Version: 0.6.0
+#   0.6.0 (F04-D036): OP-02 no puede corregir `moneda` si el estado final
+#   dejaria un efecto del hecho dentro del saldo de una posicion de otra
+#   moneda. La guarda es hermana de la de `tipo_hecho_id`: el campo NO pasa
+#   a ser inmutable, solo deja de ser corregible escalarmente cuando existe
+#   una dependencia con ancla monetaria propia.
 # Version: 0.5.0
 #   0.5.0 (F04-05, auditoria): OP-02 y OP-03 dejan de hacer rollback por una
 #   cadena RODANTE no propagable. Conforme a F04-D022 confirman la correccion,
@@ -61,6 +67,7 @@ from app.core.modelos import (
 from app.core.unidad_trabajo import SesionMotor, Traza, UnidadDeTrabajo
 from app.repositories import auditoria_repository as auditoria
 from app.repositories import hechos_repository as repo
+from app.services import coherencia_posicion
 
 _MONEDA_VALIDA = re.compile(r"^[A-Z]{3}$")
 
@@ -222,6 +229,15 @@ class HechosService:
                 raise ErrorMotor(
                     CodigoError.OPERACION_NO_PERMITIDA_EN_ESTADO,
                     "Un hecho anulado no admite correccion de captura.",
+                )
+
+            if (
+                "moneda" in cambios
+                and cambios["moneda"] is not None
+                and cambios["moneda"] != _a_dict(snapshot_previo).get("moneda")
+            ):
+                coherencia_posicion.exigir_moneda_corregible(
+                    sesion, hecho_id=hecho_id, moneda_candidata=cambios["moneda"]
                 )
 
             if "tipo_hecho_id" in cambios and repo.tiene_efectos(sesion, hecho_id):
