@@ -20,6 +20,13 @@
 #   naturaleza compatible vinculados a la entidad. Los hechos ANULADO quedan
 #   fuera por el propio WHERE, no por un filtro posterior que alguien pueda
 #   olvidar.
+#
+#   F04-D036 anade las lecturas de coherencia posicion <-> efecto. Viven
+#   aqui, y no en el servicio, porque son SQL: el servicio decide que hacer
+#   con el resultado, no como obtenerlo.
+# Version: 0.2.0
+#   0.2.0 (F04-D036): `moneda_de_hecho`, `posicion_incompatible_por_moneda`,
+#   `vinculo_incoherente_del_hecho` y `delta_de_otra_moneda`.
 # Version: 0.1.0
 # ============================================================
 
@@ -453,3 +460,110 @@ def existe_registro(sesion: SesionMotor, tabla: str, registro_id: uuid.UUID) -> 
     with sesion.conexion.cursor() as cursor:
         cursor.execute(consulta, (registro_id,))
         return cursor.fetchone() is not None
+
+
+# ==================================================================
+# F04-D036 - coherencia posicion <-> efecto
+# ==================================================================
+
+def moneda_de_hecho(sesion: SesionMotor, hecho_id: uuid.UUID) -> str | None:
+    """Moneda del hecho, o None si no existe o es de otro tenant."""
+    fila = sesion.uno(
+        "SELECT moneda FROM gapto.hechos_financieros WHERE id = %s::uuid",
+        (hecho_id,),
+    )
+    return None if fila is None else fila[0]
+
+
+def posicion_incompatible_por_moneda(
+    sesion: SesionMotor, hecho_id: uuid.UUID, moneda_candidata: str
+) -> tuple[Any, ...] | None:
+    """Primera posicion alcanzada desde el hecho cuya moneda no coincide.
+
+    "Alcanzada" significa vinculada A NIVEL DE EFECTO: un `hecho_entidades`
+    con `efecto_id IS NULL` relaciona el hecho con la entidad pero no mete
+    ningun delta en el saldo, y prohibirlo restringiria sin motivo.
+
+    Devuelve `(entidad_id, moneda_posicion)` o None. Se limita a una fila: el
+    error nombra un ejemplo concreto y no hace falta recorrerlas todas para
+    decidir que la correccion no puede aplicarse.
+    """
+    return sesion.uno(
+        """
+        SELECT p.entidad_id, p.moneda
+          FROM gapto.hecho_entidades v
+          JOIN gapto.derechos_obligaciones_financieras p
+            ON p.entidad_id = v.entidad_id
+         WHERE v.hecho_id = %s::uuid
+           AND v.efecto_id IS NOT NULL
+           AND p.moneda <> %s::varchar
+         LIMIT 1
+        """,
+        (hecho_id, moneda_candidata),
+    )
+
+
+def vinculo_incoherente_del_hecho(
+    sesion: SesionMotor, hecho_id: uuid.UUID
+) -> tuple[Any, ...] | None:
+    """Primer vinculo posicion<->efecto invalido en el ESTADO ACTUAL.
+
+    Cubre las dos dimensiones que pueden invalidarlo:
+      - moneda: el hecho del efecto y la posicion deben coincidir;
+      - naturaleza: DERECHO_COBRO se alimenta de efectos `DERECHO_COBRO` y
+        OBLIGACION_PAGO de efectos `DEUDA`.
+
+    La compatibilidad de naturaleza se expresa en SQL con un CASE y no
+    importando el mapa de Python a proposito: esta consulta se ejecuta al
+    final de una correccion agregada, donde lo que importa es lo que ha
+    quedado escrito, no lo que el servicio creia estar escribiendo.
+    """
+    return sesion.uno(
+        """
+        SELECT v.id, p.entidad_id, p.tipo, ef.tipo_efecto, h.moneda, p.moneda
+          FROM gapto.hecho_entidades v
+          JOIN gapto.derechos_obligaciones_financieras p
+            ON p.entidad_id = v.entidad_id
+          JOIN gapto.hecho_efectos ef ON ef.id = v.efecto_id
+          JOIN gapto.hechos_financieros h ON h.id = ef.hecho_id
+         WHERE v.hecho_id = %s::uuid
+           AND v.efecto_id IS NOT NULL
+           AND (
+                h.moneda <> p.moneda
+             OR ef.tipo_efecto <> CASE p.tipo
+                    WHEN 'DERECHO_COBRO' THEN 'DERECHO_COBRO'
+                    ELSE 'DEUDA'
+                END
+           )
+         LIMIT 1
+        """,
+        (hecho_id,),
+    )
+
+
+def delta_de_otra_moneda(
+    sesion: SesionMotor, entidad_id: uuid.UUID, tipo_efecto: str
+) -> tuple[Any, ...] | None:
+    """Efecto que entraria en el saldo procediendo de otra moneda.
+
+    Es la defensa en profundidad de la lectura. NO filtra la fila: la
+    denuncia. Filtrarla devolveria un saldo aparentemente correcto calculado
+    sobre un estado invalido, que es peor que fallar.
+    """
+    return sesion.uno(
+        """
+        SELECT ef.id, h.moneda, p.moneda
+          FROM gapto.hecho_entidades v
+          JOIN gapto.hecho_efectos ef ON ef.id = v.efecto_id
+          JOIN gapto.hechos_financieros h ON h.id = ef.hecho_id
+          JOIN gapto.derechos_obligaciones_financieras p
+            ON p.entidad_id = v.entidad_id
+         WHERE v.entidad_id = %s::uuid
+           AND v.efecto_id IS NOT NULL
+           AND ef.tipo_efecto = %s::varchar
+           AND h.estado = 'ACTIVO'
+           AND h.moneda <> p.moneda
+         LIMIT 1
+        """,
+        (entidad_id, tipo_efecto),
+    )
