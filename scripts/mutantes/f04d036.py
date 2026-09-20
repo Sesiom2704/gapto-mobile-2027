@@ -31,6 +31,15 @@
 #   python scripts/mutantes/f04d036.py           # todos
 #   python scripts/mutantes/f04d036.py M2 M4     # un subconjunto
 #
+# Version: 0.2.0
+#   0.2.0 (F04-D036, iteracion correctiva): E/S BYTE A BYTE y un solo
+#   veredicto por mutante. La version anterior leia y escribia en modo TEXTO:
+#   en Windows eso traduce LF a CRLF, de modo que el fichero restaurado tenia
+#   el mismo contenido y distinto SHA-256, y la guarda de restauracion —que
+#   hizo bien en disparar— marcaba DUDOSO un mutante ya demostrado. Ademas el
+#   `finally` ANADIA un segundo veredicto en lugar de corregir el primero, y
+#   el recuento salia sobre mas entradas que mutantes. Una herramienta de gate
+#   no puede depender del sistema operativo donde se ejecuta (D-181).
 # Version: 0.1.0
 # ============================================================
 
@@ -149,6 +158,15 @@ def sha256(ruta: pathlib.Path) -> str:
     return hashlib.sha256(ruta.read_bytes()).hexdigest()
 
 
+def leer(ruta: pathlib.Path) -> bytes:
+    """Bytes crudos. Nunca modo texto: traduciria los finales de linea."""
+    return ruta.read_bytes()
+
+
+def escribir(ruta: pathlib.Path, contenido: bytes) -> None:
+    ruta.write_bytes(contenido)
+
+
 def ejecutar_suite() -> tuple[str, list[str]]:
     """Devuelve (forma, tests_fallados). `forma` es INVALIDA si pytest no corrio."""
     proceso = subprocess.run(
@@ -170,38 +188,40 @@ def correr(lote: list[Mutante]) -> int:
     resultados: list[tuple[str, str]] = []
     for mutante in lote:
         ruta = RAIZ / mutante.fichero
-        original = ruta.read_text(encoding="utf-8")
+        original = leer(ruta)
         sha_original = sha256(ruta)
+        viejo = mutante.viejo.encode("utf-8")
+        nuevo = mutante.nuevo.encode("utf-8")
+        veredicto = "DUDOSO: sin ejecutar"
 
-        if original.count(mutante.viejo) != 1:
+        if original.count(viejo) != 1:
             resultados.append((mutante.ident, "DUDOSO: el fragmento no es unico"))
             continue
 
-        ruta.write_text(original.replace(mutante.viejo, mutante.nuevo), encoding="utf-8")
+        escribir(ruta, original.replace(viejo, nuevo))
         try:
             if sha256(ruta) == sha_original:
-                resultados.append((mutante.ident, "DUDOSO: mutacion INERTE"))
-                continue
-            forma, fallados = ejecutar_suite()
-            if forma == "INVALIDA":
-                resultados.append((mutante.ident, "DUDOSO: la suite no llego a correr"))
-            elif not fallados:
-                resultados.append((mutante.ident, "SUPERVIVIENTE"))
-            elif not any(mutante.discriminante in nombre for nombre in fallados):
-                resultados.append(
-                    (
-                        mutante.ident,
-                        f"DUDOSO: cayeron {fallados} pero no el discriminante",
-                    )
-                )
+                veredicto = "DUDOSO: mutacion INERTE"
             else:
-                resultados.append(
-                    (mutante.ident, f"MUERTO ({len(fallados)} fallos)")
-                )
+                forma, fallados = ejecutar_suite()
+                if forma == "INVALIDA":
+                    veredicto = "DUDOSO: la suite no llego a correr"
+                elif not fallados:
+                    veredicto = "SUPERVIVIENTE"
+                elif not any(mutante.discriminante in n for n in fallados):
+                    veredicto = (
+                        f"DUDOSO: cayeron {fallados} pero no el discriminante"
+                    )
+                else:
+                    veredicto = f"MUERTO ({len(fallados)} fallos)"
         finally:
-            ruta.write_text(original, encoding="utf-8")
+            # La restauracion se verifica SIEMPRE, y si falla degrada el
+            # veredicto en vez de anadir una segunda entrada: un mutante
+            # produce exactamente un resultado.
+            escribir(ruta, original)
             if sha256(ruta) != sha_original:
-                resultados.append((mutante.ident, "DUDOSO: restauracion fallida"))
+                veredicto = "DUDOSO: restauracion fallida"
+            resultados.append((mutante.ident, veredicto))
 
     print("=== F04-D036 - MUTANTES ===", flush=True)
     problemas = 0
