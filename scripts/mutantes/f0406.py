@@ -38,6 +38,10 @@
 #   python scripts/mutantes/f0406.py            # todos
 #   python scripts/mutantes/f0406.py N14         # un lote
 #
+# Version: 0.1.3
+#   0.1.3 (iteracion correctiva): N8 discrimina por OPERACION y no por fechas;
+#   E-B4-04 deja de apoyarse en la regla retirada; N11 queda clasificado con
+#   su prueba estatica.
 # Version: 0.1.2
 #   0.1.2 (B5): se corrige la justificacion de N11. La prediccion de que OP-21
 #   haria alcanzable la terna no se cumplio.
@@ -324,21 +328,16 @@ MUTANTES: list[Mutante] = [
         discriminante='test_retry_idempotente',
         suite=SUITE_B3,
         equivalente=(
-            'La guarda de terna es INALCANZABLE dentro de OP-13: el hecho '
-            'origen de la relacion se crea en la misma transaccion, de modo '
-            'que la terna (nuevo, original, DEVOLUCION_DE) no puede existir '
-            'antes. Todo reintento se resuelve aguas arriba por la identidad '
-            'del hecho, en _replay. Se conserva porque el mandato 5 exige el '
-            'protocolo completo de F04-D028 para los tipos activados, y '
-            'y porque el protocolo es correcto aunque hoy no se ejerza. '
-            'CORRECCION DE UNA PREVISION MIA: al escribir esto supuse que '
-            'OP-21 crearia relaciones y haria alcanzable la terna. NO ha '
-            'sido asi: OP-21 solo las ELIMINA, de modo que ninguna '
-            'operacion de F04-06 puede encontrarse una terna preexistente. '
-            'HALLAZGO FIRME PARA EL HANDOFF: '
-            'RELACION_DUPLICADA_CON_OTRA_INTENCION queda SIN CAMINO '
-            'ALCANZABLE en toda F04-06. Arquitectura debe decidir si se '
-            'retira de la taxonomia o si alguna operacion futura lo activa.'
+            'EQUIVALENTE / NO DISCRIMINABLE EN LA SUPERFICIE F04-06 ACTUAL. '
+            'PRUEBA ESTATICA: solo dos writers crean hecho_relaciones -- '
+            'devoluciones_service (OP-13) y suplementos_service (OP-18) -- y '
+            'ambos crean su hecho ORIGEN dentro de la misma transaccion, de '
+            'modo que la terna (origen, destino, tipo) no puede preexistir. '
+            'correcciones_service (OP-21) solo ELIMINA relaciones. Ningun '
+            'writer activo puede construir el estado previo necesario. '
+            'F04-D028 se mantiene como protocolo defensivo para writers '
+            'futuros; el error funcional externo se retiro por acuerdo de '
+            'arquitectura al no tener camino alcanzable.'
         ),
     ),
     Mutante(
@@ -403,12 +402,12 @@ MUTANTES: list[Mutante] = [
     ),
     Mutante(
         ident='N8',
-        invariante='INV-07: CORRIGE_A no tapa un error de captura',
-        descripcion='admite CORRIGE_A con fecha igual o anterior a la del hecho ajustado',
+        invariante='OP-18 crea realidad NUEVA y no edita el hecho relacionado',
+        descripcion='OP-18 reutiliza la identidad del hecho ajustado en vez de crear una nueva',
         fichero=SRV_SUP,
-        viejo='                if fecha_ajustado is not None and datos.fecha_hecho <= fecha_ajustado:',
-        nuevo='                if False:',
-        discriminante='test_corrige_a_con_la_misma_fecha_que_el_original',
+        viejo='                    hecho_id=datos.hecho_id,\n                    fecha_hecho=datos.fecha_hecho,',
+        nuevo='                    hecho_id=datos.hecho_ajustado_id or datos.hecho_id,\n                    fecha_hecho=datos.fecha_hecho,',
+        discriminante='test_op18_crea_realidad_nueva_y_no_edita_el_original',
         suite=SUITE_B4,
     ),
     Mutante(
@@ -443,12 +442,15 @@ MUTANTES: list[Mutante] = [
     ),
     Mutante(
         ident='E-B4-04',
-        invariante='El suplemento conserva su propia fecha economica',
-        descripcion='hereda la fecha del hecho ajustado',
+        invariante='CORRIGE_A va del ajuste al hecho ajustado',
+        descripcion='invierte origen y destino de la relacion',
         fichero=SRV_SUP,
-        viejo='                    fecha_hecho=datos.fecha_hecho,\n                    moneda=datos.moneda,\n                    presupuestable=False,',
-        nuevo='                    fecha_hecho=fecha_ajustado or datos.fecha_hecho,\n                    moneda=datos.moneda,\n                    presupuestable=False,',
-        discriminante='test_el_suplemento_tiene_su_propia_fecha_economica',
+        # El patron incluye `importe_relacionado` para ser UNIVOCO: la
+        # llamada de lectura comparte las dos primeras lineas y mutarla
+        # seria inerte.
+        viejo='            hecho_origen_id=datos.hecho_id,\n            hecho_destino_id=datos.hecho_ajustado_id,\n            tipo_relacion=TIPO_RELACION_CORRIGE,\n            importe_relacionado=',
+        nuevo='            hecho_origen_id=datos.hecho_ajustado_id,\n            hecho_destino_id=datos.hecho_id,\n            tipo_relacion=TIPO_RELACION_CORRIGE,\n            importe_relacionado=',
+        discriminante='test_corrige_a_va_del_ajuste_al_hecho_ajustado',
         suite=SUITE_B4,
     ),
     Mutante(

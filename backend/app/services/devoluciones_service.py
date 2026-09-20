@@ -32,6 +32,10 @@
 #   previsión sigue siendo cierto despues de la devolucion. Este servicio NO
 #   lee para escribir ni modifica `prevision_hechos`; solo informa de cuantos
 #   vinculos tiene el original.
+# Version: 0.2.0
+#   0.2.0 (F04-06, iteracion correctiva): se retira
+#   RELACION_DUPLICADA_CON_OTRA_INTENCION. La rama era inalcanzable y un error
+#   funcional sin camino no es contrato. El protocolo F04-D028 se mantiene.
 # Version: 0.1.0
 # ============================================================
 
@@ -255,12 +259,12 @@ class DevolucionesService:
             tipo_relacion=TIPO_RELACION_DEVOLUCION,
         )
         if existente is not None:
-            if decimal.Decimal(existente["importe_relacionado"]) != magnitud:
-                raise ErrorMotor(
-                    CodigoError.RELACION_DUPLICADA_CON_OTRA_INTENCION,
-                    "Ya existe esa relacion entre los dos hechos con otra "
-                    "porcion: no se crea una segunda fila.",
-                )
+            # Defensa interna de F04-D028: si la terna ya existiese, no se
+            # crea una segunda fila. Hoy esta rama es INALCANZABLE en OP-13
+            # porque el hecho origen nace en esta misma transaccion; se
+            # conserva porque el protocolo protege a cualquier writer futuro
+            # que si pueda encontrarse la terna. Lo que NO se conserva es un
+            # error funcional externo para un camino que nadie puede recorrer.
             return
 
         snapshot = repo_rel.insertar_relacion_si_no_existe(

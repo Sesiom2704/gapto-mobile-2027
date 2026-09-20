@@ -14,9 +14,15 @@
 #   eso los tres errores de OP-18 son SRV puros y por eso el mutante N8 —usar
 #   CORRIGE_A para tapar un error de captura— es el que de verdad importa aqui.
 #
-#   INV-07 · CORRIGE_A no representa un error de captura.
+#   INV-07 · CORRIGE_A no representa un error de captura. Pero la frontera es
+#            de OPERACION, no de fechas: un suplemento puede ser ANTERIOR,
+#            igual o posterior al hecho con el que se relaciona.
 #   INV-08 · Un efecto no tiene fecha propia: la toma de su hecho, de modo que
 #            varios periodos economicos exigen varios hechos.
+# Version: 0.2.0
+#   0.2.0 (iteracion correctiva): se retiran los dos casos que exigian fecha
+#   posterior —regla inventada, contraria a F04-D002/INV-08— y se anaden los
+#   de retroactividad legitima.
 # Version: 0.1.0
 # ============================================================
 
@@ -250,51 +256,6 @@ def test_intento_de_editar_el_original(
     assert excinfo.value.codigo is CodigoError.EDICION_DE_ORIGINAL_NO_PERMITIDA
 
 
-def test_corrige_a_con_la_misma_fecha_que_el_original(
-    servicio: HechosService,
-    servicio_suplementos: SuplementosService,
-    contexto: ContextoOperacion,
-) -> None:
-    """DECISION DEL EJECUTOR, declarada en el servicio.
-
-    Un ajuste REAL posterior ocurre despues. Si la fecha economica coincide
-    con la del hecho ajustado, lo que se esta registrando no es realidad
-    nueva: es el mismo momento reescrito con otro hecho, es decir un error de
-    captura disfrazado. Es el oraculo determinista del mutante N8.
-    """
-    anterior = crear_anterior(servicio, contexto, F("2027-03-10"))
-    with pytest.raises(ErrorMotor) as excinfo:
-        servicio_suplementos.registrar(
-            contexto,
-            datos_suplemento(
-                fecha_hecho=F("2027-03-10"),
-                relacion_id=uuid.uuid4(),
-                hecho_ajustado_id=anterior,
-            ),
-        )
-    assert excinfo.value.codigo is CodigoError.EDICION_DE_ORIGINAL_NO_PERMITIDA
-
-
-def test_corrige_a_con_fecha_anterior_al_original(
-    servicio: HechosService,
-    servicio_suplementos: SuplementosService,
-    contexto: ContextoOperacion,
-) -> None:
-    """Retrodatar un ajuste por debajo del hecho que ajusta es inventar
-    retroactividad."""
-    anterior = crear_anterior(servicio, contexto, F("2027-03-10"))
-    with pytest.raises(ErrorMotor) as excinfo:
-        servicio_suplementos.registrar(
-            contexto,
-            datos_suplemento(
-                fecha_hecho=F("2027-02-01"),
-                relacion_id=uuid.uuid4(),
-                hecho_ajustado_id=anterior,
-            ),
-        )
-    assert excinfo.value.codigo is CodigoError.EDICION_DE_ORIGINAL_NO_PERMITIDA
-
-
 def test_periodo_cerrado_sin_politica(
     servicio_suplementos: SuplementosService, contexto: ContextoOperacion
 ) -> None:
@@ -432,3 +393,119 @@ def test_misma_identidad_con_otra_fecha_es_conflicto(
         excinfo.value.codigo
         is CodigoError.IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION
     )
+
+
+# ==================================================================
+# Retroactividad legitima (F04-D002 / INV-08)
+# ==================================================================
+
+def test_suplemento_retroactivo_anterior_al_hecho_relacionado(
+    servicio: HechosService,
+    servicio_suplementos: SuplementosService,
+    contexto: ContextoOperacion,
+    admin: psycopg.Connection,
+) -> None:
+    """El 20 de septiembre se descubre un gasto atribuible al 31 de agosto.
+
+    `fecha_hecho` es la fecha ECONOMICA demostrada; cuando se registro lo dice
+    `created_at`. Que el hecho relacionado sea posterior no convierte esto en
+    una reescritura del pasado: la relacion expresa significado economico, no
+    secuencia temporal.
+    """
+    relacionado = crear_anterior(servicio, contexto, F("2027-09-10"))
+    datos = datos_suplemento(
+        fecha_hecho=F("2027-08-31"),
+        relacion_id=uuid.uuid4(),
+        hecho_ajustado_id=relacionado,
+        concepto="Gasto de agosto descubierto en septiembre",
+    )
+    resultado = servicio_suplementos.registrar(contexto, datos)
+    assert resultado.fecha_hecho == F("2027-08-31")
+    assert leer_fila(
+        admin,
+        contexto.owner_user_id,
+        "SELECT (SELECT fecha_hecho FROM gapto.hechos_financieros WHERE id = %s), "
+        "       (SELECT fecha_hecho FROM gapto.hechos_financieros WHERE id = %s), "
+        "       (SELECT tipo_relacion FROM gapto.hecho_relaciones WHERE id = %s)",
+        (datos.hecho_id, relacionado, datos.relacion_id),
+    ) == (F("2027-08-31"), F("2027-09-10"), "CORRIGE_A")
+
+
+def test_suplemento_con_la_misma_fecha_que_el_hecho_relacionado(
+    servicio: HechosService,
+    servicio_suplementos: SuplementosService,
+    contexto: ContextoOperacion,
+    admin: psycopg.Connection,
+) -> None:
+    """Dos realidades economicas del mismo dia son legitimas.
+
+    Un recargo que se descubre despues y pertenece al mismo periodo que el
+    hecho original no deja de haber ocurrido por compartir fecha.
+    """
+    relacionado = crear_anterior(servicio, contexto, F("2027-03-10"))
+    datos = datos_suplemento(
+        fecha_hecho=F("2027-03-10"),
+        relacion_id=uuid.uuid4(),
+        hecho_ajustado_id=relacionado,
+    )
+    resultado = servicio_suplementos.registrar(contexto, datos)
+    assert resultado.fecha_hecho == F("2027-03-10")
+    assert leer_fila(
+        admin,
+        contexto.owner_user_id,
+        "SELECT count(*) FROM gapto.hechos_financieros WHERE id IN (%s, %s)",
+        (datos.hecho_id, relacionado),
+    ) == (2,)
+
+
+def test_op18_crea_realidad_nueva_y_no_edita_el_original(
+    servicio: HechosService,
+    servicio_suplementos: SuplementosService,
+    contexto: ContextoOperacion,
+    admin: psycopg.Connection,
+) -> None:
+    """LA FRONTERA, comprobada por IDENTIDAD y PERSISTENCIA.
+
+    OP-18 crea un hecho NUEVO con su propia identidad; el hecho relacionado
+    permanece intacto en estado, version, importe y fecha. Corregir un dato
+    falso es otra operacion —OP-02 u OP-21— y NO produce un hecho sustitutorio.
+
+    Es el oraculo determinista del mutante N8: no mira fechas, mira si nacio
+    una realidad nueva y si la anterior sobrevivio sin tocarse.
+    """
+    relacionado = crear_anterior(servicio, contexto, F("2027-03-10"))
+    antes = leer_fila(
+        admin,
+        contexto.owner_user_id,
+        "SELECT estado, row_version, importe_total, fecha_hecho "
+        "FROM gapto.hechos_financieros WHERE id = %s",
+        (relacionado,),
+    )
+    datos = datos_suplemento(
+        relacion_id=uuid.uuid4(), hecho_ajustado_id=relacionado
+    )
+    servicio_suplementos.registrar(contexto, datos)
+
+    # 1. Nacio una realidad NUEVA, con identidad propia.
+    assert leer_fila(
+        admin,
+        contexto.owner_user_id,
+        "SELECT count(*) FROM gapto.hechos_financieros WHERE id = %s",
+        (datos.hecho_id,),
+    ) == (1,)
+    assert datos.hecho_id != relacionado
+    # 2. El original sobrevivio sin un solo cambio.
+    assert leer_fila(
+        admin,
+        contexto.owner_user_id,
+        "SELECT estado, row_version, importe_total, fecha_hecho "
+        "FROM gapto.hechos_financieros WHERE id = %s",
+        (relacionado,),
+    ) == antes
+    # 3. Coexisten los dos, no hay sustitucion.
+    assert leer_fila(
+        admin,
+        contexto.owner_user_id,
+        "SELECT count(*) FROM gapto.hechos_financieros WHERE id IN (%s, %s)",
+        (datos.hecho_id, relacionado),
+    ) == (2,)

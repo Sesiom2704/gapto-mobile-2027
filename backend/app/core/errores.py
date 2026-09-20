@@ -15,6 +15,10 @@
 #   operacion y reintentar no la hara posible". Fusionarlos haria que la UX
 #   reintentase indefinidamente algo imposible, o que abandonase algo que solo
 #   necesitaba otro intento.
+# Version: 0.13.0
+#   0.13.0 (F04-06, iteracion correctiva): se RETIRA
+#   RELACION_DUPLICADA_CON_OTRA_INTENCION: ningun writer activo puede
+#   construir el estado previo que lo haria alcanzable.
 # Version: 0.12.0
 #   0.12.0 (F04-06 B5): dos codigos de OP-21. MOTIVO_AUSENTE y
 #   VERSION_DESFASADA se reutilizan de fases anteriores.
@@ -210,7 +214,6 @@ class CodigoError(str, enum.Enum):
     # para una sola regla.
     CAPACIDAD_REVERSIBLE_NO_DEMOSTRABLE = "CAPACIDAD_REVERSIBLE_NO_DEMOSTRABLE"
     DEVOLUCION_MULTIDIVISA_NO_DEMOSTRADA = "DEVOLUCION_MULTIDIVISA_NO_DEMOSTRADA"
-    RELACION_DUPLICADA_CON_OTRA_INTENCION = "RELACION_DUPLICADA_CON_OTRA_INTENCION"
 
     # ---- F04-06 / OP-18 realidad suplementaria ----
     # Los tres son SRV puros: ninguna garantia fisica distingue una realidad

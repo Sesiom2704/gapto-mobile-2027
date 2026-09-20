@@ -16,21 +16,26 @@
 #   servicio, y por eso el mutante N8 es el mas importante del bloque.
 #
 #   INV-07 · CORRIGE_A NO ES UN ERROR DE CAPTURA. La relacion representa un
-#   ajuste REAL posterior. Para que el servicio pueda sostener esa diferencia
-#   sin adivinar intenciones, se exige lo unico observable que la acompaña
-#   siempre: la fecha economica del suplemento debe ser POSTERIOR a la del
-#   hecho ajustado. Una realidad que se descubre despues ocurre despues. Si
-#   coincide o es anterior, lo que se esta intentando es reescribir el pasado,
-#   y eso es EDICION_DE_ORIGINAL_NO_PERMITIDA.
+#   ajuste REAL posterior. Pero la frontera entre corregir y suplementar es de
+#   OPERACION, no de fechas: la elige quien llama al escoger OP-02/OP-21 o
+#   OP-18. El motor no la infiere y no debe inventarse una heuristica temporal
+#   para deducirla.
 #
-#   Es una decision del ejecutor, no del canon, y queda declarada como tal: el
-#   expediente exige distinguir ambos casos pero no fija el criterio
-#   observable. Sin el, la frontera seria una intencion declarada por el
-#   llamante y N8 no tendria oraculo determinista.
+#   NO EXISTE NINGUNA REGLA DE ORDEN CRONOLOGICO. Un suplemento puede tener
+#   fecha economica ANTERIOR, igual o posterior a la del hecho con el que se
+#   relaciona: el 20 de septiembre puede descubrirse un gasto atribuible al 31
+#   de agosto, y `fecha_hecho` es la fecha ECONOMICA demostrada, no la de
+#   registro —esa es `created_at`—. La relacion expresa significado economico,
+#   no secuencia temporal.
 #
 #   INV-08 · UN HECHO POR PERIODO. Un efecto no tiene fecha propia: la toma de
 #   su hecho. Una realidad que abarca varios periodos economicos exige un hecho
 #   por periodo, y este servicio crea exactamente uno.
+# Version: 0.2.0
+#   0.2.0 (F04-06, iteracion correctiva): se ELIMINA la regla inventada que
+#   exigia fecha posterior a la del hecho ajustado. Contradecia F04-D002 e
+#   INV-08: una realidad suplementaria puede pertenecer a un periodo economico
+#   anterior.
 # Version: 0.1.0
 # ============================================================
 
@@ -83,7 +88,6 @@ class SuplementosService:
             if repo_hechos.leer_estado(sesion, datos.hecho_id) is not None:
                 return self._replay(sesion, datos)
 
-            fecha_ajustado = None
             if datos.con_relacion:
                 # El hecho ajustado se bloquea ANTES de leer su fecha: la
                 # relacion se crea bajo el protocolo de F04-D028 y la lectura
@@ -92,19 +96,6 @@ class SuplementosService:
                     raise ErrorMotor(
                         CodigoError.AGREGADO_NO_ENCONTRADO,
                         "El hecho ajustado no existe o no es accesible.",
-                    )
-                fecha_ajustado = repo_rel.fecha_de_hecho(
-                    sesion, datos.hecho_ajustado_id
-                )
-                if fecha_ajustado is not None and datos.fecha_hecho <= fecha_ajustado:
-                    # Una realidad posterior ocurre despues. Si la fecha
-                    # coincide o es anterior, lo que se intenta es reescribir
-                    # el pasado con un hecho nuevo.
-                    raise ErrorMotor(
-                        CodigoError.EDICION_DE_ORIGINAL_NO_PERMITIDA,
-                        "Un ajuste real posterior tiene fecha economica "
-                        "posterior a la del hecho que ajusta: un error de "
-                        "captura se corrige, no se tapa con un hecho nuevo.",
                     )
 
             tipo_hecho_id = repo_hechos.resolver_tipo_hecho(
