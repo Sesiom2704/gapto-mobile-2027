@@ -20,6 +20,11 @@
 #       asi que se falla cerrado en vez de recalcular nada;
 #     - OP-03, ante realidad ya vinculada: entonces el hecho ocurrio y lo que
 #       corresponde es devolucion o reversion, que pertenecen a F04-06.
+# Version: 0.7.0
+#   0.7.0 (F04-D038): corregir `numero_participantes_total` no puede dejarlo
+#   por debajo de las personas ya identificadas en `hecho_participantes`. Es
+#   la misma invariante que vigila el writer de participantes, alcanzable por
+#   el otro extremo: en vez de subir los identificados, se baja el total.
 # Version: 0.6.0
 #   0.6.0 (F04-D036): OP-02 no puede corregir `moneda` si el estado final
 #   dejaria un efecto del hecho dentro del saldo de una posicion de otra
@@ -67,7 +72,7 @@ from app.core.modelos import (
 from app.core.unidad_trabajo import SesionMotor, Traza, UnidadDeTrabajo
 from app.repositories import auditoria_repository as auditoria
 from app.repositories import hechos_repository as repo
-from app.services import coherencia_posicion
+from app.services import coherencia_participantes, coherencia_posicion
 
 _MONEDA_VALIDA = re.compile(r"^[A-Z]{3}$")
 
@@ -280,6 +285,16 @@ class HechosService:
                     "El hecho ha cambiado desde la version que conoce el llamante.",
                 )
             row_version_nueva, estado_nuevo, snapshot_nuevo = actualizado
+
+            if "numero_participantes_total" in cambios:
+                # F04-D038 §10. Se evalua DESPUES de aplicar, sobre el estado
+                # final y con la raiz ya bloqueada por el UPDATE con guarda de
+                # version. Bajar el total por debajo de las personas ya
+                # identificadas no es corregir un dato: es afirmar que en la
+                # cena habia menos gente del que ya consta con nombre.
+                coherencia_participantes.exigir_recuento_coherente(
+                    sesion, hecho_id=hecho_id
+                )
 
             auditoria.registrar(
                 sesion,

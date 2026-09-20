@@ -24,6 +24,11 @@
 #   F04-D036 anade las lecturas de coherencia posicion <-> efecto. Viven
 #   aqui, y no en el servicio, porque son SQL: el servicio decide que hacer
 #   con el resultado, no como obtenerlo.
+# Version: 0.3.0
+#   0.3.0 (F04-D038 §20): `posiciones_para_neto`, la lectura de OP-20. Es UNA
+#   sola sentencia a proposito: construir un neto con varias consultas
+#   independientes bajo READ COMMITTED permitiria que cada una viese un
+#   commit distinto, y el resultado seria un neto que nunca existio.
 # Version: 0.2.0
 #   0.2.0 (F04-D036): `moneda_de_hecho`, `posicion_incompatible_por_moneda`,
 #   `vinculo_incoherente_del_hecho` y `delta_de_otra_moneda`.
@@ -567,3 +572,55 @@ def delta_de_otra_moneda(
         """,
         (entidad_id, tipo_efecto),
     )
+
+
+def posiciones_para_neto(
+    sesion: SesionMotor, contraparte_actor_id: uuid.UUID | None
+) -> list[tuple[Any, ...]]:
+    """Posiciones ACTIVAS con su saldo derivado, en UNA sentencia.
+
+    Devuelve por posicion: entidad_id, nombre, tipo, moneda, contraparte,
+    saldo_apertura, suma de deltas compatibles Y recuento de deltas de OTRA
+    moneda.
+
+    El recuento de incoherentes viaja en la misma consulta y no se filtra: si
+    existiera alguno, descartarlo aqui devolveria un saldo de aspecto correcto
+    calculado sobre un estado invalido. El servicio falla cerrado con el.
+
+    Las posiciones CERRADAS no salen: no participan en el neto vivo. Una
+    posicion cerrada tiene saldo actual cero aunque su pasado siga siendo
+    indeterminado.
+    """
+    consulta = """
+        WITH activas AS (
+            SELECT p.entidad_id, p.tipo, p.moneda, p.contraparte_actor_id,
+                   p.saldo_apertura
+              FROM gapto.derechos_obligaciones_financieras p
+             WHERE p.estado = 'ACTIVA'
+               AND (%s::uuid IS NULL OR p.contraparte_actor_id = %s::uuid)
+        )
+        SELECT a.entidad_id, e.nombre, a.tipo, a.moneda, a.contraparte_actor_id,
+               a.saldo_apertura, COALESCE(d.suma, 0), COALESCE(d.incoherentes, 0)
+          FROM activas a
+          JOIN gapto.entidades e ON e.id = a.entidad_id
+          LEFT JOIN LATERAL (
+              SELECT sum(ef.importe_delta) FILTER (WHERE h.moneda = a.moneda)
+                         AS suma,
+                     count(*) FILTER (WHERE h.moneda <> a.moneda)
+                         AS incoherentes
+                FROM gapto.hecho_entidades v
+                JOIN gapto.hecho_efectos ef ON ef.id = v.efecto_id
+                JOIN gapto.hechos_financieros h ON h.id = ef.hecho_id
+               WHERE v.entidad_id = a.entidad_id
+                 AND v.efecto_id IS NOT NULL
+                 AND h.estado = 'ACTIVO'
+                 AND ef.tipo_efecto = CASE a.tipo
+                         WHEN 'DERECHO_COBRO' THEN 'DERECHO_COBRO'
+                         ELSE 'DEUDA'
+                     END
+          ) d ON true
+         ORDER BY a.moneda, a.contraparte_actor_id NULLS LAST, a.entidad_id
+        """
+    with sesion.conexion.cursor() as cursor:
+        cursor.execute(consulta, (contraparte_actor_id, contraparte_actor_id))
+        return list(cursor.fetchall())

@@ -20,6 +20,10 @@
 #   servicio tomase antes sus row locks y el trigger pidiese despues el
 #   advisory, dos correcciones concurrentes podrian invertir el orden. Por eso
 #   se adquiere al principio de la transaccion, antes de cualquier fila.
+# Version: 0.2.0
+#   0.2.0 (F04-D039): superficie de atribuciones. UPDATE, DELETE y lectura
+#   del estado final de los efectos tocados, para que OP-21 pueda alcanzar
+#   atomicamente un estado valido cuando el reparto registrado era falso.
 # Version: 0.1.0
 # ============================================================
 
@@ -142,7 +146,14 @@ def actualizar_efecto(
     columna convertiria la correccion en una via para reescribir la identidad
     del efecto o su pertenencia a otro hecho.
     """
-    permitidos = {"importe_delta", "categoria_id", "descripcion", "tipo_efecto"}
+    permitidos = {
+        "importe_delta",
+        "categoria_id",
+        "descripcion",
+        "tipo_efecto",
+        # F04-D039. Corregible solo por OP-21; OP-05 conserva su progresion.
+        "estado_atribucion",
+    }
     columnas = [c for c in cambios if c in permitidos]
     if not columnas:
         return None
@@ -205,3 +216,105 @@ def aportaciones_de_conciliacion(
         (conciliacion_id,),
     )
     return 0 if fila is None else fila[0]
+
+
+# ==================================================================
+# F04-D039 - superficie de atribuciones
+# ==================================================================
+
+COLUMNAS_ATRIBUCION = {
+    "id": "uuid",
+    "efecto_id": "uuid",
+    "actor_id": "uuid",
+    "importe_atribuido": "numeric",
+    "porcentaje_aplicado": "numeric",
+    "criterio_atribucion": "varchar",
+}
+
+
+def leer_atribucion(
+    sesion: SesionMotor, atribucion_id: uuid.UUID
+) -> tuple[Any, ...] | None:
+    """Devuelve (efecto_id, hecho_id) o None si no es visible."""
+    return sesion.uno(
+        "SELECT a.efecto_id, e.hecho_id FROM gapto.efecto_atribuciones a "
+        "JOIN gapto.hecho_efectos e ON e.id = a.efecto_id WHERE a.id = %s::uuid",
+        (atribucion_id,),
+    )
+
+
+def eliminar_atribucion(
+    sesion: SesionMotor, atribucion_id: uuid.UUID
+) -> str | None:
+    """Retira una atribucion que nunca debio existir. Devuelve su snapshot."""
+    consulta = sql.SQL(
+        """
+        DELETE FROM gapto.efecto_atribuciones a
+         WHERE a.id = %s::uuid
+        RETURNING ({})::text
+        """
+    ).format(_snapshot("a", COLUMNAS_ATRIBUCION))
+    fila = sesion.uno(consulta, (atribucion_id,))
+    return None if fila is None else fila[0]
+
+
+def actualizar_atribucion(
+    sesion: SesionMotor, atribucion_id: uuid.UUID, cambios: dict[str, Any]
+) -> tuple[str, str] | None:
+    """UPDATE de un reparto que nunca fue cierto. Devuelve (antes, despues).
+
+    `actor_id` NO es corregible: cambiar de persona no es corregir un importe.
+    Un actor equivocado se expresa como DELETE de la fila falsa mas CREATE de
+    la correcta, que deja una auditoria inequivoca de que eran dos realidades
+    distintas y no una misma fila que "cambio de dueno".
+    """
+    permitidos = {"importe_atribuido", "porcentaje_aplicado", "criterio_atribucion"}
+    columnas = [c for c in cambios if c in permitidos]
+    if not columnas:
+        return None
+    asignaciones = sql.SQL(", ").join(
+        sql.SQL("{} = %s").format(sql.Identifier(c)) for c in columnas
+    )
+    consulta = sql.SQL(
+        """
+        WITH antes AS (
+            SELECT ({})::text AS snapshot FROM gapto.efecto_atribuciones a
+             WHERE a.id = %s::uuid
+        )
+        UPDATE gapto.efecto_atribuciones a
+           SET {}
+          FROM antes
+         WHERE a.id = %s::uuid
+        RETURNING antes.snapshot, ({})::text
+        """
+    ).format(
+        _snapshot("a", COLUMNAS_ATRIBUCION),
+        asignaciones,
+        _snapshot("a", COLUMNAS_ATRIBUCION),
+    )
+    parametros = [atribucion_id] + [cambios[c] for c in columnas] + [atribucion_id]
+    fila = sesion.uno(consulta, tuple(parametros))
+    return None if fila is None else (fila[0], fila[1])
+
+
+def estado_de_efectos(
+    sesion: SesionMotor, hecho_id: uuid.UUID, efecto_ids: list[uuid.UUID]
+) -> list[tuple[Any, ...]]:
+    """(efecto_id, importe_delta, estado_atribucion, filas, suma) del ESTADO FINAL.
+
+    Se limita a los efectos que la correccion toca. Evaluar todo el hecho haria
+    que OP-21 se negase a corregir un efecto por culpa de otro que ya estaba en
+    un estado que nadie rechaza hoy: las reglas de residual real y de
+    NO_DISPONIBLE sin filas son SRV y el trigger no las cubre.
+    """
+    consulta = """
+        SELECT e.id, e.importe_delta, e.estado_atribucion,
+               count(a.id), COALESCE(sum(a.importe_atribuido), 0)
+          FROM gapto.hecho_efectos e
+          LEFT JOIN gapto.efecto_atribuciones a ON a.efecto_id = e.id
+         WHERE e.hecho_id = %s::uuid AND e.id = ANY(%s::uuid[])
+         GROUP BY e.id, e.importe_delta, e.estado_atribucion
+    """
+    with sesion.conexion.cursor() as cursor:
+        cursor.execute(consulta, (hecho_id, efecto_ids))
+        return list(cursor.fetchall())

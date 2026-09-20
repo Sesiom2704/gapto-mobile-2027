@@ -15,6 +15,13 @@
 #   operacion y reintentar no la hara posible". Fusionarlos haria que la UX
 #   reintentase indefinidamente algo imposible, o que abandonase algo que solo
 #   necesitaba otro intento.
+# Version: 0.15.0
+#   0.15.0 (F04-D038): participantes identificados. `ROL_PARTICIPANTE_INVALIDO`
+#   protege el vocabulario operativo, que es SRV porque DB Schema declara
+#   `rol` deliberadamente extensible. `PARTICIPANTE_DUPLICADO` se devuelve
+#   ANTES de que aflore la UNIQUE fisica: el nombre de un indice no es
+#   contrato de API. `PARTICIPANTES_INCONSISTENTES` protege que el total
+#   declarado no quede por debajo de las personas ya identificadas.
 # Version: 0.14.0
 #   0.14.0 (F04-D036): coherencia posicion <-> efecto.
 #   MONEDA_POSICION_INCOMPATIBLE es error de COMANDO: lo devuelven los
@@ -164,6 +171,13 @@ class CodigoError(str, enum.Enum):
     # implicito y sumar nominalmente USD dentro de un saldo EUR produce un
     # numero que no significa nada.
     MONEDA_POSICION_INCOMPATIBLE = "MONEDA_POSICION_INCOMPATIBLE"
+
+    # --- F04-D038 - participantes identificados -------------------------
+    # Participar no implica atribucion, aportacion, pago, posicion ni
+    # propiedad. Estar en una cena no significa deber nada por ella.
+    ROL_PARTICIPANTE_INVALIDO = "ROL_PARTICIPANTE_INVALIDO"
+    PARTICIPANTE_DUPLICADO = "PARTICIPANTE_DUPLICADO"
+    PARTICIPANTES_INCONSISTENTES = "PARTICIPANTES_INCONSISTENTES"
     # Detectado en LECTURA, no en escritura. No se ignora la fila ni se
     # devuelve un saldo parcial fingiendo que esta completo.
     INVARIANTE_MONETARIA_POSICION_VIOLADA = (
