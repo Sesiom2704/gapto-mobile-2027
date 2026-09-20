@@ -15,6 +15,16 @@
 #   operacion y reintentar no la hara posible". Fusionarlos haria que la UX
 #   reintentase indefinidamente algo imposible, o que abandonase algo que solo
 #   necesitaba otro intento.
+# Version: 0.14.0
+#   0.14.0 (F04-D036): coherencia posicion <-> efecto.
+#   MONEDA_POSICION_INCOMPATIBLE es error de COMANDO: lo devuelven los
+#   write-paths que crearian o dejarian un efecto de otra moneda dentro del
+#   saldo de una posicion. INVARIANTE_MONETARIA_POSICION_VIOLADA es error de
+#   LECTURA: lo levanta el calculo de saldo si encuentra un estado que los
+#   write-paths ya no pueden producir. Son dos codigos y no uno porque
+#   significan cosas distintas: el primero dice "no te dejo escribir eso";
+#   el segundo dice "lo que hay guardado ya es invalido". Fusionarlos haria
+#   creer a la UX que basta con reintentar.
 # Version: 0.13.0
 #   0.13.0 (F04-06, iteracion correctiva): se RETIRA
 #   RELACION_DUPLICADA_CON_OTRA_INTENCION: ningun writer activo puede
@@ -147,6 +157,18 @@ class CodigoError(str, enum.Enum):
     APERTURA_INCONSISTENTE = "APERTURA_INCONSISTENTE"
     CIERRE_SIN_MOTIVO = "CIERRE_SIN_MOTIVO"
     POSICION_CERRADA = "POSICION_CERRADA"
+
+    # --- F04-D036 - coherencia monetaria y de naturaleza posicion<->efecto -
+    # Una posicion tiene moneda propia y estable. Un efecto que participa en
+    # su saldo debe proceder de un hecho de esa misma moneda: no existe FX
+    # implicito y sumar nominalmente USD dentro de un saldo EUR produce un
+    # numero que no significa nada.
+    MONEDA_POSICION_INCOMPATIBLE = "MONEDA_POSICION_INCOMPATIBLE"
+    # Detectado en LECTURA, no en escritura. No se ignora la fila ni se
+    # devuelve un saldo parcial fingiendo que esta completo.
+    INVARIANTE_MONETARIA_POSICION_VIOLADA = (
+        "INVARIANTE_MONETARIA_POSICION_VIOLADA"
+    )
 
     # --- F04-04 · reduccion de saldo --------------------------------------
     # Dos codigos distintos a proposito: EXCEDE_SALDO_DEL_DERECHO es el
