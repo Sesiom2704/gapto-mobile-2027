@@ -15,6 +15,10 @@
 #                8 financiaciones (PARCIAL v0.5.0: 4 prestamos formales con condiciones
 #                  versionadas, calendario, financiador y garantia; 7 compras financiadas;
 #                  derechos/obligaciones pendientes)
+#   v0.13.0: D2-E resuelta por opcion A (arquitectura, 2026-09-21): arbol de categorias
+#           canonico de Migration V3 v0.40 §15.2 como fuente suplementaria (un registro
+#           origen por nodo); ambito y presupuestable_default PROPUESTOS hasta la
+#           validacion del propietario (solo laboratorio).
 #   v0.12.0: cuarta ronda S20 (2026-09-21): garaje con inicio validado, avalista
 #           duplicada por captura fusionada en una sola vigencia, fianzas como
 #           obligaciones de devolucion y luz de Allende como servicio repercutible 100 %.
@@ -56,7 +60,7 @@
 #   RV3_IMPORT (rol login no superusuario -> gapto_migrator -> gapto_owner),
 #   fuerza los diferidos con SET CONSTRAINTS ALL IMMEDIATE y hace ROLLBACK.
 #   No es P6 (P6 hace COMMIT real).
-# Versión: 0.12.0
+# Versión: 0.13.0
 # ============================================================
 from __future__ import annotations
 
@@ -71,7 +75,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
-VERSION = "0.12.0"
+VERSION = "0.13.0"
 TRANSFORMACION = "RV3_P5"
 _AQUI = Path(__file__).resolve().parent
 
@@ -88,7 +92,7 @@ fu = _cargar("rv3_fuente")
 
 # Orden de insercion: padres antes que hijos (FK inmediatas de 0330).
 ORDEN_TABLAS = [
-    "usuarios", "paises", "regiones", "localidades",
+    "usuarios", "paises", "regiones", "localidades", "categorias_financieras",
     "terceros", "tercero_personas", "clasificaciones_tercero", "tercero_clasificaciones",
     "tercero_roles", "actores_financieros",
     "cuentas", "cuenta_participaciones",
@@ -101,7 +105,8 @@ ORDEN_TABLAS = [
 ]
 
 # Autorreferencias: el padre se inserta antes que el hijo (orden por profundidad).
-AUTOREF = {"regiones": "parent_region_id", "clasificaciones_tercero": "parent_id"}
+AUTOREF = {"regiones": "parent_region_id", "clasificaciones_tercero": "parent_id",
+           "categorias_financieras": "parent_id"}
 
 # Dominio 3. Convencion de corte de la simulacion (Migration V3 §29, RUN03):
 # corte logico 2026-09-04, ledger exacto desde 2026-09-05. saldo_apertura = liquidez V3.
@@ -279,6 +284,10 @@ LEDGER_REGLAS = {
     "D10-K": "servicio repercutible decidido (S20 R4-4): entidad SERVICIO + contrato_servicios repercutible "
               "100 % al actor declarado, validado como inquilino del contrato; vigencia = inicio del contrato. "
               "propiedad_servicios no se crea (existencia del suministro previa no demostrada).",
+    "D2-E": "categorias = arbol canonico de Migration V3 v0.40 §15.2 (opcion A, arquitectura 2026-09-21) como "
+             "fuente suplementaria ARBOL_CATEGORIAS_MV3 con SHA-256 del bloque; nombre literal del documento; orden = "
+             "posicion entre hermanos; codigo NULL; ambito INGRESO para las raices de ingreso del arbol y GASTO "
+             "para el resto; presupuestable_default PROPUESTO (GASTO si, INGRESO no) hasta validacion (S20).",
     "D8-M": "total de compra sustituido por el validado por el propietario (Migration V3 §14/RUN01); "
             "literal V3 conservado en origen.",
 }
@@ -301,6 +310,7 @@ class Dataset:
     pendientes: list = field(default_factory=list)
     modo_lab: bool = False
     self_id: str | None = None
+    categorias: dict = field(default_factory=dict)
     decisiones: "Decisiones | None" = None
     preguntas: list = field(default_factory=list)
 
@@ -514,6 +524,164 @@ def aplicar_reparto(ds: Dataset, it: dict, tabla: str, fk: str, destino: str, pc
         ds.mapear(CONT_DECISIONES, clave, tabla, rid, f"reparto.{ref}", confianza="VALIDADA")
     ds.ledger.append({"regla": "D-S20-F", "origen": it["origen"], "decision": it["id"], "tabla": tabla})
     return desde
+
+
+# ------------------------------------------------------------ categorias (D2-E, opcion A)
+CONT_ARBOL = "rv3.arbol_categorias_mv3"
+ARBOL_VERSION = "Migration V3 v0.40 §15.2 (arbol baseline resumido)"
+ARBOL_CATEGORIAS_MV3 = """SUPERMERCADOS
+RESTAURANTES
+VIVIENDA Y HOGAR
+├── Suministros
+│   ├── Electricidad
+│   ├── Agua
+│   └── Alarma y seguridad
+├── Comunidad
+│   ├── Cuota de comunidad
+│   └── Derramas
+├── Limpieza doméstica
+├── Reparaciones y mantenimiento
+├── Mejoras y reforma
+└── Equipamiento del hogar
+MOVILIDAD
+├── Combustible
+├── Peajes
+├── Parking
+├── Transporte
+│   ├── Vuelos
+│   ├── Tren
+│   ├── Barco
+│   ├── Autobús
+│   ├── Metro
+│   └── Coche compartido
+├── Mantenimiento y cuidado del vehículo
+└── Accesorios y equipamiento
+ALOJAMIENTO
+SALUD
+├── Farmacia
+├── Fisioterapia
+├── Psicología
+├── Nutrición
+└── Dental
+DEPORTE
+├── Gimnasio
+├── Natación
+├── Buceo
+├── Entrenamiento personal
+├── Carreras y competiciones
+├── Material y equipamiento deportivo
+├── Suplementos
+└── Cuotas y licencias deportivas
+CUIDADO PERSONAL
+├── Peluquería
+└── Estética
+ROPA Y COMPLEMENTOS
+├── Ropa y calzado
+└── Complementos personales
+TECNOLOGÍA E INFORMÁTICA
+└── Accesorios y periféricos
+OCIO Y CULTURA
+├── Actividades
+├── Horticultura
+├── Videojuegos
+├── Cine y vídeo
+├── Streaming
+├── Libros y cómics
+├── Juegos y ocio
+├── Eventos y espectáculos
+└── Lotería
+REGALOS Y DETALLES
+FORMACIÓN
+├── Idiomas
+└── Cursos y formación
+COMUNICACIONES Y DIGITAL
+├── Telefonía e internet
+├── Software y servicios digitales
+└── Plataformas digitales
+SEGUROS
+├── Hogar
+├── Vida
+├── Mascotas
+└── Viaje
+ADMINISTRACIÓN, IMPUESTOS Y TASAS
+├── IBI
+├── IRPF / Renta
+├── Documentación y trámites
+├── Licencias y tasas
+└── Multas y sanciones
+SERVICIOS PROFESIONALES
+COSTES FINANCIEROS
+└── Intereses y costes de financiación
+INGRESOS LABORALES
+├── Nómina
+├── Dietas y complementos
+└── Trabajos esporádicos
+PRESTACIONES
+└── Desempleo
+ALQUILERES
+RENDIMIENTOS FINANCIEROS
+└── Intereses de cuentas e inversiones
+VENTA DE BIENES"""
+RAICES_INGRESO = {"INGRESOS LABORALES", "PRESTACIONES", "ALQUILERES", "RENDIMIENTOS FINANCIEROS", "VENTA DE BIENES"}
+CATEGORIAS_ESTADO = "PROPUESTA"
+CATEGORIAS_ACTIVAS = True  # ambito/presupuestable pendientes de validacion del propietario
+
+
+def parsear_arbol(texto: str) -> list:
+    """-> [(ruta_tupla, nombre, orden)] en orden de documento; falla ante sangria incoherente o duplicados."""
+    import re as _re
+    out, pila, hijos, vistos = [], [], {}, set()
+    for linea in texto.split("\n"):
+        if not linea.strip():
+            continue
+        pre = _re.match(r"^((?:│   |    )*)", linea).group(1)
+        rama = _re.search(r"├── |└── ", linea) is not None
+        nombre = _re.sub(r"^((?:│   |    )*)(├── |└── )?", "", linea).strip()
+        prof = len(pre) // 4 + (1 if rama else 0)
+        if prof > len(pila) or not nombre:
+            raise ErrorP5("S4_ARBOL_MAL_FORMADO", linea)
+        pila = pila[:prof] + [nombre]
+        ruta = tuple(pila)
+        if ruta in vistos:
+            raise ErrorP5("S7_ARBOL_DUPLICADO", " > ".join(ruta))
+        vistos.add(ruta)
+        orden = hijos.get(ruta[:-1], 0)
+        hijos[ruta[:-1]] = orden + 1
+        out.append((ruta, nombre, orden))
+    return out
+
+
+def dominio_2_categorias(ds: Dataset) -> dict:
+    """Crea el arbol canonico; devuelve ruta_tupla -> categoria_id."""
+    if CATEGORIAS_ESTADO != "CONFIRMADA":
+        if not ds.modo_lab:
+            raise ErrorP5("S20_CATEGORIAS", "ambito/presupuestable_default pendientes de validacion")
+        ds.pendientes.append({"S20": "CATEGORIAS", "estado": CATEGORIAS_ESTADO})
+    sha = hashlib.sha256(ARBOL_CATEGORIAS_MV3.encode("utf-8")).hexdigest()
+    fid = fu.uuid_v3("ARBOL", sha, "fuentes_importacion", "fuente")
+    ds.add("fuentes_importacion", {
+        "id": fid, "owner_user_id": ds.owner, "tipo_fuente": "OTRO", "nombre_fuente": "Arbol de categorias canonico (D2-E)",
+        "version_fuente": ARBOL_VERSION, "pipeline_version": f"{TRANSFORMACION} {VERSION}", "sha256": sha,
+        "estado": "SIMULADA", "notas": "fuente suplementaria: documento canonico, no fila V3"})
+    ids = {}
+    for n, (ruta, nombre, orden) in enumerate(parsear_arbol(ARBOL_CATEGORIAS_MV3), 1):
+        clave = " > ".join(ruta)
+        d = {"ruta": list(ruta), "nombre": nombre, "orden": orden}
+        t = json.dumps(d, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        ds.add("registros_origen_importacion", {
+            "id": fu.uuid_origen(CONT_ARBOL, clave), "fuente_importacion_id": fid, "contenedor_origen": CONT_ARBOL,
+            "clave_origen": clave, "numero_fila_origen": n, "datos_origen": d, "datos_origen_texto": t,
+            "sha256_registro": hashlib.sha256(t.encode("utf-8")).hexdigest()}, natural=(CONT_ARBOL, clave))
+        ambito = "INGRESO" if ruta[0] in RAICES_INGRESO else "GASTO"
+        cid = fu.uuid_v3(CONT_ARBOL, clave, "categorias_financieras", "categoria")
+        ds.add("categorias_financieras", {
+            "id": cid, "owner_user_id": ds.owner, "parent_id": ids.get(ruta[:-1]), "nombre": nombre, "codigo": None,
+            "ambito": ambito, "presupuestable_default": ambito == "GASTO", "orden": orden},
+            natural=(ds.owner, ids.get(ruta[:-1]), nombre))
+        ds.mapear(CONT_ARBOL, clave, "categorias_financieras", cid, "categoria")
+        ids[ruta] = cid
+    ds.ledger.append({"regla": "D2-E", "origen": CONT_ARBOL, "sha256": sha, "nodos": len(ids)})
+    return ids
 
 
 # ------------------------------------------------------------ dominio 1
@@ -1573,6 +1741,8 @@ def transformar(b0: dict, sha_run06: str, modo_lab: bool = False,
     dominio_12_trazabilidad(ds, b0, sha_run06)
     dominio_1(ds, fuente, ctx)
     dominio_2(ds, fuente, ctx)
+    if CATEGORIAS_ACTIVAS:
+        ds.categorias = dominio_2_categorias(ds)
     dominio_12_decisiones(ds)
     if "public.cuentas_bancarias" in fuente:
         dominio_3(ds, fuente, ctx, modo_lab)

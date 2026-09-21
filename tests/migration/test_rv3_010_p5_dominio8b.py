@@ -11,7 +11,8 @@
 #   0.2.0: P5 v0.8.0 -> participacion 100 % propietario (S20 R2-7), vinculados (R2-8),
 #          contraparte desconocida sin pregunta (R2-6), gate con fuente PENDIENTE.
 #   0.3.0: contraparte = persona V3 validada como inquilino del contrato de la vivienda.
-# Versión: 0.3.0
+#   0.4.0: la fixture desactiva el arbol de categorias (P5 v0.13.0), ajeno a este dominio.
+# Versión: 0.4.0
 # ============================================================
 from __future__ import annotations
 
@@ -74,6 +75,7 @@ def cfg(monkeypatch):
     monkeypatch.setattr(P5, "CANON_TRANSITORIAS", (2, Decimal("15.25")))
     monkeypatch.setattr(P5, "CANON_UNIVERSIDAD", Decimal("150"))
     monkeypatch.setattr(P5, "CONTRAPARTE_V3_DECIDIDA", {})
+    monkeypatch.setattr(P5, "CATEGORIAS_ACTIVAS", False)
 
 
 def _t(filas=None, dec=None, lab=True):

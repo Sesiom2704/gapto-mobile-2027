@@ -16,6 +16,7 @@
 #   python scripts/mutantes/rv3_p5.py            # todos
 #   python scripts/mutantes/rv3_p5.py M30 M33    # subconjunto
 #
+# Version: 0.7.0 (M70..M74: P5 v0.13.0, arbol de categorias D2-E)
 # Version: 0.6.0 (M66..M69: P5 v0.12.0, cuarta ronda S20)
 # Version: 0.5.0 (M61..M65: P5 v0.11.0, dominio 10)
 # Version: 0.4.0 (M58..M60: P5 v0.10.0, tercera ronda S20)
@@ -38,6 +39,7 @@ T9 = "tests/migration/test_rv3_009_p5_s20_decisiones.py"
 T10 = "tests/migration/test_rv3_010_p5_dominio8b.py"
 T11 = "tests/migration/test_rv3_011_p5_dominio9.py"
 T12 = "tests/migration/test_rv3_012_p5_dominio10.py"
+T13 = "tests/migration/test_rv3_013_p5_categorias.py"
 
 MUTANTES = {
     "M30": ("gate de la fuente suplementaria siempre abierto",
@@ -169,6 +171,22 @@ MUTANTES = {
     "M69": ("repercusion a actor que no es inquilino",
             [('raise ErrorP5("S1_REPERCUSION_NO_INQUILINO", f"{origen} {ak}")', 'pass')],
             T12 + "::test_servicio_repercutible_validado_contra_el_contrato"),
+    "M70": ("categorias propuestas aceptadas fuera de laboratorio",
+            [('    if CATEGORIAS_ESTADO != "CONFIRMADA":\n        if not ds.modo_lab:\n            raise ErrorP5("S20_CATEGORIAS"',
+              '    if False:\n        if not ds.modo_lab:\n            raise ErrorP5("S20_CATEGORIAS"')],
+            T13 + "::test_propuesta_falla_cerrada_fuera_de_lab"),
+    "M71": ("jerarquia del arbol aplanada",
+            [('"parent_id": ids.get(ruta[:-1]), "nombre": nombre', '"parent_id": None, "nombre": nombre')],
+            T13 + "::test_categorias_trazadas_con_jerarquia_ambito_y_orden"),
+    "M72": ("nodo del arbol sin mapeo a su registro origen",
+            [('        ds.mapear(CONT_ARBOL, clave, "categorias_financieras", cid, "categoria")\n', '')],
+            T13 + "::test_categorias_trazadas_con_jerarquia_ambito_y_orden"),
+    "M73": ("ambito de ingreso no distinguido",
+            [('ambito = "INGRESO" if ruta[0] in RAICES_INGRESO else "GASTO"', 'ambito = "GASTO"')],
+            T13 + "::test_categorias_trazadas_con_jerarquia_ambito_y_orden"),
+    "M74": ("duplicado del arbol no detectado",
+            [('            raise ErrorP5("S7_ARBOL_DUPLICADO", " > ".join(ruta))', '            pass')],
+            T13 + "::test_arbol_mal_formado_o_duplicado_falla"),
 }
 
 

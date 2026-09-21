@@ -10,13 +10,14 @@
 #              catalogo declara CATALOGOS_V3_REALES = True y aporta su corpus.
 #              Asi los tests historicos verifican su baseline sin bloquear los
 #              bloques posteriores (Working Method).
-# Versión: 0.1.0
+#   0.2.0: aisla tambien el arbol de categorias canonico (CATEGORIAS_ACTIVAS, P5 v0.13.0).
+# Versión: 0.2.0
 # ============================================================
 from __future__ import annotations
 
 import pytest
 
-CATALOGOS = ("DERECHOS_V3",)
+CATALOGOS = {"DERECHOS_V3": [], "CATEGORIAS_ACTIVAS": False}
 
 
 @pytest.fixture(autouse=True)
@@ -24,6 +25,6 @@ def _aislar_catalogos_v3(request, monkeypatch):
     p5 = getattr(request.module, "P5", None)
     if p5 is None or getattr(request.module, "CATALOGOS_V3_REALES", False):
         return
-    for nombre in CATALOGOS:
+    for nombre, vacio in CATALOGOS.items():
         if hasattr(p5, nombre):
-            monkeypatch.setattr(p5, nombre, [])
+            monkeypatch.setattr(p5, nombre, vacio)
