@@ -16,6 +16,7 @@
 #   python scripts/mutantes/rv3_p5.py            # todos
 #   python scripts/mutantes/rv3_p5.py M30 M33    # subconjunto
 #
+# Version: 0.12.0 (M120..M126: P5 v0.18.0, respuestas A-F; M105 reanclado)
 # Version: 0.11.0 (M111..M119: P5 v0.17.0, respuestas del propietario; M92/M93 reanclados)
 # Version: 0.10.0 (M85..M110: P5 v0.16.0, dominio 5 reglas financieras y versiones)
 # Version: 0.9.0 (M80..M84: P5 v0.15.0, capacidades, direcciones y coordenadas)
@@ -287,8 +288,8 @@ MUTANTES = {
     "M104": ("compra financiada duplicada como regla de gasto",
              [("            disp[\"EXCLUIDA_D8\"].append(f\"{co}/{cl}\")\n            continue", "            disp[\"EXCLUIDA_D8\"].append(f\"{co}/{cl}\")")],
              T16 + "::test_exclusiones_y_pendientes_de_familia"),
-    "M105": ("cuota de prestamo como gasto ordinario sin decision",
-             [("                raise PendienteD5(\"S20\", \"D5_CUOTA_PRESTAMO_TIPO_HECHO\", _texto(g(\"prestamo_id\")))", "                pass")],
+    "M105": ("cuota de prestamo tambien tratada como regla (doble expectativa)",
+             [("            ds.ledger.append({\"regla\": \"D5-T\", \"origen\": f\"{co}/{cl}\"})\n            continue", "            ds.ledger.append({\"regla\": \"D5-T\", \"origen\": f\"{co}/{cl}\"})")],
              T16 + "::test_exclusiones_y_pendientes_de_familia"),
     "M106": ("gasto a plazos como regla sin decidir su naturaleza",
              [("                raise PendienteD5(\"S20\", \"D5_GASTO_A_PLAZOS_NATURALEZA\", f\"cuotas={g('cuotas').valor}\")", "                pass")],
@@ -333,6 +334,28 @@ MUTANTES = {
     "M119": ("saldo de apertura = capital total en vez de pendiente",
              [("            abierta = pend\n", "            abierta = capital\n")],
              T16 + "::test_compra_financiada_decidida_abierta_y_cerrada"),
+    # ---- P5 v0.18.0: respuestas A-F del propietario
+    "M120": ("inicio por creacion decidido ignorado",
+             [("        elif clave in INICIO_POR_CREACION:", "        elif False:")],
+             T16 + "::test_inicio_por_creacion_decidido"),
+    "M121": ("createon posterior al ultimo pago aceptado como inicio",
+             [("            if cre is None or (ult is not None and cre > ult):", "            if cre is None:")],
+             T16 + "::test_inicio_por_creacion_decidido"),
+    "M122": ("cobro parcial convertido en regla",
+             [("        if (co, cl) in COBRO_PARCIAL_NO_REGLA:", "        if False:")],
+             T16 + "::test_cobro_parcial_no_es_regla"),
+    "M123": ("cuota de prestamo sin excluir (pendiente/regla)",
+             [("and _texto(pr) and CUOTA_PRESTAMO_SIN_REGLA:", "and _texto(pr) and False:")],
+             T16 + "::test_exclusiones_y_pendientes_de_familia"),
+    "M124": ("cuota de prestamo sin financiacion aceptada",
+             [("                raise ErrorP5(\"S8_HUERFANO\", f\"{co}/{cl} prestamo_id={_texto(pr)}\")", "                pass")],
+             T16 + "::test_cuota_de_prestamo_sin_financiacion_falla"),
+    "M125": ("compra cancelada registrada como liquidada",
+             [("(\"CANCELADA\" if cancelada else \"LIQUIDADA\")", "\"LIQUIDADA\"")],
+             T16 + "::test_compra_financiada_cancelada"),
+    "M126": ("cancelacion incoherente aceptada",
+             [("        if cancelada and not (g(\"activo\") is False and g(\"cuotas_restantes\") not in (None, 0)):", "        if False:")],
+             T16 + "::test_compra_financiada_cancelada"),
 }
 
 

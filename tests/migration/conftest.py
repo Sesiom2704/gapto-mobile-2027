@@ -10,10 +10,11 @@
 #              catalogo declara CATALOGOS_V3_REALES = True y aporta su corpus.
 #              Asi los tests historicos verifican su baseline sin bloquear los
 #              bloques posteriores (Working Method).
+#   0.5.0: aisla inicio por creacion, cobro parcial y compra cancelada (P5 v0.18.0).
 #   0.4.0: aisla fusiones, inicio/fin y compras financiadas decididas (P5 v0.17.0).
 #   0.3.0: aisla tambien los catalogos del dominio 5 (P5 v0.16.0).
 #   0.2.0: aisla tambien el arbol de categorias canonico (CATEGORIAS_ACTIVAS, P5 v0.13.0).
-# Versión: 0.4.0
+# Versión: 0.5.0
 # ============================================================
 from __future__ import annotations
 
@@ -25,7 +26,9 @@ CATALOGOS = {"DERECHOS_V3": [], "CATEGORIAS_ACTIVAS": False,
              "REGLA_DERECHO_ISA": {}, "RODANTES_VALIDADOS": set(),
              # 0.4.0: decisiones del propietario 2026-09-21 ancladas a claves V3 reales (P5 v0.17.0)
              "FUSIONES_PROPIETARIO": [], "INICIO_CONFIRMADO": set(), "FIN_POR_MODIFICACION": set(),
-             "COMPRA_FINANCIADA_DECIDIDA": set()}
+             "COMPRA_FINANCIADA_DECIDIDA": set(),
+             # 0.5.0: respuestas A-F (P5 v0.18.0)
+             "INICIO_POR_CREACION": set(), "COBRO_PARCIAL_NO_REGLA": set(), "COMPRA_FINANCIADA_CANCELADA": set()}
 
 
 @pytest.fixture(autouse=True)

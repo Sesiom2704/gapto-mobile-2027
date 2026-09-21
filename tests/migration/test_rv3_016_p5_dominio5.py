@@ -13,7 +13,9 @@
 #   0.2.0: P5 v0.17.0 -> respuestas del propietario 2026-09-21: fusiones N:1 con solape
 #          (D5-K2/K3), inicio confirmado, fin por fecha de modificacion y compras financiadas
 #          decididas abiertas/cerradas (D8-K2/K3).
-# Versión: 0.2.0
+#   0.3.0: P5 v0.18.0 -> inicio por creacion, cobro parcial a dominio 6, cuota de prestamo sin
+#          regla (calendario de la financiacion) y compra financiada cancelada.
+# Versión: 0.3.0
 # ============================================================
 from __future__ import annotations
 
@@ -299,9 +301,44 @@ def test_exclusiones_y_pendientes_de_familia(monkeypatch):
     ds = _t([_g("GB"), _g("GL", prestamo_id="P1"), _g("GP3", cuotas=3, importe_cuota=10.5)])
     assert not _reglas(ds, G, "GB") and f"{G}/GB" in ds.reglas["disposicion"]["EXCLUIDA_D11"]
     assert not _reglas(ds, G, "G1") and f"{G}/G1" in ds.reglas["disposicion"]["EXCLUIDA_D8"]
-    assert _pend(ds, G, "GL")[0]["S20"] == "D5_CUOTA_PRESTAMO_TIPO_HECHO" and not _reglas(ds, G, "GL")
+    assert not _pend(ds, G, "GL") and not _reglas(ds, G, "GL") and f"{G}/GL" in ds.reglas["disposicion"]["EXCLUIDA_D8"]
     assert _pend(ds, G, "GP3")[0]["S20"] == "D5_GASTO_A_PLAZOS_NATURALEZA" and not _reglas(ds, G, "GP3")
     assert not _pend(ds, G, "G1") and not _pend(ds, G, "GB")
+
+
+def test_cuota_de_prestamo_sin_financiacion_falla():
+    with pytest.raises(P5.ErrorP5) as e:
+        _t([_g("GL", prestamo_id="PX")])
+    assert e.value.codigo == "S8_HUERFANO"
+
+
+def test_inicio_por_creacion_decidido(monkeypatch):
+    kw = dict(periodicidad="ANUAL", fecha="2026-08-05", createon="2025-08-05T04:49:57", ultimo_pago_on="2025-08-05T04:50:54")
+    assert _pend(_t([_g("GC2", **kw)]), G, "GC2")[0]["S6"] == "D5_INICIO_NO_DEMOSTRADO"
+    monkeypatch.setattr(P5, "INICIO_POR_CREACION", {(G, "GC2"), (G, "GC3")})
+    ds = _t([_g("GC2", **kw), _g("GC3", **dict(kw, ultimo_pago_on="2025-08-01T00:00:00"))])
+    _, v = _uno(ds, G, "GC2")
+    assert (v["vigente_desde"], v["periodicidad"]) == ("2025-08-05", "ANUAL")
+    assert _pend(ds, G, "GC3")[0]["S9"] == "D5_INICIO_CREACION_INVALIDO"
+
+
+def test_cobro_parcial_no_es_regla(monkeypatch):
+    monkeypatch.setattr(P5, "COBRO_PARCIAL_NO_REGLA", {(I, "IP")})
+    ds = _t([_i("IP", importe=862.43)])
+    assert not _reglas(ds, I, "IP") and not _pend(ds, I, "IP") and f"{I}/IP" in ds.reglas["disposicion"]["EXCLUIDA_D6"]
+
+
+def test_compra_financiada_cancelada(monkeypatch):
+    monkeypatch.setattr(P5, "COMPRA_FINANCIADA_DECIDIDA", {"GX"})
+    monkeypatch.setattr(P5, "COMPRA_FINANCIADA_CANCELADA", {"GX"})
+    kw = dict(PLAZOS_BASE, activo=False, inactivatedon="2026-08-10T00:00:00")
+    ds = _t([_g("GX", **kw)])
+    f = ds.filas["financiaciones"][F.uuid_v3(G, "GX", "entidades", "financiacion")]
+    assert (f["estado"], f["motivo_cierre"], f["saldo_principal_apertura"], f["fecha_cierre_real"]) == ("CERRADA", "CANCELADA", Decimal("0"), None)
+    assert F.uuid_origen(G, "GX") in ds.filas["registros_origen_importacion"] and not _reglas(ds, G, "GX")
+    with pytest.raises(P5.ErrorP5) as e:
+        _t([_g("GX", **dict(kw, activo=True))])
+    assert e.value.codigo == "S9_CANCELACION_INCOHERENTE"
 
 
 def test_disposicion_exclusiva_y_exhaustiva(monkeypatch):
@@ -375,6 +412,8 @@ def test_fin_por_fecha_de_modificacion_decidida(monkeypatch):
     assert _pend(ds, G, "GN")[0]["S9"] == "D5_FIN_MODIFICACION_INVALIDO"
 
 
+PLAZOS_BASE = dict(tipo_id="TX", cuotas=3, cuotas_pagadas=1, cuotas_restantes=2, importe_cuota=10.5, importe=10.5,
+                   total=31.5, importe_pendiente=21.0, activo=True)
 PLAZOS = dict(tipo_id="TX", cuotas=3, cuotas_pagadas=1, cuotas_restantes=2, importe_cuota=10.5, importe=10.5,
               total=31.5, importe_pendiente=21.0, activo=True)
 

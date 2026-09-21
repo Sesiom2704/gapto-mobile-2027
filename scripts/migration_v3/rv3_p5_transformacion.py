@@ -15,6 +15,10 @@
 #                8 financiaciones (PARCIAL v0.5.0: 4 prestamos formales con condiciones
 #                  versionadas, calendario, financiador y garantia; 7 compras financiadas;
 #                  derechos/obligaciones pendientes)
+#   v0.18.0: respuestas A-F del propietario 2026-09-21: Isa = REEMBOLSO (F04-D015); inicio = createon en 7
+#           anuales (D5-B3); PARO PARCIAL 4/26 = cobro parcial -> dominio 6 (D5-S); cuotas de prestamo sin
+#           regla (D5-T); nutricionista cancelada (D8-K4); 50/50 de compras de Fuensanta en la fuente
+#           suplementaria v2 (S20-R5-F).
 #   v0.17.0: respuestas del propietario 2026-09-21 al dominio 5: 15 gastos a plazos son compras
 #           financiadas (D8-K2; abiertas al corte -> ACTIVA con saldo pendiente, D8-K3); fusiones N:1
 #           IBI Saavedra, comunidad Saavedra y paro (D5-K3, solape -> D5-K2); inicio confirmado
@@ -78,7 +82,7 @@
 #   RV3_IMPORT (rol login no superusuario -> gapto_migrator -> gapto_owner),
 #   fuerza los diferidos con SET CONSTRAINTS ALL IMMEDIATE y hace ROLLBACK.
 #   No es P6 (P6 hace COMMIT real).
-# Versión: 0.17.0
+# Versión: 0.18.0
 # ============================================================
 from __future__ import annotations
 
@@ -93,7 +97,7 @@ from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
-VERSION = "0.17.0"
+VERSION = "0.18.0"
 TRANSFORMACION = "RV3_P5"
 _AQUI = Path(__file__).resolve().parent
 
@@ -238,6 +242,8 @@ LEDGER_REGLAS = {
     "D8-K3": "compra financiada abierta al corte: ACTIVA, saldo_principal_apertura = importe_pendiente V3 = cuotas "
              "restantes x cuota (comprobado), fecha_inicio_seguimiento = corte; sin calendario (no se fabrican fechas "
              "de cuotas futuras); financiador NULL (D8-L); participacion 0 filas (D8-H). Incoherencia -> pendiente S20.",
+    "D8-K4": "compra financiada cancelada antes del corte (respuesta E): CERRADA/CANCELADA, saldo 0 al corte, "
+             "fecha_cierre_real NULL (no declarada); el origen V3 se conserva, no se elimina.",
     "D8-N": "gasto con tipo_gasto FINANCIACION reclasificado por el propietario como gasto directo "
             "(Migration V3 §27/RUN01): no es financiacion; se dispone en dominio 6.",
     "D8-A2": "tipo de financiacion decidido por el propietario (S20-7/S20-8, 2026-09-21) cuando nombre y "
@@ -1256,6 +1262,8 @@ TIPO_GASTO_COMPRA_FINANCIADA = "FINANCIACION"
 # Reclasificado por el propietario de financiado a gasto directo (Migration V3 §27, RUN01).
 NO_COMPRA_FINANCIADA_CANON = {"gasto-7gl597"}
 # Respuesta 3 del propietario (2026-09-21): los gastos a plazos sin tipo FINANCIACION son compras financiadas.
+# Respuesta E (2026-09-21): cancelada antes del corte; el origen V3 NO se elimina (INV-RV3-01).
+COMPRA_FINANCIADA_CANCELADA = {"gasto-pguksb"}
 COMPRA_FINANCIADA_DECIDIDA = {"gasto-2t4xp3", "gasto-6p4sd2", "gasto-7sb205", "gasto-bsq0n8", "gasto-ep2gra",
                               "gasto-h45f25", "gasto-lqocej", "gasto-o678hf", "gasto-pguksb", "gasto-v56azl",
                               "gasto-w6xwkg", "gasto-x18xnq", "gasto-x2t6dm", "gasto-xpq796", "gasto-zz0qd0"}
@@ -1514,7 +1522,10 @@ def dominio_8_financiaciones(ds: Dataset, fuente: dict, ctx: dict, modo_lab: boo
             raise ErrorP5("S9_COMPRA_FINANCIADA_TOTAL", f"{origen} total={total} cuotas={capital}")
         pend_c = g("importe_pendiente")
         abierta = None
-        if decidida and g("cuotas_restantes") not in (None, 0):
+        cancelada = kg in COMPRA_FINANCIADA_CANCELADA
+        if cancelada and not (g("activo") is False and g("cuotas_restantes") not in (None, 0)):
+            raise ErrorP5("S9_CANCELACION_INCOHERENTE", origen)
+        if decidida and not cancelada and g("cuotas_restantes") not in (None, 0):
             rest = int(g("cuotas_restantes"))
             pend = Decimal(str(pend_c)) if pend_c is not None else None
             if pend is None or pend != Decimal(str(cuota)) * rest or rest + int(g("cuotas_pagadas") or 0) != int(n) \
@@ -1524,7 +1535,7 @@ def dominio_8_financiaciones(ds: Dataset, fuente: dict, ctx: dict, modo_lab: boo
                                       "efecto": "financiacion NO creada; origen conservado"})
                 continue
             abierta = pend
-        elif not (g("cuotas_restantes") == 0 and pend_c is not None and Decimal(str(pend_c)) == 0):
+        elif not cancelada and not (g("cuotas_restantes") == 0 and pend_c is not None and Decimal(str(pend_c)) == 0):
             if not modo_lab:
                 raise ErrorP5("S20_COMPRA_FINANCIADA_PENDIENTE", origen)
             ds.pendientes.append({"S20": "COMPRA_FINANCIADA_PENDIENTE", "origen": origen})
@@ -1545,7 +1556,7 @@ def dominio_8_financiaciones(ds: Dataset, fuente: dict, ctx: dict, modo_lab: boo
             "fecha_inicio_seguimiento": FECHA_INICIO_LEDGER,
             "fecha_inicio": g("fecha"), "fecha_vencimiento_final_prevista": None, "fecha_cierre_real": None,
             "estado": "ACTIVA" if abierta is not None else "CERRADA",
-            "motivo_cierre": None if abierta is not None else "LIQUIDADA", "notas": None})
+            "motivo_cierre": None if abierta is not None else ("CANCELADA" if cancelada else "LIQUIDADA"), "notas": None})
         ds.mapear(cg, kg, "financiaciones", eid, "financiacion", tipo="DIVIDIDO")
         vid = fu.uuid_v3(cg, kg, "financiacion_condiciones_versiones", "v1")
         ds.add("financiacion_condiciones_versiones", {
@@ -1556,7 +1567,7 @@ def dominio_8_financiaciones(ds: Dataset, fuente: dict, ctx: dict, modo_lab: boo
             "intervalo": 1, "importe_cuota_referencia": Decimal(str(cuota)), "numero_cuotas_referencia": int(n),
             "comisiones_periodicas": None})
         ds.mapear(cg, kg, "financiacion_condiciones_versiones", vid, "v1", tipo="DIVIDIDO")
-        for r in ("D8-K", "D8-L", "D8-D") + (("D8-K2",) if decidida else ()) + (("D8-K3",) if abierta is not None else ()):
+        for r in ("D8-K", "D8-L", "D8-D") + (("D8-K2",) if decidida else ()) + (("D8-K3",) if abierta is not None else ()) + (("D8-K4",) if cancelada else ()):
             ds.ledger.append({"regla": r, "origen": origen})
         participaciones_financiacion(ds, cg, kg, eid, g("fecha"))
         if kg in TOTAL_COMPRA_VALIDADO:
@@ -2035,13 +2046,21 @@ FUSIONES_PROPIETARIO = [
 # Respuesta 4 (2026-09-21): inicio confirmado por el propietario aunque fecha > createon.
 INICIO_CONFIRMADO = {("public.gastos", "gasto-3qw646")}
 # Respuesta 5 (2026-09-21): fin = fecha de modificacion V3 (coincide con el ultimo pago confirmado).
+# Respuesta B (2026-09-21): inicio = fecha de creacion V3 en los anuales cuya `fecha` avanzo al vencimiento.
+INICIO_POR_CREACION = {("public.gastos", k) for k in ("GASTO-E97DIW", "GASTO-OKZ0M0", "GASTO-RZG9Y3", "GASTO-UX2T9J",
+                                                      "GASTO-VTKC38", "GASTO-WR2WFJ", "gasto-ugzxrm")}
+# Respuesta C (2026-09-21): cobro parcial de un mes del paro parcial; no es regla, se dispone en dominio 6.
+COBRO_PARCIAL_NO_REGLA = {("public.ingresos", "INGRESO-TXJ5II")}
 FIN_POR_MODIFICACION = {("public.gastos", "GASTO-WIPJQR"), ("public.gastos", "gasto-0upxg2"),
                         ("public.gastos", "gasto-t2ndhm")}
 # Prestamo coche Isa: el cobro mensual reduce DER-ISA-COCHE. Tipo de hecho en STOP S1 (mandato:
 # GENERACION_DERECHO_OBLIGACION; canon F04-D015/D016 + vocabulario F04: REEMBOLSO). None = pendiente.
 REGLA_DERECHO_ISA = {("public.ingresos", "INGRESO-MX5Q04"): ("public.ingresos", "INGRESO-MX5Q04")}
-ISA_TIPO_HECHO_DECIDIDO: str | None = None
-DOMINIO_5_ACTIVO = True  # los tests historicos lo aislan (conftest 0.3.0) para verificar su baseline
+ISA_TIPO_HECHO_DECIDIDO: str | None = "REEMBOLSO"  # respuesta A del propietario 2026-09-21 (F04-D015)
+DOMINIO_5_ACTIVO = True
+# Respuesta D (2026-09-21): la cuota de prestamo no tiene regla propia; su expectativa es el calendario de la
+# financiacion (financiacion_cuotas), igual que en las compras financiadas. Evita duplicar la expectativa.
+CUOTA_PRESTAMO_SIN_REGLA = True  # los tests historicos lo aislan (conftest 0.3.0) para verificar su baseline
 ISA_TIPOS_ADMITIDOS = {"REEMBOLSO", "GENERACION_DERECHO_OBLIGACION"}
 
 LEDGER_REGLAS.update({
@@ -2059,6 +2078,10 @@ LEDGER_REGLAS.update({
              "predecesor = inicio del sucesor - 1 dia; literal de inactivatedon en origen. Hueco -> S9.",
     "D5-K3": "fusion N:1 decidida por el propietario (respuesta 8, 2026-09-21): IBI Saavedra 2025->2026, comunidad "
              "Saavedra, paro -> paro parcial; firma (cuentas, tercero, cadencia, moneda, categoria, entidad) identica.",
+    "D5-B3": "inicio = createon V3 decidido por el propietario (respuesta B, 2026-09-21) en anuales cuya fecha V3 avanzo "
+             "al siguiente vencimiento; createon no puede ser posterior al ultimo pago (S9).",
+    "D5-S": "cobro parcial de un mes de otra recurrencia (respuesta C): no es regla; se dispone en dominio 6.",
+    "D5-T": "cuota de prestamo sin regla propia (respuesta D): la expectativa es el calendario de la financiacion.",
     "D5-C1": "activo=true con inactivatedon conocido: dato contradictorio (clase C); prevalece activo, literal en origen.",
     "D5-D": "rango V3 'a-b' -> VENTANA dia_desde=a, dia_hasta=b (1<=a<=b<=31); RODANTE -> ANCLA y el rango queda solo en "
             "origen (D-126). Anclaje CALENDARIO salvo G-V3-02 gimnasio validado.",
@@ -2119,6 +2142,11 @@ def _vigencia(co: str, fila: dict, ctx: dict, desde_forzado: str | None = None) 
             raise PendienteD5("S6", "D5_INICIO_DESCONOCIDO")
         if clave in INICIO_CONFIRMADO:
             notas.append("D5-B2")
+        elif clave in INICIO_POR_CREACION:
+            if cre is None or (ult is not None and cre > ult):
+                raise PendienteD5("S9", "D5_INICIO_CREACION_INVALIDO", f"createon={cre} ultimo={ult}")
+            ini = cre
+            notas.append("D5-B3")
         elif (cre is not None and ini > cre) or (ult is not None and ini > ult):
             raise PendienteD5("S6", "D5_INICIO_NO_DEMOSTRADO", f"{CAMPO_INICIO[co]}={ini} createon={cre} ultimo={ult}")
         desde = ini
@@ -2252,7 +2280,7 @@ def _version(ds, co, cl, fila, ctx, tipo, rodante=False, desde=None) -> tuple[di
 def dominio_5_reglas(ds: Dataset, fuente: dict, ctx: dict) -> dict:
     """Reglas financieras y versiones desde las recurrencias V3 y la renta de contratos."""
     G, I, C = "public.gastos", "public.ingresos", "public.contratos"
-    disp = {"CREADA": [], "FUSIONADA": [], "EXCLUIDA_D11": [], "EXCLUIDA_D8": [], "PENDIENTE": []}
+    disp = {"CREADA": [], "FUSIONADA": [], "EXCLUIDA_D11": [], "EXCLUIDA_D8": [], "EXCLUIDA_D6": [], "PENDIENTE": []}
     FUSIONES = ([FUSION_MEDIOLANUM] if FUSION_MEDIOLANUM else []) + list(FUSIONES_PROPIETARIO)
     faltan = [k for k in CONTENEDORES_PRESUPUESTARIOS | TRANSFERENCIAS_AHORRO if k not in fuente.get(G, {})] + \
         [k for fz in FUSIONES for k in fz["filas"] if k not in fuente.get(fz["co"], {})]
@@ -2358,6 +2386,17 @@ def dominio_5_reglas(ds: Dataset, fuente: dict, ctx: dict) -> dict:
         if co == G and fu.uuid_v3(co, cl, "entidades", "financiacion") in ds.filas["financiaciones"]:
             disp["EXCLUIDA_D8"].append(f"{co}/{cl}")
             continue
+        if (co, cl) in COBRO_PARCIAL_NO_REGLA:
+            disp["EXCLUIDA_D6"].append(f"{co}/{cl}")
+            ds.ledger.append({"regla": "D5-S", "origen": f"{co}/{cl}"})
+            continue
+        pr = _celda(co, "prestamo_id", f, ctx) if co == G else None
+        if pr is not None and pr.estado == fu.CONOCIDO and _texto(pr) and CUOTA_PRESTAMO_SIN_REGLA:
+            if fu.uuid_v3("public.prestamo", _texto(pr), "entidades", "financiacion") not in ds.filas["financiaciones"]:
+                raise ErrorP5("S8_HUERFANO", f"{co}/{cl} prestamo_id={_texto(pr)}")
+            disp["EXCLUIDA_D8"].append(f"{co}/{cl}")
+            ds.ledger.append({"regla": "D5-T", "origen": f"{co}/{cl}"})
+            continue
         try:
             g = lambda col: _celda(co, col, f, ctx)
             if co == G and g("prestamo_id").estado == fu.CONOCIDO and _texto(g("prestamo_id")):
@@ -2397,7 +2436,7 @@ def dominio_5_reglas(ds: Dataset, fuente: dict, ctx: dict) -> dict:
         disp["CREADA"].append((f"{co}/{cl}", rid))
     ds.ledger.append({"regla": "D5-M", "regla_excepciones": 0})
     # disposicion exclusiva y exhaustiva de cada fila recurrente V3 (R05 del dominio)
-    vistos = [o for k in ("EXCLUIDA_D11", "EXCLUIDA_D8") for o in disp[k]] + [o for o, _ in disp["PENDIENTE"]] + \
+    vistos = [o for k in ("EXCLUIDA_D11", "EXCLUIDA_D8", "EXCLUIDA_D6") for o in disp[k]] + [o for o, _ in disp["PENDIENTE"]] + \
         [o for o, _ in disp["CREADA"]] + [x for o, _ in disp["FUSIONADA"] for x in o.split("+") if not x.startswith(C)]
     esperados = [f"{co}/{cl}" for co, cl, _ in recurrentes]
     if sorted(vistos) != sorted(esperados):
