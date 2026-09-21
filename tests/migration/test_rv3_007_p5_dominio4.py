@@ -8,8 +8,10 @@
 #              incluir_en_rentabilidad (Migration V3 §9), reparto 100 % con
 #              vigencia desde la adquisicion demostrada, reparto parcial nunca
 #              completado con cotitulares inventados (fallo cerrado S20 fuera
-#              de laboratorio) y sin direccion ni geolocalizacion fabricadas.
-# Versión: 0.1.0
+#              de laboratorio) y sin geolocalizacion fabricada.
+#   v0.2.0: P5 v0.15.0 (D4-A revisada): la direccion V3 en texto crea direccion;
+#           la vinculacion de localidad se cubre en test_rv3_015.
+# Versión: 0.2.0
 # ============================================================
 from __future__ import annotations
 
@@ -35,7 +37,7 @@ def _prop(ref, pct, **kw):
     base = {"id": ref, "referencia": ref, "tipo_inmueble": "VIVIENDA", "activo": True, "disponible": True,
             "fecha_adquisicion": "2020-01-15", "superficie_m2": "50.00", "superficie_construida": "141",
             "habitaciones": "2", "banos": "141", "garaje": False, "trastero": True, "participacion_pct": pct,
-            "calle": "CALLE X", "localidad": "PUEBLO"}
+            "calle": "CALLE X"}
     base.update(kw)
     return base
 
@@ -73,9 +75,12 @@ def test_disponible_significa_incluir_en_rentabilidad():
     assert p["V1"]["incluir_en_rentabilidad"] is True and p["V2"]["incluir_en_rentabilidad"] is False
 
 
-def test_sin_direccion_ni_geolocalizacion_fabricadas():
-    p = _props(P5.transformar(_b0(), SHA, modo_lab=True))["V1"]
-    assert p["direccion_id"] is None and p["latitud"] is None and p["geolocalizacion_origen"] is None
+def test_direccion_desde_texto_v3_sin_geolocalizacion_fabricada():
+    ds = P5.transformar(_b0(), SHA, modo_lab=True)
+    p = _props(ds)["V1"]
+    d = ds.filas["direcciones"][p["direccion_id"]]
+    assert d["via_nombre"] == "CALLE X" and d["localidad_id"] is None and d["via_tipo"] is None
+    assert p["latitud"] is None and p["longitud"] is None and p["geolocalizacion_origen"] is None
 
 
 def test_reparto_100_con_vigencia_desde_adquisicion():

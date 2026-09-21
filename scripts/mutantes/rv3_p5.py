@@ -16,6 +16,7 @@
 #   python scripts/mutantes/rv3_p5.py            # todos
 #   python scripts/mutantes/rv3_p5.py M30 M33    # subconjunto
 #
+# Version: 0.9.0 (M80..M84: P5 v0.15.0, capacidades, direcciones y coordenadas)
 # Version: 0.8.0 (M75..M79: P5 v0.14.0, clasificacion de registros)
 # Version: 0.7.0 (M70..M74: P5 v0.13.0, arbol de categorias D2-E)
 # Version: 0.6.0 (M66..M69: P5 v0.12.0, cuarta ronda S20)
@@ -42,6 +43,7 @@ T11 = "tests/migration/test_rv3_011_p5_dominio9.py"
 T12 = "tests/migration/test_rv3_012_p5_dominio10.py"
 T13 = "tests/migration/test_rv3_013_p5_categorias.py"
 T14 = "tests/migration/test_rv3_014_p5_clasificacion.py"
+T15 = "tests/migration/test_rv3_015_p5_capacidades_direcciones.py"
 
 MUTANTES = {
     "M30": ("gate de la fuente suplementaria siempre abierto",
@@ -204,6 +206,23 @@ MUTANTES = {
     "M79": ("naturaleza FUERA tratada como categoria",
             [('    if tipo.startswith("FUERA"):\n        return ("FUERA"', '    if False:\n        return ("FUERA"')],
             T14 + "::test_registro_decidido_prevalece_y_tipo_resuelve_el_resto"),
+    "M80": ("capacidades deducidas: todo el catalogo en vez de las declaradas",
+            [('        for cod in c["codigos"]:\n', '        for cod in CAPACIDADES_CATALOGO:\n')],
+            T15 + "::test_capacidades_solo_las_declaradas"),
+    "M81": ("capacidad sobre cuenta inexistente aceptada",
+            [('            raise ErrorP5("S8_DECISION_SIN_ORIGEN", f"capacidad {c[\'id\']} -> {c[\'origen\']}")',
+              '            continue')],
+            T15 + "::test_capacidad_sobre_cuenta_inexistente_falla"),
+    "M82": ("localidad ambigua resuelta eligiendo la primera",
+            [('    if len(cand) > 1:\n        raise ErrorP5("S7_LOCALIDAD_AMBIGUA", origen)\n', '')],
+            T15 + "::test_localidad_ambigua_falla_cerrado"),
+    "M83": ("localidad inexistente convertida en direccion sin localidad",
+            [('    if not cand:\n        raise ErrorP5("S8_LOCALIDAD_SIN_MAESTRO", origen)\n',
+              '    if not cand:\n        return None\n')],
+            T15 + "::test_localidad_inexistente_falla_cerrado"),
+    "M84": ("coordenadas sin redondeo a 6 decimales",
+            [('    q = lambda v: Decimal(str(v)).quantize(_Q6, rounding=ROUND_HALF_UP)', '    q = lambda v: Decimal(str(v))')],
+            T15 + "::test_coordenadas_manuales_redondeadas_a_6_decimales"),
 }
 
 

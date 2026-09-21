@@ -31,7 +31,12 @@
 #       --sheet RUTA/sheet_actual.xlsx --run06 RUTA/GaptoMobile_2027_DB_RUN06_v08.xlsx \
 #       --salida DIRECTORIO_FUERA_DEL_REPO
 #
-# Versión: 0.1.0
+#   v0.2.0: SHA-256 de referencia del RUN06 re-anclado a la copia de trabajo
+#           26210cb7... por decision del propietario (2026-09-21, opcion 1): el
+#           fichero c13a3dd2... no se localiza; la copia produce P1 2474/26/38/1,
+#           hash S1 0a180ec4... y los recuentos P5 del traspaso. El SHA retirado se
+#           conserva en SHA256_RUN06_RETIRADO solo como trazabilidad (no se acepta).
+# Versión: 0.2.0
 # ============================================================
 from __future__ import annotations
 
@@ -45,8 +50,9 @@ import time
 from collections import Counter, defaultdict
 from pathlib import Path
 
-VERSION = "0.1.0"
-SHA256_RUN06 = "c13a3dd2104e4d58951a9d8dec100f1b4868c01de205a422df0d89a0bb965079"
+VERSION = "0.2.0"
+SHA256_RUN06 = "26210cb7b950f61c7876c9a6a15bbfbd2a557475698c53ba1d056ff4c52f8556"
+SHA256_RUN06_RETIRADO = "c13a3dd2104e4d58951a9d8dec100f1b4868c01de205a422df0d89a0bb965079"
 HOJA_SNAPSHOT = "registros_origen_importacion"
 ESPERADO = {"hojas": 44, "campos": 533, "filas_snapshot": 2501, "contenedores": 27}
 SENTINEL = 141

@@ -15,6 +15,10 @@
 #                8 financiaciones (PARCIAL v0.5.0: 4 prestamos formales con condiciones
 #                  versionadas, calendario, financiador y garantia; 7 compras financiadas;
 #                  derechos/obligaciones pendientes)
+#   v0.15.0: respuestas del propietario 2026-09-21 (dominios 3 y 4): capacidades de
+#           cuenta declaradas en la fuente suplementaria (D3-D revisada); direcciones
+#           de propiedad con localidad vinculada por nombre exacto (D4-A revisada);
+#           coordenadas MANUALES aportadas por el propietario (D4-G, D-184).
 #   v0.14.0: clasificacion validada por el propietario (opcion 1, 2026-09-21): arbol
 #           CONFIRMADO; tabla tipo V3 -> categoria (52) en codigo; clasificacion por
 #           registro de los tipos heterogeneos en la fuente suplementaria (fichero
@@ -64,7 +68,7 @@
 #   RV3_IMPORT (rol login no superusuario -> gapto_migrator -> gapto_owner),
 #   fuerza los diferidos con SET CONSTRAINTS ALL IMMEDIATE y hace ROLLBACK.
 #   No es P6 (P6 hace COMMIT real).
-# Versión: 0.14.0
+# Versión: 0.15.0
 # ============================================================
 from __future__ import annotations
 
@@ -76,10 +80,10 @@ import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
-VERSION = "0.14.0"
+VERSION = "0.15.0"
 TRANSFORMACION = "RV3_P5"
 _AQUI = Path(__file__).resolve().parent
 
@@ -99,8 +103,8 @@ ORDEN_TABLAS = [
     "usuarios", "paises", "regiones", "localidades", "categorias_financieras",
     "terceros", "tercero_personas", "clasificaciones_tercero", "tercero_clasificaciones",
     "tercero_roles", "actores_financieros",
-    "cuentas", "cuenta_participaciones",
-    "entidades", "propiedades", "entidad_participaciones",
+    "cuentas", "cuenta_capacidades", "cuenta_participaciones",
+    "direcciones", "entidades", "propiedades", "entidad_participaciones",
     "financiaciones", "financiacion_condiciones_versiones", "financiacion_cuotas", "entidad_relaciones",
     "derechos_obligaciones_financieras", "inversiones", "inversion_objetivos_versiones",
     "contratos", "contrato_participantes", "contrato_revision_renta_versiones", "propiedad_valoraciones",
@@ -173,11 +177,18 @@ LEDGER_REGLAS = {
             "corte', sin afirmar el pasado. CONFIRMADA por el propietario (S20-3, 2026-09-21).",
     "D3-C": "ahorro remunerado y Revolut sin saldo V3: saldo_apertura y fecha_inicio_ledger NULL "
             "(PENDIENTE_DATO_CORTE, Migration V3 §29). Ni 930/937,83 ni 250 se interpretan como saldo.",
-    "D3-D": "cuenta_capacidades sin fuente V3: no se crean filas (RUN06 creo 21 sin origen).",
+    "D3-D": "cuenta_capacidades: V3 no tiene el dato (RUN06 creo 21 sin origen). v0.15.0: se crean SOLO las "
+            "declaradas por el propietario en la fuente suplementaria (lista 'capacidades', matriz confirmada "
+            "2026-09-21); cuenta sin declaracion -> 0 filas, nunca se deducen del tipo de cuenta.",
     "DV-10": "RUN06 cuentas contradice DB Schema §22: T. CREDITO como corriente/computa_liquidez; y "
              "permite_negativo=false con CASH en -30,00. Prevalece el contrato.",
-    "D4-A": "propiedades.direccion_id NULL: V3 da calle/numero/piso/puerta/localidad en texto; "
-            "crear direcciones exige vincular localidad por nombre (misma decision que D2-F). Origen conservado.",
+    "D4-A": "v0.15.0 (propietario 2026-09-21): se crea direccion desde calle/numero/escalera/piso/puerta V3 "
+            "(via_nombre/numero/escalera/planta/puerta; via_tipo y codigo_postal NULL: no se parsean ni se "
+            "deducen). localidad V3 (texto) -> localidades por nombre normalizado exacto: 0 coincidencias -> "
+            "S8, varias -> S7; nunca se elige una. Sin ningun dato de direccion -> direccion_id NULL.",
+    "D4-G": "geolocalizacion de propiedad SOLO si el propietario la aporta (lista 'geolocalizaciones'); origen "
+            "MANUAL; redondeo a 6 decimales (numeric(9,6), ROUND_HALF_UP, < 0,11 m); coordenadas ambas o ninguna. "
+            "La migracion no geocodifica ni fabrica coordenadas (D-184).",
     "D4-B": "incluir_en_rentabilidad = patrimonio.disponible (Migration V3 §9: disponible=false "
             "significa excluir de rentabilidad).",
     "D4-C": "entidad_participaciones: 0 filas = propiedad no modelada (D-107). Solo se modela el "
@@ -430,6 +441,26 @@ def cargar_decisiones(path: Path) -> Decisiones:
     for k, pe in personas.items():
         if not k or k == "SELF" or not (pe.get("nombre") or "").strip():
             raise ErrorP5("S4_DECISIONES_FORMATO", f"persona {k}")
+    origenes = set()
+    for c in doc.get("capacidades", []):
+        cods = c.get("codigos")
+        if c.get("id") in vistos or not c.get("id") or "/" not in c.get("origen", "") or not isinstance(cods, list) \
+                or not cods or len(cods) != len(set(cods)) or any(x not in CAPACIDADES_CATALOGO for x in cods):
+            raise ErrorP5("S4_DECISIONES_FORMATO", f"capacidad {c.get('id')}")
+        if ("cap", c["origen"]) in origenes:
+            raise ErrorP5("S7_DECISION_DUPLICADA", c["origen"])
+        vistos.add(c["id"]); origenes.add(("cap", c["origen"]))
+    for g in doc.get("geolocalizaciones", []):
+        try:
+            la, lo = Decimal(str(g["latitud"])), Decimal(str(g["longitud"]))
+        except Exception:
+            raise ErrorP5("S4_DECISIONES_FORMATO", f"geolocalizacion {g.get('id')}")
+        if g.get("id") in vistos or not g.get("id") or not str(g.get("origen", "")).startswith("public.patrimonio/") \
+                or not (-90 <= la <= 90) or not (-180 <= lo <= 180):
+            raise ErrorP5("S4_DECISIONES_FORMATO", f"geolocalizacion {g.get('id')}")
+        if ("geo", g["origen"]) in origenes:
+            raise ErrorP5("S7_DECISION_DUPLICADA", g["origen"])
+        vistos.add(g["id"]); origenes.add(("geo", g["origen"]))
     return Decisiones(hashlib.sha256(raw).hexdigest(), doc)
 
 
@@ -459,6 +490,8 @@ def dominio_12_decisiones(ds: Dataset) -> None:
             [(f"participacion/{it['id']}", it) for it in sorted(dec.doc["participaciones"], key=lambda x: x["id"])] + \
             [(f"contraparte/{c['id']}", c) for c in sorted(dec.doc.get("contrapartes", []), key=lambda x: x["id"])] + \
             [(f"financiador/{c['id']}", c) for c in sorted(dec.doc.get("financiadores", []), key=lambda x: x["id"])] + \
+            [(f"capacidad/{c['id']}", c) for c in sorted(dec.doc.get("capacidades", []), key=lambda x: x["id"])] + \
+            [(f"geolocalizacion/{g['id']}", g) for g in sorted(dec.doc.get("geolocalizaciones", []), key=lambda x: x["id"])] + \
             ([(f"clasificacion/{dec.doc['clasificacion']['id']}", dec.doc["clasificacion"])] if dec.doc.get("clasificacion") else [])
     for n, (clave, d) in enumerate(items, 1):
         t = json.dumps(d, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
@@ -1038,11 +1071,70 @@ def dominio_3(ds: Dataset, fuente: dict, ctx: dict, modo_lab: bool) -> None:
         ds.mapear(co, cl, "cuentas", cid, "cuenta_derivada", tipo="DIVIDIDO", confianza="MEDIA",
                   notas="cuenta ausente del maestro V3 (Migration V3 §14/§29); saldo PENDIENTE_DATO_CORTE")
         ds.ledger.append({"regla": "D3-C", "origen": f"{co}/{cl}"})
+    for c in sorted((ds.decisiones.doc.get("capacidades", []) if ds.decisiones else []), key=lambda x: x["id"]):
+        _gate_decisiones(ds, c["id"])
+        co, cl = c["origen"].split("/", 1)
+        cid = fu.uuid_v3(co, cl, "cuentas", "cuenta")
+        if cid not in ds.filas["cuentas"]:
+            raise ErrorP5("S8_DECISION_SIN_ORIGEN", f"capacidad {c['id']} -> {c['origen']}")
+        clave = f"capacidad/{c['id']}"
+        for cod in c["codigos"]:
+            rid = fu.uuid_v3(CONT_DECISIONES, clave, "cuenta_capacidades", cod)
+            ds.add("cuenta_capacidades", {"id": rid, "cuenta_id": cid, "capacidad_codigo": cod},
+                   natural=(cid, cod))
+            ds.mapear(CONT_DECISIONES, clave, "cuenta_capacidades", rid, f"capacidad.{cod}", confianza="VALIDADA")
     ds.ledger.append({"regla": "D3-D", "origen": "cuenta_capacidades"})
     ds.ledger.append({"regla": "DV-10", "origen": "RUN06.cuentas"})
 
 
 # ------------------------------------------------------------ dominio 4
+CAPACIDADES_CATALOGO = ("PAGAR_GASTO", "RECIBIR_INGRESO", "TRANSFERIR_SALIDA", "TRANSFERIR_ENTRADA",
+                        "DOMICILIAR", "COMPRA_TARJETA")  # ck_cuenta_capacidades__capacidad_codigo (0330)
+_DIR_V3 = (("calle", "via_nombre"), ("numero", "numero"), ("escalera", "escalera"), ("piso", "planta"),
+           ("puerta", "puerta"))
+_Q6 = Decimal("0.000001")
+
+
+def _localidad_por_nombre(fuente: dict, ctx: dict, nombre: str, origen: str) -> str:
+    cand = [cl for cl, loc in sorted(fuente.get("public.localidades", {}).items())
+            if (t := _celda("public.localidades", "nombre", loc, ctx)).estado == fu.CONOCIDO
+            and _norm(str(t.valor)) == _norm(nombre)]
+    if not cand:
+        raise ErrorP5("S8_LOCALIDAD_SIN_MAESTRO", origen)
+    if len(cand) > 1:
+        raise ErrorP5("S7_LOCALIDAD_AMBIGUA", origen)
+    return fu.uuid_v3("public.localidades", cand[0], "localidades", "localidad")
+
+
+def _direccion(ds: Dataset, fuente: dict, ctx: dict, cont: str, cp: str, g) -> str | None:
+    campos = {dst: _texto(g(src)).strip() for src, dst in _DIR_V3
+              if g(src).estado == fu.CONOCIDO and _texto(g(src)) and _texto(g(src)).strip()}
+    loc = g("localidad")
+    lid = None
+    if loc.estado == fu.CONOCIDO and _texto(loc) and _texto(loc).strip():
+        lid = _localidad_por_nombre(fuente, ctx, _texto(loc), f"{cont}/{cp}")
+    if not campos and lid is None:
+        return None
+    did = fu.uuid_v3(cont, cp, "direcciones", "direccion")
+    fila = {"id": did, "owner_user_id": ds.owner, "localidad_id": lid, "codigo_postal": None, "via_tipo": None,
+            "via_nombre": None, "numero": None, "bloque": None, "escalera": None, "planta": None, "puerta": None,
+            "observaciones": None}
+    fila.update(campos)
+    ds.add("direcciones", fila)
+    ds.mapear(cont, cp, "direcciones", did, "direccion", tipo="DIVIDIDO")
+    return did
+
+
+def _geolocalizacion(ds: Dataset, origen: str):
+    its = [x for x in (ds.decisiones.doc.get("geolocalizaciones", []) if ds.decisiones else []) if x["origen"] == origen]
+    if not its:
+        return None
+    g = its[0]
+    _gate_decisiones(ds, g["id"])
+    q = lambda v: Decimal(str(v)).quantize(_Q6, rounding=ROUND_HALF_UP)
+    return g, q(g["latitud"]), q(g["longitud"])
+
+
 def _dec(c):
     return Decimal(str(c.valor)) if c.estado == fu.CONOCIDO else None
 
@@ -1057,6 +1149,9 @@ def _bool(c):
 
 def dominio_4_propiedades(ds: Dataset, fuente: dict, ctx: dict, modo_lab: bool) -> None:
     cont = "public.patrimonio"
+    for g in (ds.decisiones.doc.get("geolocalizaciones", []) if ds.decisiones else []):
+        if g["origen"].split("/", 1)[1] not in fuente.get(cont, {}):
+            raise ErrorP5("S8_DECISION_SIN_ORIGEN", f"geolocalizacion {g['id']} -> {g['origen']}")
     self_id = next(iter(ds.filas["actores_financieros"]))
     tipos = {"VIVIENDA", "LOCAL", "GARAJE", "TERRENO"}
     for cp, pa in sorted(fuente.get(cont, {}).items()):
@@ -1069,7 +1164,9 @@ def dominio_4_propiedades(ds: Dataset, fuente: dict, ctx: dict, modo_lab: bool) 
                              "nombre": _texto(g("referencia")), "enabled": _bool(g("activo"))})
         ds.mapear(cont, cp, "entidades", eid, "propiedad", tipo="DIVIDIDO")
         adq = _texto(g("fecha_adquisicion")) if g("fecha_adquisicion").estado == fu.CONOCIDO else None
-        ds.add("propiedades", {"entidad_id": eid, "direccion_id": None, "tipo_propiedad": tipo,
+        did = _direccion(ds, fuente, ctx, cont, cp, g)
+        geo = _geolocalizacion(ds, f"{cont}/{cp}")
+        ds.add("propiedades", {"entidad_id": eid, "direccion_id": did, "tipo_propiedad": tipo,
                                "referencia_catastral": None, "fecha_adquisicion": adq,
                                "fecha_salida_patrimonio": None, "motivo_salida": None,
                                "superficie_m2": _dec(g("superficie_m2")),
@@ -1077,9 +1174,14 @@ def dominio_4_propiedades(ds: Dataset, fuente: dict, ctx: dict, modo_lab: bool) 
                                "habitaciones": _int(g("habitaciones")), "banos": _int(g("banos")),
                                "tiene_garaje": _bool(g("garaje")), "tiene_trastero": _bool(g("trastero")),
                                "incluir_en_rentabilidad": _bool(g("disponible")), "notas": None,
-                               "latitud": None, "longitud": None, "geolocalizacion_origen": None})
+                               "latitud": geo[1] if geo else None, "longitud": geo[2] if geo else None,
+                               "geolocalizacion_origen": "MANUAL" if geo else None})
         ds.mapear(cont, cp, "propiedades", eid, "propiedad", tipo="DIVIDIDO")
-        for r in ("D4-A", "D4-B"):
+        if geo:
+            ds.mapear(CONT_DECISIONES, f"geolocalizacion/{geo[0]['id']}", "propiedades", eid, "geolocalizacion",
+                      tipo="DIVIDIDO", confianza="VALIDADA")
+            ds.ledger.append({"regla": "D4-G", "origen": f"{cont}/{cp}", "decision": geo[0]["id"]})
+        for r in ("D4-A", "D4-B"):  # D4-A revisada en v0.15.0
             ds.ledger.append({"regla": r, "origen": f"{cont}/{cp}"})
         pct = _dec(g("participacion_pct"))
         dec = decision_de(ds, f"{cont}/{cp}")

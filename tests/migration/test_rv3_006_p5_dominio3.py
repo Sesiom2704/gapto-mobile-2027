@@ -12,7 +12,8 @@
 #   0.1.1: la fixture fija CONFIG_CUENTAS_ESTADO=PROPUESTA (el estado de
 #          produccion paso a CONFIRMADA en P5 v0.6.0, S20-1); el test sigue
 #          verificando su baseline sin bloquear bloques posteriores.
-# Versión: 0.1.1
+#   v0.2.0: sin declaracion de capacidades -> tabla presente y vacia (D3-D revisada, P5 v0.15.0).
+# Versión: 0.2.0
 # ============================================================
 from __future__ import annotations
 
@@ -111,7 +112,7 @@ def test_participacion_100_self_y_sin_capacidades(cfg):
     ds = P5.transformar(_b0(), SHA, modo_lab=True)
     parts = list(ds.filas["cuenta_participaciones"].values())
     assert len(parts) == 2 and all(p["porcentaje"] == Decimal(100) for p in parts)
-    assert "cuenta_capacidades" not in ds.filas
+    assert not ds.filas["cuenta_capacidades"]  # D3-D v0.15.0: sin declaracion del propietario -> 0 filas
 
 
 def test_gestor_es_el_tercero_v3(cfg):
