@@ -10,6 +10,8 @@
 #                  pendientes de decision/dominio)
 #                3 cuentas (IMPLEMENTADO v0.3.0; configuracion sin dato V3 bajo
 #                  PROPUESTA pendiente de confirmacion del propietario -> S20)
+#                4 entidades y subtipos (PARCIAL v0.4.0: PROPIEDAD; resto de subtipos
+#                  en sus dominios 8/9/10; cotitulares pendientes -> S20)
 #               12 importacion: fuente + registros origen + mapeos (base)
 #               2..11 pendientes.
 #   Principios aplicados en codigo:
@@ -25,7 +27,7 @@
 #   RV3_IMPORT (rol login no superusuario -> gapto_migrator -> gapto_owner),
 #   fuerza los diferidos con SET CONSTRAINTS ALL IMMEDIATE y hace ROLLBACK.
 #   No es P6 (P6 hace COMMIT real).
-# Versión: 0.3.0
+# Versión: 0.4.0
 # ============================================================
 from __future__ import annotations
 
@@ -40,7 +42,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 TRANSFORMACION = "RV3_P5"
 _AQUI = Path(__file__).resolve().parent
 
@@ -60,6 +62,7 @@ ORDEN_TABLAS = [
     "usuarios", "paises", "regiones", "localidades", "actores_financieros",
     "terceros", "tercero_personas", "clasificaciones_tercero", "tercero_clasificaciones",
     "cuentas", "cuenta_participaciones",
+    "entidades", "propiedades", "entidad_participaciones",
     "fuentes_importacion", "registros_origen_importacion", "mapeos_importacion",
 ]
 
@@ -93,7 +96,7 @@ CUENTAS_DERIVADAS = {
 GESTOR_REVOLUT = "PROV-UH1DM1"
 
 # Tablas cuya PK no es la columna id.
-PK = {"tercero_personas": "tercero_id"}
+PK = {"tercero_personas": "tercero_id", "propiedades": "entidad_id"}
 
 # Reference data geografica versionada (DB Schema: geografia = reference data
 # separada). Decision de ejecucion H-P5-01, PROVISIONAL hasta conformidad.
@@ -126,6 +129,14 @@ LEDGER_REGLAS = {
     "D3-D": "cuenta_capacidades sin fuente V3: no se crean filas (RUN06 creo 21 sin origen).",
     "DV-10": "RUN06 cuentas contradice DB Schema §22: T. CREDITO como corriente/computa_liquidez; y "
              "permite_negativo=false con CASH en -30,00. Prevalece el contrato.",
+    "D4-A": "propiedades.direccion_id NULL: V3 da calle/numero/piso/puerta/localidad en texto; "
+            "crear direcciones exige vincular localidad por nombre (misma decision que D2-F). Origen conservado.",
+    "D4-B": "incluir_en_rentabilidad = patrimonio.disponible (Migration V3 §9: disponible=false "
+            "significa excluir de rentabilidad).",
+    "D4-C": "entidad_participaciones: 0 filas = propiedad no modelada (D-107). Solo se modela el "
+            "reparto cuando esta completo; vigente_desde = fecha_adquisicion V3 demostrada.",
+    "D4-D": "participaciones V3 != 100 (50 %; y Blasco 1 % = 0 % real segun Migration V3 §9): el "
+            "resto exige identificar cotitulares/propietario. No se modelan hasta confirmacion (S20).",
     "DV-9": "RUN06 no materializo clasificaciones_tercero ni tercero_clasificaciones pese a que V3 "
             "tiene 22 ramas + 34 subsegmentos con jerarquia demostrada; RV3 las conserva (R26).",
 }
@@ -445,6 +456,60 @@ def dominio_3(ds: Dataset, fuente: dict, ctx: dict, modo_lab: bool) -> None:
     ds.ledger.append({"regla": "DV-10", "origen": "RUN06.cuentas"})
 
 
+# ------------------------------------------------------------ dominio 4
+def _dec(c):
+    return Decimal(str(c.valor)) if c.estado == fu.CONOCIDO else None
+
+
+def _int(c):
+    return int(Decimal(str(c.valor))) if c.estado == fu.CONOCIDO else None
+
+
+def _bool(c):
+    return bool(c.valor) if c.estado == fu.CONOCIDO else None
+
+
+def dominio_4_propiedades(ds: Dataset, fuente: dict, ctx: dict, modo_lab: bool) -> None:
+    cont = "public.patrimonio"
+    self_id = next(iter(ds.filas["actores_financieros"]))
+    tipos = {"VIVIENDA", "LOCAL", "GARAJE", "TERRENO"}
+    for cp, pa in sorted(fuente.get(cont, {}).items()):
+        g = lambda col: _celda(cont, col, pa, ctx)
+        eid = fu.uuid_v3(cont, cp, "entidades", "propiedad")
+        tipo = _texto(g("tipo_inmueble")) if g("tipo_inmueble").estado == fu.CONOCIDO else None
+        if tipo not in tipos:
+            raise ErrorP5("S4_TIPO_PROPIEDAD", f"{cont}/{cp}")
+        ds.add("entidades", {"id": eid, "owner_user_id": ds.owner, "tipo_entidad": "PROPIEDAD",
+                             "nombre": _texto(g("referencia")), "enabled": _bool(g("activo"))})
+        ds.mapear(cont, cp, "entidades", eid, "propiedad", tipo="DIVIDIDO")
+        adq = _texto(g("fecha_adquisicion")) if g("fecha_adquisicion").estado == fu.CONOCIDO else None
+        ds.add("propiedades", {"entidad_id": eid, "direccion_id": None, "tipo_propiedad": tipo,
+                               "referencia_catastral": None, "fecha_adquisicion": adq,
+                               "fecha_salida_patrimonio": None, "motivo_salida": None,
+                               "superficie_m2": _dec(g("superficie_m2")),
+                               "superficie_construida_m2": _dec(g("superficie_construida")),
+                               "habitaciones": _int(g("habitaciones")), "banos": _int(g("banos")),
+                               "tiene_garaje": _bool(g("garaje")), "tiene_trastero": _bool(g("trastero")),
+                               "incluir_en_rentabilidad": _bool(g("disponible")), "notas": None,
+                               "latitud": None, "longitud": None, "geolocalizacion_origen": None})
+        ds.mapear(cont, cp, "propiedades", eid, "propiedad", tipo="DIVIDIDO")
+        for r in ("D4-A", "D4-B"):
+            ds.ledger.append({"regla": r, "origen": f"{cont}/{cp}"})
+        pct = _dec(g("participacion_pct"))
+        if pct == Decimal(100) and adq:
+            pid = fu.uuid_v3(cont, cp, "entidad_participaciones", "self")
+            ds.add("entidad_participaciones", {"id": pid, "entidad_id": eid, "actor_id": self_id,
+                                               "porcentaje": pct, "vigente_desde": adq, "vigente_hasta": None})
+            ds.mapear(cont, cp, "entidad_participaciones", pid, "self", tipo="DIVIDIDO")
+            ds.ledger.append({"regla": "D4-C", "origen": f"{cont}/{cp}"})
+        elif pct is not None:
+            if not modo_lab:
+                raise ErrorP5("S20_COTITULAR_NO_IDENTIFICADO", f"{cont}/{cp} participacion={pct}")
+            ds.pendientes.append({"S20": "COTITULAR_NO_IDENTIFICADO", "origen": f"{cont}/{cp}",
+                                  "efecto": "reparto NO modelado (0 filas, D-107) en modo laboratorio"})
+            ds.ledger.append({"regla": "D4-D", "origen": f"{cont}/{cp}"})
+
+
 # ------------------------------------------------------------ pipeline
 def transformar(b0: dict, sha_run06: str, modo_lab: bool = False) -> Dataset:
     fuente = fu.fuente_b0(b0)
@@ -456,6 +521,7 @@ def transformar(b0: dict, sha_run06: str, modo_lab: bool = False) -> Dataset:
     dominio_2(ds, fuente, ctx)
     if "public.cuentas_bancarias" in fuente:
         dominio_3(ds, fuente, ctx, modo_lab)
+    dominio_4_propiedades(ds, fuente, ctx, modo_lab)
     verificar_trazabilidad(ds)
     return ds
 
@@ -539,7 +605,7 @@ def main() -> int:
         fisico = validar_fisico(ds, a.dsn_import)
     informe = {"version": VERSION, "hash_dataset": h, "recuentos": ds.recuentos(),
                "ledger_reglas": LEDGER_REGLAS, "ledger": ds.ledger, "pendientes": ds.pendientes,
-               "fisico": fisico, "dominios": {"implementados": [1, "2-parcial", 3, "12-base"], "pendientes": ["2-resto"] + list(range(4, 12)), "modo_lab": a.modo_lab},
+               "fisico": fisico, "dominios": {"implementados": [1, "2-parcial", 3, "4-propiedad", "12-base"], "pendientes": ["2-resto", "4-resto"] + list(range(5, 12)), "modo_lab": a.modo_lab},
                "ts": datetime.now(timezone.utc).isoformat()}
     a.salida.mkdir(parents=True, exist_ok=True)
     p = a.salida / f"rv3_p5_{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"
