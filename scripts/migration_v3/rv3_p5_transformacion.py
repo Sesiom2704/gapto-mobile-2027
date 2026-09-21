@@ -12,8 +12,11 @@
 #                  PROPUESTA pendiente de confirmacion del propietario -> S20)
 #                4 entidades y subtipos (PARCIAL v0.4.0: PROPIEDAD; resto de subtipos
 #                  en sus dominios 8/9/10; cotitulares pendientes -> S20)
+#                8 financiaciones (PARCIAL v0.5.0: 4 prestamos formales con condiciones
+#                  versionadas, calendario, financiador y garantia; 7 compras financiadas;
+#                  derechos/obligaciones pendientes)
 #               12 importacion: fuente + registros origen + mapeos (base)
-#               2..11 pendientes.
+#               5, 6, 7, 9, 10, 11 y resto de 2/4/8 pendientes.
 #   Principios aplicados en codigo:
 #     - identidad UUIDv5 canonica v3|contenedor|clave|tabla|rol (rv3_fuente);
 #     - todo destino creado lleva al menos un mapeo a su registro origen;
@@ -27,7 +30,7 @@
 #   RV3_IMPORT (rol login no superusuario -> gapto_migrator -> gapto_owner),
 #   fuerza los diferidos con SET CONSTRAINTS ALL IMMEDIATE y hace ROLLBACK.
 #   No es P6 (P6 hace COMMIT real).
-# Versión: 0.4.0
+# Versión: 0.5.0
 # ============================================================
 from __future__ import annotations
 
@@ -42,7 +45,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 TRANSFORMACION = "RV3_P5"
 _AQUI = Path(__file__).resolve().parent
 
@@ -59,10 +62,12 @@ fu = _cargar("rv3_fuente")
 
 # Orden de insercion: padres antes que hijos (FK inmediatas de 0330).
 ORDEN_TABLAS = [
-    "usuarios", "paises", "regiones", "localidades", "actores_financieros",
+    "usuarios", "paises", "regiones", "localidades",
     "terceros", "tercero_personas", "clasificaciones_tercero", "tercero_clasificaciones",
+    "tercero_roles", "actores_financieros",
     "cuentas", "cuenta_participaciones",
     "entidades", "propiedades", "entidad_participaciones",
+    "financiaciones", "financiacion_condiciones_versiones", "financiacion_cuotas", "entidad_relaciones",
     "fuentes_importacion", "registros_origen_importacion", "mapeos_importacion",
 ]
 
@@ -96,7 +101,7 @@ CUENTAS_DERIVADAS = {
 GESTOR_REVOLUT = "PROV-UH1DM1"
 
 # Tablas cuya PK no es la columna id.
-PK = {"tercero_personas": "tercero_id", "propiedades": "entidad_id"}
+PK = {"tercero_personas": "tercero_id", "propiedades": "entidad_id", "financiaciones": "entidad_id"}
 
 # Reference data geografica versionada (DB Schema: geografia = reference data
 # separada). Decision de ejecucion H-P5-01, PROVISIONAL hasta conformidad.
@@ -139,6 +144,35 @@ LEDGER_REGLAS = {
             "resto exige identificar cotitulares/propietario. No se modelan hasta confirmacion (S20).",
     "DV-9": "RUN06 no materializo clasificaciones_tercero ni tercero_clasificaciones pese a que V3 "
             "tiene 22 ramas + 34 subsegmentos con jerarquia demostrada; RV3 las conserva (R26).",
+    "D8-A": "tipo_financiacion demostrado solo si nombre V3 (HIP./PRESTAMO) y tipo_gasto del gasto de "
+            "referencia coinciden; discrepancia -> PROPUESTA por nombre y fallo S20 fuera de laboratorio.",
+    "D8-B": "HIPOTECA con referencia_vivienda V3 -> entidad_relaciones GARANTIZADA_POR a esa propiedad; "
+            "vigencia NULL (inicio de la garantia no demostrado).",
+    "D8-B2": "financiacion no HIPOTECA con referencia_vivienda: sin relacion (solo existe GARANTIZADA_POR); "
+             "vinculo conservado en origen. Pendiente de conformidad.",
+    "D8-C": "financiador = actor del tercero proveedor V3 del prestamo + tercero_roles FINANCIADOR (H-P5-04).",
+    "D8-D": "moneda = moneda de la cuenta de cargo V3 (CONFIG_CUENTAS); sin cuenta configurada -> S6/S20.",
+    "D8-E": "saldo_principal_apertura = capital_pendiente V3 con fecha_inicio_seguimiento = corte "
+            "(Migration V3 §29, R11 173.215,92).",
+    "D8-F": "sistema_amortizacion demostrado por calculo: FRANCES si el interes V3 se reproduce al centimo "
+            "con la tasa de la version y cuota constante; SIN_INTERES con tasa 0 e interes 0; si no, OTRO "
+            "(el calendario V3 es la fuente detallada). importe_cuota_referencia NULL (derivable).",
+    "D8-G": "cuota V3 con total distinto de componentes: se conservan ambos sin correccion (Migration V3 §27).",
+    "D8-H": "entidad_participaciones de la financiacion: 0 filas (no modelada, D-107); Migration V3 §29 "
+            "prohibe inferirla desde propiedad o cuenta. Pendiente S20.",
+    "D8-I": "pagada/fecha_pago/gasto_id de prestamo_cuota se disponen en dominio 6 (hechos); "
+            "financiacion_cuotas no tiene flag de pagado (DB Schema §56).",
+    "D8-J": "cuota con vencimiento anterior al corte y no pagada en V3: se conserva la fecha V3 sin "
+            "desplazarla (Migration V3 §7: calendario desplazado). Clase C.",
+    "D8-K": "compra financiada = gasto con tipo_gasto FINANCIACION y cuotas; capital = cuotas x importe_cuota "
+            "= total; liquidada (restantes 0, pendiente 0) -> CERRADA/LIQUIDADA, apertura 0 al corte, "
+            "fecha_cierre_real NULL; condicion SIN_INTERES; sin calendario (no existe en V3).",
+    "D8-L": "financiador de compra financiada NULL: el proveedor V3 no demuestra ser el financiador; "
+            "se conserva en origen (dominio 6: hecho_terceros).",
+    "D8-N": "gasto con tipo_gasto FINANCIACION reclasificado por el propietario como gasto directo "
+            "(Migration V3 §27/RUN01): no es financiacion; se dispone en dominio 6.",
+    "D8-M": "total de compra sustituido por el validado por el propietario (Migration V3 §14/RUN01); "
+            "literal V3 conservado en origen.",
 }
 
 
@@ -510,6 +544,260 @@ def dominio_4_propiedades(ds: Dataset, fuente: dict, ctx: dict, modo_lab: bool) 
             ds.ledger.append({"regla": "D4-D", "origen": f"{cont}/{cp}"})
 
 
+# ------------------------------------------------------------ dominio 8 (financiaciones)
+# Tipo de financiacion: demostrado solo cuando el nombre V3 del prestamo y el tipo_gasto de su
+# gasto de referencia coinciden. Si discrepan o falta uno, decide el propietario (S20).
+# clave prestamo -> tipo decidido (CONFIRMADO). Vacio: ninguna decision S20 registrada.
+TIPO_FINANCIACION_DECIDIDO: dict = {}
+# Condiciones versionadas decididas (arquitectura, continuacion RV3-E001-R2): Hip. Allende.
+CONDICIONES_DECIDIDAS = {
+    "prestamo-6d5rjp": [
+        {"motivo": "ALTA", "desde": None, "hasta": "2026-03-27", "tasa": "2.5", "cuotas": (1, 20)},
+        {"motivo": "CAMBIO_CONDICIONES", "desde": "2026-03-28", "hasta": None, "tasa": "2.6", "cuotas": (21, None)},
+    ],
+}
+# Total validado por el propietario (Migration V3 §14 / RUN01): V3 total=134904 es error de separador.
+TOTAL_COMPRA_VALIDADO = {"GASTO-T4I2U4": Decimal("1349.04")}
+TIPO_GASTO_COMPRA_FINANCIADA = "FINANCIACION"
+# Reclasificado por el propietario de financiado a gasto directo (Migration V3 §27, RUN01).
+NO_COMPRA_FINANCIADA_CANON = {"gasto-7gl597"}
+_PREF_NOMBRE = (("HIP.", "HIPOTECA"), ("HIPOTECA", "HIPOTECA"), ("PRÉSTAMO", "PRESTAMO"), ("PRESTAMO", "PRESTAMO"))
+_TIPO_GASTO_FIN = {"HIPOTECA": "HIPOTECA", "PRESTAMO PERSONAL": "PRESTAMO"}
+_AUSENTE = (fu.AUSENCIA_141, fu.AUSENCIA_NONE, fu.NULO)
+
+
+def _val(cont, col, fila, ctx):
+    c = _celda(cont, col, fila, ctx)
+    return c.valor if c.estado in (fu.CONOCIDO, fu.REAL_141) else None
+
+
+def _actor_tercero(ds: Dataset, clave_prov: str, rol: str | None) -> str:
+    tid = fu.uuid_v3("public.proveedores", clave_prov, "terceros", "tercero")
+    if tid not in ds.filas["terceros"]:
+        raise ErrorP5("S8_HUERFANO", f"public.proveedores/{clave_prov}")
+    aid = fu.uuid_v3("public.proveedores", clave_prov, "actores_financieros", "actor")
+    ds.add("actores_financieros", {"id": aid, "owner_user_id": ds.owner, "tercero_id": tid},
+           natural=(ds.owner, tid))
+    ds.mapear("public.proveedores", clave_prov, "actores_financieros", aid, "actor", tipo="DIVIDIDO")
+    if rol:
+        rid = fu.uuid_v3("public.proveedores", clave_prov, "tercero_roles", rol)
+        ds.add("tercero_roles", {"id": rid, "tercero_id": tid, "rol_codigo": rol}, natural=(tid, rol))
+        ds.mapear("public.proveedores", clave_prov, "tercero_roles", rid, f"rol.{rol}", tipo="DIVIDIDO")
+    return aid
+
+
+def _moneda_cuenta(ds: Dataset, clave_cuenta, origen: str, modo_lab: bool):
+    cid = fu.uuid_v3("public.cuentas_bancarias", str(clave_cuenta), "cuentas", "cuenta") if clave_cuenta else None
+    cta = ds.filas["cuentas"].get(cid) if cid else None
+    if cta is None:
+        if not modo_lab:
+            raise ErrorP5("S6_MONEDA_NO_DEMOSTRADA", f"{origen}: cuenta de cargo sin configurar")
+        ds.pendientes.append({"S20": "MONEDA_NO_DEMOSTRADA", "origen": origen,
+                              "efecto": "financiacion NO creada en modo laboratorio"})
+        return None
+    return cta["moneda"]
+
+
+def _tipo_prestamo(fuente, cont, cp, pr, ctx):
+    nombre = (_texto(_celda(cont, "nombre", pr, ctx)) or "").upper()
+    por_nombre = next((t for p, t in _PREF_NOMBRE if nombre.startswith(p)), None)
+    por_gasto = None
+    rg = _val(cont, "referencia_gasto", pr, ctx)
+    g = fuente.get("public.gastos", {}).get(str(rg)) if rg else None
+    if g is not None:
+        tg = fuente.get("public.tipo_gasto", {}).get(str(g.get("tipo_id")))
+        if tg is not None:
+            por_gasto = _TIPO_GASTO_FIN.get((_texto(_celda("public.tipo_gasto", "nombre", tg, ctx)) or "").upper())
+    if cp in TIPO_FINANCIACION_DECIDIDO:
+        return TIPO_FINANCIACION_DECIDIDO[cp], "DECIDIDO_S20", por_nombre, por_gasto
+    if por_nombre and por_nombre == por_gasto:
+        return por_nombre, "DEMOSTRADO", por_nombre, por_gasto
+    return por_nombre, "PROPUESTA", por_nombre, por_gasto
+
+
+def _sistema(cuotas: list, tasa: Decimal, ultima: int) -> str:
+    """FRANCES solo si el interes V3 se reproduce al centimo con la tasa y la cuota es constante
+    (salvo la ultima del prestamo); SIN_INTERES si tasa 0 e interes 0; en otro caso OTRO."""
+    from decimal import ROUND_HALF_UP
+    if tasa == 0:
+        return "SIN_INTERES" if all(c["interes"] == 0 for c in cuotas) else "OTRO"
+    imp = {c["importe"] for c in cuotas if c["num"] != ultima}
+    ok = all(abs((c["saldo_prev"] * tasa / Decimal(1200)).quantize(Decimal("0.01"), ROUND_HALF_UP)
+                 - c["interes"]) <= Decimal("0.01") for c in cuotas)
+    return "FRANCES" if ok and len(imp) <= 1 else "OTRO"
+
+
+def dominio_8_financiaciones(ds: Dataset, fuente: dict, ctx: dict, modo_lab: bool) -> None:
+    cont, cq = "public.prestamo", "public.prestamo_cuota"
+    cuotas_de: dict = {}
+    for kq, q in fuente.get(cq, {}).items():
+        cuotas_de.setdefault(str(q.get("prestamo_id")), []).append((kq, q))
+    for cp, pr in sorted(fuente.get(cont, {}).items()):
+        g = lambda col: _val(cont, col, pr, ctx)
+        origen = f"{cont}/{cp}"
+        tipo, estado_tipo, por_nombre, por_gasto = _tipo_prestamo(fuente, cont, cp, pr, ctx)
+        if tipo is None or estado_tipo == "PROPUESTA":
+            if not modo_lab or tipo is None:
+                raise ErrorP5("S20_TIPO_FINANCIACION", f"{origen} nombre={por_nombre} tipo_gasto={por_gasto}")
+            ds.pendientes.append({"S20": "TIPO_FINANCIACION", "origen": origen, "propuesta": tipo,
+                                  "evidencia": {"nombre": por_nombre, "tipo_gasto": por_gasto}})
+        moneda = _moneda_cuenta(ds, g("cuenta_id"), origen, modo_lab)
+        if moneda is None:
+            continue
+        eid = fu.uuid_v3(cont, cp, "entidades", "financiacion")
+        ds.add("entidades", {"id": eid, "owner_user_id": ds.owner, "tipo_entidad": "FINANCIACION",
+                             "nombre": _texto(_celda(cont, "nombre", pr, ctx)), "enabled": bool(g("activo"))})
+        ds.mapear(cont, cp, "entidades", eid, "financiacion", tipo="DIVIDIDO")
+        prov = g("proveedor_id")
+        fin_actor = _actor_tercero(ds, str(prov), "FINANCIADOR") if prov else None
+        pend = g("capital_pendiente")
+        ds.add("financiaciones", {
+            "entidad_id": eid, "tipo_financiacion": tipo, "financiador_actor_id": fin_actor, "moneda": moneda,
+            "capital_original_contratado": Decimal(str(g("importe_principal"))) if g("importe_principal") is not None else None,
+            "saldo_principal_apertura": Decimal(str(pend)) if pend is not None else None,
+            "fecha_inicio_seguimiento": FECHA_INICIO_LEDGER if pend is not None else None,
+            "fecha_inicio": g("fecha_inicio"), "fecha_vencimiento_final_prevista": g("fecha_vencimiento"),
+            "fecha_cierre_real": None, "estado": "ACTIVA" if g("estado") == "ACTIVO" else None,
+            "motivo_cierre": None, "notas": None})
+        if ds.filas["financiaciones"][eid]["estado"] is None:
+            raise ErrorP5("S20_ESTADO_FINANCIACION", f"{origen} estado={g('estado')}")
+        ds.mapear(cont, cp, "financiaciones", eid, "financiacion", tipo="DIVIDIDO")
+        for r in ("D8-A", "D8-C", "D8-D", "D8-E", "D8-H", "D8-I"):
+            ds.ledger.append({"regla": r, "origen": origen})
+
+        # calendario (orden contractual) y saldo encadenado
+        filas = sorted(cuotas_de.get(cp, []), key=lambda x: int(_val(cq, "num_cuota", x[1], ctx)))
+        principal = Decimal(str(g("importe_principal")))
+        saldo, cal = principal, []
+        for kq, q in filas:
+            gq = lambda col: _val(cq, col, q, ctx)
+            if Decimal(str(gq("seguros") or 0)) != 0:
+                raise ErrorP5("S4_SEGUROS_SIN_DESTINO", f"{cq}/{kq}")
+            c = {"clave": kq, "num": int(gq("num_cuota")), "venc": gq("fecha_vencimiento"),
+                 "capital": Decimal(str(gq("capital"))), "interes": Decimal(str(gq("interes"))),
+                 "comis": Decimal(str(gq("comisiones"))) if gq("comisiones") is not None else None,
+                 "importe": Decimal(str(gq("importe_cuota"))), "pagada": gq("pagada"), "saldo_prev": saldo}
+            saldo -= c["capital"]
+            cal.append(c)
+        if [c["num"] for c in cal] != list(range(1, len(cal) + 1)):
+            raise ErrorP5("S4_SECUENCIA_CUOTAS", origen)
+        if cal and sum(c["capital"] for c in cal) != principal:
+            raise ErrorP5("S9_CALENDARIO_NO_CUADRA", f"{origen} suma capital != principal")
+        if cal and pend is not None and principal - sum(c["capital"] for c in cal if c["pagada"] is True) != Decimal(str(pend)):
+            raise ErrorP5("S9_APERTURA_NO_CUADRA", f"{origen} capital_pendiente != principal - capital pagado")
+        ultima = len(cal)
+        versiones = CONDICIONES_DECIDIDAS.get(cp) or [
+            {"motivo": "ALTA", "desde": None, "hasta": None, "tasa": g("tin_pct"), "cuotas": (1, None)}]
+        vmap = {}
+        for i, vd in enumerate(versiones, 1):
+            vid = fu.uuid_v3(cont, cp, "financiacion_condiciones_versiones", f"v{i}")
+            lo, hi = vd["cuotas"]
+            tramo = [c for c in cal if c["num"] >= lo and (hi is None or c["num"] <= hi)]
+            tasa = Decimal(str(vd["tasa"])) if vd["tasa"] is not None else None
+            ti = g("tipo_interes")
+            if ti not in ("FIJO", "VARIABLE", "SIN_INTERES"):
+                raise ErrorP5("S4_TIPO_INTERES", f"{origen} tipo_interes={ti}")
+            if g("periodicidad") != "MENSUAL":
+                raise ErrorP5("S4_PERIODICIDAD", f"{origen} periodicidad={g('periodicidad')}")
+            sistema = _sistema(tramo, tasa, ultima) if (tasa is not None and tramo) else "OTRO"
+            ds.add("financiacion_condiciones_versiones", {
+                "id": vid, "financiacion_entidad_id": eid, "vigente_desde": vd["desde"] or g("fecha_inicio"),
+                "vigente_hasta": vd["hasta"], "motivo_version": vd["motivo"], "hecho_causa_id": None,
+                "modo_recalculo_amortizacion": None, "tipo_interes": ti, "tasa_anual_pct": tasa,
+                "indice_referencia": _texto(_celda(cont, "indice", pr, ctx)) if g("indice") else None,
+                "diferencial_pct": Decimal(str(g("diferencial_pct"))) if g("diferencial_pct") is not None else None,
+                "sistema_amortizacion": sistema, "periodicidad": "MENSUAL", "intervalo": 1,
+                "importe_cuota_referencia": None, "numero_cuotas_referencia": g("cuotas_totales"),
+                "comisiones_periodicas": None})
+            ds.mapear(cont, cp, "financiacion_condiciones_versiones", vid, f"v{i}", tipo="DIVIDIDO")
+            ds.ledger.append({"regla": "D8-F", "origen": origen, "version": i, "sistema": sistema})
+            for c in tramo:
+                vmap[c["num"]] = vid
+        for c in cal:
+            qid = fu.uuid_v3(cq, c["clave"], "financiacion_cuotas", "cuota")
+            ds.add("financiacion_cuotas", {
+                "id": qid, "financiacion_entidad_id": eid, "condicion_version_id": vmap.get(c["num"]),
+                "numero_cuota": c["num"], "fecha_vencimiento": c["venc"], "capital_previsto": c["capital"],
+                "interes_previsto": c["interes"], "comisiones_previstas": c["comis"],
+                "importe_total_previsto": c["importe"], "prevision_id": None},
+                natural=(eid, c["num"]))
+            ds.mapear(cq, c["clave"], "financiacion_cuotas", qid, "cuota")
+            if c["capital"] + c["interes"] + (c["comis"] or 0) != c["importe"]:
+                ds.ledger.append({"regla": "D8-G", "origen": f"{cq}/{c['clave']}",
+                                  "diferencia": str(c["importe"] - c["capital"] - c["interes"] - (c["comis"] or 0))})
+            if c["pagada"] is not True and str(c["venc"]) < FECHA_INICIO_LEDGER:
+                ds.ledger.append({"regla": "D8-J", "origen": f"{cq}/{c['clave']}"})
+        # garantia: solo HIPOTECA con vivienda V3 que exista como propiedad
+        viv = g("referencia_vivienda_id")
+        if tipo == "HIPOTECA" and viv:
+            pid = fu.uuid_v3("public.patrimonio", str(viv), "entidades", "propiedad")
+            if pid not in ds.filas["propiedades"]:
+                raise ErrorP5("S8_HUERFANO", f"{origen} referencia_vivienda_id")
+            rid = fu.uuid_v3(cont, cp, "entidad_relaciones", "garantia")
+            ds.add("entidad_relaciones", {"id": rid, "entidad_origen_id": eid, "entidad_destino_id": pid,
+                                          "tipo_relacion": "GARANTIZADA_POR", "vigente_desde": None,
+                                          "vigente_hasta": None})
+            ds.mapear(cont, cp, "entidad_relaciones", rid, "garantia", tipo="DIVIDIDO")
+            ds.ledger.append({"regla": "D8-B", "origen": origen})
+        elif viv:
+            ds.ledger.append({"regla": "D8-B2", "origen": origen})
+
+    # compras financiadas de consumo (Migration V3 §14/§28: 7; 2.623,76 EUR)
+    cg = "public.gastos"
+    tipos_fin = {k for k, t in fuente.get("public.tipo_gasto", {}).items()
+                 if (_texto(_celda("public.tipo_gasto", "nombre", t, ctx)) or "").upper() == TIPO_GASTO_COMPRA_FINANCIADA}
+    for kg, gg in sorted(fuente.get(cg, {}).items()):
+        if str(gg.get("tipo_id")) not in tipos_fin or _val(cg, "prestamo_id", gg, ctx):
+            continue
+        g = lambda col: _val(cg, col, gg, ctx)
+        origen = f"{cg}/{kg}"
+        if kg in NO_COMPRA_FINANCIADA_CANON:
+            ds.ledger.append({"regla": "D8-N", "origen": origen})
+            continue
+        n, cuota = g("cuotas"), g("importe_cuota")
+        if n is None or cuota is None or int(n) < 2:
+            raise ErrorP5("S4_COMPRA_FINANCIADA_SIN_CUOTAS", origen)
+        capital = Decimal(str(cuota)) * int(n)
+        total = TOTAL_COMPRA_VALIDADO.get(kg, Decimal(str(g("total"))) if g("total") is not None else None)
+        if total != capital:
+            raise ErrorP5("S9_COMPRA_FINANCIADA_TOTAL", f"{origen} total={total} cuotas={capital}")
+        pend_c = g("importe_pendiente")
+        if not (g("cuotas_restantes") == 0 and pend_c is not None and Decimal(str(pend_c)) == 0):
+            if not modo_lab:
+                raise ErrorP5("S20_COMPRA_FINANCIADA_PENDIENTE", origen)
+            ds.pendientes.append({"S20": "COMPRA_FINANCIADA_PENDIENTE", "origen": origen})
+            continue
+        if g("periodicidad") != "MENSUAL":
+            raise ErrorP5("S4_PERIODICIDAD", origen)
+        moneda = _moneda_cuenta(ds, g("cuenta_id"), origen, modo_lab)
+        if moneda is None:
+            continue
+        eid = fu.uuid_v3(cg, kg, "entidades", "financiacion")
+        ds.add("entidades", {"id": eid, "owner_user_id": ds.owner, "tipo_entidad": "FINANCIACION",
+                             "nombre": _texto(_celda(cg, "nombre", gg, ctx)), "enabled": bool(g("activo"))})
+        ds.mapear(cg, kg, "entidades", eid, "financiacion", tipo="DIVIDIDO")
+        ds.add("financiaciones", {
+            "entidad_id": eid, "tipo_financiacion": "COMPRA_FINANCIADA", "financiador_actor_id": None,
+            "moneda": moneda, "capital_original_contratado": capital,
+            "saldo_principal_apertura": Decimal("0"), "fecha_inicio_seguimiento": FECHA_INICIO_LEDGER,
+            "fecha_inicio": g("fecha"), "fecha_vencimiento_final_prevista": None, "fecha_cierre_real": None,
+            "estado": "CERRADA", "motivo_cierre": "LIQUIDADA", "notas": None})
+        ds.mapear(cg, kg, "financiaciones", eid, "financiacion", tipo="DIVIDIDO")
+        vid = fu.uuid_v3(cg, kg, "financiacion_condiciones_versiones", "v1")
+        ds.add("financiacion_condiciones_versiones", {
+            "id": vid, "financiacion_entidad_id": eid, "vigente_desde": g("fecha"), "vigente_hasta": None,
+            "motivo_version": "ALTA", "hecho_causa_id": None, "modo_recalculo_amortizacion": None,
+            "tipo_interes": "SIN_INTERES", "tasa_anual_pct": None, "indice_referencia": None,
+            "diferencial_pct": None, "sistema_amortizacion": "SIN_INTERES", "periodicidad": "MENSUAL",
+            "intervalo": 1, "importe_cuota_referencia": Decimal(str(cuota)), "numero_cuotas_referencia": int(n),
+            "comisiones_periodicas": None})
+        ds.mapear(cg, kg, "financiacion_condiciones_versiones", vid, "v1", tipo="DIVIDIDO")
+        for r in ("D8-K", "D8-L", "D8-D", "D8-H"):
+            ds.ledger.append({"regla": r, "origen": origen})
+        if kg in TOTAL_COMPRA_VALIDADO:
+            ds.ledger.append({"regla": "D8-M", "origen": origen})
+
+
 # ------------------------------------------------------------ pipeline
 def transformar(b0: dict, sha_run06: str, modo_lab: bool = False) -> Dataset:
     fuente = fu.fuente_b0(b0)
@@ -522,6 +810,7 @@ def transformar(b0: dict, sha_run06: str, modo_lab: bool = False) -> Dataset:
     if "public.cuentas_bancarias" in fuente:
         dominio_3(ds, fuente, ctx, modo_lab)
     dominio_4_propiedades(ds, fuente, ctx, modo_lab)
+    dominio_8_financiaciones(ds, fuente, ctx, modo_lab)
     verificar_trazabilidad(ds)
     return ds
 
@@ -605,7 +894,7 @@ def main() -> int:
         fisico = validar_fisico(ds, a.dsn_import)
     informe = {"version": VERSION, "hash_dataset": h, "recuentos": ds.recuentos(),
                "ledger_reglas": LEDGER_REGLAS, "ledger": ds.ledger, "pendientes": ds.pendientes,
-               "fisico": fisico, "dominios": {"implementados": [1, "2-parcial", 3, "4-propiedad", "12-base"], "pendientes": ["2-resto", "4-resto"] + list(range(5, 12)), "modo_lab": a.modo_lab},
+               "fisico": fisico, "dominios": {"implementados": [1, "2-parcial", 3, "4-propiedad", "8-financiaciones", "12-base"], "pendientes": ["2-resto", "4-resto", 5, 6, 7, "8-derechos", 9, 10, 11], "modo_lab": a.modo_lab},
                "ts": datetime.now(timezone.utc).isoformat()}
     a.salida.mkdir(parents=True, exist_ok=True)
     p = a.salida / f"rv3_p5_{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"

@@ -9,7 +9,7 @@
 #              ausencias 141 sin convertirse en valor, fallo cerrado ante
 #              incoherencia rama/subsegmento o persona propia ambigua, y
 #              orden de insercion padre->hijo.
-# Versión: 0.1.0
+# Versión: 0.1.1
 # ============================================================
 from __future__ import annotations
 
@@ -121,8 +121,10 @@ def test_persona_propia_ambigua_falla_cerrado():
 
 
 def test_sin_roles_deducidos():
+    # v0.1.1: el dominio 2 no deduce roles. Desde P5 v0.5.0 la tabla existe (el dominio 8
+    # asigna FINANCIADOR cuando un prestamo lo demuestra); sin prestamos queda vacia.
     ds = P5.transformar(_b0(), SHA)
-    assert "tercero_roles" not in ds.filas
+    assert not ds.filas.get("tercero_roles")
 
 
 @pytest.mark.skipif(not os.environ.get("GAPTO_RV3_IMPORT_URL"), reason="sin laboratorio RV3_IMPORT")
