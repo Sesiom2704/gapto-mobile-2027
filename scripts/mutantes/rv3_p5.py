@@ -16,6 +16,7 @@
 #   python scripts/mutantes/rv3_p5.py            # todos
 #   python scripts/mutantes/rv3_p5.py M30 M33    # subconjunto
 #
+# Version: 0.11.0 (M111..M119: P5 v0.17.0, respuestas del propietario; M92/M93 reanclados)
 # Version: 0.10.0 (M85..M110: P5 v0.16.0, dominio 5 reglas financieras y versiones)
 # Version: 0.9.0 (M80..M84: P5 v0.15.0, capacidades, direcciones y coordenadas)
 # Version: 0.8.0 (M75..M79: P5 v0.14.0, clasificacion de registros)
@@ -239,7 +240,7 @@ MUTANTES = {
             [("        raise PendienteD5(\"S6\", \"D5_FIN_NO_DEMOSTRADO\", \"activo=false sin inactivatedon\")", "        return desde, None, notas")],
             T16 + "::test_fin_desconocido_o_anterior_al_inicio_pendiente"),
     "M89": ("fecha posterior a captura/pago aceptada como inicio",
-            [("        if (cre is not None and ini > cre) or (ult is not None and ini > ult):", "        if False:")],
+            [("        elif (cre is not None and ini > cre) or (ult is not None and ini > ult):", "        elif False:")],
             T16 + "::test_inicio_no_demostrado_no_crea_regla"),
     "M90": ("createon como sustituto del inicio",
             [("        desde = ini\n", "        desde = cre or ini\n")],
@@ -248,10 +249,10 @@ MUTANTES = {
             [("                v, notas = _version(ds, co, cl, f, ctx, \"TRANSFERENCIA\")", "                v, notas = _version(ds, co, cl, f, ctx, \"GASTO\")")],
             T16 + "::test_ahorro_es_transferencia_sin_gasto"),
     "M92": ("aportacion a inversion como gasto",
-            [("            v, notas = _version(ds, G, kg, f, ctx, \"APORTACION_INVERSION\")", "            v, notas = _version(ds, G, kg, f, ctx, \"GASTO\")")],
+            [("        tipo = fz.get(\"tipo\") or (\"GASTO\" if co == G else \"INGRESO\")", "        tipo = (\"GASTO\" if co == G else \"INGRESO\")")],
             T16 + "::test_aportacion_fusion_n1_versiones_contiguas"),
     "M93": ("fusion N:1 copiada como dos reglas",
-            [("    vers, origenes = ([], []) if FUSION_MEDIOLANUM else (None, [])", "    vers, origenes = (None, [])")],
+            [("    FUSIONES = ([FUSION_MEDIOLANUM] if FUSION_MEDIOLANUM else [])", "    FUSIONES = ([] if FUSION_MEDIOLANUM else [])")],
             T16 + "::test_aportacion_fusion_n1_versiones_contiguas"),
     "M94": ("versiones no contiguas aceptadas",
             [("        if a[2][\"vigente_hasta\"] is None or _dia(a[2][\"vigente_hasta\"], 1) != b[2][\"vigente_desde\"]:", "        if False:")],
@@ -304,6 +305,34 @@ MUTANTES = {
     "M110": ("SEMESTRAL como intervalo 1",
              [("\"SEMESTRAL\": (\"MENSUAL\", 6)", "\"SEMESTRAL\": (\"MENSUAL\", 1)")],
              T16 + "::test_semestral_es_mensual_intervalo_6_y_anual"),
+    # ---- P5 v0.17.0: respuestas del propietario 2026-09-21
+    "M111": ("solape de fusion no truncado al inicio del sucesor",
+             [("                prev[2][\"vigente_hasta\"] = fin", "                pass")],
+             T16 + "::test_fusion_propietario_solape_trunca_al_inicio_del_sucesor"),
+    "M112": ("fusiones decididas por el propietario ignoradas (reglas duplicadas)",
+             [("    FUSIONES = ([FUSION_MEDIOLANUM] if FUSION_MEDIOLANUM else []) + list(FUSIONES_PROPIETARIO)", "    FUSIONES = ([FUSION_MEDIOLANUM] if FUSION_MEDIOLANUM else [])")],
+             T16 + "::test_fusion_propietario_solape_trunca_al_inicio_del_sucesor"),
+    "M113": ("firma de fusion sin entidad de origen",
+             [("v[\"categoria_id\"], ent_v,", "v[\"categoria_id\"], None,")],
+             T16 + "::test_fusion_propietario_hueco_o_firma_distinta_falla"),
+    "M114": ("inicio confirmado ignorado",
+             [("        if clave in INICIO_CONFIRMADO:", "        if False:")],
+             T16 + "::test_inicio_confirmado_por_el_propietario"),
+    "M115": ("fin por modificacion restando un dia (excluye la ultima ocurrencia)",
+             [("        return desde, mod, notas", "        return desde, _dia(mod, -1), notas")],
+             T16 + "::test_fin_por_fecha_de_modificacion_decidida"),
+    "M116": ("fecha de modificacion usada como fin sin decision",
+             [("    if ina is None and clave in FIN_POR_MODIFICACION:", "    if ina is None:")],
+             T16 + "::test_fin_por_fecha_de_modificacion_decidida"),
+    "M117": ("compra financiada abierta inactiva aceptada",
+             [("                    or g(\"activo\") is not True:", "                    or False:")],
+             T16 + "::test_compra_financiada_abierta_incoherente_no_se_crea"),
+    "M118": ("compra financiada abierta registrada como cerrada",
+             [("            \"estado\": \"ACTIVA\" if abierta is not None else \"CERRADA\",", "            \"estado\": \"CERRADA\",")],
+             T16 + "::test_compra_financiada_decidida_abierta_y_cerrada"),
+    "M119": ("saldo de apertura = capital total en vez de pendiente",
+             [("            abierta = pend\n", "            abierta = capital\n")],
+             T16 + "::test_compra_financiada_decidida_abierta_y_cerrada"),
 }
 
 

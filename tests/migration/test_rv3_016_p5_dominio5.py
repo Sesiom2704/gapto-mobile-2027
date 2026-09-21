@@ -10,7 +10,10 @@
 #              exclusiones (contenedor, compra financiada), pendientes por fila,
 #              trazabilidad, determinismo y validacion fisica 0330 (incluido EXCLUDE de
 #              solapamiento) bajo RV3_IMPORT con ROLLBACK.
-# Versión: 0.1.0
+#   0.2.0: P5 v0.17.0 -> respuestas del propietario 2026-09-21: fusiones N:1 con solape
+#          (D5-K2/K3), inicio confirmado, fin por fecha de modificacion y compras financiadas
+#          decididas abiertas/cerradas (D8-K2/K3).
+# Versión: 0.2.0
 # ============================================================
 from __future__ import annotations
 
@@ -212,7 +215,8 @@ def _d5(filas, monkeypatch):
     return ds
 
 
-FUS = {"regla_id": "e6f9b86e-a62e-523b-8490-99a4804df761", "inversion": "INVX", "filas": ["GM1", "GM2"]}
+FUS = {"regla_id": "e6f9b86e-a62e-523b-8490-99a4804df761", "inversion": "INVX", "filas": ["GM1", "GM2"],
+       "co": G, "tipo": "APORTACION_INVERSION"}
 
 
 def test_aportacion_fusion_n1_versiones_contiguas(monkeypatch):
@@ -321,19 +325,103 @@ def test_trazabilidad_y_determinismo():
         assert a.filas[t] and all((t, x) in dest for x in a.filas[t])
 
 
+FZ = [{"co": G, "filas": ["GP1", "GP2"]}]
+PRED = dict(activo=False, inactivatedon="2026-06-06T06:36:26", ultimo_pago_on="2025-09-18T00:00:00")
+SUCE = dict(fecha="2026-06-01", createon="2026-06-01T03:42:59", importe=12.0, importe_cuota=12.0)
+
+
+def test_fusion_propietario_solape_trunca_al_inicio_del_sucesor(monkeypatch):
+    monkeypatch.setattr(P5, "FUSIONES_PROPIETARIO", FZ)
+    ds = _t([_g("GP1", **PRED), _g("GP2", **SUCE)])
+    (r,) = _reglas(ds, G, "GP1")
+    assert _reglas(ds, G, "GP2") == [r] and r["id"] == F.uuid_v3(G, "GP1", "reglas_financieras", "regla")
+    a, b = _ver(ds, r["id"])
+    assert (a["vigente_hasta"], b["vigente_desde"], b["vigente_hasta"], b["importe_fijo"]) == ("2026-05-31", "2026-06-01", None, Decimal("12.0"))
+    assert any(e.get("regla") == "D5-K2" and e["hasta_evidencia"] == "2026-06-05" for e in ds.ledger)
+    assert r["nombre"] == "REGLA GP2"
+
+
+def test_fusion_propietario_hueco_o_firma_distinta_falla(monkeypatch):
+    monkeypatch.setattr(P5, "FUSIONES_PROPIETARIO", FZ)
+    with pytest.raises(P5.ErrorP5) as e:
+        _t([_g("GP1", **dict(PRED, inactivatedon="2026-03-01T00:00:00")), _g("GP2", **SUCE)])
+    assert e.value.codigo == "S9_VERSIONES_NO_CONTIGUAS"
+    with pytest.raises(P5.ErrorP5) as e:
+        _t([_g("GP1", **PRED), _g("GP2", referencia_vivienda_id="V1", **SUCE)])
+    assert e.value.codigo == "S9_FUSION_INCOMPATIBLE"
+
+
+def test_fusion_con_miembro_pendiente_no_crea_nada(monkeypatch):
+    monkeypatch.setattr(P5, "FUSIONES_PROPIETARIO", FZ)
+    ds = _t([_g("GP1", **dict(PRED, fecha="2026-06-23", createon="2025-06-23T09:45:24")), _g("GP2", **SUCE)])
+    assert not _reglas(ds, G, "GP1") and not _reglas(ds, G, "GP2")
+    assert _pend(ds, G, "GP1")[0]["S6"] == _pend(ds, G, "GP2")[0]["S6"] == "D5_INICIO_NO_DEMOSTRADO"
+
+
+def test_inicio_confirmado_por_el_propietario(monkeypatch):
+    kw = dict(fecha="2026-03-13", createon="2026-03-12T12:16:11")
+    assert _pend(_t([_g("GK", **kw)]), G, "GK")
+    monkeypatch.setattr(P5, "INICIO_CONFIRMADO", {(G, "GK")})
+    _, v = _uno(_t([_g("GK", **kw)]), G, "GK")
+    assert v["vigente_desde"] == "2026-03-13"
+
+
+def test_fin_por_fecha_de_modificacion_decidida(monkeypatch):
+    kw = dict(activo=False, modifiedon="2025-10-02T16:35:28.115889")
+    assert _pend(_t([_g("GM", **kw)]), G, "GM")[0]["S6"] == "D5_FIN_NO_DEMOSTRADO"
+    monkeypatch.setattr(P5, "FIN_POR_MODIFICACION", {(G, "GM"), (G, "GN")})
+    ds = _t([_g("GM", **kw), _g("GN", activo=False, modifiedon="2024-12-01T00:00:00")])
+    assert _uno(ds, G, "GM")[1]["vigente_hasta"] == "2025-10-02"
+    assert _pend(ds, G, "GN")[0]["S9"] == "D5_FIN_MODIFICACION_INVALIDO"
+
+
+PLAZOS = dict(tipo_id="TX", cuotas=3, cuotas_pagadas=1, cuotas_restantes=2, importe_cuota=10.5, importe=10.5,
+              total=31.5, importe_pendiente=21.0, activo=True)
+
+
+def _fin(ds, k):
+    return ds.filas["financiaciones"].get(F.uuid_v3(G, k, "entidades", "financiacion"))
+
+
+def test_compra_financiada_decidida_abierta_y_cerrada(monkeypatch):
+    monkeypatch.setattr(P5, "COMPRA_FINANCIADA_DECIDIDA", {"GQ", "GQC"})
+    ds = _t([_g("GQ", **PLAZOS), _g("GQC", **dict(PLAZOS, cuotas_pagadas=3, cuotas_restantes=0, importe_pendiente=0,
+                                                   activo=False, inactivatedon="2026-01-01T00:00:00"))])
+    f = _fin(ds, "GQ")
+    assert (f["tipo_financiacion"], f["estado"], f["motivo_cierre"], f["saldo_principal_apertura"], f["capital_original_contratado"]) \
+        == ("COMPRA_FINANCIADA", "ACTIVA", None, Decimal("21.0"), Decimal("31.5"))
+    assert f["financiador_actor_id"] is None and f["fecha_inicio_seguimiento"] == P5.FECHA_INICIO_LEDGER
+    c = _fin(ds, "GQC")
+    assert (c["estado"], c["motivo_cierre"], c["saldo_principal_apertura"]) == ("CERRADA", "LIQUIDADA", Decimal("0"))
+    assert not _reglas(ds, G, "GQ") and f"{G}/GQ" in ds.reglas["disposicion"]["EXCLUIDA_D8"]
+    assert not [x for x in ds.filas["financiacion_cuotas"].values() if x["financiacion_entidad_id"] == f["entidad_id"]]
+
+
+@pytest.mark.parametrize("kw", [dict(activo=False, inactivatedon="2026-08-10T00:00:00"), dict(importe_pendiente=20.0),
+                                dict(cuotas_pagadas=2)])
+def test_compra_financiada_abierta_incoherente_no_se_crea(monkeypatch, kw):
+    monkeypatch.setattr(P5, "COMPRA_FINANCIADA_DECIDIDA", {"GQ"})
+    ds = _t([_g("GQ", **dict(PLAZOS, **kw))])
+    assert _fin(ds, "GQ") is None and not _reglas(ds, G, "GQ")
+    assert any(p.get("S20") == "D8_COMPRA_FINANCIADA_ABIERTA_INCOHERENTE" for p in ds.pendientes)
+
+
 def _fisico_ds(monkeypatch):
     monkeypatch.setattr(P5, "TRANSFERENCIAS_AHORRO", {"GT"})
     monkeypatch.setattr(P5, "RODANTES_VALIDADOS", {(G, "GR")})
+    monkeypatch.setattr(P5, "FUSIONES_PROPIETARIO", FZ)
+    monkeypatch.setattr(P5, "COMPRA_FINANCIADA_DECIDIDA", {"GQ"})
     return _t([_g("GA", referencia_vivienda_id="V1"), _g("GT"), _g("GR"), _i("IS", periodicidad="SEMESTRAL"),
-               _g("GF", activo=False, inactivatedon="2026-02-11T11:25:19"),
-               _i("IR", contrato_alquiler="K1")], con={"renta_mensual": "550.00"})
+               _g("GF", activo=False, inactivatedon="2026-02-11T11:25:19"), _g("GP1", **PRED), _g("GP2", **SUCE),
+               _g("GQ", **PLAZOS), _i("IR", contrato_alquiler="K1")], con={"renta_mensual": "550.00"})
 
 
 @pytest.mark.skipif(not os.environ.get("GAPTO_RV3_IMPORT_URL"), reason="sin laboratorio RV3_IMPORT")
 def test_fisico_rv3_import_rollback(monkeypatch):
     ds = _fisico_ds(monkeypatch)
     res = P5.validar_fisico(ds, os.environ["GAPTO_RV3_IMPORT_URL"])
-    assert (res["reglas_financieras"], res["regla_versiones"], res["regla_excepciones"]) == (6, 6, 0)
+    assert (res["reglas_financieras"], res["regla_versiones"], res["regla_excepciones"]) == (7, 8, 0)
+    assert res["financiaciones"] == 4
 
 
 @pytest.mark.skipif(not os.environ.get("GAPTO_RV3_IMPORT_URL"), reason="sin laboratorio RV3_IMPORT")
