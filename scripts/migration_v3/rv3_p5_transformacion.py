@@ -5,6 +5,9 @@
 # Descripcion: RV3 / P5. Transformacion B0 (y S1 por las mismas reglas) hacia
 #              el contrato fisico 0330, por dominios del plan R2:
 #                1 tenant/geografia   (IMPLEMENTADO v0.1.0)
+#                2 maestros: terceros, personas, clasificaciones de tercero
+#                  (IMPLEMENTADO PARCIAL v0.2.0; categorias, roles y direcciones
+#                  pendientes de decision/dominio)
 #               12 importacion: fuente + registros origen + mapeos (base)
 #               2..11 pendientes.
 #   Principios aplicados en codigo:
@@ -20,7 +23,7 @@
 #   RV3_IMPORT (rol login no superusuario -> gapto_migrator -> gapto_owner),
 #   fuerza los diferidos con SET CONSTRAINTS ALL IMMEDIATE y hace ROLLBACK.
 #   No es P6 (P6 hace COMMIT real).
-# Versión: 0.1.0
+# Versión: 0.2.0
 # ============================================================
 from __future__ import annotations
 
@@ -35,7 +38,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 TRANSFORMACION = "RV3_P5"
 _AQUI = Path(__file__).resolve().parent
 
@@ -53,8 +56,15 @@ fu = _cargar("rv3_fuente")
 # Orden de insercion: padres antes que hijos (FK inmediatas de 0330).
 ORDEN_TABLAS = [
     "usuarios", "paises", "regiones", "localidades", "actores_financieros",
+    "terceros", "tercero_personas", "clasificaciones_tercero", "tercero_clasificaciones",
     "fuentes_importacion", "registros_origen_importacion", "mapeos_importacion",
 ]
+
+# Autorreferencias: el padre se inserta antes que el hijo (orden por profundidad).
+AUTOREF = {"regiones": "parent_region_id", "clasificaciones_tercero": "parent_id"}
+
+# Tablas cuya PK no es la columna id.
+PK = {"tercero_personas": "tercero_id"}
 
 # Reference data geografica versionada (DB Schema: geografia = reference data
 # separada). Decision de ejecucion H-P5-01, PROVISIONAL hasta conformidad.
@@ -69,6 +79,17 @@ LEDGER_REGLAS = {
                "(sin jerarquia inventada). PROVISIONAL.",
     "H-P5-03": "usuarios.timezone/locale NOT NULL sin dato V3; se deja actuar el DEFAULT de "
                "configuracion del contrato (no es hecho financiero). PROVISIONAL.",
+    "H-P5-04": "terceros desde proveedores: naturaleza NULL y sin roles; ni EMPRESA ni COMERCIO "
+               "se deducen del nombre o la rama. Los roles se asignan en el dominio que los demuestre.",
+    "H-P5-05": "proveedores.persona_contacto (sin columna destino) se conserva en terceros.notas "
+               "con etiqueta de origen. PROVISIONAL.",
+    "H-P5-06": "terceros desde personas: enabled sin dato V3 (inactivatedon=141) -> DEFAULT del "
+               "contrato. PROVISIONAL.",
+    "D2-C": "persona V3 cuyo email coincide con el del tenant = el propio usuario: se VINCULA a "
+            "usuarios y NO se crea tercero (C43/R-RV3-008). DNI/telefono/nacimiento no tienen "
+            "destino en usuarios: perdida de detalle CANDIDATA R24, pendiente de aceptacion.",
+    "DV-9": "RUN06 no materializo clasificaciones_tercero ni tercero_clasificaciones pese a que V3 "
+            "tiene 22 ramas + 34 subsegmentos con jerarquia demostrada; RV3 las conserva (R26).",
 }
 
 
@@ -89,7 +110,7 @@ class Dataset:
     pendientes: list = field(default_factory=list)
 
     def add(self, tabla: str, fila: dict, natural: tuple | None = None) -> str:
-        fid = fila["id"]
+        fid = fila[PK.get(tabla, "id")]
         if fid in self.filas[tabla]:
             if self.filas[tabla][fid] != fila:
                 raise ErrorP5("S7_COLISION_UUID", f"{tabla}/{fid}")
@@ -223,6 +244,95 @@ def dominio_1(ds: Dataset, fuente: dict, ctx: dict) -> None:
         ds.mapear("public.localidades", cl, "localidades", lid, "localidad")
 
 
+# ------------------------------------------------------------ dominio 2
+def _conocido(cont, col, fila, ctx):
+    c = _celda(cont, col, fila, ctx)
+    return _texto(c) if c.estado == fu.CONOCIDO else None
+
+
+def dominio_2(ds: Dataset, fuente: dict, ctx: dict) -> None:
+    email_tenant = ds.filas["usuarios"][ds.owner]["email"].casefold()
+    # Clasificaciones de tercero: rama (raiz) -> subsegmento (hijo), jerarquia de V3.
+    clas_de = {}
+    for cr, r in sorted(fuente.get("public.tipo_ramas_proveedores", {}).items()):
+        cid = fu.uuid_v3("public.tipo_ramas_proveedores", cr, "clasificaciones_tercero", "rama")
+        ds.add("clasificaciones_tercero", {
+            "id": cid, "owner_user_id": ds.owner, "parent_id": None, "codigo": None,
+            "nombre": _conocido("public.tipo_ramas_proveedores", "nombre", r, ctx)},
+            natural=(ds.owner, None, _conocido("public.tipo_ramas_proveedores", "nombre", r, ctx)))
+        ds.mapear("public.tipo_ramas_proveedores", cr, "clasificaciones_tercero", cid, "rama")
+        clas_de[("R", str(r["id"]))] = cid
+    for cs, sg in sorted(fuente.get("public.tipo_subsegmentos_provee", {}).items()):
+        padre = clas_de.get(("R", str(sg.get("rama_id"))))
+        if padre is None:
+            raise ErrorP5("S8_HUERFANO", f"public.tipo_subsegmentos_provee/{cs} rama_id")
+        nom = _conocido("public.tipo_subsegmentos_provee", "nombre", sg, ctx)
+        act = _celda("public.tipo_subsegmentos_provee", "activo", sg, ctx)
+        cid = fu.uuid_v3("public.tipo_subsegmentos_provee", cs, "clasificaciones_tercero", "subsegmento")
+        fila = {"id": cid, "owner_user_id": ds.owner, "parent_id": padre, "codigo": None, "nombre": nom}
+        if act.estado == fu.CONOCIDO:
+            fila["enabled"] = bool(act.valor)
+        ds.add("clasificaciones_tercero", fila, natural=(ds.owner, padre, nom))
+        ds.mapear("public.tipo_subsegmentos_provee", cs, "clasificaciones_tercero", cid, "subsegmento")
+        clas_de[("S", str(sg["id"]))] = (cid, padre)
+    ds.ledger.append({"regla": "DV-9", "origen": "public.tipo_ramas_proveedores+tipo_subsegmentos_provee"})
+
+    for cp, pv in sorted(fuente.get("public.proveedores", {}).items()):
+        cont = "public.proveedores"
+        tid = fu.uuid_v3(cont, cp, "terceros", "tercero")
+        contacto = _conocido(cont, "persona_contacto", pv, ctx)
+        act = _celda(cont, "activo", pv, ctx)
+        fila = {"id": tid, "owner_user_id": ds.owner, "nombre": _conocido(cont, "nombre", pv, ctx),
+                "naturaleza": None, "identificador_fiscal": _conocido(cont, "cif", pv, ctx),
+                "tipo_identificador_fiscal": None, "pais_fiscal_id": None,
+                "email": _conocido(cont, "email", pv, ctx), "telefono": _conocido(cont, "telefono", pv, ctx),
+                "notas": f"Persona de contacto (V3): {contacto}" if contacto else None}
+        if act.estado == fu.CONOCIDO:
+            fila["enabled"] = bool(act.valor)
+        if not fila["nombre"]:
+            raise ErrorP5("S4_TERCERO_SIN_NOMBRE", f"{cont}/{cp}")
+        ds.add("terceros", fila)
+        ds.mapear(cont, cp, "terceros", tid, "tercero")
+        ds.ledger.append({"regla": "H-P5-04", "origen": f"{cont}/{cp}"})
+        if contacto:
+            ds.ledger.append({"regla": "H-P5-05", "origen": f"{cont}/{cp}"})
+        sub = clas_de.get(("S", str(pv.get("subsegmento_id")))) if _celda(cont, "subsegmento_id", pv, ctx).estado == fu.CONOCIDO else None
+        rama = clas_de.get(("R", str(pv.get("rama_id"))))
+        if sub is not None and sub[1] != rama:
+            raise ErrorP5("S1_RAMA_SUBSEGMENTO_INCOHERENTE", f"{cont}/{cp}")
+        destino = sub[0] if sub is not None else rama
+        if destino is None:
+            raise ErrorP5("S8_HUERFANO", f"{cont}/{cp} rama_id")
+        tcid = fu.uuid_v3(cont, cp, "tercero_clasificaciones", "clasificacion")
+        ds.add("tercero_clasificaciones", {"id": tcid, "tercero_id": tid, "clasificacion_id": destino,
+                                           "principal": True}, natural=(tid, destino))
+        ds.mapear(cont, cp, "tercero_clasificaciones", tcid, "clasificacion")
+
+    propias = [cp for cp, pe in fuente.get("public.personas", {}).items()
+               if (_conocido("public.personas", "email", pe, ctx) or "").casefold() == email_tenant]
+    if len(propias) > 1:
+        raise ErrorP5("S20_PERSONA_PROPIA_AMBIGUA", str(sorted(propias)))
+    for cp, pe in sorted(fuente.get("public.personas", {}).items()):
+        cont = "public.personas"
+        if cp in propias:
+            ds.mapear(cont, cp, "usuarios", ds.owner, "persona_propia", tipo="VINCULADO",
+                      notas="persona del propio tenant; no se crea tercero (C43)")
+            ds.ledger.append({"regla": "D2-C", "origen": f"{cont}/{cp}"})
+            continue
+        tid = fu.uuid_v3(cont, cp, "terceros", "tercero")
+        ds.add("terceros", {"id": tid, "owner_user_id": ds.owner,
+                            "nombre": _conocido(cont, "nombre_completo", pe, ctx), "naturaleza": "PERSONA",
+                            "identificador_fiscal": _conocido(cont, "dni", pe, ctx),
+                            "tipo_identificador_fiscal": None, "pais_fiscal_id": None,
+                            "email": _conocido(cont, "email", pe, ctx), "telefono": _conocido(cont, "telefono", pe, ctx),
+                            "notas": _conocido(cont, "observaciones", pe, ctx)})
+        ds.mapear(cont, cp, "terceros", tid, "tercero", tipo="DIVIDIDO")
+        ds.add("tercero_personas", {"tercero_id": tid,
+                                    "fecha_nacimiento": _conocido(cont, "fecha_nacimiento", pe, ctx)})
+        ds.mapear(cont, cp, "tercero_personas", tid, "persona", tipo="DIVIDIDO")
+        ds.ledger.append({"regla": "H-P5-06", "origen": f"{cont}/{cp}"})
+
+
 # ------------------------------------------------------------ pipeline
 def transformar(b0: dict, sha_run06: str) -> Dataset:
     fuente = fu.fuente_b0(b0)
@@ -231,6 +341,7 @@ def transformar(b0: dict, sha_run06: str) -> Dataset:
     ds = Dataset(owner=owner_de(cu))
     dominio_12_trazabilidad(ds, b0, sha_run06)
     dominio_1(ds, fuente, ctx)
+    dominio_2(ds, fuente, ctx)
     verificar_trazabilidad(ds)
     return ds
 
@@ -253,6 +364,22 @@ def verificar_trazabilidad(ds: Dataset) -> None:
 
 
 # ------------------------------------------------------------ validacion fisica
+def orden_insercion(ds: Dataset, tabla: str) -> list:
+    filas = ds.filas[tabla]
+    col = AUTOREF.get(tabla)
+    if col is None:
+        return sorted(filas)
+
+    def prof(fid, vistos=()):
+        padre = filas[fid].get(col)
+        if padre is None or padre not in filas:
+            return 0
+        if fid in vistos:
+            raise ErrorP5("S1_CICLO_JERARQUIA", f"{tabla}/{fid}")
+        return 1 + prof(padre, vistos + (fid,))
+    return sorted(filas, key=lambda f: (prof(f), f))
+
+
 def validar_fisico(ds: Dataset, dsn_import: str) -> dict:
     """Carga en una transaccion bajo RV3_IMPORT y SIEMPRE revierte."""
     import psycopg
@@ -264,7 +391,7 @@ def validar_fisico(ds: Dataset, dsn_import: str) -> dict:
             c.execute("SET ROLE gapto_owner")
             c.execute("SELECT set_config('gapto.owner_user_id', %s, true)", (ds.owner,))
             for t in ORDEN_TABLAS:
-                for fid in sorted(ds.filas[t]):
+                for fid in orden_insercion(ds, t):
                     f = ds.filas[t][fid]
                     cols = sorted(f)
                     vals = [Jsonb(f[k]) if isinstance(f[k], (dict, list)) else f[k] for k in cols]
@@ -296,7 +423,7 @@ def main() -> int:
         fisico = validar_fisico(ds, a.dsn_import)
     informe = {"version": VERSION, "hash_dataset": h, "recuentos": ds.recuentos(),
                "ledger_reglas": LEDGER_REGLAS, "ledger": ds.ledger, "pendientes": ds.pendientes,
-               "fisico": fisico, "dominios": {"implementados": [1, "12-base"], "pendientes": list(range(2, 12))},
+               "fisico": fisico, "dominios": {"implementados": [1, "2-parcial", "12-base"], "pendientes": ["2-resto"] + list(range(3, 12))},
                "ts": datetime.now(timezone.utc).isoformat()}
     a.salida.mkdir(parents=True, exist_ok=True)
     p = a.salida / f"rv3_p5_{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"
