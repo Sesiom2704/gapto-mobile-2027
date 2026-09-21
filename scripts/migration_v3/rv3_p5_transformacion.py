@@ -8,6 +8,8 @@
 #                2 maestros: terceros, personas, clasificaciones de tercero
 #                  (IMPLEMENTADO PARCIAL v0.2.0; categorias, roles y direcciones
 #                  pendientes de decision/dominio)
+#                3 cuentas (IMPLEMENTADO v0.3.0; configuracion sin dato V3 bajo
+#                  PROPUESTA pendiente de confirmacion del propietario -> S20)
 #               12 importacion: fuente + registros origen + mapeos (base)
 #               2..11 pendientes.
 #   Principios aplicados en codigo:
@@ -23,7 +25,7 @@
 #   RV3_IMPORT (rol login no superusuario -> gapto_migrator -> gapto_owner),
 #   fuerza los diferidos con SET CONSTRAINTS ALL IMMEDIATE y hace ROLLBACK.
 #   No es P6 (P6 hace COMMIT real).
-# Versión: 0.2.0
+# Versión: 0.3.0
 # ============================================================
 from __future__ import annotations
 
@@ -38,7 +40,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 TRANSFORMACION = "RV3_P5"
 _AQUI = Path(__file__).resolve().parent
 
@@ -57,11 +59,38 @@ fu = _cargar("rv3_fuente")
 ORDEN_TABLAS = [
     "usuarios", "paises", "regiones", "localidades", "actores_financieros",
     "terceros", "tercero_personas", "clasificaciones_tercero", "tercero_clasificaciones",
+    "cuentas", "cuenta_participaciones",
     "fuentes_importacion", "registros_origen_importacion", "mapeos_importacion",
 ]
 
 # Autorreferencias: el padre se inserta antes que el hijo (orden por profundidad).
 AUTOREF = {"regiones": "parent_region_id", "clasificaciones_tercero": "parent_id"}
+
+# Dominio 3. Convencion de corte de la simulacion (Migration V3 §29, RUN03):
+# corte logico 2026-09-04, ledger exacto desde 2026-09-05. saldo_apertura = liquidez V3.
+FECHA_INICIO_LEDGER = "2026-09-05"
+# Configuracion de cuenta SIN dato V3 (DB Schema §22: NOT NULL y sin default fisico).
+# Estado PROPUESTA: la carga falla cerrada (S20) salvo confirmacion del propietario o
+# modo laboratorio explicito, que deja la marca PROPUESTA_NO_CONFIRMADA en el ledger.
+# clave -> (tipo, naturaleza, computa_liquidez, computa_patrimonio, permite_negativo, moneda)
+CONFIG_CUENTAS = {
+    ("public.cuentas_bancarias", "BANCO-0TBZZI"): ("EFECTIVO", "ACTIVO", True, True, True, "EUR"),
+    ("public.cuentas_bancarias", "BANCO-96C620E0"): ("CORRIENTE", "ACTIVO", True, True, True, "EUR"),
+    ("public.cuentas_bancarias", "BANCO-679A92B7"): ("CORRIENTE", "ACTIVO", True, True, True, "EUR"),
+    ("public.cuentas_bancarias", "CTA-H3PG1R"): ("CORRIENTE", "ACTIVO", True, True, True, "EUR"),
+    ("public.cuentas_bancarias", "BANCO-A6791418"): ("CORRIENTE", "ACTIVO", True, True, True, "EUR"),
+    ("public.cuentas_bancarias", "BANCO-DF92A62D"): ("CORRIENTE", "ACTIVO", True, True, True, "EUR"),
+    ("public.cuentas_bancarias", "CTA-Z4QIC5"): ("CREDITO", "PASIVO", False, True, True, "EUR"),
+    ("public.inversion", "INV-F28AEAD467"): ("AHORRO", "ACTIVO", True, True, False, "EUR"),
+    ("public.gastos", "gasto-xg1mue"): ("PREPAGO", "ACTIVO", True, True, False, None),
+}
+CONFIG_CUENTAS_ESTADO = "PROPUESTA"
+# Cuentas sin fila maestra V3 (Migration V3 §14/§29): origen, nombre, gestor V3.
+CUENTAS_DERIVADAS = {
+    ("public.inversion", "INV-F28AEAD467"): ("CUENTA AHORRO", "proveedor_id"),
+    ("public.gastos", "gasto-xg1mue"): ("REVOLUT", None),
+}
+GESTOR_REVOLUT = "PROV-UH1DM1"
 
 # Tablas cuya PK no es la columna id.
 PK = {"tercero_personas": "tercero_id"}
@@ -88,6 +117,15 @@ LEDGER_REGLAS = {
     "D2-C": "persona V3 cuyo email coincide con el del tenant = el propio usuario: se VINCULA a "
             "usuarios y NO se crea tercero (C43/R-RV3-008). DNI/telefono/nacimiento no tienen "
             "destino en usuarios: perdida de detalle CANDIDATA R24, pendiente de aceptacion.",
+    "D3-A": "configuracion de cuenta sin dato V3 (tipo, naturaleza, computa_*, permite_negativo, "
+            "moneda Revolut) -> tabla CONFIG_CUENTAS en estado PROPUESTA; requiere confirmacion (S20).",
+    "D3-B": "cuenta_participaciones.vigente_desde NOT NULL; V3 no da inicio real. Se usa "
+            "FECHA_INICIO_LEDGER con semantica 'conocida desde el corte', sin afirmar el pasado. PROPUESTA.",
+    "D3-C": "ahorro remunerado y Revolut sin saldo V3: saldo_apertura y fecha_inicio_ledger NULL "
+            "(PENDIENTE_DATO_CORTE, Migration V3 §29). Ni 930/937,83 ni 250 se interpretan como saldo.",
+    "D3-D": "cuenta_capacidades sin fuente V3: no se crean filas (RUN06 creo 21 sin origen).",
+    "DV-10": "RUN06 cuentas contradice DB Schema §22: T. CREDITO como corriente/computa_liquidez; y "
+             "permite_negativo=false con CASH en -30,00. Prevalece el contrato.",
     "DV-9": "RUN06 no materializo clasificaciones_tercero ni tercero_clasificaciones pese a que V3 "
             "tiene 22 ramas + 34 subsegmentos con jerarquia demostrada; RV3 las conserva (R26).",
 }
@@ -333,8 +371,82 @@ def dominio_2(ds: Dataset, fuente: dict, ctx: dict) -> None:
         ds.ledger.append({"regla": "H-P5-06", "origen": f"{cont}/{cp}"})
 
 
+# ------------------------------------------------------------ dominio 3
+def dominio_3(ds: Dataset, fuente: dict, ctx: dict, modo_lab: bool) -> None:
+    if CONFIG_CUENTAS_ESTADO != "CONFIRMADA":
+        if not modo_lab:
+            raise ErrorP5("S20_CONFIG_CUENTAS", "configuracion de cuentas sin dato V3 pendiente de confirmacion")
+        ds.pendientes.append({"S20": "CONFIG_CUENTAS", "estado": "PROPUESTA_NO_CONFIRMADA"})
+    self_id = next(iter(ds.filas["actores_financieros"]))
+
+    def tercero(cont_prov_clave):
+        tid = fu.uuid_v3("public.proveedores", cont_prov_clave, "terceros", "tercero")
+        if tid not in ds.filas["terceros"]:
+            raise ErrorP5("S8_HUERFANO", f"gestor {cont_prov_clave}")
+        return tid
+
+    def crear(cont, clave, nombre, gestor, saldo, activo):
+        tipo, nat, liq, pat, neg, mon = CONFIG_CUENTAS[(cont, clave)]
+        if mon is None:
+            # moneda NOT NULL sin default y no demostrada: nunca se rellena.
+            if not modo_lab:
+                raise ErrorP5("S6_MONEDA_NO_DEMOSTRADA", f"{cont}/{clave}")
+            ds.pendientes.append({"S20": "MONEDA_NO_DEMOSTRADA", "origen": f"{cont}/{clave}",
+                                  "efecto": "cuenta NO creada en modo laboratorio"})
+            return None
+        cid = fu.uuid_v3(cont, clave, "cuentas", "cuenta")
+        ds.add("cuentas", {"id": cid, "owner_user_id": ds.owner, "nombre": nombre, "tercero_gestor_id": gestor,
+                           "tipo": tipo, "naturaleza": nat, "moneda": mon, "saldo_apertura": saldo,
+                           "fecha_inicio_ledger": FECHA_INICIO_LEDGER if saldo is not None else None,
+                           "limite_credito": None, "computa_liquidez": liq, "computa_patrimonio": pat,
+                           "permite_negativo": neg, "enabled": activo, "fecha_cierre": None})
+        ds.ledger.append({"regla": "D3-A", "origen": f"{cont}/{clave}"})
+        return cid
+
+    cont = "public.cuentas_bancarias"
+    for cc, cb in sorted(fuente.get(cont, {}).items()):
+        if (cont, cc) not in CONFIG_CUENTAS:
+            raise ErrorP5("S4_CUENTA_SIN_CONFIG", f"{cont}/{cc}")
+        liq = _celda(cont, "liquidez", cb, ctx)
+        saldo = Decimal(str(liq.valor)) if liq.estado == fu.CONOCIDO else None
+        act = _celda(cont, "activo", cb, ctx)
+        cid = crear(cont, cc, _conocido(cont, "anagrama", cb, ctx),
+                    tercero(_conocido(cont, "banco_id", cb, ctx)) if _conocido(cont, "banco_id", cb, ctx) else None,
+                    saldo, bool(act.valor) if act.estado == fu.CONOCIDO else True)
+        ds.mapear(cont, cc, "cuentas", cid, "cuenta")
+        pct = _celda(cont, "participacion_pct", cb, ctx)
+        if pct.estado == fu.CONOCIDO and Decimal(str(pct.valor)) != Decimal(100):
+            # 0330 exige participacion = 100 en todo instante cubierto (fn_check_participacion_suma).
+            # V3 solo conoce la cuota del tenant: el resto exige identificar al cotitular. Nunca se inventa.
+            if not modo_lab:
+                raise ErrorP5("S20_COTITULAR_NO_IDENTIFICADO", f"{cont}/{cc} participacion={pct.valor}")
+            ds.pendientes.append({"S20": "COTITULAR_NO_IDENTIFICADO", "origen": f"{cont}/{cc}",
+                                  "efecto": "participacion NO creada en modo laboratorio"})
+        elif pct.estado == fu.CONOCIDO:
+            pid = fu.uuid_v3(cont, cc, "cuenta_participaciones", "self")
+            ds.add("cuenta_participaciones", {"id": pid, "cuenta_id": cid, "actor_id": self_id,
+                                              "porcentaje": Decimal(str(pct.valor)),
+                                              "vigente_desde": FECHA_INICIO_LEDGER, "vigente_hasta": None})
+            ds.mapear(cont, cc, "cuenta_participaciones", pid, "self", tipo="DIVIDIDO")
+            ds.ledger.append({"regla": "D3-B", "origen": f"{cont}/{cc}"})
+
+    for (co, cl), (nombre, col_gestor) in sorted(CUENTAS_DERIVADAS.items()):
+        fila = fuente.get(co, {}).get(cl)
+        if fila is None:
+            raise ErrorP5("S8_ORIGEN_AUSENTE", f"{co}/{cl}")
+        gestor = tercero(fila[col_gestor]) if col_gestor else tercero(GESTOR_REVOLUT)
+        cid = crear(co, cl, nombre, gestor, None, True)
+        if cid is None:
+            continue
+        ds.mapear(co, cl, "cuentas", cid, "cuenta_derivada", tipo="DIVIDIDO", confianza="MEDIA",
+                  notas="cuenta ausente del maestro V3 (Migration V3 §14/§29); saldo PENDIENTE_DATO_CORTE")
+        ds.ledger.append({"regla": "D3-C", "origen": f"{co}/{cl}"})
+    ds.ledger.append({"regla": "D3-D", "origen": "cuenta_capacidades"})
+    ds.ledger.append({"regla": "DV-10", "origen": "RUN06.cuentas"})
+
+
 # ------------------------------------------------------------ pipeline
-def transformar(b0: dict, sha_run06: str) -> Dataset:
+def transformar(b0: dict, sha_run06: str, modo_lab: bool = False) -> Dataset:
     fuente = fu.fuente_b0(b0)
     ctx = fu.contexto_de(fuente)
     (cu,) = fuente["public.users"].keys()
@@ -342,6 +454,8 @@ def transformar(b0: dict, sha_run06: str) -> Dataset:
     dominio_12_trazabilidad(ds, b0, sha_run06)
     dominio_1(ds, fuente, ctx)
     dominio_2(ds, fuente, ctx)
+    if "public.cuentas_bancarias" in fuente:
+        dominio_3(ds, fuente, ctx, modo_lab)
     verificar_trazabilidad(ds)
     return ds
 
@@ -408,6 +522,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--run06", required=True, type=Path)
     ap.add_argument("--salida", required=True, type=Path)
+    ap.add_argument("--modo-lab", action="store_true",
+                    help="permite PROPUESTAS no confirmadas; el informe queda marcado y NO vale para gate")
     ap.add_argument("--dsn-import", default=None, help="DSN del perfil RV3_IMPORT (laboratorio)")
     a = ap.parse_args()
     t0 = time.time()
@@ -415,7 +531,7 @@ def main() -> int:
     b0 = fu.cargar_b0(a.run06)
     sha = fu.p1.sha256_fichero(a.run06)
     print(f"[{time.strftime('%H:%M:%S')}] [2/3] Transformacion P5 v{VERSION}", flush=True)
-    ds = transformar(b0, sha)
+    ds = transformar(b0, sha, modo_lab=a.modo_lab)
     h = ds.hash()
     fisico = None
     if a.dsn_import:
@@ -423,7 +539,7 @@ def main() -> int:
         fisico = validar_fisico(ds, a.dsn_import)
     informe = {"version": VERSION, "hash_dataset": h, "recuentos": ds.recuentos(),
                "ledger_reglas": LEDGER_REGLAS, "ledger": ds.ledger, "pendientes": ds.pendientes,
-               "fisico": fisico, "dominios": {"implementados": [1, "2-parcial", "12-base"], "pendientes": ["2-resto"] + list(range(3, 12))},
+               "fisico": fisico, "dominios": {"implementados": [1, "2-parcial", 3, "12-base"], "pendientes": ["2-resto"] + list(range(4, 12)), "modo_lab": a.modo_lab},
                "ts": datetime.now(timezone.utc).isoformat()}
     a.salida.mkdir(parents=True, exist_ok=True)
     p = a.salida / f"rv3_p5_{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"
