@@ -16,6 +16,7 @@
 #   python scripts/mutantes/rv3_p5.py            # todos
 #   python scripts/mutantes/rv3_p5.py M30 M33    # subconjunto
 #
+# Version: 0.16.0 (M147..M148: P5 v0.21.0, ticket compartido; M134 reanclado)
 # Version: 0.15.0 (M144..M146: P5 v0.20.0, compras financiadas OP-15; M136/M138 reanclados)
 # Version: 0.14.0 (M140..M143: P5 v0.20.0, respuestas al bloque 1 del dominio 6)
 # Version: 0.13.0 (M127..M139: P5 v0.19.0, dominio 6 bloque 1)
@@ -385,7 +386,7 @@ MUTANTES = {
              [('    if imp > tot:  # dato V3 incoherente', '    if False:  # dato V3 incoherente')],
              T17 + "::test_parte_personal_superior_al_total_es_pendiente_sin_redondeo"),
     "M134": ("gasto repercutido atribuido al propietario",
-             [('h.efecto("gasto", "GASTO", tot, cat, [(contraparte, tot, "MANUAL")], "COMPLETA")', 'h.efecto("gasto", "GASTO", tot, cat, [(S, tot, "MANUAL")], "COMPLETA")')],
+             [('            atr, estado = [(contraparte, tot, "MANUAL")], "COMPLETA"', '            atr, estado = [(S, tot, "MANUAL")], "COMPLETA"')],
              T17 + "::test_repercusion_100_a_la_contraparte_y_reembolso_sin_ingreso"),
     "M135": ("repercusion sin contraparte aceptada",
              [('if d["id"] not in ATRIBUCION_CONTRAPARTE_100 or contraparte is None:', 'if d["id"] not in ATRIBUCION_CONTRAPARTE_100:')],
@@ -426,6 +427,13 @@ MUTANTES = {
     "M146": ("compra sin participacion asumida 100 % propietario",
              [('        raise PendienteD6("S20", "D6_COMPRA_SIN_PARTICIPACION", f"{co}/{cl}")', '        ps = [{"actor_id": ds.self_id, "porcentaje": Decimal(100)}]')],
              T17 + "::test_compra_sin_participacion_no_presume_propietario"),
+    # ---- 0.16.0: P5 v0.21.0, ticket compartido (D6-Z)
+    "M147": ("ticket compartido atribuido entero al propietario",
+             [('            atr = [(S, tot - importe_derecho, "MANUAL")]', '            atr = [(S, tot, "MANUAL")]')],
+             T17 + "::test_ticket_compartido_sin_actor_parte_propia_y_parcial"),
+    "M148": ("parte ajena sin actor declarada COMPLETA",
+             [('            estado = "COMPLETA" if contraparte else "PARCIAL"', '            estado = "COMPLETA"')],
+             T17 + "::test_ticket_compartido_sin_actor_parte_propia_y_parcial"),
 }
 
 

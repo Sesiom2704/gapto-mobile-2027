@@ -11,7 +11,8 @@
 #              determinismo y carga fisica RV3_IMPORT con ROLLBACK.
 #   0.2.0: atribucion por vivienda decidida (D6-V) y total corregido (D6-W), P5 v0.20.0.
 #   0.3.0: bloque 2, compras financiadas OP-15 (P5 v0.20.0).
-# Versión: 0.3.0
+#   0.4.0: ticket compartido (D6-Z), P5 v0.21.0.
+# Versión: 0.4.0
 # ============================================================
 from __future__ import annotations
 
@@ -369,3 +370,33 @@ def test_fisico_compra_financiada_rollback(monkeypatch):
     monkeypatch.setattr(P5, "PARTICIPACION_FIN_SELF", {(G, "G1"): None})
     res = P5.validar_fisico(_t(), os.environ["GAPTO_RV3_IMPORT_URL"])
     assert res["hechos_financieros"] == 1 and res["hecho_efectos"] == 2 and res["hecho_entidades"] == 1
+
+
+def _compartido(monkeypatch, contraparte):
+    monkeypatch.setattr(P5, "DERECHOS_V3", [{"id": "DER-X", "modo": "TRANSITORIA", "genera": (GC, "CT"),
+                                             "evidencia": [(I, "IB")]}])
+    monkeypatch.setattr(P5, "CANON_TRANSITORIAS", (1, Decimal("11")))
+    monkeypatch.setattr(P5, "CONTRAPARTE_V3_DECIDIDA", {"DER-X": ("public.personas", "PI")} if contraparte else {})
+    monkeypatch.setattr(P5, "ATRIBUCION_COMPARTIDA", {"DER-X"})
+    # la validacion de inquilino del dominio 8B no aplica a un ticket compartido sintetico
+    monkeypatch.setattr(P5, "_validar_inquilino", lambda *a: None)
+    return _t([_c("CT", importe=38.33, importe_total=38.33), _i("IB", tipo_id="TR", importe=11)])
+
+
+def test_ticket_compartido_sin_actor_parte_propia_y_parcial(monkeypatch):
+    ds = _compartido(monkeypatch, contraparte=False)
+    h = _hecho(ds, GC, "CT")
+    ef = {e["tipo_efecto"]: e for e in _efectos(ds, h)}
+    assert (ef["GASTO"]["importe_delta"], ef["GASTO"]["estado_atribucion"]) == (Decimal("38.33"), "PARCIAL")
+    assert [(a["actor_id"], a["importe_atribuido"]) for a in _atribs(ds, ef["GASTO"])] == [(ds.self_id, Decimal("27.33"))]
+    assert ef["DERECHO_COBRO"]["importe_delta"] == Decimal("11")
+    hr = _hecho(ds, I, "IB")
+    assert hr["tipo_hecho_id"] == TH["REEMBOLSO"]
+    assert [r["tipo_relacion"] for r in ds.filas["hecho_relaciones"].values() if r["hecho_origen_id"] == hr["id"]] == ["REEMBOLSO_DE"]
+
+
+def test_ticket_compartido_con_actor_atribucion_completa(monkeypatch):
+    ds = _compartido(monkeypatch, contraparte=True)
+    ef = {e["tipo_efecto"]: e for e in _efectos(ds, _hecho(ds, GC, "CT"))}
+    got = sorted((a["actor_id"] == ds.self_id, a["importe_atribuido"]) for a in _atribs(ds, ef["GASTO"]))
+    assert got == [(False, Decimal("11")), (True, Decimal("27.33"))] and ef["GASTO"]["estado_atribucion"] == "COMPLETA"

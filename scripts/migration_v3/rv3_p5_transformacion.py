@@ -15,6 +15,9 @@
 #                8 financiaciones (PARCIAL v0.5.0: 4 prestamos formales con condiciones
 #                  versionadas, calendario, financiador y garantia; 7 compras financiadas;
 #                  derechos/obligaciones pendientes)
+#   v0.21.0: respuestas 2026-09-21: ticket compartido con Ana (D6-Z: parte propia 27,33, sin actor ficticio);
+#           compras ASICS, seguro Saavedra y vuelo Tailandia 100 % propias (PARTICIPACION_FIN_SELF); vuelo
+#           vinculado al contexto Tailandia 2026; sin aportaciones de pago en el historico (D6-Q confirmada).
 #   v0.20.0: respuestas del propietario (2026-09-21) al bloque 1 del dominio 6: Fuensanta 50 % por
 #           participacion vigente (D6-V), Blasco Ibanez 100 % propio (D6-V), total 15,61 del cotidiano 1FRA14
 #           (D6-W). Nutricionista: se mantiene como compra financiada cancelada, sin gasto (D8-K4 sin cambio).
@@ -95,7 +98,7 @@
 #   RV3_IMPORT (rol login no superusuario -> gapto_migrator -> gapto_owner),
 #   fuerza los diferidos con SET CONSTRAINTS ALL IMMEDIATE y hace ROLLBACK.
 #   No es P6 (P6 hace COMMIT real).
-# Versión: 0.20.0
+# Versión: 0.21.0
 # ============================================================
 from __future__ import annotations
 
@@ -110,7 +113,7 @@ from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
-VERSION = "0.20.0"
+VERSION = "0.21.0"
 TRANSFORMACION = "RV3_P5"
 _AQUI = Path(__file__).resolve().parent
 
@@ -1260,6 +1263,9 @@ PARTICIPACION_FIN_SELF = {
     ("public.gastos", "GASTO-DMNX6U"): None, ("public.gastos", "GASTO-T4I2U4"): None,
     ("public.gastos", "GASTO-Z0I8VL"): None, ("public.gastos", "gasto-6xec66"): None,
     ("public.gastos", "gasto-as0zyr"): None,
+    # respuesta 2 del propietario (2026-09-21) a las compras decididas sin participacion
+    ("public.gastos", "gasto-bsq0n8"): None, ("public.gastos", "gasto-ep2gra"): None,
+    ("public.gastos", "gasto-x2t6dm"): None,
 }
 # Propuesta fecha_inicio ACEPTADA por el propietario (respuesta 4, 2026-09-21).
 PARTICIPACION_FIN_VIGENCIA_ESTADO = "CONFIRMADA"
@@ -2491,14 +2497,19 @@ GASTO_CORREGIDO_V3 = {("public.ingresos", "INGRESO-SIJREF")}  # Migration V3 §2
 # Respuesta 3 (2026-09-21): la luz de Allende la soporta 100 % el inquilino (contraparte del derecho).
 ATRIBUCION_CONTRAPARTE_100 = {f"DER-LUZ-0{n}" for n in range(3, 8)}
 # Sin decision: gasto adelantado parcialmente reembolsado (Canela, tarta Ana) -> pendiente de fila.
-ATRIBUCION_DERECHO_PENDIENTE = {"DER-CANELA", "DER-ANA"}
+ATRIBUCION_DERECHO_PENDIENTE = {"DER-CANELA"}
+# Respuesta 1 (2026-09-21): ticket pagado entero y compartido; la parte del otro participante es el importe del
+# derecho. Contraparte sin actor -> atribucion PARCIAL (no se crea actor ficticio); con actor -> COMPLETA.
+ATRIBUCION_COMPARTIDA = {"DER-ANA"}
 # Respuestas del propietario 2026-09-21 (P5 v0.20.0), por vivienda V3:
 #   Fuensanta: todo lo relacionado se reparte 50 % (participacion vigente de la propiedad) -> PARTICIPACION;
 #   Blasco Ibanez: gasto 100 % propio (contribucion a la vivienda habitual sin participacion) -> SELF_100.
 VIVIENDA_ATRIBUCION_DECIDIDA = {"VIVIENDA-42E8QW": "PARTICIPACION", "VIVIENDA-0B1D7T": "SELF_100"}
 # Respuesta 4: el total real del ticket es 15,61 (V3 guardo 15,605); el literal V3 se conserva en origen.
 IMPORTE_TOTAL_CORREGIDO = {("public.gastos_cotidianos", "GASTO_COTIDIANO-1FRA14"): Decimal("15.61")}
-COMPRAS_FINANCIADAS_D6 = True  # bloque 2 del dominio 6 (OP-15)
+COMPRAS_FINANCIADAS_D6 = True
+# Respuesta 2 (2026-09-21): el vuelo de Tailandia tambien pertenece al contexto Tailandia 2026.
+CONTEXTO_ADICIONAL = {("public.gastos", "gasto-x2t6dm"): "CTX-TAILANDIA-2026"}  # bloque 2 del dominio 6 (OP-15)
 # Prestamo/adelanto puro sin gasto propio (Migration V3, F03-01 punto 2: Tania-SHEIN).
 GENERACION_PURA = {"DER-SHEIN"}
 
@@ -2521,8 +2532,8 @@ LEDGER_REGLAS.update({
     "D6-M": "moneda EUR (V3 monodivisa).",
     "D6-P": "presupuestable = presupuestable_default de la categoria; sin categoria GASTO si / INGRESO no; "
             "transferencias, reembolsos y generaciones de derecho false.",
-    "D6-Q": "sin aportaciones de pago ni efecto_cuentas en este bloque: el cuenta_id V3 queda en origen (pregunta "
-            "abierta al propietario sobre financiacion real).",
+    "D6-Q": "sin aportaciones de pago ni efecto_cuentas en el historico (decidido por el propietario 2026-09-21): el "
+            "cuenta_id V3 no prueba el cargo bancario (Migration V3 §18) y queda en origen; los saldos abren en el corte.",
     "D6-R": "tercero: proveedor V3 -> hecho_terceros VENDEDOR principal.",
     "D6-S": "vivienda V3 -> hecho_entidades AFECTA_A (nivel hecho); contexto decidido -> RELACIONADO_CON.",
     "D6-T": "traspaso real sin movimiento V3 (opcion A del propietario): hecho TRANSFERENCIA sin efectos ni "
@@ -2532,6 +2543,9 @@ LEDGER_REGLAS.update({
             "entidad_participaciones vigentes en fecha_hecho (criterio PARTICIPACION_ENTIDAD, suma exacta); SELF_100 -> "
             "100 % propietario aunque no participe en la vivienda. Sin decision -> pendiente de fila.",
     "D6-W": "total corregido por el propietario (clase C): se usa el importe declarado; el literal V3 queda en origen.",
+    "D6-Z": "ticket compartido decidido por el propietario: GASTO por el total; parte propia = total - derecho; la "
+            "parte del otro participante solo se atribuye si tiene actor (si no, PARCIAL); DERECHO_COBRO por esa parte "
+            "y su cobro como REEMBOLSO. El importe personal V3 (que no descontaba el Bizum) queda en origen.",
     "D6-X": "compra financiada (OP-15): hecho COMPRA_FINANCIADA con GASTO por el total (nace con la compra) y DEUDA por "
             "el principal que desembolsa el financiador (= capital_original_contratado, comprobado contra cuota x numero "
             "de cuotas), ambos atribuidos por la participacion vigente de la financiacion y la DEUDA vinculada a ella. "
@@ -2666,7 +2680,8 @@ def dominio_6_hechos(ds: Dataset, fuente: dict, ctx: dict) -> dict:
                                  "fecha_fin": None, "notas": None})
             ds.mapear(CONT_DECISIONES, clave, "entidades", cid, "contexto", confianza="VALIDADA")
             ds.mapear(CONT_DECISIONES, clave, "contextos", cid, "contexto", tipo="DIVIDIDO", confianza="VALIDADA")
-            for r in c["registros"]:
+            extra = [f"{k[0]}/{k[1]}" for k, v in sorted(CONTEXTO_ADICIONAL.items()) if v == c["id"]]
+            for r in list(c["registros"]) + extra:
                 o = tuple(r.split("/", 1))
                 if o[1] not in fuente.get(o[0], {}):
                     raise ErrorP5("S8_CONTEXTO_SIN_ORIGEN", r)
@@ -2700,6 +2715,8 @@ def dominio_6_hechos(ds: Dataset, fuente: dict, ctx: dict) -> dict:
                 continue
             try:
                 h = _compra_financiada(ds, fuente, ctx, co, cl, fid, fin)
+                for cid in contexto_de.get((co, cl), []):
+                    h.entidad(cid, "RELACIONADO_CON", rol="contexto")
             except PendienteD6 as p:
                 ds.pendientes.append({"dominio": 6, "origen": f"{co}/{cl}", "clase": p.clase, "codigo": p.codigo,
                                       "detalle": p.detalle})
@@ -2863,13 +2880,21 @@ def _hecho_v3(ds, fuente, ctx, co, cl, derecho_de, contexto_de, ids, filas_d6=fr
             ef = h.efecto("derecho_cobro", "DERECHO_COBRO", tot, None, [(S, tot, "MANUAL")], "COMPLETA")
             h.entidad(did, "AFECTA_A", ef, rol="derecho")
             return "GENERACION_DERECHO_OBLIGACION", _base(h)
-        if d["id"] not in ATRIBUCION_CONTRAPARTE_100 or contraparte is None:
-            raise PendienteD6("S20", "D6_ATRIBUCION_GASTO_REEMBOLSADO", d["id"])
         importe_derecho = Decimal(str(sub["importe_original_documentado"]))
-        if importe_derecho != tot:
-            raise ErrorP5("S9_REPERCUSION_NO_TOTAL", d["id"])
+        if d["id"] in ATRIBUCION_COMPARTIDA:
+            if not 0 < importe_derecho < tot:
+                raise ErrorP5("S9_PARTE_COMPARTIDA_INCOHERENTE", d["id"])
+            atr = [(S, tot - importe_derecho, "MANUAL")] + ([(contraparte, importe_derecho, "MANUAL")] if contraparte else [])
+            estado = "COMPLETA" if contraparte else "PARCIAL"
+            ds.ledger.append({"regla": "D6-Z", "origen": f"{co}/{cl}", "derecho": d["id"]})
+        else:
+            if d["id"] not in ATRIBUCION_CONTRAPARTE_100 or contraparte is None:
+                raise PendienteD6("S20", "D6_ATRIBUCION_GASTO_REEMBOLSADO", d["id"])
+            if importe_derecho != tot:
+                raise ErrorP5("S9_REPERCUSION_NO_TOTAL", d["id"])
+            atr, estado = [(contraparte, tot, "MANUAL")], "COMPLETA"
         h = _H(ds, co, cl, "GASTO", fecha, nombre, tot, _presup(ds, cat, "GASTO"), notas)
-        h.efecto("gasto", "GASTO", tot, cat, [(contraparte, tot, "MANUAL")], "COMPLETA")
+        h.efecto("gasto", "GASTO", tot, cat, atr, estado)
         ef = h.efecto("derecho_cobro", "DERECHO_COBRO", importe_derecho, None,
                       [(S, importe_derecho, "MANUAL")], "COMPLETA")
         h.entidad(did, "AFECTA_A", ef, rol="derecho")

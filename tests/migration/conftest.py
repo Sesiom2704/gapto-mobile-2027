@@ -10,6 +10,7 @@
 #              catalogo declara CATALOGOS_V3_REALES = True y aporta su corpus.
 #              Asi los tests historicos verifican su baseline sin bloquear los
 #              bloques posteriores (Working Method).
+#   0.8.0: aisla ATRIBUCION_COMPARTIDA y CONTEXTO_ADICIONAL (P5 v0.21.0).
 #   0.7.0: aisla VIVIENDA_ATRIBUCION_DECIDIDA e IMPORTE_TOTAL_CORREGIDO (P5 v0.20.0).
 #   0.6.0: aisla el dominio 6 (DOMINIO_6_ACTIVO salvo modulos con DOMINIO_6 = True) y sus
 #          catalogos anclados a claves V3 reales (P5 v0.19.0).
@@ -17,7 +18,7 @@
 #   0.4.0: aisla fusiones, inicio/fin y compras financiadas decididas (P5 v0.17.0).
 #   0.3.0: aisla tambien los catalogos del dominio 5 (P5 v0.16.0).
 #   0.2.0: aisla tambien el arbol de categorias canonico (CATEGORIAS_ACTIVAS, P5 v0.13.0).
-# Versión: 0.7.0
+# Versión: 0.8.0
 # ============================================================
 from __future__ import annotations
 
@@ -36,7 +37,9 @@ CATALOGOS = {"DERECHOS_V3": [], "CATEGORIAS_ACTIVAS": False,
              "TRANSFERENCIA_LEGACY_DECIDIDA": set(), "DEVOLUCION_DECIDIDA": {}, "GASTO_CORREGIDO_V3": set(),
              "ATRIBUCION_CONTRAPARTE_100": set(), "ATRIBUCION_DERECHO_PENDIENTE": set(), "GENERACION_PURA": set(),
              # 0.7.0: respuestas al bloque 1 del dominio 6 (P5 v0.20.0)
-             "VIVIENDA_ATRIBUCION_DECIDIDA": {}, "IMPORTE_TOTAL_CORREGIDO": {}}
+             "VIVIENDA_ATRIBUCION_DECIDIDA": {}, "IMPORTE_TOTAL_CORREGIDO": {},
+             # 0.8.0: ticket compartido y contexto adicional (P5 v0.21.0)
+             "ATRIBUCION_COMPARTIDA": set(), "CONTEXTO_ADICIONAL": {}}
 
 
 @pytest.fixture(autouse=True)
