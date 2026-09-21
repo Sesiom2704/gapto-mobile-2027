@@ -16,6 +16,7 @@
 #   python scripts/mutantes/rv3_p5.py            # todos
 #   python scripts/mutantes/rv3_p5.py M30 M33    # subconjunto
 #
+# Version: 0.18.0 (M155..M159: P5 v0.23.0, dominio 11 cierres legacy)
 # Version: 0.17.0 (M149..M154: P5 v0.22.0, dominio 7 tesoreria legacy)
 # Version: 0.16.0 (M147..M148: P5 v0.21.0, ticket compartido; M134 reanclado)
 # Version: 0.15.0 (M144..M146: P5 v0.20.0, compras financiadas OP-15; M136/M138 reanclados)
@@ -55,6 +56,7 @@ T15 = "tests/migration/test_rv3_015_p5_capacidades_direcciones.py"
 T16 = "tests/migration/test_rv3_016_p5_dominio5.py"
 T17 = "tests/migration/test_rv3_017_p5_dominio6.py"
 T18 = "tests/migration/test_rv3_018_p5_dominio7.py"
+T19 = "tests/migration/test_rv3_019_p5_dominio11.py"
 
 MUTANTES = {
     "M30": ("gate de la fuente suplementaria siempre abierto",
@@ -457,6 +459,23 @@ MUTANTES = {
     "M154": ("ajuste acompanado de hecho financiero",
              [('            mov("ajuste", corig, delta, "AJUSTE_SALDO")\n', '            mov("ajuste", corig, delta, "AJUSTE_SALDO")\n            _H(ds, co, cl, "TRANSFERENCIA", fecha, None, abs(delta), False, desc).confirmar()\n')],
              T18 + "::test_ajuste_es_un_unico_movimiento_con_signo_del_saldo_nunca_autotransferencia"),
+    # ---- 0.18.0: P5 v0.23.0, dominio 11 (cierres legacy)
+    "M155": ("campos previos al rediseno materializados como cero",
+             [('            if (anio, mes) < REDISENO_CIERRES and campo in CAMPOS_REDISENO:\n', '            if False:\n')],
+             T19 + "::test_campos_previos_al_rediseno_no_se_convierten_en_cero"),
+    "M156": ("metrica desconocida convertida en cero",
+             [('    if c.estado != fu.CONOCIDO or c.valor is None:\n        return None\n',
+               '    if c.estado != fu.CONOCIDO or c.valor is None:\n        return {"valor_numeric": Decimal(0), "valor_text": None}\n')],
+             T19 + "::test_desconocido_nunca_es_cero"),
+    "M157": ("metricas legacy habilitadas para cierres nuevos",
+             [('                                   "enabled": False}, natural=(codigo,))', '                                   "enabled": True}, natural=(codigo,))')],
+             T19 + "::test_metricas_legacy_deshabilitadas_para_cierres_nuevos"),
+    "M158": ("contenedor presupuestario sin pendiente",
+             [('        if k in fuente.get("public.gastos", {}) and k not in CONTENEDORES_PRESUPUESTO_DECISION:\n', '        if False:\n')],
+             T19 + "::test_contenedor_presupuestario_queda_pendiente"),
+    "M159": ("detalle sin clave de desglose",
+             [('                                       "clave_desglose": f"{tipo}/{seg}", "dimensiones_snapshot": None, **v})', '                                       "clave_desglose": None, "dimensiones_snapshot": None, **v})')],
+             T19 + "::test_detalle_con_clave_de_desglose_y_valores_v3"),
 }
 
 

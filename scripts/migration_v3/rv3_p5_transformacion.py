@@ -15,6 +15,9 @@
 #                8 financiaciones (PARCIAL v0.5.0: 4 prestamos formales con condiciones
 #                  versionadas, calendario, financiador y garantia; 7 compras financiadas;
 #                  derechos/obligaciones pendientes)
+#   v0.23.0: dominio 11 (cierres): 13 cierres V3 -> snapshots IMPORTADO_LEGACY/CAJA/V3_SNAPSHOT; cabecera y
+#           detalle como cierre_metricas con bundle LEGACY_V3_* deshabilitado (DB Schema §61/§65); sin snapshots
+#           de saldos/posiciones/presupuesto que V3 no conserva. Presupuestos G-V3-03 pendientes (Migration V3 §4).
 #   v0.22.0: dominio 7 (tesoreria legacy): 141 movimientos V3 -> 83 transferencias (hecho neutro + 166
 #           movimientos OPERACION + transferencias + 166 conciliaciones, F04-D001) y 58 AJUSTE_SALDO (DV-7) = 224;
 #           todos anteriores a fecha_inicio_ledger: no computan en el saldo de apertura (DB Schema §40, D7-D).
@@ -101,7 +104,7 @@
 #   RV3_IMPORT (rol login no superusuario -> gapto_migrator -> gapto_owner),
 #   fuerza los diferidos con SET CONSTRAINTS ALL IMMEDIATE y hace ROLLBACK.
 #   No es P6 (P6 hace COMMIT real).
-# Versión: 0.22.0
+# Versión: 0.23.0
 # ============================================================
 from __future__ import annotations
 
@@ -116,7 +119,7 @@ from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
-VERSION = "0.22.0"
+VERSION = "0.23.0"
 TRANSFORMACION = "RV3_P5"
 _AQUI = Path(__file__).resolve().parent
 
@@ -145,6 +148,7 @@ ORDEN_TABLAS = [
     "servicios", "contrato_servicios", "contextos",
     "hechos_financieros", "hecho_efectos", "efecto_atribuciones", "hecho_terceros", "hecho_entidades",
     "hecho_relaciones", "movimientos_tesoreria", "transferencias", "hecho_movimientos_tesoreria",
+    "metricas_definicion", "cierres_mensuales", "cierre_metricas",
     "fuentes_importacion", "registros_origen_importacion", "mapeos_importacion",
 ]
 
@@ -379,6 +383,7 @@ class Dataset:
     reglas: dict = field(default_factory=dict)
     hechos: dict = field(default_factory=dict)
     tesoreria: dict = field(default_factory=dict)
+    cierres: dict = field(default_factory=dict)
 
     def add(self, tabla: str, fila: dict, natural: tuple | None = None) -> str:
         fid = fila[PK.get(tabla, "id")]
@@ -3036,6 +3041,134 @@ def dominio_7_tesoreria(ds: Dataset, fuente: dict, ctx: dict) -> dict:
     return {"transferencias": n_tr, "ajustes": n_aj, "movimientos": 2 * n_tr + n_aj}
 
 
+# ------------------------------------------------------------ dominio 11 (cierres legacy y presupuestos)
+# 13 cierres V3 -> snapshots IMPORTADO_LEGACY / CAJA / V3_SNAPSHOT sin recalcular (INV-RV3-08, D-MIG-015, DB Schema
+# §61). Cabecera y detalle se conservan como cierre_metricas con un bundle LEGACY_V3_* de metricas_definicion
+# (DB Schema: "Legacy V3 puede aportar bundles especificos LEGACY_V3_*"), deshabilitado para cierres nuevos.
+DOMINIO_11_ACTIVO = True
+CIERRES_V3, DETALLE_V3 = "public.cierre_mensual", "public.cierre_mensual_detalle"
+CONT_LEGACY_METRICAS = "LEGACY_V3"
+CABECERA_NO_METRICA = {"anio", "mes", "id", "user_id", "fecha_cierre", "criterio"}
+DETALLE_METRICAS = {"esperado": "MONEDA", "real": "MONEDA", "desviacion": "MONEDA", "cumplimiento_pct": "NUMERO",
+                    "incluye_kpi": "TEXTO"}
+# Migration V3 §11: el rediseno de diciembre 2025 introduce liquidez, contadores y desglose; antes esos campos
+# valen 0 por inexistencia del modulo, no por valor real (INV-RV3-04).
+REDISENO_CIERRES = (2025, 12)
+CAMPOS_REDISENO = {"liquidez_total", "n_cotidianos", "n_recurrentes_gas", "n_recurrentes_ing", "n_unicos_gas",
+                   "n_unicos_ing", "gastos_cotidianos_esperados", "gastos_cotidianos_reales",
+                   "gastos_gestionables_esperados", "gastos_gestionables_reales", "desv_cotidianos",
+                   "desv_gestionables"}
+# G-V3-03: semantica importe/total no fiable (Migration V3 §4); presupuesto pendiente de decision del propietario.
+CONTENEDORES_PRESUPUESTO_DECISION = {}  # clave V3 -> {"importe_objetivo": Decimal, "periodo": (desde, hasta)}
+
+LEDGER_REGLAS.update({
+    "D11-A": "cierre V3 -> cierres_mensuales: periodo = mes natural (anio, mes); cerrado_at = fecha_cierre V3 (timestamp "
+             "sin zona de la BD V3, interpretado en UTC como la baseline); criterio V3 literal; IMPORTADO_LEGACY; "
+             "metodologia V3_SNAPSHOT; CERRADO version 1.",
+    "D11-B": "cada campo numerico de la cabecera V3 -> cierre_metricas con metrica LEGACY_V3_<CAMPO> (valor V3 tal cual, sin "
+             "recalculo; las discrepancias cabecera/detalle se conservan). Desconocido -> sin fila, nunca cero.",
+    "D11-G": "cierres anteriores al rediseno de diciembre 2025: los campos que aun no existian (liquidez, contadores y "
+             "desglose cotidianos/gestionables) valen 0 por ausencia del modulo -> sin metrica (desconocido, INV-RV3-04); "
+             "literal en origen. Un valor no nulo en esos campos antes del rediseno contradice el canon -> S9.",
+    "D11-C": "detalle V3 -> cierre_metricas del cierre padre con metricas LEGACY_V3_DETALLE_* y clave_desglose = "
+             "tipo_detalle/segmento_id; incluye_kpi como texto.",
+    "D11-D": "metricas LEGACY_V3_* se crean deshabilitadas (enabled=false: no disponibles para cierres 2027) y se trazan a "
+             "cada cierre V3 que las usa.",
+    "D11-E": "sin cierre_saldos_cuenta / cierre_presupuesto_lineas / cierre_posiciones_entidad: V3 no conserva esos "
+             "snapshots y no se reconstruyen desde el estado posterior (INV-RV3-08).",
+    "D11-F": "contenedores G-V3-03: sin presupuesto mientras el propietario no fije objetivo y periodo (pendiente).",
+})
+
+
+def _metrica_legacy(ds: Dataset, codigo: str, unidad: str) -> str:
+    mid = fu.uuid_v3(CONT_LEGACY_METRICAS, codigo, "metricas_definicion", "metrica")
+    ds.add("metricas_definicion", {"id": mid, "codigo": codigo, "nombre": f"Legacy V3: {codigo[10:].lower()}",
+                                   "tipo_valor": "TEXT" if unidad == "TEXTO" else "NUMERIC", "unidad": unidad,
+                                   "enabled": False}, natural=(codigo,))
+    return mid
+
+
+def _valor_metrica(c, unidad):
+    if c.estado != fu.CONOCIDO or c.valor is None:
+        return None
+    if unidad == "TEXTO":
+        return {"valor_numeric": None, "valor_text": str(c.valor).lower() if isinstance(c.valor, bool) else str(c.valor)}
+    return {"valor_numeric": Decimal(str(c.valor)), "valor_text": None}
+
+
+def dominio_11_cierres(ds: Dataset, fuente: dict, ctx: dict) -> dict:
+    import calendar
+    ids, n_met = {}, 0
+    for cl in sorted(fuente.get(CIERRES_V3, {})):
+        co, f = CIERRES_V3, fuente[CIERRES_V3][cl]
+        anio, mes = _int(_celda(co, "anio", f, ctx)), _int(_celda(co, "mes", f, ctx))
+        fc, crit = _celda(co, "fecha_cierre", f, ctx), _texto(_celda(co, "criterio", f, ctx))
+        if anio is None or mes is None or fc.estado != fu.CONOCIDO or crit is None:
+            raise ErrorP5("S6_CIERRE_INCOMPLETO", f"{co}/{cl}")
+        cid = fu.uuid_v3(co, cl, "cierres_mensuales", "cierre")
+        ds.add("cierres_mensuales", {
+            "id": cid, "owner_user_id": ds.owner, "periodo_desde": f"{anio:04d}-{mes:02d}-01",
+            "periodo_hasta": f"{anio:04d}-{mes:02d}-{calendar.monthrange(anio, mes)[1]:02d}",
+            "cerrado_at": str(fc.valor) if "+" in str(fc.valor)[10:] else f"{fc.valor}+00:00",
+            "criterio": crit, "origen_cierre": "IMPORTADO_LEGACY", "metodologia_version": "V3_SNAPSHOT",
+            "estado": "CERRADO", "version_cierre": 1, "reemplaza_cierre_id": None, "reabierto_at": None,
+            "motivo_reapertura": None, "notas": None}, natural=(ds.owner, anio, mes))
+        ds.mapear(co, cl, "cierres_mensuales", cid, "cierre")
+        ids[cl] = (cid, anio, mes)
+        for campo in sorted(k for k in f if k not in CABECERA_NO_METRICA):
+            unidad = "NUMERO" if campo.startswith("n_") else "MONEDA"
+            v = _valor_metrica(_celda(co, campo, f, ctx), unidad)
+            if v is None:
+                continue
+            if (anio, mes) < REDISENO_CIERRES and campo in CAMPOS_REDISENO:
+                if v["valor_numeric"] != 0:
+                    raise ErrorP5("S9_CAMPO_PREVIO_AL_REDISENO", f"{co}/{cl} {campo}")
+                ds.ledger.append({"regla": "D11-G", "origen": f"{co}/{cl}", "campo": campo})
+                continue
+            codigo = f"LEGACY_V3_{campo.upper()}"
+            met = _metrica_legacy(ds, codigo, unidad)
+            ds.mapear(co, cl, "metricas_definicion", met, f"metrica.{codigo}", tipo="VINCULADO")
+            rid = fu.uuid_v3(co, cl, "cierre_metricas", codigo)
+            ds.add("cierre_metricas", {"id": rid, "cierre_id": cid, "metrica_id": met, "clave_desglose": None,
+                                       "dimensiones_snapshot": None, **v})
+            ds.mapear(co, cl, "cierre_metricas", rid, codigo, tipo="DIVIDIDO")
+            n_met += 1
+    n_det = 0
+    for cl in sorted(fuente.get(DETALLE_V3, {})):
+        co, f = DETALLE_V3, fuente[DETALLE_V3][cl]
+        padre = _texto(_celda(co, "cierre_id", f, ctx))
+        if padre not in ids:
+            raise ErrorP5("S8_DETALLE_SIN_CIERRE", f"{co}/{cl}")
+        cid, anio, mes = ids[padre]
+        if (_int(_celda(co, "anio", f, ctx)), _int(_celda(co, "mes", f, ctx))) != (anio, mes):
+            raise ErrorP5("S9_DETALLE_PERIODO_DISTINTO", f"{co}/{cl}")
+        tipo, seg = _texto(_celda(co, "tipo_detalle", f, ctx)), _texto(_celda(co, "segmento_id", f, ctx))
+        if not tipo or not seg:
+            raise ErrorP5("S6_DETALLE_SIN_CLAVE", f"{co}/{cl}")
+        for campo, unidad in sorted(DETALLE_METRICAS.items()):
+            v = _valor_metrica(_celda(co, campo, f, ctx), unidad)
+            if v is None:
+                continue
+            codigo = f"LEGACY_V3_DETALLE_{campo.upper()}"
+            met = _metrica_legacy(ds, codigo, unidad)
+            ds.mapear(co, cl, "metricas_definicion", met, f"metrica.{codigo}", tipo="VINCULADO")
+            rid = fu.uuid_v3(co, cl, "cierre_metricas", codigo)
+            ds.add("cierre_metricas", {"id": rid, "cierre_id": cid, "metrica_id": met,
+                                       "clave_desglose": f"{tipo}/{seg}", "dimensiones_snapshot": None, **v})
+            ds.mapear(co, cl, "cierre_metricas", rid, codigo, tipo="DIVIDIDO")
+            n_det += 1
+    pend = []
+    for k in sorted(CONTENEDORES_PRESUPUESTARIOS):
+        if k in fuente.get("public.gastos", {}) and k not in CONTENEDORES_PRESUPUESTO_DECISION:
+            ds.pendientes.append({"dominio": 11, "origen": f"public.gastos/{k}", "clase": "S20",
+                                  "codigo": "D11_PRESUPUESTO_SEMANTICA_NO_FIABLE", "detalle": "Migration V3 §4"})
+            pend.append(k)
+    return {"cierres": len(ids), "metricas_cabecera": n_met, "metricas_detalle": n_det,
+            "definiciones_legacy": sum(1 for m in ds.filas["metricas_definicion"].values()
+                                       if m["codigo"].startswith("LEGACY_V3_")),
+            "presupuestos_pendientes": pend}
+
+
 def transformar(b0: dict, sha_run06: str, modo_lab: bool = False,
                 decisiones: "Decisiones | None" = None) -> Dataset:
     fuente = fu.fuente_b0(b0)
@@ -3063,6 +3196,8 @@ def transformar(b0: dict, sha_run06: str, modo_lab: bool = False,
             ds.hechos = dominio_6_hechos(ds, fuente, ctx)
             if DOMINIO_7_ACTIVO and MOVIMIENTOS_V3 in fuente:
                 ds.tesoreria = dominio_7_tesoreria(ds, fuente, ctx)
+    if DOMINIO_11_ACTIVO and CIERRES_V3 in fuente:
+        ds.cierres = dominio_11_cierres(ds, fuente, ctx)
     verificar_trazabilidad(ds)
     return ds
 
@@ -3150,7 +3285,7 @@ def main() -> int:
     informe = {"version": VERSION, "hash_dataset": h, "recuentos": ds.recuentos(),
                "ledger_reglas": LEDGER_REGLAS, "ledger": ds.ledger, "pendientes": ds.pendientes,
                "preguntas": ds.preguntas, "clasificacion": ds.clasificacion, "decisiones_sha256": dec.sha256 if dec else None,
-               "fisico": fisico, "reglas": ds.reglas, "hechos": ds.hechos, "tesoreria": ds.tesoreria, "dominios": {"implementados": [1, "2-parcial", 3, "4-propiedad", 5, "6", 7, "8-financiaciones", "8B-derechos", "9-inversiones", "10-contratos-valoraciones", "12-base"], "pendientes": ["2-resto", "4-resto", 11], "modo_lab": a.modo_lab},
+               "fisico": fisico, "reglas": ds.reglas, "hechos": ds.hechos, "tesoreria": ds.tesoreria, "cierres": ds.cierres, "dominios": {"implementados": [1, "2-parcial", 3, "4-propiedad", 5, "6", 7, "11-cierres", "8-financiaciones", "8B-derechos", "9-inversiones", "10-contratos-valoraciones", "12-base"], "pendientes": ["2-resto", "4-resto", "11-presupuestos"], "modo_lab": a.modo_lab},
                "ts": datetime.now(timezone.utc).isoformat()}
     a.salida.mkdir(parents=True, exist_ok=True)
     p = a.salida / f"rv3_p5_{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"
