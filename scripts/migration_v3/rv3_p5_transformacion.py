@@ -15,6 +15,10 @@
 #                8 financiaciones (PARCIAL v0.5.0: 4 prestamos formales con condiciones
 #                  versionadas, calendario, financiador y garantia; 7 compras financiadas;
 #                  derechos/obligaciones pendientes)
+#   v0.14.0: clasificacion validada por el propietario (opcion 1, 2026-09-21): arbol
+#           CONFIRMADO; tabla tipo V3 -> categoria (52) en codigo; clasificacion por
+#           registro de los tipos heterogeneos en la fuente suplementaria (fichero
+#           externo); resolucion completa de los registros operativos comprobada.
 #   v0.13.0: D2-E resuelta por opcion A (arquitectura, 2026-09-21): arbol de categorias
 #           canonico de Migration V3 v0.40 §15.2 como fuente suplementaria (un registro
 #           origen por nodo); ambito y presupuestable_default PROPUESTOS hasta la
@@ -60,7 +64,7 @@
 #   RV3_IMPORT (rol login no superusuario -> gapto_migrator -> gapto_owner),
 #   fuerza los diferidos con SET CONSTRAINTS ALL IMMEDIATE y hace ROLLBACK.
 #   No es P6 (P6 hace COMMIT real).
-# Versión: 0.13.0
+# Versión: 0.14.0
 # ============================================================
 from __future__ import annotations
 
@@ -75,7 +79,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
-VERSION = "0.13.0"
+VERSION = "0.14.0"
 TRANSFORMACION = "RV3_P5"
 _AQUI = Path(__file__).resolve().parent
 
@@ -288,6 +292,10 @@ LEDGER_REGLAS = {
              "fuente suplementaria ARBOL_CATEGORIAS_MV3 con SHA-256 del bloque; nombre literal del documento; orden = "
              "posicion entre hermanos; codigo NULL; ambito INGRESO para las raices de ingreso del arbol y GASTO "
              "para el resto; presupuestable_default PROPUESTO (GASTO si, INGRESO no) hasta validacion (S20).",
+    "D2-E2": "clasificacion de cada registro operativo: decision por registro de la fuente suplementaria "
+              "(tipos heterogeneos; hoja REGISTROS aceptada en bloque) > tabla CATEGORIA_POR_TIPO_V3 (hoja TIPOS "
+              "validada) ; FUERA = naturaleza distinta de categoria (transferencia, aportacion, cuota, derecho); "
+              "desglose exacto solo cuando el origen canonico lo da (Migration V3 §15.2).",
     "D8-M": "total de compra sustituido por el validado por el propietario (Migration V3 §14/RUN01); "
             "literal V3 conservado en origen.",
 }
@@ -311,6 +319,7 @@ class Dataset:
     modo_lab: bool = False
     self_id: str | None = None
     categorias: dict = field(default_factory=dict)
+    clasificacion: dict = field(default_factory=dict)
     decisiones: "Decisiones | None" = None
     preguntas: list = field(default_factory=list)
 
@@ -449,7 +458,8 @@ def dominio_12_decisiones(ds: Dataset) -> None:
     items = [(f"persona/{k}", {"persona": k, **v}) for k, v in sorted(dec.doc["personas"].items())] + \
             [(f"participacion/{it['id']}", it) for it in sorted(dec.doc["participaciones"], key=lambda x: x["id"])] + \
             [(f"contraparte/{c['id']}", c) for c in sorted(dec.doc.get("contrapartes", []), key=lambda x: x["id"])] + \
-            [(f"financiador/{c['id']}", c) for c in sorted(dec.doc.get("financiadores", []), key=lambda x: x["id"])]
+            [(f"financiador/{c['id']}", c) for c in sorted(dec.doc.get("financiadores", []), key=lambda x: x["id"])] + \
+            ([(f"clasificacion/{dec.doc['clasificacion']['id']}", dec.doc["clasificacion"])] if dec.doc.get("clasificacion") else [])
     for n, (clave, d) in enumerate(items, 1):
         t = json.dumps(d, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
         ds.add("registros_origen_importacion", {
@@ -623,8 +633,121 @@ RENDIMIENTOS FINANCIEROS
 └── Intereses de cuentas e inversiones
 VENTA DE BIENES"""
 RAICES_INGRESO = {"INGRESOS LABORALES", "PRESTACIONES", "ALQUILERES", "RENDIMIENTOS FINANCIEROS", "VENTA DE BIENES"}
-CATEGORIAS_ESTADO = "PROPUESTA"
-CATEGORIAS_ACTIVAS = True  # ambito/presupuestable pendientes de validacion del propietario
+CATEGORIAS_ESTADO = "CONFIRMADA"  # hoja ARBOL_MV3 aceptada en bloque (opcion 1, 2026-09-21)
+CATEGORIAS_ACTIVAS = True
+# Hoja TIPOS validada (2026-09-21). Valor: ruta canonica normalizada | POR_REGISTRO | FUERA: <naturaleza> | SIN_USO.
+CATEGORIA_POR_TIPO_V3 = {
+    'ACT-TIPOGASTO-2X9H1Q': 'POR_REGISTRO',
+    'AEA-TIPOGASTO-J06VRO': 'ADMINISTRACION, IMPUESTOS Y TASAS > IRPF / RENTA',
+    'AHO-TIPOGASTO-470C59B8': 'FUERA: transferencia entre cuentas propias',
+    'BIZ-TIPOINGRESO-6UJSD0': 'POR_REGISTRO',
+    'CAP-TIPOGASTO-334BFEC7': 'POR_REGISTRO',
+    'COM-TIPOGASTO-311A33BD': 'SUPERMERCADOS',
+    'COM-TIPOGASTO-689645A0': 'VIVIENDA Y HOGAR > COMUNIDAD > CUOTA DE COMUNIDAD',
+    'DER-TIPOGASTO-580F0N': 'VIVIENDA Y HOGAR > COMUNIDAD > DERRAMAS',
+    'DES-TIPO_INGRESO-1JNN5I': 'PRESTACIONES > DESEMPLEO',
+    'DEV-TIPO_INGRESO-9MD2NR': 'FUERA: devolucion de capital (reduce derecho)',
+    'ELE-TIPOGASTO-47CC77E5': 'VIVIENDA Y HOGAR > SUMINISTROS > ELECTRICIDAD',
+    'EXT-TIPO_INGRESO-BKKW27': 'SIN_USO',
+    'FIN-TIPOGASTO-CC19E5D9': 'POR_REGISTRO',
+    'FON-TIPOGASTO-F271A9D9': 'FUERA: aportacion a inversion',
+    'HIP-TIPOGASTO-1D7B749B': 'FUERA: cuota de financiacion (interes -> COSTES FINANCIEROS > INTERESES Y COSTES DE FINANCIACION)',
+    'HOS-TIPOGASTO-357FDG': 'ALOJAMIENTO',
+    'HOT-TIPOGASTO-357FDG': 'ALOJAMIENTO',
+    'LIQ-TIPOINGRESO-JVS25Q': 'RENDIMIENTOS FINANCIEROS > INTERESES DE CUENTAS E INVERSIONES',
+    'MAN-TIPOGASTO-8FA20F09': 'VIVIENDA Y HOGAR > REPARACIONES Y MANTENIMIENTO',
+    'MAV-TIPOGASTO-BVC356': 'MOVILIDAD > MANTENIMIENTO Y CUIDADO DEL VEHICULO',
+    'MEJ-TIPOGASTO-52C6B7D9': 'POR_REGISTRO',
+    'NOM-TIPO_INGRESO-N21P2F': 'INGRESOS LABORALES > NOMINA',
+    'PAR-TIPOGASTO-5JKK5D': 'MOVILIDAD > PARKING',
+    'PEA-TIPOGASTO-7HDY89': 'MOVILIDAD > PEAJES',
+    'PRE-TIPOGASTO-DF858F12': 'FUERA: cuota de financiacion (interes -> COSTES FINANCIEROS)',
+    'RES-TIPOGASTO-26ROES': 'RESTAURANTES',
+    'ROP-TIPOGASTO-S227BB': 'ROPA Y COMPLEMENTOS > ROPA Y CALZADO',
+    'SAL-TIPOGASTO-03B17403': 'POR_REGISTRO',
+    'SEG-TIPOGASTO-C3MR9Y': 'POR_REGISTRO',
+    'SUS-TIPOGASTO-FD321542': 'POR_REGISTRO',
+    'TAR-TIPOGASTO-LC70SY': 'FUERA: amortizacion de tarjeta (transferencia)',
+    'TAS-TIPOGASTO-UBBCAG': 'SERVICIOS PROFESIONALES',
+    'TGAS-34HJV4': 'VIVIENDA Y HOGAR > SUMINISTROS > ELECTRICIDAD',
+    'TGAS-71U318': 'POR_REGISTRO',
+    'TGAS-8OS99A': 'ADMINISTRACION, IMPUESTOS Y TASAS > DOCUMENTACION Y TRAMITES',
+    'TGAS-D0HQH4': 'FUERA: aportacion a inversion',
+    'TGAS-TQMYN1': 'FUERA: cuenta de ahorro',
+    'TGAS-XMKMUE': 'FUERA: aportacion a inversion (joint venture)',
+    'TING-2059DN': 'FUERA: reembolso de suministros (reduce derecho)',
+    'TING-2IB5N9': 'FUERA: reintegro de ahorro (transferencia)',
+    'TING-9MCM5N': 'FUERA: devolucion de compra (reduce el gasto original)',
+    'TING-FALQNB': 'INGRESOS LABORALES > DIETAS Y COMPLEMENTOS',
+    'TING-YPN3X2': 'VENTA DE BIENES',
+    'TIP-GASOLINA-SW1ZQO': 'MOVILIDAD > COMBUSTIBLE',
+    'TIP-IBI-1BTR4W': 'ADMINISTRACION, IMPUESTOS Y TASAS > IBI',
+    'TIP-INGLES-8CIIGN': 'FORMACION > IDIOMAS',
+    'TIP-SEGURO HOGAR-SGQCAZ': 'SEGUROS > HOGAR',
+    'TIP-SEGURO VIDA-7CHKTS': 'SEGUROS > VIDA',
+    'TRA-TIPOGASTO-RB133Z': 'POR_REGISTRO',
+    'TRA-TIPOINGRESO-S11CGL': 'INGRESOS LABORALES > TRABAJOS ESPORADICOS',
+    'VIA-TIPOGASTO-6JPV7K': 'POR_REGISTRO',
+    'VIV-TIPO_INGRESO-FKV95F': 'ALQUILERES',
+}
+CONTENEDORES_OPERATIVOS = ("public.gastos", "public.gastos_cotidianos", "public.ingresos")
+
+
+def _norm(t: str) -> str:
+    import unicodedata as _u
+    return _u.normalize("NFKD", t).encode("ascii", "ignore").decode().upper().strip()
+
+
+def _cat_por_ruta(ds: Dataset, ruta_norm: str) -> str:
+    for ruta, cid in ds.categorias.items():
+        if " > ".join(_norm(x) for x in ruta) == ruta_norm:
+            return cid
+    raise ErrorP5("S1_CATEGORIA_NO_CANONICA", ruta_norm)
+
+
+def clasificar(ds: Dataset, co: str, cl: str, fila: dict) -> tuple:
+    """-> ('CAT', id) | ('NULL', None) | ('FUERA', naturaleza) | ('DESGLOSE', [(id, Decimal)])."""
+    regs = (ds.decisiones.doc.get("clasificacion") or {}).get("registros", {}) if ds.decisiones else {}
+    clave = f"{co}/{cl}"
+    tipo = CATEGORIA_POR_TIPO_V3.get(str(fila.get("tipo_id")))
+    if tipo is None:
+        raise ErrorP5("S4_TIPO_SIN_CLASIFICACION", f"{clave} tipo={fila.get('tipo_id')}")
+    if clave in regs:
+        v = regs[clave]
+        if v is None:
+            return ("NULL", None)
+        if isinstance(v, dict) and "desglose" in v:
+            return ("DESGLOSE", [(_cat_por_ruta(ds, r), Decimal(str(x))) for r, x in v["desglose"]])
+        if isinstance(v, str):
+            return ("CAT", _cat_por_ruta(ds, v))
+        raise ErrorP5("S4_CLASIFICACION_FORMATO", clave)
+    if tipo.startswith("FUERA"):
+        return ("FUERA", tipo.split(":", 1)[1].strip())
+    if tipo in ("POR_REGISTRO", "SIN_USO"):
+        raise ErrorP5("S20_CLASIFICACION_REGISTRO", clave)
+    return ("CAT", _cat_por_ruta(ds, tipo))
+
+
+def verificar_clasificacion(ds: Dataset, fuente: dict) -> dict:
+    """Resuelve todos los registros operativos V3 (control previo a los dominios 5/6)."""
+    if not ds.categorias:
+        return {}
+    regs = (ds.decisiones.doc.get("clasificacion") or {}).get("registros", {}) if ds.decisiones else {}
+    for clave in regs:
+        co, cl = clave.split("/", 1)
+        if cl not in fuente.get(co, {}):
+            raise ErrorP5("S8_CLASIFICACION_SIN_ORIGEN", clave)
+    cuenta = {}
+    for co in CONTENEDORES_OPERATIVOS:
+        for cl, fila in fuente.get(co, {}).items():
+            r = clasificar(ds, co, cl, fila)
+            if r[0] == "DESGLOSE":
+                tot = fila.get("total") if fila.get("total") not in (None, "141") else fila.get("importe")
+                if sum(x for _, x in r[1]) != Decimal(str(tot)):
+                    raise ErrorP5("S9_DESGLOSE_NO_CUADRA", f"{co}/{cl}")
+            cuenta[r[0]] = cuenta.get(r[0], 0) + 1
+    ds.ledger.append({"regla": "D2-E2", "origen": "clasificacion", "resumen": cuenta})
+    return cuenta  # ambito/presupuestable pendientes de validacion del propietario
 
 
 def parsear_arbol(texto: str) -> list:
@@ -1752,6 +1875,7 @@ def transformar(b0: dict, sha_run06: str, modo_lab: bool = False,
         dominio_8b_derechos(ds, fuente, ctx)
     dominio_9_inversiones(ds, fuente, ctx)
     dominio_10_contratos(ds, fuente, ctx)
+    ds.clasificacion = verificar_clasificacion(ds, fuente)
     verificar_trazabilidad(ds)
     return ds
 
@@ -1838,7 +1962,7 @@ def main() -> int:
         fisico = validar_fisico(ds, a.dsn_import)
     informe = {"version": VERSION, "hash_dataset": h, "recuentos": ds.recuentos(),
                "ledger_reglas": LEDGER_REGLAS, "ledger": ds.ledger, "pendientes": ds.pendientes,
-               "preguntas": ds.preguntas, "decisiones_sha256": dec.sha256 if dec else None,
+               "preguntas": ds.preguntas, "clasificacion": ds.clasificacion, "decisiones_sha256": dec.sha256 if dec else None,
                "fisico": fisico, "dominios": {"implementados": [1, "2-parcial", 3, "4-propiedad", "8-financiaciones", "8B-derechos", "9-inversiones", "10-contratos-valoraciones", "12-base"], "pendientes": ["2-resto", "4-resto", 5, 6, 7, 11], "modo_lab": a.modo_lab},
                "ts": datetime.now(timezone.utc).isoformat()}
     a.salida.mkdir(parents=True, exist_ok=True)

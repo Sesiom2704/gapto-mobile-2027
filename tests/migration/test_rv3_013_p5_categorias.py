@@ -7,7 +7,8 @@
 #              embebido (93 nodos, 23 raices, jerarquia y orden), la trazabilidad
 #              nodo -> registro origen, el ambito por raiz, el fallo cerrado
 #              mientras la configuracion siga PROPUESTA y la carga fisica.
-# Versión: 0.1.0
+#   0.2.0: estado CONFIRMADO en produccion (opcion 1); el test del mecanismo fija PROPUESTA.
+# Versión: 0.2.0
 # ============================================================
 from __future__ import annotations
 
@@ -39,6 +40,8 @@ def cfg(monkeypatch):
     monkeypatch.setattr(P5, "CONDICIONES_DECIDIDAS", {})
     monkeypatch.setattr(P5, "PARTICIPACION_FIN_SELF", {})
     monkeypatch.setattr(P5, "DERECHOS_V3", [])
+    monkeypatch.setattr(P5, "CATEGORIA_POR_TIPO_V3", {"TH": "FUERA: cuota", "TP": "FUERA: cuota",
+                                                      "TF": "FUERA: compra financiada"})
 
 
 def _t(lab=True):
@@ -79,6 +82,8 @@ def test_categorias_trazadas_con_jerarquia_ambito_y_orden():
 
 
 def test_propuesta_falla_cerrada_fuera_de_lab(monkeypatch):
+    assert P5.CATEGORIAS_ESTADO == "CONFIRMADA"
+    monkeypatch.setattr(P5, "CATEGORIAS_ESTADO", "PROPUESTA")
     with pytest.raises(P5.ErrorP5) as e:
         _t(lab=False)
     assert e.value.codigo == "S20_CATEGORIAS"

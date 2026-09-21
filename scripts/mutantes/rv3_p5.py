@@ -16,6 +16,7 @@
 #   python scripts/mutantes/rv3_p5.py            # todos
 #   python scripts/mutantes/rv3_p5.py M30 M33    # subconjunto
 #
+# Version: 0.8.0 (M75..M79: P5 v0.14.0, clasificacion de registros)
 # Version: 0.7.0 (M70..M74: P5 v0.13.0, arbol de categorias D2-E)
 # Version: 0.6.0 (M66..M69: P5 v0.12.0, cuarta ronda S20)
 # Version: 0.5.0 (M61..M65: P5 v0.11.0, dominio 10)
@@ -40,6 +41,7 @@ T10 = "tests/migration/test_rv3_010_p5_dominio8b.py"
 T11 = "tests/migration/test_rv3_011_p5_dominio9.py"
 T12 = "tests/migration/test_rv3_012_p5_dominio10.py"
 T13 = "tests/migration/test_rv3_013_p5_categorias.py"
+T14 = "tests/migration/test_rv3_014_p5_clasificacion.py"
 
 MUTANTES = {
     "M30": ("gate de la fuente suplementaria siempre abierto",
@@ -187,6 +189,21 @@ MUTANTES = {
     "M74": ("duplicado del arbol no detectado",
             [('            raise ErrorP5("S7_ARBOL_DUPLICADO", " > ".join(ruta))', '            pass')],
             T13 + "::test_arbol_mal_formado_o_duplicado_falla"),
+    "M75": ("tipo heterogeneo sin decision clasificado por defecto",
+            [('        raise ErrorP5("S20_CLASIFICACION_REGISTRO", clave)', '        return ("NULL", None)')],
+            T14 + "::test_tipo_heterogeneo_sin_decision_falla_s20"),
+    "M76": ("decision por registro ignorada frente al tipo",
+            [('    if clave in regs:\n        v = regs[clave]', '    if False:\n        v = regs[clave]')],
+            T14 + "::test_registro_decidido_prevalece_y_tipo_resuelve_el_resto"),
+    "M77": ("desglose sin comprobar el total",
+            [('                if sum(x for _, x in r[1]) != Decimal(str(tot)):', '                if False:')],
+            T14 + "::test_desglose_debe_cuadrar"),
+    "M78": ("decision sobre registro inexistente aceptada",
+            [('            raise ErrorP5("S8_CLASIFICACION_SIN_ORIGEN", clave)', '            pass')],
+            T14 + "::test_ruta_no_canonica_y_registro_inexistente_fallan"),
+    "M79": ("naturaleza FUERA tratada como categoria",
+            [('    if tipo.startswith("FUERA"):\n        return ("FUERA"', '    if False:\n        return ("FUERA"')],
+            T14 + "::test_registro_decidido_prevalece_y_tipo_resuelve_el_resto"),
 }
 
 
