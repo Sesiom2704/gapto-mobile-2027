@@ -15,6 +15,13 @@
 #                8 financiaciones (PARCIAL v0.5.0: 4 prestamos formales con condiciones
 #                  versionadas, calendario, financiador y garantia; 7 compras financiadas;
 #                  derechos/obligaciones pendientes)
+#   v0.19.0: dominio 6 bloque 1 (hechos): 811 filas (810 HECHO_EXACTO + cobro parcial D5-S) -> hechos,
+#           efectos, atribuciones, terceros, vinculos a entidades y relaciones; traspasos sin movimiento V3 como
+#           TRANSFERENCIA neutra (opcion A del propietario, D6-T); devoluciones OP-13 (gafas con origen, gasolina
+#           sin origen D6-D2); reembolsos F04-D015 con REEMBOLSO_DE; luz de Allende 100 % al inquilino
+#           (respuesta 3); contextos decididos (Tailandia 2026, Finde Unai). Pendientes de fila: viviendas
+#           compartidas sin decision, gasto adelantado parcialmente reembolsado, parte personal > total.
+#           Compras financiadas -> bloque 2. Sin tesoreria (dominio 7).
 #   v0.18.0: respuestas A-F del propietario 2026-09-21: Isa = REEMBOLSO (F04-D015); inicio = createon en 7
 #           anuales (D5-B3); PARO PARCIAL 4/26 = cobro parcial -> dominio 6 (D5-S); cuotas de prestamo sin
 #           regla (D5-T); nutricionista cancelada (D8-K4); 50/50 de compras de Fuensanta en la fuente
@@ -82,7 +89,7 @@
 #   RV3_IMPORT (rol login no superusuario -> gapto_migrator -> gapto_owner),
 #   fuerza los diferidos con SET CONSTRAINTS ALL IMMEDIATE y hace ROLLBACK.
 #   No es P6 (P6 hace COMMIT real).
-# Versión: 0.18.0
+# Versión: 0.19.0
 # ============================================================
 from __future__ import annotations
 
@@ -97,7 +104,7 @@ from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
-VERSION = "0.18.0"
+VERSION = "0.19.0"
 TRANSFORMACION = "RV3_P5"
 _AQUI = Path(__file__).resolve().parent
 
@@ -123,7 +130,9 @@ ORDEN_TABLAS = [
     "derechos_obligaciones_financieras", "inversiones", "inversion_objetivos_versiones",
     "reglas_financieras", "regla_versiones", "regla_excepciones",
     "contratos", "contrato_participantes", "contrato_revision_renta_versiones", "propiedad_valoraciones",
-    "servicios", "contrato_servicios",
+    "servicios", "contrato_servicios", "contextos",
+    "hechos_financieros", "hecho_efectos", "efecto_atribuciones", "hecho_terceros", "hecho_entidades",
+    "hecho_relaciones",
     "fuentes_importacion", "registros_origen_importacion", "mapeos_importacion",
 ]
 
@@ -162,7 +171,7 @@ GESTOR_REVOLUT = "PROV-UH1DM1"
 # Tablas cuya PK no es la columna id.
 PK = {"tercero_personas": "tercero_id", "propiedades": "entidad_id", "financiaciones": "entidad_id",
       "derechos_obligaciones_financieras": "entidad_id", "inversiones": "entidad_id", "contratos": "entidad_id",
-      "servicios": "entidad_id"}
+      "servicios": "entidad_id", "contextos": "entidad_id"}
 
 # Reference data geografica versionada (DB Schema: geografia = reference data
 # separada). Decision de ejecucion H-P5-01, PROVISIONAL hasta conformidad.
@@ -356,6 +365,7 @@ class Dataset:
     decisiones: "Decisiones | None" = None
     preguntas: list = field(default_factory=list)
     reglas: dict = field(default_factory=dict)
+    hechos: dict = field(default_factory=dict)
 
     def add(self, tabla: str, fila: dict, natural: tuple | None = None) -> str:
         fid = fila[PK.get(tabla, "id")]
@@ -515,6 +525,7 @@ def dominio_12_decisiones(ds: Dataset) -> None:
             [(f"financiador/{c['id']}", c) for c in sorted(dec.doc.get("financiadores", []), key=lambda x: x["id"])] + \
             [(f"capacidad/{c['id']}", c) for c in sorted(dec.doc.get("capacidades", []), key=lambda x: x["id"])] + \
             [(f"geolocalizacion/{g['id']}", g) for g in sorted(dec.doc.get("geolocalizaciones", []), key=lambda x: x["id"])] + \
+            [(f"contexto/{c['id']}", c) for c in sorted(dec.doc.get("contextos", []), key=lambda x: x["id"])] + \
             ([(f"clasificacion/{dec.doc['clasificacion']['id']}", dec.doc["clasificacion"])] if dec.doc.get("clasificacion") else [])
     for n, (clave, d) in enumerate(items, 1):
         t = json.dumps(d, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
@@ -2452,6 +2463,339 @@ def dominio_5_reglas(ds: Dataset, fuente: dict, ctx: dict) -> dict:
 
 
 # ------------------------------------------------------------ pipeline
+# ------------------------------------------------------------ dominio 6 (hechos) - bloque 1
+# Plan R2 dominio 6: hechos, efectos, atribuciones, terceros y vinculos a entidades de las 810 filas
+# operativas sin regla ni financiacion (RUN02: HECHO_EXACTO) + el cobro parcial derivado por D5-S.
+# Sin tesoreria (dominio 7; D-MIG-015 y Migration V3 §18: cuenta_id V3 no prueba movimiento bancario).
+DOMINIO_6_ACTIVO = True
+MONEDA_V3 = "EUR"  # D6-M: V3 es monodivisa EUR (Revolut EUR confirmado S20); sin campo de moneda por fila
+NATURALEZA_TRANSFERENCIA = {"transferencia entre cuentas propias", "amortizacion de tarjeta (transferencia)",
+                            "reintegro de ahorro (transferencia)"}
+NATURALEZA_REEMBOLSO = {"devolucion de capital (reduce derecho)", "reembolso de suministros (reduce derecho)"}
+PREFIJO_INTERES = "cuota de financiacion (interes -> "
+# Opcion A del propietario (2026-09-21): traspaso real sin movimiento V3 -> hecho TRANSFERENCIA neutro sin
+# movimientos (excepcion legacy D6-T). CARGA REVOLUT: Migration V3 §14 (traspaso entre cuentas propias).
+TRANSFERENCIA_LEGACY_DECIDIDA = {("public.gastos", "gasto-xg1mue")}
+# OP-13 (F04-06): devolucion = GASTO negativo de la misma naturaleza. Gafas: origen conocido (DEVOLUCION_DE).
+# PAPA (GASOLINA): devolucion de gasolina declarada por el propietario (2026-09-21); origen no identificado ->
+# sin relacion inventada (D6-D2).
+DEVOLUCION_DECIDIDA = {("public.ingresos", "INGRESO-5SRKF6"): ("public.gastos", "gasto-i3yngl"),
+                       ("public.ingresos", "INGRESO-6AMJ79"): None}
+GASTO_CORREGIDO_V3 = {("public.ingresos", "INGRESO-SIJREF")}  # Migration V3 §23: ventiladores = gasto de 85 EUR
+# Respuesta 3 (2026-09-21): la luz de Allende la soporta 100 % el inquilino (contraparte del derecho).
+ATRIBUCION_CONTRAPARTE_100 = {f"DER-LUZ-0{n}" for n in range(3, 8)}
+# Sin decision: gasto adelantado parcialmente reembolsado (Canela, tarta Ana) -> pendiente de fila.
+ATRIBUCION_DERECHO_PENDIENTE = {"DER-CANELA", "DER-ANA"}
+# Prestamo/adelanto puro sin gasto propio (Migration V3, F03-01 punto 2: Tania-SHEIN).
+GENERACION_PURA = {"DER-SHEIN"}
+
+LEDGER_REGLAS.update({
+    "D6-A": "1 fila operativa -> 1 hecho (uuid v3|fila|hechos_financieros|hecho); fecha_hecho = fecha / fecha_inicio V3; "
+            "estado ACTIVO; localizacion DESCONOCIDA (V3 no la registra; NO_APLICA nunca es default).",
+    "D6-B": "GASTO: efecto GASTO por el total del hecho (total/importe_total); atribucion self = parte personal V3 "
+            "(importe); COMPLETA si coincide, PARCIAL si falta el resto (Migration V3 §18/§23, sin actores ficticios).",
+    "D6-C": "INGRESO real: efecto INGRESO por importe, atribucion self 100 %.",
+    "D6-D": "devolucion (OP-13): hecho GASTO con efecto GASTO negativo y DEVOLUCION_DE si el origen es conocido; "
+            "nunca INGRESO.",
+    "D6-D2": "devolucion con origen no identificado: sin relacion inventada; capacidad reversible no demostrable en "
+             "legacy (declarada).",
+    "D6-E": "derecho de cobro: la generacion y el cobro se vinculan con hecho_entidades al efecto DERECHO_COBRO. El "
+            "saldo de la posicion solo suma deltas posteriores a fecha_inicio_seguimiento (DB Schema §46): los hechos "
+            "anteriores al corte son detalle reconstruido y no alteran la apertura del dominio 8B (D-MIG-015).",
+    "D6-F": "reembolso (F04-D015): REEMBOLSO con DERECHO_COBRO negativo; REEMBOLSO_DE solo si el hecho generador existe.",
+    "D6-G": "prestamo/adelanto puro a tercero sin gasto propio -> GENERACION_DERECHO_OBLIGACION (Migration V3, "
+            "F03-01 punto 2).",
+    "D6-M": "moneda EUR (V3 monodivisa).",
+    "D6-P": "presupuestable = presupuestable_default de la categoria; sin categoria GASTO si / INGRESO no; "
+            "transferencias, reembolsos y generaciones de derecho false.",
+    "D6-Q": "sin aportaciones de pago ni efecto_cuentas en este bloque: el cuenta_id V3 queda en origen (pregunta "
+            "abierta al propietario sobre financiacion real).",
+    "D6-R": "tercero: proveedor V3 -> hecho_terceros VENDEDOR principal.",
+    "D6-S": "vivienda V3 -> hecho_entidades AFECTA_A (nivel hecho); contexto decidido -> RELACIONADO_CON.",
+    "D6-T": "traspaso real sin movimiento V3 (opcion A del propietario): hecho TRANSFERENCIA sin efectos ni "
+            "movimientos; excepcion legacy a la literalidad de F04-D001 (no se fabrica tesoreria).",
+    "D6-U": "cotidianos: numero_participantes_total = cantidad; observaciones/comentarios -> notas.",
+    "D6-X": "compras financiadas: hecho COMPRA_FINANCIADA pendiente del bloque 2 del dominio 6.",
+})
+
+
+class PendienteD6(Exception):
+    def __init__(self, clase: str, codigo: str, detalle: str | None = None):
+        super().__init__(codigo)
+        self.clase, self.codigo, self.detalle = clase, codigo, detalle
+
+
+def _presup(ds: Dataset, cat: str | None, tipo: str) -> bool:
+    if tipo not in ("GASTO", "INGRESO"):
+        return False
+    if cat is not None:
+        return bool(ds.filas["categorias_financieras"][cat]["presupuestable_default"])
+    return tipo == "GASTO"
+
+
+def _dec_c(co, col, fila, ctx):
+    c = _celda(co, col, fila, ctx)
+    return Decimal(str(c.valor)) if c.estado == fu.CONOCIDO and c.valor is not None else None
+
+
+def _tercero_hecho(ds, co, cl, fila, ctx):
+    if co not in ("public.gastos", "public.gastos_cotidianos"):
+        return None
+    c = _celda(co, "proveedor_id", fila, ctx)
+    if c.estado != fu.CONOCIDO or not _texto(c):
+        return None
+    tid = fu.uuid_v3("public.proveedores", _texto(c), "terceros", "tercero")
+    if tid not in ds.filas["terceros"]:
+        raise ErrorP5("S8_HUERFANO", f"{co}/{cl} proveedor_id")
+    return tid
+
+
+def _participacion_entidad_self_100(ds, eid) -> bool:
+    ps = [p for p in ds.filas["entidad_participaciones"].values() if p["entidad_id"] == eid]
+    return bool(ps) and all(p["actor_id"] == ds.self_id and Decimal(p["porcentaje"]) == 100 for p in ps)
+
+
+class _H:
+    """Constructor de un hecho y sus hijos, todos mapeados al registro origen."""
+
+    def __init__(self, ds, co, cl, tipo, fecha, concepto, importe_total, presupuestable, notas=None, participantes=None):
+        self.ds, self.co, self.cl = ds, co, cl
+        self.id = fu.uuid_v3(co, cl, "hechos_financieros", "hecho")
+        self.efectos, self.hijos = [], []
+        self.fila = {"id": self.id, "owner_user_id": ds.owner, "tipo_hecho_id": TIPOS_HECHO_SEED[tipo],
+                     "fecha_hecho": fecha, "concepto": concepto, "importe_total": importe_total,
+                     "numero_participantes_total": participantes, "moneda": MONEDA_V3, "localidad_id": None,
+                     "estado_localizacion": "DESCONOCIDA", "estado": "ACTIVO", "anulado_at": None,
+                     "motivo_anulacion": None, "presupuestable": presupuestable, "notas": notas}
+
+    def efecto(self, rol, tipo_efecto, delta, categoria, atribs, estado):
+        if delta == 0:
+            raise PendienteD6("S6", "D6_EFECTO_CERO", rol)
+        eid = fu.uuid_v3(self.co, self.cl, "hecho_efectos", rol)
+        self.efectos.append(("hecho_efectos", {"id": eid, "hecho_id": self.id, "tipo_efecto": tipo_efecto,
+                                               "importe_delta": delta, "categoria_id": categoria,
+                                               "estado_atribucion": estado, "descripcion": None}, rol))
+        for actor, imp, crit in atribs:
+            self.hijos.append(("efecto_atribuciones", {
+                "id": fu.uuid_v3(self.co, self.cl, "efecto_atribuciones", f"{rol}.{actor}"), "efecto_id": eid,
+                "actor_id": actor, "importe_atribuido": imp, "porcentaje_aplicado": None,
+                "criterio_atribucion": crit}, f"{rol}.atribucion"))
+        return eid
+
+    def entidad(self, entidad_id, tipo_rel, efecto_id=None, rol="entidad"):
+        self.hijos.append(("hecho_entidades", {
+            "id": fu.uuid_v3(self.co, self.cl, "hecho_entidades", f"{rol}.{entidad_id}"), "hecho_id": self.id,
+            "efecto_id": efecto_id, "entidad_id": entidad_id, "tipo_relacion": tipo_rel, "principal": True,
+            "owner_user_id": self.ds.owner}, rol))
+
+    def tercero(self, tid, rol_en_hecho="VENDEDOR"):
+        self.hijos.append(("hecho_terceros", {
+            "id": fu.uuid_v3(self.co, self.cl, "hecho_terceros", rol_en_hecho), "hecho_id": self.id,
+            "tercero_id": tid, "rol_en_hecho": rol_en_hecho, "principal": True}, "tercero"))
+
+    def relacion(self, destino_id, tipo_rel, importe):
+        self.hijos.append(("hecho_relaciones", {
+            "id": fu.uuid_v3(self.co, self.cl, "hecho_relaciones", tipo_rel), "hecho_origen_id": self.id,
+            "hecho_destino_id": destino_id, "tipo_relacion": tipo_rel, "importe_relacionado": importe,
+            "notas": None}, tipo_rel.lower()))
+
+    def confirmar(self):
+        ds = self.ds
+        ds.add("hechos_financieros", self.fila)
+        ds.mapear(self.co, self.cl, "hechos_financieros", self.id, "hecho")
+        for tabla, fila, rol in self.efectos + self.hijos:
+            ds.add(tabla, fila)
+            ds.mapear(self.co, self.cl, tabla, fila["id"], rol, tipo="DIVIDIDO")
+        return self.id
+
+
+def _filas_dominio_6(ds: Dataset, fuente: dict) -> list:
+    disp = (ds.reglas or {}).get("disposicion", {})
+    fuera = set()
+    for k in ("CREADA", "FUSIONADA"):
+        for o, _ in disp.get(k, []):
+            fuera.update(tuple(x.split("/", 1)) for x in o.split("+"))
+    for k in ("EXCLUIDA_D11", "EXCLUIDA_D8"):
+        fuera.update(tuple(o.split("/", 1)) for o in disp.get(k, []))
+    return [(co, cl) for co in CONTENEDORES_OPERATIVOS for cl in sorted(fuente.get(co, {})) if (co, cl) not in fuera]
+
+
+def dominio_6_hechos(ds: Dataset, fuente: dict, ctx: dict) -> dict:
+    filas = _filas_dominio_6(ds, fuente)
+    derecho_de = {}  # (co, cl) -> (id derecho, rol 'genera'|'cobro')
+    for d in DERECHOS_V3:
+        origenes = ([d["genera"]] if d["genera"] else []) + d["evidencia"]
+        eid = fu.uuid_v3(origenes[0][0], origenes[0][1], "entidades", "derecho")
+        if eid not in ds.filas["derechos_obligaciones_financieras"]:
+            raise ErrorP5("S8_DERECHO_AUSENTE", d["id"])
+        if d["genera"]:
+            derecho_de[tuple(d["genera"])] = (d, eid, "genera")
+        for e in d["evidencia"]:
+            derecho_de[tuple(e)] = (d, eid, "cobro")
+    contexto_de = {}
+    if ds.decisiones is not None:
+        for c in sorted(ds.decisiones.doc.get("contextos", []), key=lambda x: x["id"]):
+            clave = f"contexto/{c['id']}"
+            cid = fu.uuid_v3(CONT_DECISIONES, clave, "entidades", "contexto")
+            ds.add("entidades", {"id": cid, "owner_user_id": ds.owner, "tipo_entidad": "CONTEXTO",
+                                 "nombre": c["nombre"].strip()})
+            ds.add("contextos", {"entidad_id": cid, "tipo_contexto": c["tipo"], "fecha_inicio": None,
+                                 "fecha_fin": None, "notas": None})
+            ds.mapear(CONT_DECISIONES, clave, "entidades", cid, "contexto", confianza="VALIDADA")
+            ds.mapear(CONT_DECISIONES, clave, "contextos", cid, "contexto", tipo="DIVIDIDO", confianza="VALIDADA")
+            for r in c["registros"]:
+                o = tuple(r.split("/", 1))
+                if o[1] not in fuente.get(o[0], {}):
+                    raise ErrorP5("S8_CONTEXTO_SIN_ORIGEN", r)
+                contexto_de.setdefault(o, []).append(cid)
+    creados, ids, pend = {}, {}, []
+    # los origenes de relaciones (generador, gasto original) se construyen antes que sus dependientes
+    orden = sorted(filas, key=lambda o: (o in derecho_de and derecho_de[o][2] == "cobro") or o in DEVOLUCION_DECIDIDA)
+    for co, cl in orden:
+        try:
+            tipo, h = _hecho_v3(ds, fuente, ctx, co, cl, derecho_de, contexto_de, ids, set(filas),
+                                {tuple(x.split("/", 1)) for x in pend})
+        except PendienteD6 as p:
+            ds.pendientes.append({"dominio": 6, "origen": f"{co}/{cl}", "clase": p.clase, "codigo": p.codigo,
+                                  "detalle": p.detalle})
+            pend.append(f"{co}/{cl}")
+            continue
+        ids[(co, cl)] = h.confirmar()
+        creados[tipo] = creados.get(tipo, 0) + 1
+    for o in sorted(o for o in DEVOLUCION_DECIDIDA if o in dict.fromkeys(filas) and DEVOLUCION_DECIDIDA[o] is None):
+        ds.ledger.append({"regla": "D6-D2", "origen": f"{o[0]}/{o[1]}"})
+    for co, cl in filas:
+        if (co, cl) in TRANSFERENCIA_LEGACY_DECIDIDA or ((co, cl) in ids and
+                ds.filas["hechos_financieros"][ids[(co, cl)]]["tipo_hecho_id"] == TIPOS_HECHO_SEED["TRANSFERENCIA"]):
+            ds.ledger.append({"regla": "D6-T", "origen": f"{co}/{cl}"})
+    ds.ledger.append({"regla": "D6-X", "origen": "dominio 8", "resumen": "compras financiadas: bloque 2"})
+    return {"filas": len(filas), "creados": creados, "pendientes": pend}
+
+
+def _hecho_v3(ds, fuente, ctx, co, cl, derecho_de, contexto_de, ids, filas_d6=frozenset(), pendientes_d6=frozenset()):
+    f = fuente[co][cl]
+    fc = _celda(co, "fecha_inicio" if co == "public.ingresos" else "fecha", f, ctx)
+    if fc.estado != fu.CONOCIDO:
+        raise PendienteD6("S6", "D6_FECHA_DESCONOCIDA")
+    fecha = str(fc.valor)[:10]
+    nombre = _texto(_celda(co, {"public.gastos": "nombre", "public.ingresos": "concepto"}[co], f, ctx)) \
+        if co != "public.gastos_cotidianos" else None
+    col_nota = {"public.gastos": "comentarios", "public.gastos_cotidianos": "observaciones"}.get(co)
+    notas = _texto(_celda(co, col_nota, f, ctx)) if col_nota else None
+    imp = _dec_c(co, "importe", f, ctx)
+    tot = _dec_c(co, "importe_total" if co == "public.gastos_cotidianos" else "total", f, ctx) \
+        if co != "public.ingresos" else imp
+    if tot is None:
+        tot = imp
+    if imp is None or tot is None:
+        raise PendienteD6("S6", "D6_IMPORTE_DESCONOCIDO")
+    if imp < 0 or tot < 0:
+        raise ErrorP5("S9_IMPORTE_INCOHERENTE", f"{co}/{cl}")
+    if imp > tot:  # dato V3 incoherente (clase C): no se redondea ni se corrige
+        raise PendienteD6("C", "D6_PARTE_PERSONAL_SUPERA_TOTAL", f"{imp} > {tot}")
+    clasif = clasificar(ds, co, cl, f)
+    if clasif[0] == "DESGLOSE":
+        raise PendienteD6("S20", "D6_DESGLOSE")
+    cat = clasif[1] if clasif[0] == "CAT" else None
+    naturaleza = clasif[1] if clasif[0] == "FUERA" else None
+    tid = _tercero_hecho(ds, co, cl, f, ctx)
+    viv = _entidad_vivienda(ds, co, cl, f, ctx)
+    S = ds.self_id
+    o = (co, cl)
+
+    def _base(h):
+        if tid:
+            h.tercero(tid)
+        if viv:
+            h.entidad(viv, "AFECTA_A", rol="vivienda")
+        for cid in contexto_de.get(o, []):
+            h.entidad(cid, "RELACIONADO_CON", rol="contexto")
+        return h
+
+    # 1) traspasos propios (opcion A)
+    if o in TRANSFERENCIA_LEGACY_DECIDIDA or naturaleza in NATURALEZA_TRANSFERENCIA:
+        if cat is not None:
+            raise ErrorP5("S1_CATEGORIA_EN_TRANSFERENCIA", f"{co}/{cl}")
+        h = _H(ds, co, cl, "TRANSFERENCIA", fecha, nombre, tot, False, notas)
+        return "TRANSFERENCIA", h
+    # 2) derechos de cobro
+    if o in derecho_de:
+        d, did, rol = derecho_de[o]
+        if rol == "genera" and d["id"] in ATRIBUCION_DERECHO_PENDIENTE:
+            raise PendienteD6("S20", "D6_ATRIBUCION_GASTO_REEMBOLSADO", d["id"])
+        if rol == "cobro":
+            if co != "public.ingresos" or (naturaleza is not None and naturaleza not in NATURALEZA_REEMBOLSO):
+                raise ErrorP5("S1_COBRO_DE_DERECHO_NO_REEMBOLSO", f"{co}/{cl}")
+            h = _H(ds, co, cl, "REEMBOLSO", fecha, nombre, imp, False, notas)
+            ef = h.efecto("derecho_cobro", "DERECHO_COBRO", -imp, None, [(S, -imp, "MANUAL")], "COMPLETA")
+            h.entidad(did, "AFECTA_A", ef, rol="derecho")
+            gen = tuple(d["genera"]) if d["genera"] else None
+            if gen is not None and gen in ids:
+                h.relacion(ids[gen], "REEMBOLSO_DE", imp)
+            elif gen is not None and gen in pendientes_d6:
+                raise PendienteD6("S20", "D6_GENERADOR_PENDIENTE", f"{gen[0]}/{gen[1]}")
+            elif gen is not None and gen in filas_d6:
+                raise ErrorP5("S8_GENERADOR_NO_CREADO", f"{co}/{cl}")
+            return "REEMBOLSO", _base(h)
+        sub = ds.filas["derechos_obligaciones_financieras"][did]
+        contraparte = sub["contraparte_actor_id"]
+        if d["id"] in GENERACION_PURA:  # adelanto puro sin gasto propio
+            h = _H(ds, co, cl, "GENERACION_DERECHO_OBLIGACION", fecha, nombre, tot, False, notas)
+            ef = h.efecto("derecho_cobro", "DERECHO_COBRO", tot, None, [(S, tot, "MANUAL")], "COMPLETA")
+            h.entidad(did, "AFECTA_A", ef, rol="derecho")
+            return "GENERACION_DERECHO_OBLIGACION", _base(h)
+        if d["id"] not in ATRIBUCION_CONTRAPARTE_100 or contraparte is None:
+            raise PendienteD6("S20", "D6_ATRIBUCION_GASTO_REEMBOLSADO", d["id"])
+        importe_derecho = Decimal(str(sub["importe_original_documentado"]))
+        if importe_derecho != tot:
+            raise ErrorP5("S9_REPERCUSION_NO_TOTAL", d["id"])
+        h = _H(ds, co, cl, "GASTO", fecha, nombre, tot, _presup(ds, cat, "GASTO"), notas)
+        h.efecto("gasto", "GASTO", tot, cat, [(contraparte, tot, "MANUAL")], "COMPLETA")
+        ef = h.efecto("derecho_cobro", "DERECHO_COBRO", importe_derecho, None,
+                      [(S, importe_derecho, "MANUAL")], "COMPLETA")
+        h.entidad(did, "AFECTA_A", ef, rol="derecho")
+        return "GASTO", _base(h)
+    # 3) devoluciones (OP-13)
+    if o in DEVOLUCION_DECIDIDA:
+        orig = DEVOLUCION_DECIDIDA[o]
+        cat_d = cat
+        h = _H(ds, co, cl, "GASTO", fecha, nombre, imp, False, notas)
+        if orig is not None:
+            if orig not in ids:
+                raise ErrorP5("S8_ORIGEN_DEVOLUCION_NO_CREADO", f"{co}/{cl}")
+            fo = fuente[orig[0]][orig[1]]
+            r = clasificar(ds, orig[0], orig[1], fo)
+            cat_d = r[1] if r[0] == "CAT" else None
+            cap = sum(-Decimal(e["importe_delta"]) for e in ds.filas["hecho_efectos"].values()
+                      if e["hecho_id"] == ids[orig] and e["tipo_efecto"] == "GASTO")
+            if imp > -cap:
+                raise ErrorP5("S9_DEVOLUCION_EXCEDE_ORIGEN", f"{co}/{cl}")
+            h.relacion(ids[orig], "DEVOLUCION_DE", imp)
+        h.fila["presupuestable"] = _presup(ds, cat_d, "GASTO")
+        h.efecto("gasto", "GASTO", -imp, cat_d, [(S, -imp, "MANUAL")], "COMPLETA")
+        return "GASTO", _base(h)
+    # 4) viviendas sin participacion 100 % self: atribucion pendiente de decision
+    if viv and not _participacion_entidad_self_100(ds, viv):
+        raise PendienteD6("S20", "D6_ATRIBUCION_ENTIDAD_COMPARTIDA", viv)
+    # 5) ingresos
+    if co == "public.ingresos" and o not in GASTO_CORREGIDO_V3:
+        if naturaleza is not None or cat is None:
+            raise ErrorP5("S4_INGRESO_SIN_DISPOSICION", f"{co}/{cl} {naturaleza}")
+        h = _H(ds, co, cl, "INGRESO", fecha, nombre, imp, _presup(ds, cat, "INGRESO"), notas)
+        h.efecto("ingreso", "INGRESO", imp, cat, [(S, imp, "MANUAL")], "COMPLETA")
+        return "INGRESO", _base(h)
+    # 6) gastos
+    if naturaleza is not None:
+        if not naturaleza.startswith(PREFIJO_INTERES):
+            raise ErrorP5("S4_GASTO_FUERA_SIN_DISPOSICION", f"{co}/{cl} {naturaleza}")
+        cat = _cat_por_ruta(ds, _norm(naturaleza[len(PREFIJO_INTERES):].rstrip(")")))
+    part = _dec_c(co, "cantidad", f, ctx) if co == "public.gastos_cotidianos" else None
+    h = _H(ds, co, cl, "GASTO", fecha, nombre, tot, _presup(ds, cat, "GASTO"), notas,
+           int(part) if part is not None else None)
+    h.efecto("gasto", "GASTO", tot, cat, [(S, imp, "MANUAL")], "COMPLETA" if imp == tot else "PARCIAL")
+    return "GASTO", _base(h)
+
+
 def transformar(b0: dict, sha_run06: str, modo_lab: bool = False,
                 decisiones: "Decisiones | None" = None) -> Dataset:
     fuente = fu.fuente_b0(b0)
@@ -2475,6 +2819,8 @@ def transformar(b0: dict, sha_run06: str, modo_lab: bool = False,
     ds.clasificacion = verificar_clasificacion(ds, fuente)
     if DOMINIO_5_ACTIVO:
         ds.reglas = dominio_5_reglas(ds, fuente, ctx)
+        if DOMINIO_6_ACTIVO:
+            ds.hechos = dominio_6_hechos(ds, fuente, ctx)
     verificar_trazabilidad(ds)
     return ds
 
@@ -2562,7 +2908,7 @@ def main() -> int:
     informe = {"version": VERSION, "hash_dataset": h, "recuentos": ds.recuentos(),
                "ledger_reglas": LEDGER_REGLAS, "ledger": ds.ledger, "pendientes": ds.pendientes,
                "preguntas": ds.preguntas, "clasificacion": ds.clasificacion, "decisiones_sha256": dec.sha256 if dec else None,
-               "fisico": fisico, "reglas": ds.reglas, "dominios": {"implementados": [1, "2-parcial", 3, "4-propiedad", 5, "8-financiaciones", "8B-derechos", "9-inversiones", "10-contratos-valoraciones", "12-base"], "pendientes": ["2-resto", "4-resto", 6, 7, 11], "modo_lab": a.modo_lab},
+               "fisico": fisico, "reglas": ds.reglas, "hechos": ds.hechos, "dominios": {"implementados": [1, "2-parcial", 3, "4-propiedad", 5, "6-bloque1", "8-financiaciones", "8B-derechos", "9-inversiones", "10-contratos-valoraciones", "12-base"], "pendientes": ["2-resto", "4-resto", "6-bloque2", 7, 11], "modo_lab": a.modo_lab},
                "ts": datetime.now(timezone.utc).isoformat()}
     a.salida.mkdir(parents=True, exist_ok=True)
     p = a.salida / f"rv3_p5_{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"

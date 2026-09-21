@@ -1,0 +1,277 @@
+# ============================================================
+# GAPTO MOBILE 2027
+# Fichero: test_rv3_017_p5_dominio6.py
+# Ruta: tests/migration/test_rv3_017_p5_dominio6.py
+# Descripcion: RV3 / P5 v0.19.0. Dominio 6 bloque 1 (hechos, efectos, atribuciones,
+#              terceros, vinculos a entidades y relaciones) sobre corpus SINTETICO sin PII.
+#              Discrimina: gasto con total + parte personal (COMPLETA/PARCIAL sin actores
+#              ficticios), traspaso legacy sin efectos ni movimientos (opcion A), devolucion
+#              OP-13 negativa con limite de origen, reembolso sin INGRESO con REEMBOLSO_DE,
+#              repercusion 100 % a la contraparte, pendientes de fila sin fabricar datos,
+#              determinismo y carga fisica RV3_IMPORT con ROLLBACK.
+# Versión: 0.1.0
+# ============================================================
+from __future__ import annotations
+
+import importlib.util
+import os
+import sys
+from decimal import Decimal
+from pathlib import Path
+
+import pytest
+
+RAIZ = Path(__file__).resolve().parents[2]
+_spec = importlib.util.spec_from_file_location("rv3_p5_transformacion", RAIZ / "scripts" / "migration_v3" / "rv3_p5_transformacion.py")
+P5 = importlib.util.module_from_spec(_spec)
+sys.modules["rv3_p5_transformacion"] = P5
+_spec.loader.exec_module(P5)
+_s12 = importlib.util.spec_from_file_location("t12_d6", Path(__file__).resolve().parent / "test_rv3_012_p5_dominio10.py")
+T12 = importlib.util.module_from_spec(_s12)
+_s12.loader.exec_module(T12)
+T8 = T12.T8
+F = P5.fu
+SHA = "0" * 64
+G, GC, I = "public.gastos", "public.gastos_cotidianos", "public.ingresos"
+N = "141"
+DOMINIO_5 = True
+DOMINIO_6 = True
+TH = P5.TIPOS_HECHO_SEED
+
+
+def _g(k, **kw):
+    d = {"id": k, "nombre": f"GASTO {k}", "tipo_id": "TX", "prestamo_id": N, "periodicidad": "PAGO UNICO", "cuotas": 1,
+         "fecha": "2026-03-10", "createon": "2026-03-10T10:00:00", "rango_pago": N, "importe": 40, "total": 40,
+         "cuenta_id": "C1", "proveedor_id": N, "activo": False, "inactivatedon": N, "comentarios": N,
+         "ultimo_pago_on": "2026-03-10T10:00:00", "referencia_vivienda_id": N}
+    d.update(kw)
+    return (G, k, d)
+
+
+def _c(k, **kw):
+    d = {"id": k, "tipo_id": "TX", "importe": 12.5, "importe_total": 12.5, "fecha": "2026-02-01", "cuenta_id": "C1",
+         "pagado": True, "tipo_pago": 1, "cantidad": 1, "proveedor_id": N, "observaciones": N, "evento": N,
+         "km": N, "litros": N, "precio_litro": N}
+    d.update(kw)
+    return (GC, k, d)
+
+
+def _i(k, **kw):
+    d = {"id": k, "concepto": f"INGRESO {k}", "tipo_id": "TX", "periodicidad": "PAGO UNICO",
+         "fecha_inicio": "2026-04-02", "createon": "2026-04-02T10:00:00", "rango_cobro": N, "importe": 40,
+         "cuenta_id": "C1", "activo": False, "inactivatedon": N, "ultimo_ingreso_on": "2026-04-02T10:00:00",
+         "contrato_alquiler": N, "referencia_vivienda_id": N}
+    d.update(kw)
+    return (I, k, d)
+
+
+NAT = {"TX": "SIN_CATEGORIA_TEST", "TT": "FUERA: transferencia entre cuentas propias",
+       "TR": "FUERA: reembolso de suministros (reduce derecho)", "TV": "FUERA: devolucion de compra (reduce el gasto)"}
+
+
+@pytest.fixture(autouse=True)
+def cfg(monkeypatch):
+    for k, v in (("CONFIG_CUENTAS", {("public.cuentas_bancarias", "C1"): ("CORRIENTE", "ACTIVO", True, True, True, "EUR")}),
+                 ("CUENTAS_DERIVADAS", {}), ("CONDICIONES_DECIDIDAS", {}), ("PARTICIPACION_FIN_SELF", {}),
+                 ("FECHA_INICIO_CONTRATO_VALIDADA", {}), ("PARTICIPANTE_DUPLICADO_CAPTURA", {}),
+                 ("SERVICIOS_REPERCUTIDOS", {}), ("ISA_TIPO_HECHO_DECIDIDO", None),
+                 ("DOMINIO_5_ACTIVO", True), ("DOMINIO_6_ACTIVO", True)):
+        monkeypatch.setattr(P5, k, v)
+    monkeypatch.setattr(P5, "CATEGORIA_POR_TIPO_V3", {**P5.CATEGORIA_POR_TIPO_V3, **NAT})
+    real = P5.clasificar
+
+    def clas(ds, co, cl, f):
+        t = f.get("tipo_id")
+        if t == "TX":
+            return ("NULL", None)
+        if t in NAT:
+            return ("FUERA", NAT[t].split(":", 1)[1].strip())
+        return real(ds, co, cl, f)
+    monkeypatch.setattr(P5, "clasificar", clas)
+
+
+def _t(extra=()):
+    return P5.transformar(T8._b0(T12._filas(extra=tuple(extra))), SHA, modo_lab=True)
+
+
+def _hecho(ds, co, cl):
+    return ds.filas["hechos_financieros"].get(F.uuid_v3(co, cl, "hechos_financieros", "hecho"))
+
+
+def _efectos(ds, h):
+    return [e for e in ds.filas["hecho_efectos"].values() if e["hecho_id"] == h["id"]]
+
+
+def _atribs(ds, e):
+    return [a for a in ds.filas["efecto_atribuciones"].values() if a["efecto_id"] == e["id"]]
+
+
+def _pend(ds, co, cl):
+    return [p["codigo"] for p in ds.pendientes if p.get("dominio") == 6 and p["origen"] == f"{co}/{cl}"]
+
+
+def _luz(monkeypatch, contraparte=True):
+    """Gasto repercutido 100 % al inquilino sintetico PI (vivienda V1 / contrato K1) + su cobro."""
+    monkeypatch.setattr(P5, "DERECHOS_V3", [{"id": "DER-LUZ-03", "modo": "TRANSITORIA", "genera": (G, "GL"),
+                                             "evidencia": [(I, "IL")]}])
+    monkeypatch.setattr(P5, "CANON_TRANSITORIAS", (1, Decimal("40")))
+    monkeypatch.setattr(P5, "CONTRAPARTE_V3_DECIDIDA", {"DER-LUZ-03": ("public.personas", "PI")} if contraparte else {})
+    monkeypatch.setattr(P5, "ATRIBUCION_CONTRAPARTE_100", {"DER-LUZ-03"})
+    return _t([_g("GL", referencia_vivienda_id="V1"), _i("IL", tipo_id="TR", referencia_vivienda_id="V1")])
+
+
+def test_gasto_unico_total_atribuido_y_sin_tesoreria():
+    ds = _t([_g("GU", proveedor_id="PT", comentarios="nota")])
+    h = _hecho(ds, G, "GU")
+    assert h["tipo_hecho_id"] == TH["GASTO"] and h["fecha_hecho"] == "2026-03-10"
+    assert (h["estado_localizacion"], h["localidad_id"], h["moneda"], h["notas"]) == ("DESCONOCIDA", None, "EUR", "nota")
+    (e,) = _efectos(ds, h)
+    assert (e["tipo_efecto"], e["importe_delta"], e["estado_atribucion"]) == ("GASTO", Decimal("40"), "COMPLETA")
+    (a,) = _atribs(ds, e)
+    assert (a["actor_id"], a["importe_atribuido"]) == (ds.self_id, Decimal("40"))
+    assert [t["rol_en_hecho"] for t in ds.filas["hecho_terceros"].values() if t["hecho_id"] == h["id"]] == ["VENDEDOR"]
+    assert "movimientos_tesoreria" not in ds.filas and "hecho_aportaciones_pago" not in ds.filas
+
+
+def test_invitado_conserva_total_y_parte_personal_cero_sin_actor_ficticio():
+    ds = _t([_c("CI", tipo_pago=2, importe=0, importe_total=30, cantidad=3)])
+    h = _hecho(ds, GC, "CI")
+    assert (h["importe_total"], h["numero_participantes_total"]) == (Decimal("30"), 3)
+    (e,) = _efectos(ds, h)
+    assert (e["importe_delta"], e["estado_atribucion"]) == (Decimal("30"), "PARCIAL")
+    assert [(a["actor_id"], a["importe_atribuido"]) for a in _atribs(ds, e)] == [(ds.self_id, Decimal("0"))]
+
+
+def test_a_medias_parcial_y_pago_propio_completo():
+    ds = _t([_c("CM", tipo_pago=3, importe=10, importe_total=20, cantidad=2), _c("CP")])
+    (em,) = _efectos(ds, _hecho(ds, GC, "CM"))
+    (ep,) = _efectos(ds, _hecho(ds, GC, "CP"))
+    assert (em["importe_delta"], em["estado_atribucion"]) == (Decimal("20"), "PARCIAL")
+    assert _atribs(ds, em)[0]["importe_atribuido"] == Decimal("10")
+    assert ep["estado_atribucion"] == "COMPLETA"
+
+
+def test_parte_personal_superior_al_total_es_pendiente_sin_redondeo():
+    ds = _t([_c("CR", importe=15.61, importe_total=15.605)])
+    assert _hecho(ds, GC, "CR") is None
+    assert _pend(ds, GC, "CR") == ["D6_PARTE_PERSONAL_SUPERA_TOTAL"]
+
+
+def test_fecha_desconocida_no_se_fabrica():
+    ds = _t([_c("CF", fecha=N)])
+    assert _hecho(ds, GC, "CF") is None and _pend(ds, GC, "CF") == ["D6_FECHA_DESCONOCIDA"]
+
+
+def test_traspaso_legacy_es_transferencia_sin_efectos_ni_movimientos():
+    ds = _t([_g("GT", tipo_id="TT", importe=200, total=200)])
+    h = _hecho(ds, G, "GT")
+    assert h["tipo_hecho_id"] == TH["TRANSFERENCIA"] and h["importe_total"] == Decimal("200")
+    assert _efectos(ds, h) == [] and h["presupuestable"] is False
+    assert {"regla": "D6-T", "origen": f"{G}/GT"} in ds.ledger
+
+
+def test_ingreso_sin_categoria_ni_naturaleza_falla_cerrado():
+    with pytest.raises(P5.ErrorP5) as e:
+        _t([_i("IR")])
+    assert e.value.codigo == "S4_INGRESO_SIN_DISPOSICION"
+
+
+def test_devolucion_con_origen_es_gasto_negativo_relacionado(monkeypatch):
+    monkeypatch.setattr(P5, "DEVOLUCION_DECIDIDA", {(I, "ID"): (G, "GO")})
+    ds = _t([_g("GO", importe=39, total=39), _i("ID", tipo_id="TV", importe=39)])
+    h = _hecho(ds, I, "ID")
+    assert h["tipo_hecho_id"] == TH["GASTO"]
+    (e,) = _efectos(ds, h)
+    assert (e["tipo_efecto"], e["importe_delta"]) == ("GASTO", Decimal("-39"))
+    assert _atribs(ds, e)[0]["importe_atribuido"] == Decimal("-39")
+    (r,) = [r for r in ds.filas["hecho_relaciones"].values() if r["hecho_origen_id"] == h["id"]]
+    assert (r["tipo_relacion"], r["hecho_destino_id"], r["importe_relacionado"]) == \
+        ("DEVOLUCION_DE", _hecho(ds, G, "GO")["id"], Decimal("39"))
+    assert not any(x["tipo_efecto"] == "INGRESO" for x in ds.filas["hecho_efectos"].values())
+
+
+def test_devolucion_que_excede_el_origen_falla(monkeypatch):
+    monkeypatch.setattr(P5, "DEVOLUCION_DECIDIDA", {(I, "ID"): (G, "GO")})
+    with pytest.raises(P5.ErrorP5) as e:
+        _t([_g("GO", importe=39, total=39), _i("ID", tipo_id="TV", importe=40)])
+    assert e.value.codigo == "S9_DEVOLUCION_EXCEDE_ORIGEN"
+
+
+def test_devolucion_sin_origen_no_inventa_relacion(monkeypatch):
+    monkeypatch.setattr(P5, "DEVOLUCION_DECIDIDA", {(I, "ID"): None})
+    ds = _t([_i("ID", importe=50), _g("GX", importe=60, total=60)])  # candidato plausible: no se vincula
+    h = _hecho(ds, I, "ID")
+    assert [e["importe_delta"] for e in _efectos(ds, h)] == [Decimal("-50")]
+    assert _hecho(ds, G, "GX") is not None
+    assert not any(r["hecho_origen_id"] == h["id"] for r in ds.filas["hecho_relaciones"].values())
+    assert {"regla": "D6-D2", "origen": f"{I}/ID"} in ds.ledger
+
+
+def test_repercusion_100_a_la_contraparte_y_reembolso_sin_ingreso(monkeypatch):
+    ds = _luz(monkeypatch)
+    did = F.uuid_v3(G, "GL", "entidades", "derecho")
+    inquilino = ds.filas["derechos_obligaciones_financieras"][did]["contraparte_actor_id"]
+    hg, hr = _hecho(ds, G, "GL"), _hecho(ds, I, "IL")
+    ef = {e["tipo_efecto"]: e for e in _efectos(ds, hg)}
+    assert set(ef) == {"GASTO", "DERECHO_COBRO"}
+    assert [(a["actor_id"], a["importe_atribuido"]) for a in _atribs(ds, ef["GASTO"])] == [(inquilino, Decimal("40"))]
+    assert ef["GASTO"]["estado_atribucion"] == "COMPLETA"
+    assert hr["tipo_hecho_id"] == TH["REEMBOLSO"]
+    (er,) = _efectos(ds, hr)
+    assert (er["tipo_efecto"], er["importe_delta"]) == ("DERECHO_COBRO", Decimal("-40"))
+    ligados = [x for x in ds.filas["hecho_entidades"].values() if x["entidad_id"] == did]
+    assert sorted(x["efecto_id"] for x in ligados) == sorted([ef["DERECHO_COBRO"]["id"], er["id"]])
+    assert sum(ds.filas["hecho_efectos"][x["efecto_id"]]["importe_delta"] for x in ligados) == 0
+    (r,) = [r for r in ds.filas["hecho_relaciones"].values() if r["hecho_origen_id"] == hr["id"]]
+    assert (r["tipo_relacion"], r["hecho_destino_id"]) == ("REEMBOLSO_DE", hg["id"])
+    assert not any(x["tipo_efecto"] == "INGRESO" for x in ds.filas["hecho_efectos"].values())
+
+
+def test_repercusion_sin_contraparte_queda_pendiente_y_bloquea_su_cobro(monkeypatch):
+    ds = _luz(monkeypatch, contraparte=False)
+    assert _hecho(ds, G, "GL") is None and _pend(ds, G, "GL") == ["D6_ATRIBUCION_GASTO_REEMBOLSADO"]
+    assert _hecho(ds, I, "IL") is None and _pend(ds, I, "IL") == ["D6_GENERADOR_PENDIENTE"]
+
+
+def test_vivienda_compartida_sin_decision_queda_pendiente(monkeypatch):
+    monkeypatch.setattr(P5, "_participacion_entidad_self_100", lambda ds, eid: False)
+    ds = _t([_g("GV", referencia_vivienda_id="V1"), _g("GN")])
+    assert _hecho(ds, G, "GV") is None and _pend(ds, G, "GV") == ["D6_ATRIBUCION_ENTIDAD_COMPARTIDA"]
+    assert _hecho(ds, G, "GN") is not None
+
+
+def test_dataset_determinista_y_trazado():
+    extra = [_g("GU"), _c("CI", tipo_pago=2, importe=0, importe_total=30), _g("GT", tipo_id="TT")]
+    a, b = _t(extra), _t(extra)
+    assert a.hash() == b.hash()
+    mapeados = {m["registro_destino_id"] for m in a.filas["mapeos_importacion"].values()}
+    for t in ("hechos_financieros", "hecho_efectos", "efecto_atribuciones", "hecho_terceros"):
+        assert set(a.filas[t]) <= mapeados
+
+
+@pytest.mark.skipif(not os.environ.get("GAPTO_RV3_IMPORT_URL"), reason="sin laboratorio RV3_IMPORT")
+def test_fisico_rv3_import_rollback(monkeypatch):
+    monkeypatch.setattr(P5, "DEVOLUCION_DECIDIDA", {(I, "ID"): (G, "GO")})
+    monkeypatch.setattr(P5, "DERECHOS_V3", [{"id": "DER-LUZ-03", "modo": "TRANSITORIA", "genera": (G, "GL"),
+                                             "evidencia": [(I, "IL")]}])
+    monkeypatch.setattr(P5, "CANON_TRANSITORIAS", (1, Decimal("40")))
+    monkeypatch.setattr(P5, "CONTRAPARTE_V3_DECIDIDA", {"DER-LUZ-03": ("public.personas", "PI")})
+    monkeypatch.setattr(P5, "ATRIBUCION_CONTRAPARTE_100", {"DER-LUZ-03"})
+    ds = _t([_g("GL", referencia_vivienda_id="V1"), _i("IL", tipo_id="TR", referencia_vivienda_id="V1"),
+             _g("GO", importe=39, total=39), _i("ID", tipo_id="TV", importe=39), _g("GT", tipo_id="TT"),
+             _c("CI", tipo_pago=2, importe=0, importe_total=30, cantidad=3),
+             _c("CM", tipo_pago=3, importe=10, importe_total=20)])
+    res = P5.validar_fisico(ds, os.environ["GAPTO_RV3_IMPORT_URL"])
+    assert res["hechos_financieros"] == 7 and res["hecho_relaciones"] == 2
+    assert res["hecho_efectos"] == 7 and res["efecto_atribuciones"] == 7
+
+
+@pytest.mark.skipif(not os.environ.get("GAPTO_RV3_IMPORT_URL"), reason="sin laboratorio RV3_IMPORT")
+def test_fisico_atribucion_completa_descuadrada_rechazada():
+    """El contrato fisico 0330 rechaza COMPLETA con suma distinta: el estado PARCIAL no es decorativo."""
+    import psycopg
+    ds = _t([_c("CM", tipo_pago=3, importe=10, importe_total=20)])
+    (e,) = _efectos(ds, _hecho(ds, GC, "CM"))
+    e["estado_atribucion"] = "COMPLETA"
+    with pytest.raises(psycopg.errors.RaiseException):
+        P5.validar_fisico(ds, os.environ["GAPTO_RV3_IMPORT_URL"])

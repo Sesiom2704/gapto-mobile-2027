@@ -16,6 +16,7 @@
 #   python scripts/mutantes/rv3_p5.py            # todos
 #   python scripts/mutantes/rv3_p5.py M30 M33    # subconjunto
 #
+# Version: 0.13.0 (M127..M139: P5 v0.19.0, dominio 6 bloque 1)
 # Version: 0.12.0 (M120..M126: P5 v0.18.0, respuestas A-F; M105 reanclado)
 # Version: 0.11.0 (M111..M119: P5 v0.17.0, respuestas del propietario; M92/M93 reanclados)
 # Version: 0.10.0 (M85..M110: P5 v0.16.0, dominio 5 reglas financieras y versiones)
@@ -48,6 +49,7 @@ T13 = "tests/migration/test_rv3_013_p5_categorias.py"
 T14 = "tests/migration/test_rv3_014_p5_clasificacion.py"
 T15 = "tests/migration/test_rv3_015_p5_capacidades_direcciones.py"
 T16 = "tests/migration/test_rv3_016_p5_dominio5.py"
+T17 = "tests/migration/test_rv3_017_p5_dominio6.py"
 
 MUTANTES = {
     "M30": ("gate de la fuente suplementaria siempre abierto",
@@ -356,6 +358,49 @@ MUTANTES = {
     "M126": ("cancelacion incoherente aceptada",
              [("        if cancelada and not (g(\"activo\") is False and g(\"cuotas_restantes\") not in (None, 0)):", "        if False:")],
              T16 + "::test_compra_financiada_cancelada"),
+    # ---- 0.13.0: P5 v0.19.0, dominio 6 bloque 1 (hechos)
+    "M127": ("parte personal sustituida por el total (invitado paga)",
+             [('[(S, imp, "MANUAL")], "COMPLETA" if imp == tot else "PARCIAL")', '[(S, tot, "MANUAL")], "COMPLETA" if imp == tot else "PARCIAL")')],
+             T17 + "::test_invitado_conserva_total_y_parte_personal_cero_sin_actor_ficticio"),
+    "M128": ("atribucion parcial declarada COMPLETA",
+             [('"COMPLETA" if imp == tot else "PARCIAL")', '"COMPLETA")')],
+             T17 + "::test_a_medias_parcial_y_pago_propio_completo"),
+    "M129": ("traspaso propio tratado como gasto",
+             [('    if o in TRANSFERENCIA_LEGACY_DECIDIDA or naturaleza in NATURALEZA_TRANSFERENCIA:\n', '    if o in TRANSFERENCIA_LEGACY_DECIDIDA:\n'),
+              ('        if not naturaleza.startswith(PREFIJO_INTERES):\n', '        if False:\n'),
+              ('        cat = _cat_por_ruta(ds, _norm(naturaleza[len(PREFIJO_INTERES):].rstrip(")")))\n', '        cat = None\n')],
+             T17 + "::test_traspaso_legacy_es_transferencia_sin_efectos_ni_movimientos"),
+    "M130": ("reembolso de derecho como INGRESO",
+             [('h = _H(ds, co, cl, "REEMBOLSO", fecha, nombre, imp, False, notas)', 'h = _H(ds, co, cl, "INGRESO", fecha, nombre, imp, False, notas)')],
+             T17 + "::test_repercusion_100_a_la_contraparte_y_reembolso_sin_ingreso"),
+    "M131": ("devolucion con signo positivo",
+             [('h.efecto("gasto", "GASTO", -imp, cat_d, [(S, -imp, "MANUAL")], "COMPLETA")', 'h.efecto("gasto", "GASTO", imp, cat_d, [(S, imp, "MANUAL")], "COMPLETA")')],
+             T17 + "::test_devolucion_con_origen_es_gasto_negativo_relacionado"),
+    "M132": ("limite de devolucion por origen ignorado",
+             [('            if imp > -cap:\n', '            if False:\n')],
+             T17 + "::test_devolucion_que_excede_el_origen_falla"),
+    "M133": ("parte personal superior al total aceptada",
+             [('    if imp > tot:  # dato V3 incoherente', '    if False:  # dato V3 incoherente')],
+             T17 + "::test_parte_personal_superior_al_total_es_pendiente_sin_redondeo"),
+    "M134": ("gasto repercutido atribuido al propietario",
+             [('h.efecto("gasto", "GASTO", tot, cat, [(contraparte, tot, "MANUAL")], "COMPLETA")', 'h.efecto("gasto", "GASTO", tot, cat, [(S, tot, "MANUAL")], "COMPLETA")')],
+             T17 + "::test_repercusion_100_a_la_contraparte_y_reembolso_sin_ingreso"),
+    "M135": ("repercusion sin contraparte aceptada",
+             [('if d["id"] not in ATRIBUCION_CONTRAPARTE_100 or contraparte is None:', 'if d["id"] not in ATRIBUCION_CONTRAPARTE_100:')],
+             T17 + "::test_repercusion_sin_contraparte_queda_pendiente_y_bloquea_su_cobro"),
+    "M136": ("vivienda compartida atribuida al propietario sin decision",
+             [('    if viv and not _participacion_entidad_self_100(ds, viv):\n', '    if False:\n')],
+             T17 + "::test_vivienda_compartida_sin_decision_queda_pendiente"),
+    "M137": ("REEMBOLSO_DE omitido con generador conocido",
+             [('                h.relacion(ids[gen], "REEMBOLSO_DE", imp)\n', '                pass\n')],
+             T17 + "::test_repercusion_100_a_la_contraparte_y_reembolso_sin_ingreso"),
+    "M138": ("fecha desconocida sustituida por una fecha fabricada",
+             [('        raise PendienteD6("S6", "D6_FECHA_DESCONOCIDA")\n    fecha = str(fc.valor)[:10]\n',
+               '        fc = None\n    fecha = str(fc.valor)[:10] if fc else "2026-01-01"\n')],
+             T17 + "::test_fecha_desconocida_no_se_fabrica"),
+    "M139": ("relacion de devolucion inventada sin origen",
+             [('        if orig is not None:\n            if orig not in ids:', '        if orig is None and ids:\n            h.relacion(sorted(ids.values())[0], "DEVOLUCION_DE", imp)\n        if orig is not None:\n            if orig not in ids:')],
+             T17 + "::test_devolucion_sin_origen_no_inventa_relacion"),
 }
 
 
