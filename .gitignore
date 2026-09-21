@@ -1,9 +1,9 @@
-﻿# ============================================================
+# ============================================================
 # GAPTO MOBILE 2027
 # Fichero: .gitignore
 # Ruta: .gitignore
 # Descripción: Exclusiones del control de versiones.
-# Versión: 0.2.0
+# Versión: 0.3.0
 # ============================================================
 
 # Secretos
@@ -40,15 +40,29 @@ Thumbs.db
 *.log
 logs/
 
-# Datos reales de migración V3
-data/migration_v3/input/*
-!data/migration_v3/input/.gitkeep
+# Datos reales de migración V3 (RV3-E001 §2)
+# Todo data/migration_v3/ queda excluido salvo los placeholders .gitkeep.
+# Los datos V3 reales deben vivir FUERA del repositorio (GAPTO_RV3_DATA_DIR):
+# la subida web de GitHub NO respeta .gitignore.
+data/migration_v3/**
+!data/migration_v3/
+!data/migration_v3/*/
+!data/migration_v3/**/.gitkeep
 
-data/migration_v3/working/*
-!data/migration_v3/working/.gitkeep
+# Artefactos V3 / RUN reconocibles en cualquier ruta
+**/Base_Datos_Personal_py*
+**/GaptoMobile_2027_DB*
+**/*RUN0[0-9]*.xls*
+*.xlsx
+*.xlsm
+*.xls
+*.ods
+*.jsonl
+*.parquet
 
-data/migration_v3/reports/*
-!data/migration_v3/reports/.gitkeep
+# Evidencia RV3 local (debe escribirse fuera del repositorio)
+.rv3/
+rv3_evidencia/
 
 # Bases, dumps y exports
 *.sqlite
