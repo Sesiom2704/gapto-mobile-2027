@@ -16,6 +16,7 @@
 #   python scripts/mutantes/rv3_p5.py            # todos
 #   python scripts/mutantes/rv3_p5.py M30 M33    # subconjunto
 #
+# Version: 0.17.0 (M149..M154: P5 v0.22.0, dominio 7 tesoreria legacy)
 # Version: 0.16.0 (M147..M148: P5 v0.21.0, ticket compartido; M134 reanclado)
 # Version: 0.15.0 (M144..M146: P5 v0.20.0, compras financiadas OP-15; M136/M138 reanclados)
 # Version: 0.14.0 (M140..M143: P5 v0.20.0, respuestas al bloque 1 del dominio 6)
@@ -53,6 +54,7 @@ T14 = "tests/migration/test_rv3_014_p5_clasificacion.py"
 T15 = "tests/migration/test_rv3_015_p5_capacidades_direcciones.py"
 T16 = "tests/migration/test_rv3_016_p5_dominio5.py"
 T17 = "tests/migration/test_rv3_017_p5_dominio6.py"
+T18 = "tests/migration/test_rv3_018_p5_dominio7.py"
 
 MUTANTES = {
     "M30": ("gate de la fuente suplementaria siempre abierto",
@@ -434,6 +436,27 @@ MUTANTES = {
     "M148": ("parte ajena sin actor declarada COMPLETA",
              [('            estado = "COMPLETA" if contraparte else "PARCIAL"', '            estado = "COMPLETA"')],
              T17 + "::test_ticket_compartido_sin_actor_parte_propia_y_parcial"),
+    # ---- 0.17.0: P5 v0.22.0, dominio 7 (tesoreria legacy)
+    "M149": ("ajuste V3 convertido en autotransferencia",
+             [('        if org == dst:  # DV-7: ajuste manual de liquidez\n', '        if False:  # DV-7: ajuste manual de liquidez\n')],
+             T18 + "::test_ajuste_es_un_unico_movimiento_con_signo_del_saldo_nunca_autotransferencia"),
+    "M150": ("signo del ajuste tomado del importe V3 (siempre positivo)",
+             [('            delta = despues - antes\n', '            delta = imp\n')],
+             T18 + "::test_ajuste_es_un_unico_movimiento_con_signo_del_saldo_nunca_autotransferencia"),
+    "M151": ("movimiento dentro del ledger aceptado (doble conteo)",
+             [('            if c["fecha_inicio_ledger"] is None or fecha >= c["fecha_inicio_ledger"]:\n', '            if False:\n')],
+             T18 + "::test_movimiento_dentro_del_ledger_se_contaria_dos_veces"),
+    "M152": ("transferencia sin conciliaciones",
+             [('        for rol, mid, x in (("conciliacion.salida", ms, -imp), ("conciliacion.entrada", me, imp)):\n', '        for rol, mid, x in ():\n')],
+             T18 + "::test_transferencia_hecho_neutro_dos_patas_y_conciliaciones"),
+    "M153": ("confirmacion desconocida fabricada a medianoche",
+             [('        if fecha.estado != fu.CONOCIDO or creado.estado != fu.CONOCIDO or imp is None or not org or not dst:\n',
+               '        if fecha.estado != fu.CONOCIDO or imp is None or not org or not dst:\n'),
+              ('        confirmado = str(creado.valor)\n', '        confirmado = str(creado.valor) if creado.estado == fu.CONOCIDO else f"{fecha}T00:00:00+00:00"\n')],
+             T18 + "::test_confirmacion_desconocida_no_se_fabrica"),
+    "M154": ("ajuste acompanado de hecho financiero",
+             [('            mov("ajuste", corig, delta, "AJUSTE_SALDO")\n', '            mov("ajuste", corig, delta, "AJUSTE_SALDO")\n            _H(ds, co, cl, "TRANSFERENCIA", fecha, None, abs(delta), False, desc).confirmar()\n')],
+             T18 + "::test_ajuste_es_un_unico_movimiento_con_signo_del_saldo_nunca_autotransferencia"),
 }
 
 

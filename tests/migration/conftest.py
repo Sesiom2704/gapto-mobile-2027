@@ -10,6 +10,7 @@
 #              catalogo declara CATALOGOS_V3_REALES = True y aporta su corpus.
 #              Asi los tests historicos verifican su baseline sin bloquear los
 #              bloques posteriores (Working Method).
+#   0.9.0: aisla el dominio 7 (DOMINIO_7_ACTIVO salvo modulos con DOMINIO_7 = True), P5 v0.22.0.
 #   0.8.0: aisla ATRIBUCION_COMPARTIDA y CONTEXTO_ADICIONAL (P5 v0.21.0).
 #   0.7.0: aisla VIVIENDA_ATRIBUCION_DECIDIDA e IMPORTE_TOTAL_CORREGIDO (P5 v0.20.0).
 #   0.6.0: aisla el dominio 6 (DOMINIO_6_ACTIVO salvo modulos con DOMINIO_6 = True) y sus
@@ -18,7 +19,7 @@
 #   0.4.0: aisla fusiones, inicio/fin y compras financiadas decididas (P5 v0.17.0).
 #   0.3.0: aisla tambien los catalogos del dominio 5 (P5 v0.16.0).
 #   0.2.0: aisla tambien el arbol de categorias canonico (CATEGORIAS_ACTIVAS, P5 v0.13.0).
-# Versión: 0.8.0
+# Versión: 0.9.0
 # ============================================================
 from __future__ import annotations
 
@@ -51,6 +52,9 @@ def _aislar_catalogos_v3(request, monkeypatch):
     # los tests historicos verifican su baseline sin el bloque posterior (Working Method).
     if hasattr(p5, "DOMINIO_5_ACTIVO") and not getattr(request.module, "DOMINIO_5", False):
         monkeypatch.setattr(p5, "DOMINIO_5_ACTIVO", False)
+    # 0.9.0: igual para el dominio 7
+    if hasattr(p5, "DOMINIO_7_ACTIVO") and not getattr(request.module, "DOMINIO_7", False):
+        monkeypatch.setattr(p5, "DOMINIO_7_ACTIVO", False)
     # 0.6.0: igual para el dominio 6
     if hasattr(p5, "DOMINIO_6_ACTIVO") and not getattr(request.module, "DOMINIO_6", False):
         monkeypatch.setattr(p5, "DOMINIO_6_ACTIVO", False)

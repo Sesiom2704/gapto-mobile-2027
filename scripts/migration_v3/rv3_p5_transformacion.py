@@ -15,6 +15,9 @@
 #                8 financiaciones (PARCIAL v0.5.0: 4 prestamos formales con condiciones
 #                  versionadas, calendario, financiador y garantia; 7 compras financiadas;
 #                  derechos/obligaciones pendientes)
+#   v0.22.0: dominio 7 (tesoreria legacy): 141 movimientos V3 -> 83 transferencias (hecho neutro + 166
+#           movimientos OPERACION + transferencias + 166 conciliaciones, F04-D001) y 58 AJUSTE_SALDO (DV-7) = 224;
+#           todos anteriores a fecha_inicio_ledger: no computan en el saldo de apertura (DB Schema §40, D7-D).
 #   v0.21.0: respuestas 2026-09-21: ticket compartido con Ana (D6-Z: parte propia 27,33, sin actor ficticio);
 #           compras ASICS, seguro Saavedra y vuelo Tailandia 100 % propias (PARTICIPACION_FIN_SELF); vuelo
 #           vinculado al contexto Tailandia 2026; sin aportaciones de pago en el historico (D6-Q confirmada).
@@ -98,7 +101,7 @@
 #   RV3_IMPORT (rol login no superusuario -> gapto_migrator -> gapto_owner),
 #   fuerza los diferidos con SET CONSTRAINTS ALL IMMEDIATE y hace ROLLBACK.
 #   No es P6 (P6 hace COMMIT real).
-# Versión: 0.21.0
+# Versión: 0.22.0
 # ============================================================
 from __future__ import annotations
 
@@ -113,7 +116,7 @@ from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
-VERSION = "0.21.0"
+VERSION = "0.22.0"
 TRANSFORMACION = "RV3_P5"
 _AQUI = Path(__file__).resolve().parent
 
@@ -141,7 +144,7 @@ ORDEN_TABLAS = [
     "contratos", "contrato_participantes", "contrato_revision_renta_versiones", "propiedad_valoraciones",
     "servicios", "contrato_servicios", "contextos",
     "hechos_financieros", "hecho_efectos", "efecto_atribuciones", "hecho_terceros", "hecho_entidades",
-    "hecho_relaciones",
+    "hecho_relaciones", "movimientos_tesoreria", "transferencias", "hecho_movimientos_tesoreria",
     "fuentes_importacion", "registros_origen_importacion", "mapeos_importacion",
 ]
 
@@ -375,6 +378,7 @@ class Dataset:
     preguntas: list = field(default_factory=list)
     reglas: dict = field(default_factory=dict)
     hechos: dict = field(default_factory=dict)
+    tesoreria: dict = field(default_factory=dict)
 
     def add(self, tabla: str, fila: dict, natural: tuple | None = None) -> str:
         fid = fila[PK.get(tabla, "id")]
@@ -2947,6 +2951,91 @@ def _hecho_v3(ds, fuente, ctx, co, cl, derecho_de, contexto_de, ids, filas_d6=fr
     return "GASTO", _base(h)
 
 
+# ------------------------------------------------------------ dominio 7 (tesoreria)
+# public.movimientos_cuenta V3 -> ledger legacy anterior al corte (DB Schema §40: se conserva y NO computa en el
+# saldo, que abre en fecha_inicio_ledger con saldo_apertura del dominio 3). DV-7: misma cuenta = ajuste manual.
+DOMINIO_7_ACTIVO = True
+MOVIMIENTOS_V3 = "public.movimientos_cuenta"
+
+LEDGER_REGLAS.update({
+    "D7-A": "transferencia V3 entre cuentas distintas -> hecho TRANSFERENCIA neutro (sin efectos) + movimiento de salida "
+            "(-importe) y de entrada (+importe) OPERACION + transferencias + dos conciliaciones por el importe firmado "
+            "de cada pata (F04-D001).",
+    "D7-B": "movimiento V3 con origen = destino -> un unico movimiento AJUSTE_SALDO, sin hecho ni transferencia "
+            "(DV-7, INV-RV3-10); importe = saldo_despues - saldo_antes (RUN01), comprobado contra el importe V3.",
+    "D7-C": "fecha_movimiento = fecha V3; confirmado_at = createdon V3 (registro/confirmacion del usuario en V3; sin "
+            "hora fabricada); descripcion = comentarios.",
+    "D7-D": "todo movimiento V3 es anterior a fecha_inicio_ledger de su cuenta: legacy que no computa en el saldo de "
+            "apertura (DB Schema §40). Un movimiento en o tras el inicio del ledger se contaria dos veces -> S9.",
+})
+
+
+def _cuenta_v3(ds: Dataset, clave: str, origen: str) -> dict:
+    cid = fu.uuid_v3("public.cuentas_bancarias", clave, "cuentas", "cuenta")
+    c = ds.filas["cuentas"].get(cid)
+    if c is None:
+        raise ErrorP5("S8_HUERFANO", f"{origen} cuenta {clave}")
+    return c
+
+
+def dominio_7_tesoreria(ds: Dataset, fuente: dict, ctx: dict) -> dict:
+    co = MOVIMIENTOS_V3
+    n_tr = n_aj = 0
+    for cl in sorted(fuente.get(co, {})):
+        f = fuente[co][cl]
+        g = lambda col: _celda(co, col, f, ctx)
+        org, dst = _texto(g("cuenta_origen_id")), _texto(g("cuenta_destino_id"))
+        fecha, creado, imp = g("fecha"), g("createdon"), _dec_c(co, "importe", f, ctx)
+        if fecha.estado != fu.CONOCIDO or creado.estado != fu.CONOCIDO or imp is None or not org or not dst:
+            raise ErrorP5("S6_MOVIMIENTO_INCOMPLETO", f"{co}/{cl}")
+        fecha = str(fecha.valor)[:10]
+        confirmado = str(creado.valor)
+        desc = _texto(g("comentarios"))
+        corig = _cuenta_v3(ds, org, f"{co}/{cl}")
+        for c in (corig, _cuenta_v3(ds, dst, f"{co}/{cl}")):
+            if c["fecha_inicio_ledger"] is None or fecha >= c["fecha_inicio_ledger"]:
+                raise ErrorP5("S9_MOVIMIENTO_DENTRO_DEL_LEDGER", f"{co}/{cl}")  # computaria dos veces
+
+        def mov(rol, cuenta, importe, clase):
+            mid = fu.uuid_v3(co, cl, "movimientos_tesoreria", rol)
+            ds.add("movimientos_tesoreria", {
+                "id": mid, "cuenta_id": cuenta["id"], "fecha_movimiento": fecha, "importe": importe,
+                "descripcion": desc, "confirmado_at": confirmado, "clase_movimiento": clase, "estado": "ACTIVO",
+                "anulado_at": None, "motivo_anulacion": None, "reversion_de_movimiento_id": None})
+            ds.mapear(co, cl, "movimientos_tesoreria", mid, rol, tipo="DIVIDIDO" if clase == "OPERACION" else "CREADO")
+            return mid
+        if org == dst:  # DV-7: ajuste manual de liquidez
+            antes, despues = _dec_c(co, "saldo_origen_antes", f, ctx), _dec_c(co, "saldo_origen_despues", f, ctx)
+            if antes is None or despues is None:
+                raise ErrorP5("S6_AJUSTE_SIN_SALDOS", f"{co}/{cl}")
+            delta = despues - antes
+            if delta == 0 or abs(delta) != imp:
+                raise ErrorP5("S9_AJUSTE_INCOHERENTE", f"{co}/{cl}")
+            mov("ajuste", corig, delta, "AJUSTE_SALDO")
+            n_aj += 1
+            continue
+        if imp <= 0:
+            raise ErrorP5("S9_TRANSFERENCIA_IMPORTE", f"{co}/{cl}")
+        cdst = _cuenta_v3(ds, dst, f"{co}/{cl}")
+        if corig["moneda"] != cdst["moneda"]:
+            raise ErrorP5("S20_TRANSFERENCIA_MULTIDIVISA", f"{co}/{cl}")
+        ms, me = mov("salida", corig, -imp, "OPERACION"), mov("entrada", cdst, imp, "OPERACION")
+        tid = fu.uuid_v3(co, cl, "transferencias", "transferencia")
+        ds.add("transferencias", {"id": tid, "movimiento_salida_id": ms, "movimiento_entrada_id": me, "notas": None})
+        ds.mapear(co, cl, "transferencias", tid, "transferencia", tipo="DIVIDIDO")
+        h = _H(ds, co, cl, "TRANSFERENCIA", fecha, None, imp, False, desc)
+        h.fila["moneda"] = corig["moneda"]
+        for rol, mid, x in (("conciliacion.salida", ms, -imp), ("conciliacion.entrada", me, imp)):
+            h.hijos.append(("hecho_movimientos_tesoreria", {
+                "id": fu.uuid_v3(co, cl, "hecho_movimientos_tesoreria", rol), "hecho_id": h.id,
+                "movimiento_tesoreria_id": mid, "importe_asignado": x}, rol))
+        h.confirmar()
+        n_tr += 1
+    ds.ledger.append({"regla": "D7-A", "origen": co, "transferencias": n_tr})
+    ds.ledger.append({"regla": "D7-B", "origen": co, "ajustes": n_aj})
+    return {"transferencias": n_tr, "ajustes": n_aj, "movimientos": 2 * n_tr + n_aj}
+
+
 def transformar(b0: dict, sha_run06: str, modo_lab: bool = False,
                 decisiones: "Decisiones | None" = None) -> Dataset:
     fuente = fu.fuente_b0(b0)
@@ -2972,6 +3061,8 @@ def transformar(b0: dict, sha_run06: str, modo_lab: bool = False,
         ds.reglas = dominio_5_reglas(ds, fuente, ctx)
         if DOMINIO_6_ACTIVO:
             ds.hechos = dominio_6_hechos(ds, fuente, ctx)
+            if DOMINIO_7_ACTIVO and MOVIMIENTOS_V3 in fuente:
+                ds.tesoreria = dominio_7_tesoreria(ds, fuente, ctx)
     verificar_trazabilidad(ds)
     return ds
 
@@ -3059,7 +3150,7 @@ def main() -> int:
     informe = {"version": VERSION, "hash_dataset": h, "recuentos": ds.recuentos(),
                "ledger_reglas": LEDGER_REGLAS, "ledger": ds.ledger, "pendientes": ds.pendientes,
                "preguntas": ds.preguntas, "clasificacion": ds.clasificacion, "decisiones_sha256": dec.sha256 if dec else None,
-               "fisico": fisico, "reglas": ds.reglas, "hechos": ds.hechos, "dominios": {"implementados": [1, "2-parcial", 3, "4-propiedad", 5, "6-bloque1", "8-financiaciones", "8B-derechos", "9-inversiones", "10-contratos-valoraciones", "12-base"], "pendientes": ["2-resto", "4-resto", "6-bloque2", 7, 11], "modo_lab": a.modo_lab},
+               "fisico": fisico, "reglas": ds.reglas, "hechos": ds.hechos, "tesoreria": ds.tesoreria, "dominios": {"implementados": [1, "2-parcial", 3, "4-propiedad", 5, "6", 7, "8-financiaciones", "8B-derechos", "9-inversiones", "10-contratos-valoraciones", "12-base"], "pendientes": ["2-resto", "4-resto", 11], "modo_lab": a.modo_lab},
                "ts": datetime.now(timezone.utc).isoformat()}
     a.salida.mkdir(parents=True, exist_ok=True)
     p = a.salida / f"rv3_p5_{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"

@@ -12,7 +12,8 @@
 #   0.2.0: atribucion por vivienda decidida (D6-V) y total corregido (D6-W), P5 v0.20.0.
 #   0.3.0: bloque 2, compras financiadas OP-15 (P5 v0.20.0).
 #   0.4.0: ticket compartido (D6-Z), P5 v0.21.0.
-# Versión: 0.4.0
+#   0.4.1: la tabla de movimientos existe desde el dominio 7; se afirma que el dominio 6 no genera filas.
+# Versión: 0.4.1
 # ============================================================
 from __future__ import annotations
 
@@ -133,7 +134,8 @@ def test_gasto_unico_total_atribuido_y_sin_tesoreria():
     (a,) = _atribs(ds, e)
     assert (a["actor_id"], a["importe_atribuido"]) == (ds.self_id, Decimal("40"))
     assert [t["rol_en_hecho"] for t in ds.filas["hecho_terceros"].values() if t["hecho_id"] == h["id"]] == ["VENDEDOR"]
-    assert "movimientos_tesoreria" not in ds.filas and "hecho_aportaciones_pago" not in ds.filas
+    assert not ds.filas.get("movimientos_tesoreria") and not ds.filas.get("hecho_movimientos_tesoreria")
+    assert "hecho_aportaciones_pago" not in ds.filas  # D6-Q: sin aportaciones en el historico
 
 
 def test_invitado_conserva_total_y_parte_personal_cero_sin_actor_ficticio():
