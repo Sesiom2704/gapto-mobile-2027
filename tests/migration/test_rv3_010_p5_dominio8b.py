@@ -10,7 +10,8 @@
 #              desconocida NULL salvo decision S20, trazabilidad y carga fisica.
 #   0.2.0: P5 v0.8.0 -> participacion 100 % propietario (S20 R2-7), vinculados (R2-8),
 #          contraparte desconocida sin pregunta (R2-6), gate con fuente PENDIENTE.
-# Versión: 0.2.0
+#   0.3.0: contraparte = persona V3 validada como inquilino del contrato de la vivienda.
+# Versión: 0.3.0
 # ============================================================
 from __future__ import annotations
 
@@ -72,6 +73,7 @@ def cfg(monkeypatch):
     monkeypatch.setattr(P5, "DERECHOS_V3", CAT)
     monkeypatch.setattr(P5, "CANON_TRANSITORIAS", (2, Decimal("15.25")))
     monkeypatch.setattr(P5, "CANON_UNIVERSIDAD", Decimal("150"))
+    monkeypatch.setattr(P5, "CONTRAPARTE_V3_DECIDIDA", {})
 
 
 def _t(filas=None, dec=None, lab=True):
@@ -175,6 +177,23 @@ def test_vinculado_relacionado_por_el_propietario(monkeypatch):
                for m in ds.filas["mapeos_importacion"].values())
     cat[3]["vinculados"] = [(G, "NOEXISTE")]
     assert _err() == "S8_ORIGEN_AUSENTE"
+
+
+def _con_contrato(rol="inquilino", viv="V1"):
+    return _filas(GT1={"referencia_vivienda_id": "V1"}) + [
+        ("public.personas", "PX", {"id": "PX", "nombre_completo": "Persona X", "email": "x@example.invalid"}),
+        ("public.contratos", "K1", {"id": "K1", "patrimonio_id": viv, "estado": "activo",
+                                    "objeto_alquiler": "completa", "fecha_inicio": "2024-01-01"}),
+        ("public.contratos_participantes", "KP1", {"id": "KP1", "contrato_id": "K1", "persona_id": "PX", "rol": rol})]
+
+
+def test_contraparte_persona_v3_validada_como_inquilino(monkeypatch):
+    monkeypatch.setattr(P5, "CONTRAPARTE_V3_DECIDIDA", {"D-T1": ("public.personas", "PX")})
+    ds = _t(filas=_con_contrato())
+    assert _d(ds, G, "GT1")["contraparte_actor_id"] == F.uuid_v3("public.personas", "PX", "actores_financieros", "actor")
+    P5.verificar_trazabilidad(ds)
+    assert _err(filas=_con_contrato(rol="avalista")) == "S1_CONTRAPARTE_NO_INQUILINO"
+    assert _err(filas=_con_contrato(viv="OTRA")) == "S1_CONTRAPARTE_NO_INQUILINO"
 
 
 def test_trazabilidad_y_evidencia_vinculada():

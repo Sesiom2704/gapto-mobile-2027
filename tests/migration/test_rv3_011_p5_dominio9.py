@@ -8,7 +8,9 @@
 #              valoracion ni capital real), cierre sin fecha/motivo inventados,
 #              tipo_producto PROPUESTA con fallo cerrado fuera de laboratorio, la
 #              fila V3 que es cuenta no se duplica y coherencia del ROI objetivo.
-# Versión: 0.1.0
+#   0.2.0: P5 v0.10.0 -> tipos CONFIRMADOS en produccion (la fixture fija PROPUESTA,
+#          baseline del mecanismo), nota del joint venture y participacion 100 %.
+# Versión: 0.2.0
 # ============================================================
 from __future__ import annotations
 
@@ -57,6 +59,8 @@ def cfg(monkeypatch):
     monkeypatch.setattr(P5, "CONDICIONES_DECIDIDAS", {})
     monkeypatch.setattr(P5, "PARTICIPACION_FIN_SELF", {})
     monkeypatch.setattr(P5, "TIPO_PRODUCTO_PROPUESTO", {"IA": "FONDO", "IC": "OTRO"})
+    monkeypatch.setattr(P5, "TIPO_PRODUCTO_ESTADO", "PROPUESTA")
+    monkeypatch.setattr(P5, "NOTA_TIPO_PRODUCTO", {"IC": "Tipo declarado: JOINT VENTURE"})
 
 
 def _t(filas=None, lab=True):
@@ -76,8 +80,10 @@ def _err(**kw):
 def test_catalogo_real_de_tipos_cubre_las_siete_posiciones():
     real = importlib.util.module_from_spec(_spec)
     _spec.loader.exec_module(real)
-    assert len(real.TIPO_PRODUCTO_PROPUESTO) == 7 and real.TIPO_PRODUCTO_ESTADO == "PROPUESTA"
-    assert set(real.TIPO_PRODUCTO_PROPUESTO.values()) <= {"PLAN", "CARTERA_GESTIONADA", "FONDO", "ACCION", "DEPOSITO", "OTRO"}
+    assert len(real.TIPO_PRODUCTO_PROPUESTO) == 7 and real.TIPO_PRODUCTO_ESTADO == "CONFIRMADA"
+    assert sorted(real.TIPO_PRODUCTO_PROPUESTO.values()) == ["FONDO"] * 6 + ["OTRO"]
+    assert set(real.NOTA_TIPO_PRODUCTO) == {k for k, v in real.TIPO_PRODUCTO_PROPUESTO.items() if v == "OTRO"}
+    assert real.PARTICIPACION_INVERSION_SELF is True
 
 
 def test_posicion_sin_padre_con_gestor_v3_y_sin_capital_inventado():
@@ -107,6 +113,17 @@ def test_objetivos_version_sin_vigencia_inventada():
 def test_cerrada_sin_fecha_ni_motivo_inventados():
     i = _i(_t(), "IC")
     assert (i["estado"], i["fecha_fin_real"], i["motivo_cierre"], i["plazo_real_meses"]) == ("CERRADA", None, None, 8)
+    assert i["notas"] == "Edificio Tipo declarado: JOINT VENTURE"
+
+
+def test_participacion_100_propietario_desde_fecha_inicio(monkeypatch):
+    ds = _t()
+    eid = F.uuid_v3(IV, "IA", "entidades", "inversion")
+    ps = [p for p in ds.filas["entidad_participaciones"].values() if p["entidad_id"] == eid]
+    assert len(ps) == 1 and (ps[0]["actor_id"], ps[0]["porcentaje"], ps[0]["vigente_desde"]) == \
+        (ds.self_id, Decimal(100), "2019-03-11")
+    monkeypatch.setattr(P5, "PARTICIPACION_INVERSION_SELF", False)
+    assert not [p for p in _t().filas["entidad_participaciones"].values() if p["entidad_id"] == eid]
 
 
 def test_tipo_producto_propuesto_falla_fuera_de_lab(monkeypatch):

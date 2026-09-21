@@ -16,6 +16,8 @@
 #   python scripts/mutantes/rv3_p5.py            # todos
 #   python scripts/mutantes/rv3_p5.py M30 M33    # subconjunto
 #
+# Version: 0.5.0 (M61..M65: P5 v0.11.0, dominio 10)
+# Version: 0.4.0 (M58..M60: P5 v0.10.0, tercera ronda S20)
 # Version: 0.3.0 (M52..M57: P5 v0.9.0, dominio 9)
 # Version: 0.2.0 (M48..M51: P5 v0.8.0, segunda ronda S20)
 # Version: 0.1.0 (M30..M40 P5 v0.6.0 respuestas S20; M41..M47 P5 v0.7.0 dominio 8B)
@@ -34,6 +36,7 @@ OBJ = "scripts/migration_v3/rv3_p5_transformacion.py"
 T9 = "tests/migration/test_rv3_009_p5_s20_decisiones.py"
 T10 = "tests/migration/test_rv3_010_p5_dominio8b.py"
 T11 = "tests/migration/test_rv3_011_p5_dominio9.py"
+T12 = "tests/migration/test_rv3_012_p5_dominio10.py"
 
 MUTANTES = {
     "M30": ("gate de la fuente suplementaria siempre abierto",
@@ -126,6 +129,32 @@ MUTANTES = {
     "M57": ("gestor discrepante con dealer aceptado",
             [('        if prov and dealer and prov != dealer:\n', '        if False:\n')],
             T11 + "::test_gestor_discrepante_falla_s20"),
+    "M58": ("contraparte V3 aceptada sin validar el contrato",
+            [('            _validar_inquilino(fuente, ctx, co, cl, pk, d["id"])\n', '')],
+            T10 + "::test_contraparte_persona_v3_validada_como_inquilino"),
+    "M59": ("participacion de inversion fijada al corte",
+            [('"porcentaje": Decimal(100), "vigente_desde": str(v("fecha_inicio")),',
+              '"porcentaje": Decimal(100), "vigente_desde": FECHA_INICIO_LEDGER,')],
+            T11 + "::test_participacion_100_propietario_desde_fecha_inicio"),
+    "M60": ("declaracion del propietario sobre el tipo perdida",
+            [('                                          NOTA_TIPO_PRODUCTO.get(ci)) if x) or None})',
+              '                                          None) if x) or None})')],
+            T11 + "::test_cerrada_sin_fecha_ni_motivo_inventados"),
+    "M61": ("sustitucion de participante con vigencias solapadas",
+            [('desde = max(inicio, _dia(inact[(per, rolv)]))', 'desde = inicio')],
+            T12 + "::test_participantes_self_y_sustitucion_sin_solape"),
+    "M62": ("persona propia convertida en tercero del contrato",
+            [('            if fu.uuid_origen("public.personas", per) in persona_propia:\n', '            if False:\n')],
+            T12 + "::test_participantes_self_y_sustitucion_sin_solape"),
+    "M63": ("fecha de inicio validada ignorada",
+            [('inicio = FECHA_INICIO_CONTRATO_VALIDADA.get(ck, v("fecha_inicio"))', 'inicio = v("fecha_inicio")')],
+            T12 + "::test_fecha_validada_prevalece_y_origen_se_conserva"),
+    "M64": ("total_inversion no comprobado",
+            [('!= dv("total_inversion"):', '!= dv("total_inversion") and False:')],
+            T12 + "::test_valoraciones_por_metodo_y_total_comprobado"),
+    "M65": ("objeto de alquiler desconocido convertido en OTRO",
+            [('tipo = TIPO_CONTRATO_V3.get(str(v("objeto_alquiler")))', 'tipo = TIPO_CONTRATO_V3.get(str(v("objeto_alquiler")), "OTRO")')],
+            T12 + "::test_valor_v3_sin_mapping_falla"),
 }
 
 

@@ -15,6 +15,14 @@
 #                8 financiaciones (PARCIAL v0.5.0: 4 prestamos formales con condiciones
 #                  versionadas, calendario, financiador y garantia; 7 compras financiadas;
 #                  derechos/obligaciones pendientes)
+#   v0.11.0: dominio 10 (parcial): contratos, participantes con vigencias, clausula de
+#           revision de renta y valoraciones de propiedad desde patrimonio_compra.
+#           Servicios y contextos sin fuente V3 estructurada: no se crean (D10-F/D10-G);
+#           renta -> regla del dominio 5.
+#   v0.10.0: tercera ronda S20 (2026-09-21): tipo_producto CONFIRMADO (6 FONDO + joint
+#           venture como OTRO con nota), inversiones 100 % propietario desde su
+#           fecha_inicio, contraparte de luz Allende = inquilino V3 validado contra el
+#           contrato de la vivienda.
 #   v0.9.0: dominio 9 inversiones (7 posiciones + objetivos versionados; la cuenta
 #           de ahorro V3 sigue en dominio 3). tipo_producto sin dato V3 -> PROPUESTA S20.
 #   v0.8.0: segunda ronda S20 (2026-09-21): fuente suplementaria APROBADA por
@@ -45,7 +53,7 @@
 #   RV3_IMPORT (rol login no superusuario -> gapto_migrator -> gapto_owner),
 #   fuerza los diferidos con SET CONSTRAINTS ALL IMMEDIATE y hace ROLLBACK.
 #   No es P6 (P6 hace COMMIT real).
-# Versión: 0.9.0
+# Versión: 0.11.0
 # ============================================================
 from __future__ import annotations
 
@@ -60,7 +68,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
-VERSION = "0.9.0"
+VERSION = "0.11.0"
 TRANSFORMACION = "RV3_P5"
 _AQUI = Path(__file__).resolve().parent
 
@@ -84,6 +92,7 @@ ORDEN_TABLAS = [
     "entidades", "propiedades", "entidad_participaciones",
     "financiaciones", "financiacion_condiciones_versiones", "financiacion_cuotas", "entidad_relaciones",
     "derechos_obligaciones_financieras", "inversiones", "inversion_objetivos_versiones",
+    "contratos", "contrato_participantes", "contrato_revision_renta_versiones", "propiedad_valoraciones",
     "fuentes_importacion", "registros_origen_importacion", "mapeos_importacion",
 ]
 
@@ -120,7 +129,7 @@ GESTOR_REVOLUT = "PROV-UH1DM1"
 
 # Tablas cuya PK no es la columna id.
 PK = {"tercero_personas": "tercero_id", "propiedades": "entidad_id", "financiaciones": "entidad_id",
-      "derechos_obligaciones_financieras": "entidad_id", "inversiones": "entidad_id"}
+      "derechos_obligaciones_financieras": "entidad_id", "inversiones": "entidad_id", "contratos": "entidad_id"}
 
 # Reference data geografica versionada (DB Schema: geografia = reference data
 # separada). Decision de ejecucion H-P5-01, PROVISIONAL hasta conformidad.
@@ -234,7 +243,30 @@ LEDGER_REGLAS = {
              "y motivo_cierre desconocidos -> NULL (Migration V3 §27).",
     "D9-F": "tipo_producto NOT NULL sin dato V3: TIPO_PRODUCTO_PROPUESTO por inversion; fuera de laboratorio "
              "falla S20 hasta confirmacion del propietario.",
-    "D9-G": "entidad_participaciones de inversiones: 0 filas (sin decision S20; no se infiere).",
+    "D9-G": "entidad_participaciones de inversiones: 100 % propietario desde fecha_inicio V3 (S20 R3-2).",
+    "D9-H": "tipo de producto sin valor propio en el CHECK de 0330 (joint venture): OTRO + declaracion en "
+             "notas; no es clase G (OTRO es representacion fiel) salvo que se requiera filtrar por el tipo.",
+    "D8B-H": "contraparte = persona V3 declarada por el propietario (S20 R3-4), validada: debe figurar como "
+              "inquilino en un contrato V3 de la vivienda referenciada por el gasto generador; si no -> S1.",
+    "D10-A": "contrato V3 -> entidad CONTRATO + contratos; tipo por objeto_alquiler segun TIPO_CONTRATO_V3 "
+              "(tabla cerrada; valor no mapeado -> S4); estado V3 'activo' -> FORMALIZADO.",
+    "D10-B": "fecha_inicio = V3 salvo correccion validada por el propietario (Migration V3 §9/§27: contrato "
+              "Francisco 2026-03-01); literal V3 conservado en origen. fecha_fin 141 -> NULL.",
+    "D10-C": "renta_mensual -> regla financiera del dominio 5 (regla_renta_id se completa alli).",
+    "D10-D": "participantes: rol V3 -> INQUILINO/AVALISTA/GESTOR; la persona propia (D2-C) -> actor self; "
+              "vigente_desde = inicio del contrato. Fila inactivada: vigente_hasta = dia anterior a la "
+              "inactivacion y la fila activa del mismo actor/rol empieza ese dia (Migration V3 §27: se migran "
+              "ambas vigencias, sin deduplicar).",
+    "D10-E": "incremento_ipc -> contrato_revision_renta_versiones IPC (true) / NINGUNA (false), vigente desde "
+              "el inicio del contrato; periodicidad e indice no demostrados -> NULL.",
+    "D10-F": "incluye_agua/luz/internet = false y suministros a cargo del inquilino: no se crean servicios ni "
+              "contrato_servicios (seria fabricar entidades); flags conservados en origen.",
+    "D10-G": "contextos: V3 no tiene entidad de contexto; se disponen en dominio 6 si un hecho lo demuestra.",
+    "D10-H": "patrimonio_compra -> propiedad_valoraciones: COMPRA (valor_compra, fecha = fecha_adquisicion de "
+              "la propiedad), MERCADO (valor_mercado, valor_mercado_fecha), FISCAL_REFERENCIA (valor_referencia, "
+              "fecha NULL). total_inversion es control derivado (se comprueba, no se guarda); impuestos, "
+              "notaria, agencia y reforma son costes -> dominio 6.",
+    "D10-I": "fianza V3 conservada en origen; su posicion (obligacion de devolucion) no se crea sin decision.",
     "D8-M": "total de compra sustituido por el validado por el propietario (Migration V3 §14/RUN01); "
             "literal V3 conservado en origen.",
 }
@@ -1112,6 +1144,8 @@ DERECHOS_V3 = [
     {"id": "DER-ISA-ENTRADA", "genera": None, "evidencia": [(_I, "INGRESO-WPIL1Z")], "modo": "INDETERMINADA"},
 ]
 CANON_TRANSITORIAS = (7, Decimal("330.11"))
+# S20 R3-4: la luz de Allende la paga el inquilino Francisco (persona V3), validado contra el contrato.
+CONTRAPARTE_V3_DECIDIDA = {f"DER-LUZ-0{n}": ("public.personas", "PER-8C62EC5126") for n in range(3, 8)}
 PARTICIPACION_DERECHO_SELF = True  # S20 R2-7 (2026-09-21)
 CANON_UNIVERSIDAD = Decimal("1352.00")
 
@@ -1143,6 +1177,26 @@ def contraparte_decidida(ds: Dataset, origen: str, lista: str = "contrapartes") 
         raise ErrorP5("S7_DECISION_DUPLICADA", origen)
     _gate_decisiones(ds, its[0]["id"])
     return its[0]
+
+
+def _actor_persona_v3(ds: Dataset, co: str, ck: str) -> str:
+    tid = fu.uuid_v3(co, ck, "terceros", "tercero")
+    if tid not in ds.filas["terceros"]:
+        raise ErrorP5("S8_HUERFANO", f"{co}/{ck}")
+    aid = fu.uuid_v3(co, ck, "actores_financieros", "actor")
+    ds.add("actores_financieros", {"id": aid, "owner_user_id": ds.owner, "tercero_id": tid}, natural=(ds.owner, tid))
+    ds.mapear(co, ck, "actores_financieros", aid, "actor", tipo="DIVIDIDO")
+    return aid
+
+
+def _validar_inquilino(fuente, ctx, co, cl, persona, did) -> None:
+    viv = fuente[co][cl].get("referencia_vivienda_id")
+    contratos = {k for k, c in fuente.get("public.contratos", {}).items() if str(c.get("patrimonio_id")) == str(viv)}
+    ok = any(str(p.get("persona_id")) == persona and str(p.get("contrato_id")) in contratos
+             and str(p.get("rol")).lower() == "inquilino"
+             for p in fuente.get("public.contratos_participantes", {}).values())
+    if not ok:
+        raise ErrorP5("S1_CONTRAPARTE_NO_INQUILINO", f"{did}: {persona} no es inquilino de {viv}")
 
 
 def dominio_8b_derechos(ds: Dataset, fuente: dict, ctx: dict) -> None:
@@ -1182,7 +1236,12 @@ def dominio_8b_derechos(ds: Dataset, fuente: dict, ctx: dict) -> None:
         elif modo != "INDETERMINADA":
             raise ErrorP5("S4_MODO_DERECHO", d["id"])
         dec = contraparte_decidida(ds, f"{co}/{cl}")
-        if dec is not None:
+        if d["id"] in CONTRAPARTE_V3_DECIDIDA:
+            po, pk = CONTRAPARTE_V3_DECIDIDA[d["id"]]
+            _validar_inquilino(fuente, ctx, co, cl, pk, d["id"])
+            sub["contraparte_actor_id"] = _actor_persona_v3(ds, po, pk)
+            ds.ledger.append({"regla": "D8B-H", "origen": f"{co}/{cl}", "derecho": d["id"]})
+        elif dec is not None:
             sub["contraparte_actor_id"] = _actor_decidido(ds, dec["persona"])
             ds.mapear(CONT_DECISIONES, f"contraparte/{dec['id']}", "derechos_obligaciones_financieras", eid,
                       "contraparte", tipo="VINCULADO", confianza="VALIDADA")
@@ -1228,11 +1287,15 @@ def dominio_8b_derechos(ds: Dataset, fuente: dict, ctx: dict) -> None:
 
 # ------------------------------------------------------------ dominio 9 (inversiones)
 # tipo_producto sin dato V3 (PROPUESTA pendiente del propietario, D9-F).
+# S20 R3-1 (2026-09-21): todas FONDO salvo el edificio, que es un joint venture (sin valor
+# propio en el CHECK de 0330 -> OTRO, con la declaracion del propietario en notas; D9-H).
 TIPO_PRODUCTO_PROPUESTO = {
-    "INV-26577BEDE3": "OTRO", "INV-2F7A749023": "OTRO", "INV-35B5375831": "FONDO",
-    "INV-59D23434E8": "OTRO", "INV-DE397BD29C": "OTRO", "INV-E30D554524": "OTRO", "INV-E674104368": "FONDO",
+    "INV-26577BEDE3": "FONDO", "INV-2F7A749023": "OTRO", "INV-35B5375831": "FONDO",
+    "INV-59D23434E8": "FONDO", "INV-DE397BD29C": "FONDO", "INV-E30D554524": "FONDO", "INV-E674104368": "FONDO",
 }
-TIPO_PRODUCTO_ESTADO = "PROPUESTA"
+TIPO_PRODUCTO_ESTADO = "CONFIRMADA"
+NOTA_TIPO_PRODUCTO = {"INV-2F7A749023": "Tipo declarado por el propietario: JOINT VENTURE (S20 R3-1)."}
+PARTICIPACION_INVERSION_SELF = True  # S20 R3-2: 100 % propietario desde fecha_inicio V3
 _OBJ = {"aporte_estimado": "aporte_objetivo_total", "retorno_esperado_total": "valor_objetivo_total",
         "roi_esperado_pct": "roi_objetivo_pct", "irr_esperada_pct": "irr_objetivo_pct",
         "moic_esperado": "moic_objetivo", "plazo_esperado_meses": "plazo_objetivo_meses",
@@ -1279,8 +1342,18 @@ def dominio_9_inversiones(ds: Dataset, fuente: dict, ctx: dict) -> None:
             "plazo_real_meses": int(Decimal(str(plazo))) if plazo is not None else None,
             "capital_invertido_apertura": None, "fecha_capital_invertido_apertura": None,
             "estado": estado, "motivo_cierre": None,
-            "notas": _texto(g("descripcion")) if g("descripcion").estado == fu.CONOCIDO else None})
+            "notas": " ".join(x for x in (_texto(g("descripcion")) if g("descripcion").estado == fu.CONOCIDO else None,
+                                          NOTA_TIPO_PRODUCTO.get(ci)) if x) or None})
         ds.mapear(cont, ci, "inversiones", eid, "inversion", tipo="DIVIDIDO")
+        if PARTICIPACION_INVERSION_SELF:
+            if not v("fecha_inicio"):
+                raise ErrorP5("S6_VIGENCIA_INVERSION_SIN_FECHA", origen)
+            pid = fu.uuid_v3(cont, ci, "entidad_participaciones", "self")
+            ds.add("entidad_participaciones", {"id": pid, "entidad_id": eid, "actor_id": ds.self_id,
+                                               "porcentaje": Decimal(100), "vigente_desde": str(v("fecha_inicio")),
+                                               "vigente_hasta": None})
+            ds.mapear(cont, ci, "entidad_participaciones", pid, "self", tipo="DIVIDIDO",
+                      notas="participacion decidida por el propietario (S20 R3-2)")
         obj = {}
         for col, dest in _OBJ.items():
             x = v(col)
@@ -1305,6 +1378,116 @@ def dominio_9_inversiones(ds: Dataset, fuente: dict, ctx: dict) -> None:
             ds.ledger.append({"regla": r_, "origen": origen})
 
 
+# ------------------------------------------------------------ dominio 10 (contratos y valoraciones)
+TIPO_CONTRATO_V3 = {"completa": "ALQUILER_VIVIENDA", "vivienda_trastero": "ALQUILER_VIVIENDA", "garaje": "OTRO"}
+ESTADO_CONTRATO_V3 = {"activo": "FORMALIZADO"}
+FECHA_INICIO_CONTRATO_VALIDADA = {"CON-FRANCISCO-20250301": "2026-03-01"}  # Migration V3 §9/§27
+ROL_PARTICIPANTE_V3 = {"inquilino": "INQUILINO", "avalista": "AVALISTA", "gestor": "GESTOR"}
+
+
+def _dia(ts: str, delta: int = 0) -> str:
+    from datetime import date, timedelta
+    return (date.fromisoformat(str(ts)[:10]) + timedelta(days=delta)).isoformat()
+
+
+def dominio_10_contratos(ds: Dataset, fuente: dict, ctx: dict) -> None:
+    cc, cpt = "public.contratos", "public.contratos_participantes"
+    persona_propia = {m["registro_origen_id"] for m in ds.filas["mapeos_importacion"].values()
+                      if m["tabla_destino"] == "usuarios" and m["tipo_mapping"] == "VINCULADO"}
+    for ck, c in sorted(fuente.get(cc, {}).items()):
+        g = lambda col: _celda(cc, col, c, ctx)
+        v = lambda col: g(col).valor if g(col).estado == fu.CONOCIDO else None
+        origen = f"{cc}/{ck}"
+        pid = fu.uuid_v3("public.patrimonio", str(v("patrimonio_id")), "entidades", "propiedad")
+        if pid not in ds.filas["propiedades"]:
+            raise ErrorP5("S8_HUERFANO", f"{origen} patrimonio_id")
+        tipo = TIPO_CONTRATO_V3.get(str(v("objeto_alquiler")))
+        est = ESTADO_CONTRATO_V3.get(str(v("estado")))
+        if tipo is None or est is None:
+            raise ErrorP5("S4_CONTRATO_SIN_MAPPING", f"{origen} objeto={v('objeto_alquiler')} estado={v('estado')}")
+        inicio = FECHA_INICIO_CONTRATO_VALIDADA.get(ck, v("fecha_inicio"))
+        eid = fu.uuid_v3(cc, ck, "entidades", "contrato")
+        ds.add("entidades", {"id": eid, "owner_user_id": ds.owner, "tipo_entidad": "CONTRATO", "nombre": ck})
+        ds.mapear(cc, ck, "entidades", eid, "contrato", tipo="DIVIDIDO")
+        ds.add("contratos", {"entidad_id": eid, "propiedad_entidad_id": pid, "tipo_contrato": tipo,
+                             "fecha_inicio": inicio, "fecha_fin_prevista": v("fecha_fin"), "fecha_fin_real": None,
+                             "estado_documental": est, "regla_renta_id": None,
+                             "notas": _texto(g("observaciones")) if g("observaciones").estado == fu.CONOCIDO else None})
+        ds.mapear(cc, ck, "contratos", eid, "contrato", tipo="DIVIDIDO",
+                  notas="fecha_inicio corregida y validada (D10-B)" if ck in FECHA_INICIO_CONTRATO_VALIDADA else None)
+        for r in ("D10-A", "D10-C", "D10-F", "D10-I") + (("D10-B",) if ck in FECHA_INICIO_CONTRATO_VALIDADA else ()):
+            ds.ledger.append({"regla": r, "origen": origen})
+        ipc = v("incremento_ipc")
+        if ipc is not None:
+            rid = fu.uuid_v3(cc, ck, "contrato_revision_renta_versiones", "v1")
+            ds.add("contrato_revision_renta_versiones", {
+                "id": rid, "contrato_entidad_id": eid, "vigente_desde": inicio, "vigente_hasta": None,
+                "tipo_revision": "IPC" if ipc else "NINGUNA", "indice_referencia": None, "periodicidad_meses": None,
+                "fecha_primera_revision": None, "porcentaje_fijo": None, "notas": None})
+            ds.mapear(cc, ck, "contrato_revision_renta_versiones", rid, "revision_v1", tipo="DIVIDIDO")
+            ds.ledger.append({"regla": "D10-E", "origen": origen})
+        parts = {k: p for k, p in fuente.get(cpt, {}).items() if str(p.get("contrato_id")) == ck}
+        inact = {}
+        for k, p in parts.items():
+            ic = _celda(cpt, "inactivatedon", p, ctx)
+            if ic.estado == fu.CONOCIDO:
+                inact[(str(p.get("persona_id")), str(p.get("rol")))] = str(ic.valor)
+        for k, p in sorted(parts.items()):
+            per, rolv = str(p.get("persona_id")), str(p.get("rol"))
+            rol = ROL_PARTICIPANTE_V3.get(rolv.lower())
+            if rol is None:
+                raise ErrorP5("S4_ROL_PARTICIPANTE", f"{cpt}/{k} rol={rolv}")
+            if fu.uuid_origen("public.personas", per) in persona_propia:
+                actor = ds.self_id
+            else:
+                actor = _actor_persona_v3(ds, "public.personas", per)
+            ic = _celda(cpt, "inactivatedon", p, ctx)
+            desde, hasta = inicio, None
+            if ic.estado == fu.CONOCIDO:
+                hasta = _dia(ic.valor, -1)
+            elif (per, rolv) in inact:
+                desde = max(inicio, _dia(inact[(per, rolv)]))
+            if hasta is not None and hasta < desde:
+                raise ErrorP5("S9_VIGENCIA_PARTICIPANTE", f"{cpt}/{k}")
+            prid = fu.uuid_v3(cpt, k, "contrato_participantes", "participante")
+            es_p = _celda(cpt, "es_principal", p, ctx)
+            ds.add("contrato_participantes", {"id": prid, "contrato_entidad_id": eid, "actor_id": actor, "rol": rol,
+                                              "principal": bool(es_p.valor) if es_p.estado == fu.CONOCIDO else False,
+                                              "vigente_desde": desde, "vigente_hasta": hasta})
+            ds.mapear(cpt, k, "contrato_participantes", prid, "participante")
+            ds.ledger.append({"regla": "D10-D", "origen": f"{cpt}/{k}"})
+    ds.ledger.append({"regla": "D10-G", "origen": "contextos"})
+
+    cv = "public.patrimonio_compra"
+    for vk, pc in sorted(fuente.get(cv, {}).items()):
+        g = lambda col: _celda(cv, col, pc, ctx)
+        dv = lambda col: Decimal(str(g(col).valor)) if g(col).estado == fu.CONOCIDO else None
+        origen = f"{cv}/{vk}"
+        pid = fu.uuid_v3("public.patrimonio", str(pc.get("patrimonio_id")), "entidades", "propiedad")
+        prop = ds.filas["propiedades"].get(pid)
+        if prop is None:
+            raise ErrorP5("S8_HUERFANO", f"{origen} patrimonio_id")
+        comps = [dv(x) for x in ("valor_compra", "impuestos_eur", "notaria", "agencia", "reforma_adecuamiento")]
+        if dv("total_inversion") is not None and sum(x for x in comps if x is not None) != dv("total_inversion"):
+            raise ErrorP5("S9_TOTAL_INVERSION_NO_CUADRA", origen)
+        fcomp = _celda(cv, "fecha_compra", pc, ctx)
+        for col, metodo, fecha in (
+                ("valor_compra", "COMPRA", str(fcomp.valor) if fcomp.estado == fu.CONOCIDO else prop["fecha_adquisicion"]),
+                ("valor_mercado", "MERCADO", str(g("valor_mercado_fecha").valor) if g("valor_mercado_fecha").estado == fu.CONOCIDO else None),
+                ("valor_referencia", "FISCAL_REFERENCIA", None)):
+            val = dv(col)
+            if val is None:
+                continue
+            if val <= 0:
+                raise ErrorP5("S5_VALORACION_NO_POSITIVA", f"{origen} {col}")
+            vid = fu.uuid_v3(cv, vk, "propiedad_valoraciones", metodo)
+            ds.add("propiedad_valoraciones", {"id": vid, "propiedad_entidad_id": pid, "fecha_valoracion": fecha,
+                                              "valor_total": val, "moneda": "EUR", "metodo": metodo,
+                                              "fuente": f"V3 {cv}.{col}", "notas": None})
+            ds.mapear(cv, vk, "propiedad_valoraciones", vid, f"valoracion.{metodo}", tipo="DIVIDIDO")
+        ds.ledger.append({"regla": "D10-H", "origen": origen})
+
+
 # ------------------------------------------------------------ pipeline
 def transformar(b0: dict, sha_run06: str, modo_lab: bool = False,
                 decisiones: "Decisiones | None" = None) -> Dataset:
@@ -1323,6 +1506,7 @@ def transformar(b0: dict, sha_run06: str, modo_lab: bool = False,
     if DERECHOS_V3:
         dominio_8b_derechos(ds, fuente, ctx)
     dominio_9_inversiones(ds, fuente, ctx)
+    dominio_10_contratos(ds, fuente, ctx)
     verificar_trazabilidad(ds)
     return ds
 
@@ -1410,7 +1594,7 @@ def main() -> int:
     informe = {"version": VERSION, "hash_dataset": h, "recuentos": ds.recuentos(),
                "ledger_reglas": LEDGER_REGLAS, "ledger": ds.ledger, "pendientes": ds.pendientes,
                "preguntas": ds.preguntas, "decisiones_sha256": dec.sha256 if dec else None,
-               "fisico": fisico, "dominios": {"implementados": [1, "2-parcial", 3, "4-propiedad", "8-financiaciones", "8B-derechos", "9-inversiones", "12-base"], "pendientes": ["2-resto", "4-resto", 5, 6, 7, 10, 11], "modo_lab": a.modo_lab},
+               "fisico": fisico, "dominios": {"implementados": [1, "2-parcial", 3, "4-propiedad", "8-financiaciones", "8B-derechos", "9-inversiones", "10-contratos-valoraciones", "12-base"], "pendientes": ["2-resto", "4-resto", 5, 6, 7, 11], "modo_lab": a.modo_lab},
                "ts": datetime.now(timezone.utc).isoformat()}
     a.salida.mkdir(parents=True, exist_ok=True)
     p = a.salida / f"rv3_p5_{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"
