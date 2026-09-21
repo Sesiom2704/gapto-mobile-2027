@@ -16,6 +16,7 @@
 #   python scripts/mutantes/rv3_p5.py            # todos
 #   python scripts/mutantes/rv3_p5.py M30 M33    # subconjunto
 #
+# Version: 0.10.0 (M85..M110: P5 v0.16.0, dominio 5 reglas financieras y versiones)
 # Version: 0.9.0 (M80..M84: P5 v0.15.0, capacidades, direcciones y coordenadas)
 # Version: 0.8.0 (M75..M79: P5 v0.14.0, clasificacion de registros)
 # Version: 0.7.0 (M70..M74: P5 v0.13.0, arbol de categorias D2-E)
@@ -44,6 +45,7 @@ T12 = "tests/migration/test_rv3_012_p5_dominio10.py"
 T13 = "tests/migration/test_rv3_013_p5_categorias.py"
 T14 = "tests/migration/test_rv3_014_p5_clasificacion.py"
 T15 = "tests/migration/test_rv3_015_p5_capacidades_direcciones.py"
+T16 = "tests/migration/test_rv3_016_p5_dominio5.py"
 
 MUTANTES = {
     "M30": ("gate de la fuente suplementaria siempre abierto",
@@ -223,6 +225,85 @@ MUTANTES = {
     "M84": ("coordenadas sin redondeo a 6 decimales",
             [('    q = lambda v: Decimal(str(v)).quantize(_Q6, rounding=ROUND_HALF_UP)', '    q = lambda v: Decimal(str(v))')],
             T15 + "::test_coordenadas_manuales_redondeadas_a_6_decimales"),
+    # ---- dominio 5 (P5 v0.16.0): reglas financieras y versiones
+    "M85": ("RODANTE generalizado a toda recurrencia",
+            [("rodante=(co, cl) in RODANTES_VALIDADOS)", "rodante=True)")],
+            T16 + "::test_rodante_solo_para_el_caso_validado"),
+    "M86": ("RODANTE con ventana relativa inventada desde rango V3",
+            [("    if rodante:\n        fecha_modo, dd, dh = \"ANCLA\", None, None", "    if False:\n        fecha_modo, dd, dh = \"ANCLA\", None, None")],
+            T16 + "::test_rodante_solo_para_el_caso_validado"),
+    "M87": ("inactivatedon -> vigente_hasta sin restar el dia",
+            [("    hasta = _dia(ina, -1)\n    if hasta < desde:", "    hasta = _dia(ina, 0)\n    if hasta < desde:")],
+            T16 + "::test_fin_dia_anterior_a_la_inactivacion"),
+    "M88": ("fin desconocido -> regla abierta (NULL = vigente)",
+            [("        raise PendienteD5(\"S6\", \"D5_FIN_NO_DEMOSTRADO\", \"activo=false sin inactivatedon\")", "        return desde, None, notas")],
+            T16 + "::test_fin_desconocido_o_anterior_al_inicio_pendiente"),
+    "M89": ("fecha posterior a captura/pago aceptada como inicio",
+            [("        if (cre is not None and ini > cre) or (ult is not None and ini > ult):", "        if False:")],
+            T16 + "::test_inicio_no_demostrado_no_crea_regla"),
+    "M90": ("createon como sustituto del inicio",
+            [("        desde = ini\n", "        desde = cre or ini\n")],
+            T16 + "::test_gasto_ordinario_calendario_ventana"),
+    "M91": ("ahorro remunerado como gasto",
+            [("                v, notas = _version(ds, co, cl, f, ctx, \"TRANSFERENCIA\")", "                v, notas = _version(ds, co, cl, f, ctx, \"GASTO\")")],
+            T16 + "::test_ahorro_es_transferencia_sin_gasto"),
+    "M92": ("aportacion a inversion como gasto",
+            [("            v, notas = _version(ds, G, kg, f, ctx, \"APORTACION_INVERSION\")", "            v, notas = _version(ds, G, kg, f, ctx, \"GASTO\")")],
+            T16 + "::test_aportacion_fusion_n1_versiones_contiguas"),
+    "M93": ("fusion N:1 copiada como dos reglas",
+            [("    vers, origenes = ([], []) if FUSION_MEDIOLANUM else (None, [])", "    vers, origenes = (None, [])")],
+            T16 + "::test_aportacion_fusion_n1_versiones_contiguas"),
+    "M94": ("versiones no contiguas aceptadas",
+            [("        if a[2][\"vigente_hasta\"] is None or _dia(a[2][\"vigente_hasta\"], 1) != b[2][\"vigente_desde\"]:", "        if False:")],
+            T16 + "::test_fusion_con_hueco_o_incompatible_falla"),
+    "M95": ("tipo de hecho Isa fabricado sin decision (S1 ignorado)",
+            [("                if ISA_TIPO_HECHO_DECIDIDO is None:\n                    raise PendienteD5", "                if False:\n                    raise PendienteD5")],
+            T16 + "::test_isa_pendiente_s1_sin_decision"),
+    "M96": ("cobro de derecho admitido como INGRESO",
+            [("ISA_TIPOS_ADMITIDOS = {\"REEMBOLSO\", \"GENERACION_DERECHO_OBLIGACION\"}", "ISA_TIPOS_ADMITIDOS = {\"REEMBOLSO\", \"GENERACION_DERECHO_OBLIGACION\", \"INGRESO\"}")],
+            T16 + "::test_isa_como_ingreso_rechazado"),
+    "M97": ("renta duplicada (contrato + ingreso como dos reglas)",
+            [("        disp[\"FUSIONADA\"].append((f\"{I}/{kl}+{C}/{ck}\", rid))\n        hechos.add((I, kl))", "        disp[\"FUSIONADA\"].append((f\"{I}/{kl}+{C}/{ck}\", rid))")],
+            T16 + "::test_renta_n1_contrato_mas_ingreso"),
+    "M98": ("regla_renta_id no completado",
+            [("        con[\"regla_renta_id\"] = rid", "        pass")],
+            T16 + "::test_renta_n1_contrato_mas_ingreso"),
+    "M99": ("vigencia de renta desde el ingreso V3 y no desde el contrato validado",
+            [("desde=con[\"fecha_inicio\"])", "desde=None)")],
+            T16 + "::test_renta_n1_contrato_mas_ingreso"),
+    "M100": ("importe cero/desconocido convertido en FIJO",
+             [("    if imp.estado != fu.CONOCIDO or imp.valor is None or Decimal(str(imp.valor)) <= 0:", "    if imp.estado != fu.CONOCIDO and False:")],
+             T16 + "::test_importe_cero_o_desconocido_no_es_fijo"),
+    "M101": ("transferencia/aportacion presupuestable",
+             [("        return None, False\n    if r[0] == \"FUERA\":", "        return None, True\n    if r[0] == \"FUERA\":")],
+             T16 + "::test_ahorro_es_transferencia_sin_gasto"),
+    "M102": ("importe_referencia_lado rellenado por conveniencia",
+             [("\"moneda\": moneda, \"importe_referencia_lado\": None,", "\"moneda\": moneda, \"importe_referencia_lado\": \"SALIDA\" if flujo == \"TRANSFERENCIA\" else None,")],
+             T16 + "::test_ahorro_es_transferencia_sin_gasto"),
+    "M103": ("contenedor presupuestario G-V3-03 convertido en regla",
+             [("            disp[\"EXCLUIDA_D11\"].append(f\"{co}/{cl}\")\n            continue", "            disp[\"EXCLUIDA_D11\"].append(f\"{co}/{cl}\")")],
+             T16 + "::test_exclusiones_y_pendientes_de_familia"),
+    "M104": ("compra financiada duplicada como regla de gasto",
+             [("            disp[\"EXCLUIDA_D8\"].append(f\"{co}/{cl}\")\n            continue", "            disp[\"EXCLUIDA_D8\"].append(f\"{co}/{cl}\")")],
+             T16 + "::test_exclusiones_y_pendientes_de_familia"),
+    "M105": ("cuota de prestamo como gasto ordinario sin decision",
+             [("                raise PendienteD5(\"S20\", \"D5_CUOTA_PRESTAMO_TIPO_HECHO\", _texto(g(\"prestamo_id\")))", "                pass")],
+             T16 + "::test_exclusiones_y_pendientes_de_familia"),
+    "M106": ("gasto a plazos como regla sin decidir su naturaleza",
+             [("                raise PendienteD5(\"S20\", \"D5_GASTO_A_PLAZOS_NATURALEZA\", f\"cuotas={g('cuotas').valor}\")", "                pass")],
+             T16 + "::test_exclusiones_y_pendientes_de_familia"),
+    "M107": ("version sin mapeo a su origen",
+             [("            ds.mapear(co, cl, \"regla_versiones\", vid, rol, tipo=\"FUSIONADO\" if len(vorig) > 1 else \"DIVIDIDO\")", "            pass")],
+             T16 + "::test_trazabilidad_y_determinismo"),
+    "M108": ("ventana invertida/fuera de rango aceptada",
+             [("    return (a, b) if 1 <= a <= b <= 31 else None", "    return (a, b)")],
+             T16 + "::test_rango_no_representable_no_se_deforma"),
+    "M109": ("activo=true con inactivatedon cierra la regla",
+             [("    if act.valor is True:\n", "    if act.valor is True and ina is None:\n")],
+             T16 + "::test_activo_con_inactivatedon_contradictorio_regla_abierta"),
+    "M110": ("SEMESTRAL como intervalo 1",
+             [("\"SEMESTRAL\": (\"MENSUAL\", 6)", "\"SEMESTRAL\": (\"MENSUAL\", 1)")],
+             T16 + "::test_semestral_es_mensual_intervalo_6_y_anual"),
 }
 
 
