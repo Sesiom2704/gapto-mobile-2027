@@ -8,7 +8,9 @@
 #              CERRADA/LIQUIDADA, importe = cobro), canon de transitorias, principal
 #              desconocido NULL, saldo indeterminado NULL (nunca 0), contraparte
 #              desconocida NULL salvo decision S20, trazabilidad y carga fisica.
-# Versión: 0.1.0
+#   0.2.0: P5 v0.8.0 -> participacion 100 % propietario (S20 R2-7), vinculados (R2-8),
+#          contraparte desconocida sin pregunta (R2-6), gate con fuente PENDIENTE.
+# Versión: 0.2.0
 # ============================================================
 from __future__ import annotations
 
@@ -100,7 +102,7 @@ def test_abierto_saldo_igual_a_importe_y_contraparte_desconocida_null():
     d = _d(ds, G, "GA")
     assert (d["estado"], d["saldo_apertura"], d["importe_original_documentado"]) == ("ACTIVA", Decimal("40.5"), Decimal("40.5"))
     assert d["fecha_inicio_seguimiento"] == P5.FECHA_INICIO_LEDGER and d["contraparte_actor_id"] is None
-    assert any(q["id"] == "Q-8B-CONTRAPARTE-D-AB" for q in ds.preguntas)
+    assert any(x["regla"] == "D8B-C" and x["derecho"] == "D-AB" for x in ds.ledger)
 
 
 def test_transitoria_liquidada_saldo_cero_cerrada():
@@ -138,7 +140,7 @@ def test_origen_ausente_falla_cerrado():
     assert _err(filas=_filas(IX=None)) == "S8_ORIGEN_AUSENTE"
 
 
-def test_contraparte_decidida_por_fuente_suplementaria(tmp_path):
+def test_contraparte_decidida_por_fuente_suplementaria(tmp_path, monkeypatch):
     doc = {"id": "S", "personas": {"P-A": {"nombre": "Persona A"}}, "participaciones": [],
            "contrapartes": [{"id": "C1", "origen": f"{G}/GA", "persona": "P-A"}]}
     p = tmp_path / "d.json"
@@ -147,9 +149,32 @@ def test_contraparte_decidida_por_fuente_suplementaria(tmp_path):
     ds = _t(dec=dec)
     aid = F.uuid_v3(P5.CONT_DECISIONES, "persona/P-A", "actores_financieros", "actor")
     assert _d(ds, G, "GA")["contraparte_actor_id"] == aid
+    monkeypatch.setattr(P5, "ARQ_FUENTE_DECISIONES_ESTADO", "PENDIENTE_ARQUITECTURA")
     with pytest.raises(P5.ErrorP5) as e:
         _t(dec=dec, lab=False)
     assert e.value.codigo == "S20_ARQ_FUENTE_DECISIONES"
+
+
+def test_participacion_del_derecho_100_propietario_con_fecha_de_origen():
+    ds = _t()
+    ps = {p["entidad_id"]: p for p in ds.filas["entidad_participaciones"].values()}
+    ga = ps[F.uuid_v3(G, "GA", "entidades", "derecho")]
+    iu = ps[F.uuid_v3(I, "IU1", "entidades", "derecho")]
+    assert (ga["actor_id"], ga["porcentaje"], ga["vigente_desde"]) == (ds.self_id, Decimal(100), "2026-05-01")
+    assert iu["vigente_desde"] == "2025-11-30"
+
+
+def test_vinculado_relacionado_por_el_propietario(monkeypatch):
+    cat = [dict(x) for x in CAT]
+    cat[3]["vinculados"] = [(G, "GT1")]
+    monkeypatch.setattr(P5, "DERECHOS_V3", cat)
+    ds = _t()
+    orig = ds.filas["registros_origen_importacion"]
+    assert any(m["tipo_mapping"] == "VINCULADO" and orig[m["registro_origen_id"]]["clave_origen"] == "GT1"
+               and m["registro_destino_id"] == F.uuid_v3(I, "IU1", "entidades", "derecho")
+               for m in ds.filas["mapeos_importacion"].values())
+    cat[3]["vinculados"] = [(G, "NOEXISTE")]
+    assert _err() == "S8_ORIGEN_AUSENTE"
 
 
 def test_trazabilidad_y_evidencia_vinculada():
@@ -164,4 +189,4 @@ def test_trazabilidad_y_evidencia_vinculada():
 @pytest.mark.skipif(not os.environ.get("GAPTO_RV3_IMPORT_URL"), reason="sin laboratorio RV3_IMPORT")
 def test_fisico_rv3_import_rollback():
     res = P5.validar_fisico(_t(), os.environ["GAPTO_RV3_IMPORT_URL"])
-    assert res["derechos_obligaciones_financieras"] == 5
+    assert res["derechos_obligaciones_financieras"] == 5 and res["entidad_participaciones"] >= 5

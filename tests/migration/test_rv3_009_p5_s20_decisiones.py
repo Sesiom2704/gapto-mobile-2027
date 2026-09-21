@@ -8,7 +8,10 @@
 #              financiacion 100 % propietario con vigencia PROPUESTA, y fuente
 #              suplementaria DECISIONES_PROPIETARIO (personas sin fila V3) con
 #              fallo cerrado mientras arquitectura no la apruebe.
-# Versión: 0.1.0
+#   0.2.0: P5 v0.8.0 -> fuente APROBADA y vigencias CONFIRMADAS en produccion; los
+#          tests de mecanismo fijan el estado previo; financiador decidido y
+#          vigencia justificada.
+# Versión: 0.2.0
 # ============================================================
 from __future__ import annotations
 
@@ -30,7 +33,8 @@ _s8 = importlib.util.spec_from_file_location("t8", Path(__file__).resolve().pare
 T8 = importlib.util.module_from_spec(_s8)
 _s8.loader.exec_module(T8)
 F = P5.fu
-PROD = (P5.CONFIG_CUENTAS_ESTADO, dict(P5.CONFIG_CUENTAS), dict(P5.TIPO_FINANCIACION_DECIDIDO))
+PROD = (P5.CONFIG_CUENTAS_ESTADO, dict(P5.CONFIG_CUENTAS), dict(P5.TIPO_FINANCIACION_DECIDIDO),
+        P5.ARQ_FUENTE_DECISIONES_ESTADO, P5.PARTICIPACION_FIN_VIGENCIA_ESTADO)
 SHA = "0" * 64
 CB, PT = "public.cuentas_bancarias", "public.patrimonio"
 
@@ -79,6 +83,9 @@ def cfg(monkeypatch):
     monkeypatch.setattr(P5, "TIPO_FINANCIACION_DECIDIDO", {"P1": "HIPOTECA", "P2": "PRESTAMO"})
     monkeypatch.setattr(P5, "FINANCIADOR_NO_DEMOSTRADO", {"P2"})
     monkeypatch.setattr(P5, "PARTICIPACION_FIN_SELF", {("public.prestamo", "P2"): None, ("public.gastos", "G1"): None})
+    # Los tests de mecanismo parten del estado previo a las aprobaciones (baseline v0.6.0).
+    monkeypatch.setattr(P5, "ARQ_FUENTE_DECISIONES_ESTADO", "PENDIENTE_ARQUITECTURA")
+    monkeypatch.setattr(P5, "PARTICIPACION_FIN_VIGENCIA_ESTADO", "PROPUESTA")
 
 
 def _t(ds, decisiones=None, lab=True):
@@ -91,7 +98,8 @@ def _fin(ds, nombre):
 
 
 def test_configuracion_confirmada_en_produccion():
-    estado, config, tipos = PROD
+    estado, config, tipos, arq, vig = PROD
+    assert (arq, vig) == ("APROBADA", "CONFIRMADA")
     assert estado == "CONFIRMADA" and config[("public.gastos", "gasto-xg1mue")][5] == "EUR"
     assert tipos == {"prestamo-N622DI": "HIPOTECA", "prestamo-wb8ysw": "PRESTAMO"}
 
@@ -194,6 +202,24 @@ def test_todo_destino_tiene_mapeo_a_registro_existente(tmp_path):
             "entidad_participaciones"} <= sup
 
 
+def test_financiador_decidido_y_vigencia_justificada(tmp_path, monkeypatch):
+    monkeypatch.setattr(P5, "ARQ_FUENTE_DECISIONES_ESTADO", "APROBADA")
+    monkeypatch.setattr(P5, "PARTICIPACION_FIN_VIGENCIA_ESTADO", "CONFIRMADA")
+    base = _decisiones(tmp_path)
+    reps = base.doc["participaciones"]
+    reps[3] = dict(reps[3], justificacion="firmado antes del primer vencimiento")
+    dec = _decisiones(tmp_path, personas={**base.doc["personas"], "P-G": {"nombre": "Grupo", "naturaleza": None}},
+                      participaciones=reps,
+                      financiadores=[{"id": "F1", "origen": "public.prestamo/P2", "persona": "P-G"}])
+    ds = _t(None, dec, lab=False)
+    aid = F.uuid_v3(P5.CONT_DECISIONES, "persona/P-G", "actores_financieros", "actor")
+    tid = F.uuid_v3(P5.CONT_DECISIONES, "persona/P-G", "terceros", "tercero")
+    assert _fin(ds, "HIP. FAMILIA")[1]["financiador_actor_id"] == aid
+    assert ds.filas["terceros"][tid]["naturaleza"] is None and tid not in ds.filas["tercero_personas"]
+    assert any(r["tercero_id"] == tid and r["rol_codigo"] == "FINANCIADOR" for r in ds.filas["tercero_roles"].values())
+    assert not ds.preguntas and not ds.pendientes
+
+
 def test_hash_determinista(tmp_path):
     dec = _decisiones(tmp_path)
     assert _t(None, dec).hash() == _t(None, dec).hash()
@@ -209,5 +235,5 @@ def test_fisico_rv3_import_rollback(tmp_path):
 
 def test_plantilla_de_decisiones_es_valida_y_sin_datos_reales():
     dec = P5.cargar_decisiones(RAIZ / "scripts" / "migration_v3" / "rv3_decisiones_propietario.ejemplo.json")
-    assert list(dec.doc["personas"]) == ["P-EJEMPLO"]
-    assert all("CLAVE-V3" in x["origen"] for x in dec.doc["participaciones"] + dec.doc["contrapartes"])
+    assert sorted(dec.doc["personas"]) == ["P-EJEMPLO", "P-GRUPO"]
+    assert all("CLAVE-V3" in x["origen"] for x in dec.doc["participaciones"] + dec.doc["contrapartes"] + dec.doc["financiadores"])

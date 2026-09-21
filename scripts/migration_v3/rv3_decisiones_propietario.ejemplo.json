@@ -3,17 +3,52 @@
   "proyecto": "GAPTO MOBILE 2027",
   "fichero": "rv3_decisiones_propietario.ejemplo.json",
   "ruta": "scripts/migration_v3/rv3_decisiones_propietario.ejemplo.json",
-  "descripcion": "PLANTILLA SIN PII de la fuente suplementaria DECISIONES_PROPIETARIO (P5 v0.6.0+). El fichero real contiene nombres de terceros: vive FUERA del repositorio (GAPTO_RV3_DATA_DIR) y se pasa con --decisiones-propietario. 'desde' admite fecha ISO o {fecha_adquisicion_de: contenedor/clave}. SELF = actor propio del tenant.",
-  "version": "0.1.0"
+  "descripcion": "PLANTILLA SIN PII de la fuente suplementaria DECISIONES_PROPIETARIO (P5 v0.6.0+). El fichero real contiene nombres de terceros: vive FUERA del repositorio (GAPTO_RV3_DATA_DIR) y se pasa con --decisiones-propietario. 'desde' admite fecha ISO o {fecha_adquisicion_de: contenedor/clave}. SELF = actor propio del tenant. v0.2.0: 'naturaleza' opcional por persona (PERSONA por defecto; null = grupo sin persona individual), lista 'financiadores' y 'justificacion' opcional de una vigencia anterior al inicio de la financiacion.",
+  "version": "0.2.0"
  },
  "id": "RV3-S20-AAAA-MM-DD",
  "fecha": "AAAA-MM-DD",
- "personas": {"P-EJEMPLO": {"nombre": "Nombre Ficticio", "relacion": "COTITULAR"}},
+ "personas": {
+  "P-EJEMPLO": {
+   "nombre": "Nombre Ficticio",
+   "relacion": "COTITULAR"
+  },
+  "P-GRUPO": {
+   "nombre": "Grupo Ficticio",
+   "relacion": "FAMILIA",
+   "naturaleza": null
+  }
+ },
  "participaciones": [
-  {"id": "S20-X", "origen": "public.cuentas_bancarias/CLAVE-V3", "desde": "2026-09-05",
-   "repartos": [["SELF", "50"], ["P-EJEMPLO", "50"]]}
+  {
+   "id": "S20-X",
+   "origen": "public.cuentas_bancarias/CLAVE-V3",
+   "desde": "2026-09-05",
+   "repartos": [
+    [
+     "SELF",
+     "50"
+    ],
+    [
+     "P-EJEMPLO",
+     "50"
+    ]
+   ],
+   "justificacion": "opcional"
+  }
  ],
  "contrapartes": [
-  {"id": "S20-Y", "origen": "public.gastos/CLAVE-V3", "persona": "P-EJEMPLO"}
+  {
+   "id": "S20-Y",
+   "origen": "public.gastos/CLAVE-V3",
+   "persona": "P-EJEMPLO"
+  }
+ ],
+ "financiadores": [
+  {
+   "id": "S20-Z",
+   "origen": "public.prestamo/CLAVE-V3",
+   "persona": "P-GRUPO"
+  }
  ]
 }

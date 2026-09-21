@@ -16,6 +16,8 @@
 #   python scripts/mutantes/rv3_p5.py            # todos
 #   python scripts/mutantes/rv3_p5.py M30 M33    # subconjunto
 #
+# Version: 0.3.0 (M52..M57: P5 v0.9.0, dominio 9)
+# Version: 0.2.0 (M48..M51: P5 v0.8.0, segunda ronda S20)
 # Version: 0.1.0 (M30..M40 P5 v0.6.0 respuestas S20; M41..M47 P5 v0.7.0 dominio 8B)
 # ============================================================
 from __future__ import annotations
@@ -31,6 +33,7 @@ RAIZ = Path(__file__).resolve().parents[2]
 OBJ = "scripts/migration_v3/rv3_p5_transformacion.py"
 T9 = "tests/migration/test_rv3_009_p5_s20_decisiones.py"
 T10 = "tests/migration/test_rv3_010_p5_dominio8b.py"
+T11 = "tests/migration/test_rv3_011_p5_dominio9.py"
 
 MUTANTES = {
     "M30": ("gate de la fuente suplementaria siempre abierto",
@@ -85,12 +88,44 @@ MUTANTES = {
             [('        for eo, ec in origenes[1:]:\n', '        for eo, ec in []:\n')],
             T10 + "::test_trazabilidad_y_evidencia_vinculada"),
     "M46": ("contraparte desconocida sustituida por el propietario",
-            [('            ds.ledger.append({"regla": "D8B-C", "origen": f"{co}/{cl}"})\n',
-              '            sub["contraparte_actor_id"] = ds.self_id\n            ds.ledger.append({"regla": "D8B-C", "origen": f"{co}/{cl}"})\n')],
+            [('            ds.ledger.append({"regla": "D8B-C", "origen": f"{co}/{cl}", "derecho": d["id"]})\n',
+              '            sub["contraparte_actor_id"] = ds.self_id\n            ds.ledger.append({"regla": "D8B-C", "origen": f"{co}/{cl}", "derecho": d["id"]})\n')],
             T10 + "::test_abierto_saldo_igual_a_importe_y_contraparte_desconocida_null"),
     "M47": ("transitoria con importe distinto del cobro aceptada",
             [('if co != _GC and _importe_v3(fuente, ctx, co, cl) != cobros[0][0]:', 'if False:')],
             T10 + "::test_transitoria_con_importe_distinto_falla"),
+    "M48": ("financiador decidido por el propietario ignorado",
+            [('            if fdec is not None:\n                fin_actor', '            if False:\n                fin_actor')],
+            T9 + "::test_financiador_decidido_y_vigencia_justificada"),
+    "M49": ("vigencia anterior al inicio sin justificacion no elevada",
+            [('            if not dec.get("justificacion"):\n', '            if False:\n')],
+            T9 + "::test_vigencia_anterior_al_inicio_se_eleva"),
+    "M50": ("vigencia de la participacion del derecho fijada al corte",
+            [('desde = fechas[0] if d["genera"] else min((f for f in fechas if f), default=None)', 'desde = FECHA_INICIO_LEDGER')],
+            T10 + "::test_participacion_del_derecho_100_propietario_con_fecha_de_origen"),
+    "M51": ("filas relacionadas por el propietario sin vincular",
+            [('        for vo, vc in d.get("vinculados", []):\n', '        for vo, vc in []:\n')],
+            T10 + "::test_vinculado_relacionado_por_el_propietario"),
+    "M52": ("aporte estimado convertido en capital invertido de apertura",
+            [('"capital_invertido_apertura": None, "fecha_capital_invertido_apertura": None,\n            "estado": estado',
+              '"capital_invertido_apertura": Decimal(str(v("aporte_estimado"))), "fecha_capital_invertido_apertura": v("fecha_inicio"),\n            "estado": estado')],
+            T11 + "::test_posicion_sin_padre_con_gestor_v3_y_sin_capital_inventado"),
+    "M53": ("tipo_producto propuesto aceptado fuera de laboratorio",
+            [('        if TIPO_PRODUCTO_ESTADO != "CONFIRMADA":\n', '        if False:\n')],
+            T11 + "::test_tipo_producto_propuesto_falla_fuera_de_lab"),
+    "M54": ("vigencia del objetivo inventada con fecha_inicio",
+            [('fila = {"id": oid, "inversion_entidad_id": eid, "vigente_desde": None,',
+              'fila = {"id": oid, "inversion_entidad_id": eid, "vigente_desde": v("fecha_inicio"),')],
+            T11 + "::test_objetivos_version_sin_vigencia_inventada"),
+    "M55": ("fila V3 cuenta duplicada como inversion",
+            [('        if (cont, ci) in CUENTAS_DERIVADAS:\n', '        if False:\n')],
+            T11 + "::test_cuenta_v3_no_se_duplica_como_inversion"),
+    "M56": ("incoherencia del ROI objetivo no comprobada",
+            [('- roi) > Decimal("0.01"):', '- roi) > Decimal("999999"):')],
+            T11 + "::test_roi_objetivo_incoherente_falla"),
+    "M57": ("gestor discrepante con dealer aceptado",
+            [('        if prov and dealer and prov != dealer:\n', '        if False:\n')],
+            T11 + "::test_gestor_discrepante_falla_s20"),
 }
 
 
