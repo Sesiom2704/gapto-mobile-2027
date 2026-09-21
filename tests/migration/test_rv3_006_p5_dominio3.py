@@ -9,7 +9,10 @@
 #              saldo desconocido NULL (nunca 0); moneda no demostrada nunca se
 #              rellena; cotitular no identificado nunca se inventa; sin
 #              capacidades fabricadas.
-# Versión: 0.1.0
+#   0.1.1: la fixture fija CONFIG_CUENTAS_ESTADO=PROPUESTA (el estado de
+#          produccion paso a CONFIRMADA en P5 v0.6.0, S20-1); el test sigue
+#          verificando su baseline sin bloquear bloques posteriores.
+# Versión: 0.1.1
 # ============================================================
 from __future__ import annotations
 
@@ -43,6 +46,7 @@ def cfg(monkeypatch):
     monkeypatch.setattr(P5, "CUENTAS_DERIVADAS", {("public.inversion", "I1"): ("CUENTA AHORRO", "proveedor_id"),
                                                  ("public.gastos", "G1"): ("PREPAGO X", None)})
     monkeypatch.setattr(P5, "GESTOR_REVOLUT", "PB")
+    monkeypatch.setattr(P5, "CONFIG_CUENTAS_ESTADO", "PROPUESTA")
 
 
 def _b0():

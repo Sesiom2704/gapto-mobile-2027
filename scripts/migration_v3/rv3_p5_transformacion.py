@@ -15,6 +15,14 @@
 #                8 financiaciones (PARCIAL v0.5.0: 4 prestamos formales con condiciones
 #                  versionadas, calendario, financiador y garantia; 7 compras financiadas;
 #                  derechos/obligaciones pendientes)
+#   v0.7.0: dominio 8B derechos de cobro (11 posiciones: 7 transitorias liquidadas
+#           = 330,11; SHEIN abierta 59,96; Universidad 0; dos de Isa indeterminadas).
+#   v0.6.0: respuestas S20 del propietario (2026-09-21): configuracion de cuentas
+#           CONFIRMADA, Revolut EUR, tipos de financiacion decididos, participaciones
+#           de financiacion al 100 % propietario (vigencia PROPUESTA) y fuente
+#           suplementaria DECISIONES_PROPIETARIO (fichero externo fuera del repo, con
+#           PII) para cotitulares sin fila V3; esa fuente esta PENDIENTE de arquitectura:
+#           fuera de laboratorio falla cerrada (S20_ARQ_FUENTE_DECISIONES).
 #               12 importacion: fuente + registros origen + mapeos (base)
 #               5, 6, 7, 9, 10, 11 y resto de 2/4/8 pendientes.
 #   Principios aplicados en codigo:
@@ -30,7 +38,7 @@
 #   RV3_IMPORT (rol login no superusuario -> gapto_migrator -> gapto_owner),
 #   fuerza los diferidos con SET CONSTRAINTS ALL IMMEDIATE y hace ROLLBACK.
 #   No es P6 (P6 hace COMMIT real).
-# Versión: 0.5.0
+# Versión: 0.7.0
 # ============================================================
 from __future__ import annotations
 
@@ -45,7 +53,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
-VERSION = "0.5.0"
+VERSION = "0.7.0"
 TRANSFORMACION = "RV3_P5"
 _AQUI = Path(__file__).resolve().parent
 
@@ -68,6 +76,7 @@ ORDEN_TABLAS = [
     "cuentas", "cuenta_participaciones",
     "entidades", "propiedades", "entidad_participaciones",
     "financiaciones", "financiacion_condiciones_versiones", "financiacion_cuotas", "entidad_relaciones",
+    "derechos_obligaciones_financieras",
     "fuentes_importacion", "registros_origen_importacion", "mapeos_importacion",
 ]
 
@@ -90,9 +99,11 @@ CONFIG_CUENTAS = {
     ("public.cuentas_bancarias", "BANCO-DF92A62D"): ("CORRIENTE", "ACTIVO", True, True, True, "EUR"),
     ("public.cuentas_bancarias", "CTA-Z4QIC5"): ("CREDITO", "PASIVO", False, True, True, "EUR"),
     ("public.inversion", "INV-F28AEAD467"): ("AHORRO", "ACTIVO", True, True, False, "EUR"),
-    ("public.gastos", "gasto-xg1mue"): ("PREPAGO", "ACTIVO", True, True, False, None),
+    # S20-2 (2026-09-21): EUR siempre salvo edicion explicita; incluye Revolut.
+    ("public.gastos", "gasto-xg1mue"): ("PREPAGO", "ACTIVO", True, True, False, "EUR"),
 }
-CONFIG_CUENTAS_ESTADO = "PROPUESTA"
+# S20-1 (2026-09-21): configuracion confirmada por el propietario.
+CONFIG_CUENTAS_ESTADO = "CONFIRMADA"
 # Cuentas sin fila maestra V3 (Migration V3 §14/§29): origen, nombre, gestor V3.
 CUENTAS_DERIVADAS = {
     ("public.inversion", "INV-F28AEAD467"): ("CUENTA AHORRO", "proveedor_id"),
@@ -101,7 +112,8 @@ CUENTAS_DERIVADAS = {
 GESTOR_REVOLUT = "PROV-UH1DM1"
 
 # Tablas cuya PK no es la columna id.
-PK = {"tercero_personas": "tercero_id", "propiedades": "entidad_id", "financiaciones": "entidad_id"}
+PK = {"tercero_personas": "tercero_id", "propiedades": "entidad_id", "financiaciones": "entidad_id",
+      "derechos_obligaciones_financieras": "entidad_id"}
 
 # Reference data geografica versionada (DB Schema: geografia = reference data
 # separada). Decision de ejecucion H-P5-01, PROVISIONAL hasta conformidad.
@@ -127,8 +139,8 @@ LEDGER_REGLAS = {
             "destino en usuarios: perdida de detalle CANDIDATA R24, pendiente de aceptacion.",
     "D3-A": "configuracion de cuenta sin dato V3 (tipo, naturaleza, computa_*, permite_negativo, "
             "moneda Revolut) -> tabla CONFIG_CUENTAS en estado PROPUESTA; requiere confirmacion (S20).",
-    "D3-B": "cuenta_participaciones.vigente_desde NOT NULL; V3 no da inicio real. Se usa "
-            "FECHA_INICIO_LEDGER con semantica 'conocida desde el corte', sin afirmar el pasado. PROPUESTA.",
+    "D3-B": "cuenta_participaciones.vigente_desde = FECHA_INICIO_LEDGER con semantica 'conocida desde el "
+            "corte', sin afirmar el pasado. CONFIRMADA por el propietario (S20-3, 2026-09-21).",
     "D3-C": "ahorro remunerado y Revolut sin saldo V3: saldo_apertura y fecha_inicio_ledger NULL "
             "(PENDIENTE_DATO_CORTE, Migration V3 §29). Ni 930/937,83 ni 250 se interpretan como saldo.",
     "D3-D": "cuenta_capacidades sin fuente V3: no se crean filas (RUN06 creo 21 sin origen).",
@@ -171,6 +183,31 @@ LEDGER_REGLAS = {
             "se conserva en origen (dominio 6: hecho_terceros).",
     "D8-N": "gasto con tipo_gasto FINANCIACION reclasificado por el propietario como gasto directo "
             "(Migration V3 §27/RUN01): no es financiacion; se dispone en dominio 6.",
+    "D8-A2": "tipo de financiacion decidido por el propietario (S20-7/S20-8, 2026-09-21) cuando nombre y "
+             "tipo_gasto V3 discrepan o no bastan: prevalece TIPO_FINANCIACION_DECIDIDO.",
+    "D8-C2": "financiador NULL cuando el proveedor V3 del prestamo contradice el prestamista declarado por el "
+             "propietario (S20-8: prestamo de familiares; V3 dice banco). Proveedor conservado en origen; "
+             "no se crea actor ni rol FINANCIADOR por ese prestamo. PENDIENTE de conformidad.",
+    "D8-H2": "participacion de financiacion 100 % propietario decidida (S20-9); vigente_desde no fijada por "
+             "el propietario: PROPUESTA = fecha_inicio de la financiacion. Fuera de laboratorio falla S20.",
+    "D-S20-F": "fuente suplementaria DECISIONES_PROPIETARIO: personas y repartos declarados por el propietario "
+               "sin fila V3 (S20-4..7, S20-11). Cada decision es un registro origen propio; fichero externo con "
+               "SHA-256. PENDIENTE de decision de arquitectura: solo laboratorio.",
+    "D-S20-V": "conflicto de vigencia: participacion de financiacion con vigente_desde anterior a su fecha_inicio "
+               "(se aplica literal la decision del propietario y se eleva pregunta).",
+    "D6-T1": "gasto S1 decidido como transferencia propia (S20-10): se dispone en dominios 6/7 (F04-D001), "
+             "sin gasto ni ingreso; destino identificado por gestor V3 (candidata unica).",
+    "D8B-A": "derecho de cobro = entidad DERECHO_OBLIGACION + subtipo; origen = fila V3 que lo genera "
+              "(gasto adelantado) o, sin ella, las filas V3 que lo evidencian (cobros). Catalogo cerrado "
+              "DERECHOS_V3 (Migration V3 §16/§28/§29); ninguna posicion se deduce por nombre.",
+    "D8B-B": "posicion transitoria liquidada antes del corte: importe_original_documentado = cobro V3 de "
+              "liquidacion; saldo_apertura 0 al corte; CERRADA/LIQUIDADA; fecha_cierre NULL (la fecha del "
+              "cobro se dispone en dominio 6). Canon 330,11 / 7 posiciones.",
+    "D8B-C": "contraparte sin fila V3 que la identifique -> NULL (desconocida), salvo decision del propietario "
+              "en la fuente suplementaria (S20-11).",
+    "D8B-D": "principal original desconocido -> importe_original_documentado NULL; saldo indeterminado -> "
+              "saldo_apertura y fecha_inicio_seguimiento NULL, ACTIVA (Migration V3 §16; nunca 0).",
+    "D8B-E": "moneda EUR (S20-2). entidad_participaciones del derecho: 0 filas (no modelada; sin decision S20).",
     "D8-M": "total de compra sustituido por el validado por el propietario (Migration V3 §14/RUN01); "
             "literal V3 conservado en origen.",
 }
@@ -191,6 +228,10 @@ class Dataset:
     naturales: dict = field(default_factory=dict)
     ledger: list = field(default_factory=list)
     pendientes: list = field(default_factory=list)
+    modo_lab: bool = False
+    self_id: str | None = None
+    decisiones: "Decisiones | None" = None
+    preguntas: list = field(default_factory=list)
 
     def add(self, tabla: str, fila: dict, natural: tuple | None = None) -> str:
         fid = fila[PK.get(tabla, "id")]
@@ -260,6 +301,144 @@ def dominio_12_trazabilidad(ds: Dataset, b0: dict, sha_run06: str) -> str:
     return fid
 
 
+# ------------------------------------------------------------ fuente suplementaria S20
+# Decisiones del propietario que crean filas sin registro V3 (personas cotitulares y
+# repartos). El fichero vive FUERA del repositorio (contiene PII) y se fija por SHA-256.
+# Cada persona y cada reparto es un registro origen propio de una fuente distinta de RUN06.
+CONT_DECISIONES = "rv3.decisiones_propietario"
+ARQ_FUENTE_DECISIONES_ESTADO = "PENDIENTE_ARQUITECTURA"
+
+
+@dataclass
+class Decisiones:
+    sha256: str
+    doc: dict
+
+
+def cargar_decisiones(path: Path) -> Decisiones:
+    raw = Path(path).read_bytes()
+    doc = json.loads(raw.decode("utf-8"))
+    personas, reps = doc.get("personas"), doc.get("participaciones")
+    if not doc.get("id") or not isinstance(personas, dict) or not isinstance(reps, list):
+        raise ErrorP5("S4_DECISIONES_FORMATO", "id/personas/participaciones")
+    vistos = set()
+    for it in reps:
+        if it.get("id") in vistos or not it.get("id") or not it.get("origen") or "/" not in it["origen"]:
+            raise ErrorP5("S4_DECISIONES_FORMATO", f"participacion {it.get('id')}")
+        vistos.add(it["id"])
+        refs = [r for r, _ in it.get("repartos", [])]
+        if len(refs) != len(set(refs)) or any(r != "SELF" and r not in personas for r in refs):
+            raise ErrorP5("S8_DECISION_ACTOR_DESCONOCIDO", it["id"])
+        if sum(Decimal(str(x)) for _, x in it["repartos"]) != Decimal(100) or \
+                any(Decimal(str(x)) <= 0 for _, x in it["repartos"]):
+            raise ErrorP5("S9_DECISION_REPARTO_NO_100", it["id"])
+    for c in doc.get("contrapartes", []):
+        if c.get("id") in vistos or not c.get("id") or c.get("persona") not in personas or "/" not in c.get("origen", ""):
+            raise ErrorP5("S4_DECISIONES_FORMATO", f"contraparte {c.get('id')}")
+        vistos.add(c["id"])
+    for k, pe in personas.items():
+        if not k or k == "SELF" or not (pe.get("nombre") or "").strip():
+            raise ErrorP5("S4_DECISIONES_FORMATO", f"persona {k}")
+    return Decisiones(hashlib.sha256(raw).hexdigest(), doc)
+
+
+def _gate_decisiones(ds: Dataset, motivo: str) -> None:
+    if ARQ_FUENTE_DECISIONES_ESTADO == "APROBADA":
+        return
+    if not ds.modo_lab:
+        raise ErrorP5("S20_ARQ_FUENTE_DECISIONES", motivo)
+    if not any(p.get("S20") == "ARQ_FUENTE_DECISIONES" for p in ds.pendientes):
+        ds.pendientes.append({"S20": "ARQ_FUENTE_DECISIONES", "estado": ARQ_FUENTE_DECISIONES_ESTADO,
+                              "efecto": "filas de la fuente suplementaria creadas SOLO en laboratorio"})
+
+
+def dominio_12_decisiones(ds: Dataset) -> None:
+    dec = ds.decisiones
+    if dec is None:
+        return
+    _gate_decisiones(ds, "fuente suplementaria")
+    fid = fu.uuid_v3("DECISIONES", dec.sha256, "fuentes_importacion", "fuente")
+    ds.add("fuentes_importacion", {
+        "id": fid, "owner_user_id": ds.owner, "tipo_fuente": "OTRO",
+        "nombre_fuente": f"Decisiones del propietario S20 ({dec.doc['id']})",
+        "version_fuente": str(dec.doc.get("fecha") or ""), "pipeline_version": f"{TRANSFORMACION} {VERSION}",
+        "sha256": dec.sha256, "estado": "SIMULADA",
+        "notas": "fuente suplementaria sin fila V3 (D-S20-F); PENDIENTE de arquitectura"})
+    items = [(f"persona/{k}", {"persona": k, **v}) for k, v in sorted(dec.doc["personas"].items())] + \
+            [(f"participacion/{it['id']}", it) for it in sorted(dec.doc["participaciones"], key=lambda x: x["id"])] + \
+            [(f"contraparte/{c['id']}", c) for c in sorted(dec.doc.get("contrapartes", []), key=lambda x: x["id"])]
+    for n, (clave, d) in enumerate(items, 1):
+        t = json.dumps(d, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        ds.add("registros_origen_importacion", {
+            "id": fu.uuid_origen(CONT_DECISIONES, clave), "fuente_importacion_id": fid,
+            "contenedor_origen": CONT_DECISIONES, "clave_origen": clave, "numero_fila_origen": n,
+            "datos_origen": d, "datos_origen_texto": t,
+            "sha256_registro": hashlib.sha256(t.encode("utf-8")).hexdigest()},
+            natural=(CONT_DECISIONES, clave))
+    ds.ledger.append({"regla": "D-S20-F", "origen": CONT_DECISIONES, "sha256": dec.sha256})
+    for k, pe in sorted(dec.doc["personas"].items()):
+        clave = f"persona/{k}"
+        tid = fu.uuid_v3(CONT_DECISIONES, clave, "terceros", "tercero")
+        ds.add("terceros", {"id": tid, "owner_user_id": ds.owner, "nombre": pe["nombre"].strip(),
+                            "naturaleza": "PERSONA", "identificador_fiscal": None,
+                            "tipo_identificador_fiscal": None, "pais_fiscal_id": None, "email": None,
+                            "telefono": None, "notas": None})
+        ds.mapear(CONT_DECISIONES, clave, "terceros", tid, "tercero", confianza="VALIDADA")
+        ds.add("tercero_personas", {"tercero_id": tid, "fecha_nacimiento": None})
+        ds.mapear(CONT_DECISIONES, clave, "tercero_personas", tid, "persona", tipo="DIVIDIDO", confianza="VALIDADA")
+        aid = fu.uuid_v3(CONT_DECISIONES, clave, "actores_financieros", "actor")
+        ds.add("actores_financieros", {"id": aid, "owner_user_id": ds.owner, "tercero_id": tid},
+               natural=(ds.owner, tid))
+        ds.mapear(CONT_DECISIONES, clave, "actores_financieros", aid, "actor", tipo="DIVIDIDO", confianza="VALIDADA")
+
+
+def decision_de(ds: Dataset, origen: str) -> dict | None:
+    if ds.decisiones is None:
+        return None
+    its = [it for it in ds.decisiones.doc["participaciones"] if it["origen"] == origen]
+    if len(its) > 1:
+        raise ErrorP5("S7_DECISION_DUPLICADA", origen)
+    return its[0] if its else None
+
+
+def _actor_decidido(ds: Dataset, ref: str) -> str:
+    if ref == "SELF":
+        return ds.self_id
+    return fu.uuid_v3(CONT_DECISIONES, f"persona/{ref}", "actores_financieros", "actor")
+
+
+def _desde_decidido(ds: Dataset, it: dict) -> str:
+    d = it.get("desde")
+    if isinstance(d, dict) and set(d) == {"fecha_adquisicion_de"}:
+        co, cl = d["fecha_adquisicion_de"].split("/", 1)
+        pid = fu.uuid_v3(co, cl, "entidades", "propiedad")
+        prop = ds.filas["propiedades"].get(pid)
+        if prop is None or not prop["fecha_adquisicion"]:
+            raise ErrorP5("S8_DECISION_FECHA_SIN_ORIGEN", it["id"])
+        return prop["fecha_adquisicion"]
+    if isinstance(d, str) and len(d) == 10 and d[4] == d[7] == "-":
+        return d
+    raise ErrorP5("S4_DECISIONES_FORMATO", f"desde de {it['id']}")
+
+
+def aplicar_reparto(ds: Dataset, it: dict, tabla: str, fk: str, destino: str, pct_v3) -> str:
+    """Crea el reparto decidido (suma 100). Si V3 conoce la cuota propia y la decision la
+    contradice, exige corrige_v3 explicito (Migration V3 §9: Blasco 1 % = 0 % real)."""
+    _gate_decisiones(ds, it["id"])
+    self_pct = sum((Decimal(str(x)) for r, x in it["repartos"] if r == "SELF"), Decimal(0))
+    if pct_v3 is not None and Decimal(str(pct_v3)) != self_pct and not it.get("corrige_v3"):
+        raise ErrorP5("S1_DECISION_CONTRADICE_V3", f"{it['id']} v3={pct_v3} decision={self_pct}")
+    desde = _desde_decidido(ds, it)
+    clave = f"participacion/{it['id']}"
+    for ref, pct in it["repartos"]:
+        rid = fu.uuid_v3(CONT_DECISIONES, clave, tabla, ref)
+        ds.add(tabla, {"id": rid, fk: destino, "actor_id": _actor_decidido(ds, ref),
+                       "porcentaje": Decimal(str(pct)), "vigente_desde": desde, "vigente_hasta": None})
+        ds.mapear(CONT_DECISIONES, clave, tabla, rid, f"reparto.{ref}", confianza="VALIDADA")
+    ds.ledger.append({"regla": "D-S20-F", "origen": it["origen"], "decision": it["id"], "tabla": tabla})
+    return desde
+
+
 # ------------------------------------------------------------ dominio 1
 def owner_de(clave_user: str) -> str:
     return fu.uuid_v3("public.users", clave_user, "usuarios", "tenant")
@@ -281,6 +460,7 @@ def dominio_1(ds: Dataset, fuente: dict, ctx: dict) -> None:
     self_id = fu.uuid_v3("public.users", cu, "actores_financieros", "self")
     ds.add("actores_financieros", {"id": self_id, "owner_user_id": ds.owner, "tercero_id": None},
            natural=(ds.owner, None))
+    ds.self_id = self_id
     ds.mapear("public.users", cu, "actores_financieros", self_id, "self", tipo="CREADO",
               notas="actor self derivado del tenant (obligatorio por contrato)")
 
@@ -460,7 +640,11 @@ def dominio_3(ds: Dataset, fuente: dict, ctx: dict, modo_lab: bool) -> None:
                     saldo, bool(act.valor) if act.estado == fu.CONOCIDO else True)
         ds.mapear(cont, cc, "cuentas", cid, "cuenta")
         pct = _celda(cont, "participacion_pct", cb, ctx)
-        if pct.estado == fu.CONOCIDO and Decimal(str(pct.valor)) != Decimal(100):
+        dec = decision_de(ds, f"{cont}/{cc}")
+        if dec is not None:
+            aplicar_reparto(ds, dec, "cuenta_participaciones", "cuenta_id", cid,
+                            pct.valor if pct.estado == fu.CONOCIDO else None)
+        elif pct.estado == fu.CONOCIDO and Decimal(str(pct.valor)) != Decimal(100):
             # 0330 exige participacion = 100 en todo instante cubierto (fn_check_participacion_suma).
             # V3 solo conoce la cuota del tenant: el resto exige identificar al cotitular. Nunca se inventa.
             if not modo_lab:
@@ -530,7 +714,10 @@ def dominio_4_propiedades(ds: Dataset, fuente: dict, ctx: dict, modo_lab: bool) 
         for r in ("D4-A", "D4-B"):
             ds.ledger.append({"regla": r, "origen": f"{cont}/{cp}"})
         pct = _dec(g("participacion_pct"))
-        if pct == Decimal(100) and adq:
+        dec = decision_de(ds, f"{cont}/{cp}")
+        if dec is not None:
+            aplicar_reparto(ds, dec, "entidad_participaciones", "entidad_id", eid, pct)
+        elif pct == Decimal(100) and adq:
             pid = fu.uuid_v3(cont, cp, "entidad_participaciones", "self")
             ds.add("entidad_participaciones", {"id": pid, "entidad_id": eid, "actor_id": self_id,
                                                "porcentaje": pct, "vigente_desde": adq, "vigente_hasta": None})
@@ -548,7 +735,26 @@ def dominio_4_propiedades(ds: Dataset, fuente: dict, ctx: dict, modo_lab: bool) 
 # Tipo de financiacion: demostrado solo cuando el nombre V3 del prestamo y el tipo_gasto de su
 # gasto de referencia coinciden. Si discrepan o falta uno, decide el propietario (S20).
 # clave prestamo -> tipo decidido (CONFIRMADO). Vacio: ninguna decision S20 registrada.
-TIPO_FINANCIACION_DECIDIDO: dict = {}
+TIPO_FINANCIACION_DECIDIDO: dict = {
+    "prestamo-N622DI": "HIPOTECA",   # S20-7 (2026-09-21)
+    "prestamo-wb8ysw": "PRESTAMO",   # S20-8 (2026-09-21): prestamo personal sin intereses
+}
+# S20-8: el proveedor V3 no es el prestamista declarado -> financiador NULL (D8-C2).
+FINANCIADOR_NO_DEMOSTRADO = {"prestamo-wb8ysw"}
+# S20-9: participacion 100 % propietario. vigente_desde NO fijada por el propietario:
+# None = PROPUESTA fecha_inicio de la financiacion (D8-H2).
+PARTICIPACION_FIN_SELF = {
+    ("public.prestamo", "prestamo-0rmjg9"): None, ("public.prestamo", "prestamo-6d5rjp"): None,
+    ("public.prestamo", "prestamo-wb8ysw"): None,
+    ("public.gastos", "GASTO-4WG8DD"): None, ("public.gastos", "GASTO-B6RF5F"): None,
+    ("public.gastos", "GASTO-DMNX6U"): None, ("public.gastos", "GASTO-T4I2U4"): None,
+    ("public.gastos", "GASTO-Z0I8VL"): None, ("public.gastos", "gasto-6xec66"): None,
+    ("public.gastos", "gasto-as0zyr"): None,
+}
+PARTICIPACION_FIN_VIGENCIA_ESTADO = "PROPUESTA"
+# S20-10: gasto S1 (no existe en B0) = transferencia propia hacia la cuenta Santander
+# (candidata unica por gestor). Se dispone en dominios 6/7 (F04-D001); aqui solo se declara.
+TRANSFERENCIA_PROPIA_DECIDIDA = {("public.gastos", "gasto-0e7jvy"): ("public.cuentas_bancarias", "CTA-H3PG1R")}
 # Condiciones versionadas decididas (arquitectura, continuacion RV3-E001-R2): Hip. Allende.
 CONDICIONES_DECIDIDAS = {
     "prestamo-6d5rjp": [
@@ -627,6 +833,38 @@ def _sistema(cuotas: list, tasa: Decimal, ultima: int) -> str:
     return "FRANCES" if ok and len(imp) <= 1 else "OTRO"
 
 
+def participaciones_financiacion(ds: Dataset, co: str, cl: str, eid: str, fecha_inicio) -> None:
+    """S20-7 (reparto decidido con cotitular, fuente suplementaria) o S20-9 (100 % propietario,
+    vigencia PROPUESTA = fecha_inicio). Sin decision: 0 filas (D8-H, nunca se infiere)."""
+    origen = f"{co}/{cl}"
+    dec = decision_de(ds, origen)
+    if dec is not None:
+        desde = aplicar_reparto(ds, dec, "entidad_participaciones", "entidad_id", eid, None)
+        if fecha_inicio and str(desde) < str(fecha_inicio):
+            ds.ledger.append({"regla": "D-S20-V", "origen": origen, "vigente_desde": desde,
+                              "fecha_inicio": str(fecha_inicio)})
+            ds.preguntas.append({"id": "Q-S20-7-VIGENCIA", "origen": origen, "vigente_desde": desde,
+                                 "fecha_inicio": str(fecha_inicio)})
+        return
+    if (co, cl) not in PARTICIPACION_FIN_SELF:
+        ds.ledger.append({"regla": "D8-H", "origen": origen})
+        return
+    desde = PARTICIPACION_FIN_SELF[(co, cl)]
+    if desde is None:
+        if PARTICIPACION_FIN_VIGENCIA_ESTADO != "CONFIRMADA" and not ds.modo_lab:
+            raise ErrorP5("S20_VIGENCIA_PARTICIPACION_FIN", origen)
+        if not fecha_inicio:
+            raise ErrorP5("S6_VIGENCIA_SIN_FECHA_INICIO", origen)
+        desde = str(fecha_inicio)
+        ds.pendientes.append({"S20": "VIGENCIA_PARTICIPACION_FIN", "origen": origen, "propuesta": desde})
+    pid = fu.uuid_v3(co, cl, "entidad_participaciones", "self")
+    ds.add("entidad_participaciones", {"id": pid, "entidad_id": eid, "actor_id": ds.self_id,
+                                       "porcentaje": Decimal(100), "vigente_desde": desde, "vigente_hasta": None})
+    ds.mapear(co, cl, "entidad_participaciones", pid, "self", tipo="DIVIDIDO",
+              notas="participacion decidida por el propietario (S20-9)")
+    ds.ledger.append({"regla": "D8-H2", "origen": origen, "vigente_desde": desde})
+
+
 def dominio_8_financiaciones(ds: Dataset, fuente: dict, ctx: dict, modo_lab: bool) -> None:
     cont, cq = "public.prestamo", "public.prestamo_cuota"
     cuotas_de: dict = {}
@@ -649,7 +887,13 @@ def dominio_8_financiaciones(ds: Dataset, fuente: dict, ctx: dict, modo_lab: boo
                              "nombre": _texto(_celda(cont, "nombre", pr, ctx)), "enabled": bool(g("activo"))})
         ds.mapear(cont, cp, "entidades", eid, "financiacion", tipo="DIVIDIDO")
         prov = g("proveedor_id")
-        fin_actor = _actor_tercero(ds, str(prov), "FINANCIADOR") if prov else None
+        if cp in FINANCIADOR_NO_DEMOSTRADO:
+            fin_actor = None
+            ds.ledger.append({"regla": "D8-C2", "origen": origen})
+            ds.preguntas.append({"id": "Q-S20-8-FINANCIADOR", "origen": origen,
+                                 "nota": "proveedor V3 (banco) no es el prestamista declarado; financiador NULL"})
+        else:
+            fin_actor = _actor_tercero(ds, str(prov), "FINANCIADOR") if prov else None
         pend = g("capital_pendiente")
         ds.add("financiaciones", {
             "entidad_id": eid, "tipo_financiacion": tipo, "financiador_actor_id": fin_actor, "moneda": moneda,
@@ -662,8 +906,9 @@ def dominio_8_financiaciones(ds: Dataset, fuente: dict, ctx: dict, modo_lab: boo
         if ds.filas["financiaciones"][eid]["estado"] is None:
             raise ErrorP5("S20_ESTADO_FINANCIACION", f"{origen} estado={g('estado')}")
         ds.mapear(cont, cp, "financiaciones", eid, "financiacion", tipo="DIVIDIDO")
-        for r in ("D8-A", "D8-C", "D8-D", "D8-E", "D8-H", "D8-I"):
+        for r in ("D8-A2" if estado_tipo == "DECIDIDO_S20" else "D8-A", "D8-C", "D8-D", "D8-E", "D8-I"):
             ds.ledger.append({"regla": r, "origen": origen})
+        participaciones_financiacion(ds, cont, cp, eid, g("fecha_inicio"))
 
         # calendario (orden contractual) y saldo encadenado
         filas = sorted(cuotas_de.get(cp, []), key=lambda x: int(_val(cq, "num_cuota", x[1], ctx)))
@@ -792,25 +1037,143 @@ def dominio_8_financiaciones(ds: Dataset, fuente: dict, ctx: dict, modo_lab: boo
             "intervalo": 1, "importe_cuota_referencia": Decimal(str(cuota)), "numero_cuotas_referencia": int(n),
             "comisiones_periodicas": None})
         ds.mapear(cg, kg, "financiacion_condiciones_versiones", vid, "v1", tipo="DIVIDIDO")
-        for r in ("D8-K", "D8-L", "D8-D", "D8-H"):
+        for r in ("D8-K", "D8-L", "D8-D"):
             ds.ledger.append({"regla": r, "origen": origen})
+        participaciones_financiacion(ds, cg, kg, eid, g("fecha"))
         if kg in TOTAL_COMPRA_VALIDADO:
             ds.ledger.append({"regla": "D8-M", "origen": origen})
 
 
+# ------------------------------------------------------------ dominio 8B (derechos/obligaciones)
+# Catalogo cerrado (Migration V3 §16, §28, §29). genera: fila V3 que crea la posicion (o None);
+# evidencia: cobros V3 que la reducen. modo: TRANSITORIA (liquidada antes del corte), ABIERTA
+# (saldo = importe documentado sin cobro), LIQUIDADA_SIN_PRINCIPAL, INDETERMINADA.
+_G, _GC, _I = "public.gastos", "public.gastos_cotidianos", "public.ingresos"
+DERECHOS_V3 = [
+    {"id": "DER-SHEIN", "genera": (_G, "gasto-g62il0"), "evidencia": [], "modo": "ABIERTA"},
+    {"id": "DER-CANELA", "genera": (_G, "gasto-av2dby"), "evidencia": [(_I, "INGRESO-FZEQZV")], "modo": "TRANSITORIA"},
+    {"id": "DER-ANA", "genera": (_GC, "GASTO_COTIDIANO-WL4DM4"), "evidencia": [(_I, "INGRESO-BI42IG")], "modo": "TRANSITORIA"},
+    {"id": "DER-LUZ-03", "genera": (_G, "gasto-yh7fy4"), "evidencia": [(_I, "INGRESO-YC1PTU")], "modo": "TRANSITORIA"},
+    {"id": "DER-LUZ-04", "genera": (_G, "gasto-uh4oum"), "evidencia": [(_I, "INGRESO-XC60RI")], "modo": "TRANSITORIA"},
+    {"id": "DER-LUZ-05", "genera": (_G, "gasto-n5rj3l"), "evidencia": [(_I, "INGRESO-RLAOQR")], "modo": "TRANSITORIA"},
+    {"id": "DER-LUZ-06", "genera": (_G, "gasto-302hrq"), "evidencia": [(_I, "INGRESO-8EACUL")], "modo": "TRANSITORIA"},
+    {"id": "DER-LUZ-07", "genera": (_G, "gasto-yu6yhd"), "evidencia": [(_I, "INGRESO-K1KVM4")], "modo": "TRANSITORIA"},
+    {"id": "DER-UNIV", "genera": None, "evidencia": [(_I, "INGRESO-MUJB1F"), (_I, "INGRESO-1THX4C"),
+                                                      (_I, "INGRESO-TJ433N")], "modo": "LIQUIDADA_SIN_PRINCIPAL"},
+    {"id": "DER-ISA-COCHE", "genera": None, "evidencia": [(_I, "INGRESO-MX5Q04")], "modo": "INDETERMINADA"},
+    {"id": "DER-ISA-ENTRADA", "genera": None, "evidencia": [(_I, "INGRESO-WPIL1Z")], "modo": "INDETERMINADA"},
+]
+CANON_TRANSITORIAS = (7, Decimal("330.11"))
+CANON_UNIVERSIDAD = Decimal("1352.00")
+
+
+def _importe_v3(fuente, ctx, co, cl) -> Decimal:
+    fila = fuente.get(co, {}).get(cl)
+    if fila is None:
+        raise ErrorP5("S8_ORIGEN_AUSENTE", f"{co}/{cl}")
+    c = _celda(co, "importe", fila, ctx)
+    if c.estado != fu.CONOCIDO:
+        raise ErrorP5("S6_IMPORTE_DERECHO_DESCONOCIDO", f"{co}/{cl}")
+    return Decimal(str(c.valor))
+
+
+def _fecha_v3(fuente, ctx, co, cl):
+    fila = fuente[co][cl]
+    col = "fecha_inicio" if co == _I else "fecha"
+    c = _celda(co, col, fila, ctx)
+    return str(c.valor) if c.estado == fu.CONOCIDO else None
+
+
+def contraparte_decidida(ds: Dataset, origen: str) -> str | None:
+    if ds.decisiones is None:
+        return None
+    its = [c for c in ds.decisiones.doc.get("contrapartes", []) if c["origen"] == origen]
+    if not its:
+        return None
+    if len(its) > 1:
+        raise ErrorP5("S7_DECISION_DUPLICADA", origen)
+    _gate_decisiones(ds, its[0]["id"])
+    return its[0]
+
+
+def dominio_8b_derechos(ds: Dataset, fuente: dict, ctx: dict) -> None:
+    trans_n, trans_total = 0, Decimal(0)
+    for d in DERECHOS_V3:
+        origenes = ([d["genera"]] if d["genera"] else []) + d["evidencia"]
+        co, cl = origenes[0]
+        if cl not in fuente.get(co, {}):
+            raise ErrorP5("S8_ORIGEN_AUSENTE", f"{co}/{cl} ({d['id']})")
+        eid = fu.uuid_v3(co, cl, "entidades", "derecho")
+        fila_g = fuente[co][cl]
+        nombre = _texto(_celda(co, "concepto" if co == _I else ("observaciones" if co == _GC else "nombre"), fila_g, ctx))
+        cobros = [(_importe_v3(fuente, ctx, eo, ec), _fecha_v3(fuente, ctx, eo, ec)) for eo, ec in d["evidencia"]]
+        modo = d["modo"]
+        sub = {"entidad_id": eid, "tipo": "DERECHO_COBRO", "contraparte_actor_id": None, "moneda": "EUR",
+               "importe_original_documentado": None, "saldo_apertura": None, "fecha_inicio_seguimiento": None,
+               "fecha_vencimiento_final": None, "estado": "ACTIVA", "motivo_cierre": None, "fecha_cierre": None,
+               "notas": None}
+        if modo == "ABIERTA":
+            if cobros:
+                raise ErrorP5("S9_DERECHO_ABIERTO_CON_COBRO", d["id"])
+            imp = _importe_v3(fuente, ctx, co, cl)
+            sub.update(importe_original_documentado=imp, saldo_apertura=imp, fecha_inicio_seguimiento=FECHA_INICIO_LEDGER)
+        elif modo == "TRANSITORIA":
+            if len(cobros) != 1 or cobros[0][1] is None or cobros[0][1] >= FECHA_INICIO_LEDGER:
+                raise ErrorP5("S9_TRANSITORIA_NO_LIQUIDADA_AL_CORTE", d["id"])
+            if co != _GC and _importe_v3(fuente, ctx, co, cl) != cobros[0][0]:
+                raise ErrorP5("S9_TRANSITORIA_IMPORTE_DISTINTO", d["id"])
+            trans_n, trans_total = trans_n + 1, trans_total + cobros[0][0]
+            sub.update(importe_original_documentado=cobros[0][0], saldo_apertura=Decimal("0"),
+                       fecha_inicio_seguimiento=FECHA_INICIO_LEDGER, estado="CERRADA", motivo_cierre="LIQUIDADA")
+        elif modo == "LIQUIDADA_SIN_PRINCIPAL":
+            if sum(c[0] for c in cobros) != CANON_UNIVERSIDAD or any(c[1] is None or c[1] >= FECHA_INICIO_LEDGER for c in cobros):
+                raise ErrorP5("S9_UNIVERSIDAD_NO_CUADRA", d["id"])
+            sub.update(saldo_apertura=Decimal("0"), fecha_inicio_seguimiento=FECHA_INICIO_LEDGER,
+                       estado="CERRADA", motivo_cierre="LIQUIDADA")
+        elif modo != "INDETERMINADA":
+            raise ErrorP5("S4_MODO_DERECHO", d["id"])
+        dec = contraparte_decidida(ds, f"{co}/{cl}")
+        if dec is not None:
+            sub["contraparte_actor_id"] = _actor_decidido(ds, dec["persona"])
+            ds.mapear(CONT_DECISIONES, f"contraparte/{dec['id']}", "derechos_obligaciones_financieras", eid,
+                      "contraparte", tipo="VINCULADO", confianza="VALIDADA")
+        else:
+            ds.ledger.append({"regla": "D8B-C", "origen": f"{co}/{cl}"})
+            ds.preguntas.append({"id": f"Q-8B-CONTRAPARTE-{d['id']}", "origen": f"{co}/{cl}"})
+        ds.add("entidades", {"id": eid, "owner_user_id": ds.owner, "tipo_entidad": "DERECHO_OBLIGACION",
+                             "nombre": nombre})
+        ds.add("derechos_obligaciones_financieras", sub)
+        tipo_map = "DIVIDIDO" if d["genera"] else "FUSIONADO"
+        ds.mapear(co, cl, "entidades", eid, "derecho", tipo=tipo_map)
+        ds.mapear(co, cl, "derechos_obligaciones_financieras", eid, "derecho", tipo=tipo_map)
+        for eo, ec in origenes[1:]:
+            ds.mapear(eo, ec, "derechos_obligaciones_financieras", eid, "derecho.evidencia",
+                      tipo="VINCULADO" if d["genera"] else "FUSIONADO")
+        regla = {"ABIERTA": "D8B-A", "TRANSITORIA": "D8B-B", "LIQUIDADA_SIN_PRINCIPAL": "D8B-D",
+                 "INDETERMINADA": "D8B-D"}[modo]
+        for r in ("D8B-A", regla, "D8B-E") if regla != "D8B-A" else ("D8B-A", "D8B-E"):
+            ds.ledger.append({"regla": r, "origen": f"{co}/{cl}", "derecho": d["id"]})
+    if (trans_n, trans_total) != CANON_TRANSITORIAS:
+        raise ErrorP5("S9_TRANSITORIAS_CANON", f"{trans_n} / {trans_total}")
+
+
 # ------------------------------------------------------------ pipeline
-def transformar(b0: dict, sha_run06: str, modo_lab: bool = False) -> Dataset:
+def transformar(b0: dict, sha_run06: str, modo_lab: bool = False,
+                decisiones: "Decisiones | None" = None) -> Dataset:
     fuente = fu.fuente_b0(b0)
     ctx = fu.contexto_de(fuente)
     (cu,) = fuente["public.users"].keys()
-    ds = Dataset(owner=owner_de(cu))
+    ds = Dataset(owner=owner_de(cu), modo_lab=modo_lab, decisiones=decisiones)
     dominio_12_trazabilidad(ds, b0, sha_run06)
     dominio_1(ds, fuente, ctx)
     dominio_2(ds, fuente, ctx)
+    dominio_12_decisiones(ds)
     if "public.cuentas_bancarias" in fuente:
         dominio_3(ds, fuente, ctx, modo_lab)
     dominio_4_propiedades(ds, fuente, ctx, modo_lab)
     dominio_8_financiaciones(ds, fuente, ctx, modo_lab)
+    if DERECHOS_V3:
+        dominio_8b_derechos(ds, fuente, ctx)
     verificar_trazabilidad(ds)
     return ds
 
@@ -880,13 +1243,16 @@ def main() -> int:
     ap.add_argument("--modo-lab", action="store_true",
                     help="permite PROPUESTAS no confirmadas; el informe queda marcado y NO vale para gate")
     ap.add_argument("--dsn-import", default=None, help="DSN del perfil RV3_IMPORT (laboratorio)")
+    ap.add_argument("--decisiones-propietario", default=None, type=Path,
+                    help="JSON EXTERNO al repositorio (contiene PII) con decisiones S20 sin fila V3")
     a = ap.parse_args()
     t0 = time.time()
     print(f"[{time.strftime('%H:%M:%S')}] [1/3] Carga B0", flush=True)
     b0 = fu.cargar_b0(a.run06)
     sha = fu.p1.sha256_fichero(a.run06)
     print(f"[{time.strftime('%H:%M:%S')}] [2/3] Transformacion P5 v{VERSION}", flush=True)
-    ds = transformar(b0, sha, modo_lab=a.modo_lab)
+    dec = cargar_decisiones(a.decisiones_propietario) if a.decisiones_propietario else None
+    ds = transformar(b0, sha, modo_lab=a.modo_lab, decisiones=dec)
     h = ds.hash()
     fisico = None
     if a.dsn_import:
@@ -894,7 +1260,8 @@ def main() -> int:
         fisico = validar_fisico(ds, a.dsn_import)
     informe = {"version": VERSION, "hash_dataset": h, "recuentos": ds.recuentos(),
                "ledger_reglas": LEDGER_REGLAS, "ledger": ds.ledger, "pendientes": ds.pendientes,
-               "fisico": fisico, "dominios": {"implementados": [1, "2-parcial", 3, "4-propiedad", "8-financiaciones", "12-base"], "pendientes": ["2-resto", "4-resto", 5, 6, 7, "8-derechos", 9, 10, 11], "modo_lab": a.modo_lab},
+               "preguntas": ds.preguntas, "decisiones_sha256": dec.sha256 if dec else None,
+               "fisico": fisico, "dominios": {"implementados": [1, "2-parcial", 3, "4-propiedad", "8-financiaciones", "8B-derechos", "12-base"], "pendientes": ["2-resto", "4-resto", 5, 6, 7, 9, 10, 11], "modo_lab": a.modo_lab},
                "ts": datetime.now(timezone.utc).isoformat()}
     a.salida.mkdir(parents=True, exist_ok=True)
     p = a.salida / f"rv3_p5_{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"
