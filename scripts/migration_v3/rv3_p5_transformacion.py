@@ -15,6 +15,9 @@
 #                8 financiaciones (PARCIAL v0.5.0: 4 prestamos formales con condiciones
 #                  versionadas, calendario, financiador y garantia; 7 compras financiadas;
 #                  derechos/obligaciones pendientes)
+#   v0.12.0: cuarta ronda S20 (2026-09-21): garaje con inicio validado, avalista
+#           duplicada por captura fusionada en una sola vigencia, fianzas como
+#           obligaciones de devolucion y luz de Allende como servicio repercutible 100 %.
 #   v0.11.0: dominio 10 (parcial): contratos, participantes con vigencias, clausula de
 #           revision de renta y valoraciones de propiedad desde patrimonio_compra.
 #           Servicios y contextos sin fuente V3 estructurada: no se crean (D10-F/D10-G);
@@ -53,7 +56,7 @@
 #   RV3_IMPORT (rol login no superusuario -> gapto_migrator -> gapto_owner),
 #   fuerza los diferidos con SET CONSTRAINTS ALL IMMEDIATE y hace ROLLBACK.
 #   No es P6 (P6 hace COMMIT real).
-# Versión: 0.11.0
+# Versión: 0.12.0
 # ============================================================
 from __future__ import annotations
 
@@ -68,7 +71,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
-VERSION = "0.11.0"
+VERSION = "0.12.0"
 TRANSFORMACION = "RV3_P5"
 _AQUI = Path(__file__).resolve().parent
 
@@ -93,6 +96,7 @@ ORDEN_TABLAS = [
     "financiaciones", "financiacion_condiciones_versiones", "financiacion_cuotas", "entidad_relaciones",
     "derechos_obligaciones_financieras", "inversiones", "inversion_objetivos_versiones",
     "contratos", "contrato_participantes", "contrato_revision_renta_versiones", "propiedad_valoraciones",
+    "servicios", "contrato_servicios",
     "fuentes_importacion", "registros_origen_importacion", "mapeos_importacion",
 ]
 
@@ -129,7 +133,8 @@ GESTOR_REVOLUT = "PROV-UH1DM1"
 
 # Tablas cuya PK no es la columna id.
 PK = {"tercero_personas": "tercero_id", "propiedades": "entidad_id", "financiaciones": "entidad_id",
-      "derechos_obligaciones_financieras": "entidad_id", "inversiones": "entidad_id", "contratos": "entidad_id"}
+      "derechos_obligaciones_financieras": "entidad_id", "inversiones": "entidad_id", "contratos": "entidad_id",
+      "servicios": "entidad_id"}
 
 # Reference data geografica versionada (DB Schema: geografia = reference data
 # separada). Decision de ejecucion H-P5-01, PROVISIONAL hasta conformidad.
@@ -266,7 +271,14 @@ LEDGER_REGLAS = {
               "la propiedad), MERCADO (valor_mercado, valor_mercado_fecha), FISCAL_REFERENCIA (valor_referencia, "
               "fecha NULL). total_inversion es control derivado (se comprueba, no se guarda); impuestos, "
               "notaria, agencia y reforma son costes -> dominio 6.",
-    "D10-I": "fianza V3 conservada en origen; su posicion (obligacion de devolucion) no se crea sin decision.",
+    "D10-I": "fianza V3 > 0 -> OBLIGACION_PAGO abierta (S20 R4-3): importe y saldo al corte = fianza; "
+              "contraparte = inquilino principal V3 del contrato; participacion 100 % propietario desde el inicio "
+              "del contrato (criterio S20 R2-7); los desperfectos futuros se registraran como hechos.",
+    "D10-J": "fila de participante duplicada por captura (S20 R4-2): no se crea; su origen se FUSIONA en la "
+              "superviviente, que cubre desde el inicio del contrato. Corrige Migration V3 §27 (ambas vigencias).",
+    "D10-K": "servicio repercutible decidido (S20 R4-4): entidad SERVICIO + contrato_servicios repercutible "
+              "100 % al actor declarado, validado como inquilino del contrato; vigencia = inicio del contrato. "
+              "propiedad_servicios no se crea (existencia del suministro previa no demostrada).",
     "D8-M": "total de compra sustituido por el validado por el propietario (Migration V3 §14/RUN01); "
             "literal V3 conservado en origen.",
 }
@@ -1381,7 +1393,20 @@ def dominio_9_inversiones(ds: Dataset, fuente: dict, ctx: dict) -> None:
 # ------------------------------------------------------------ dominio 10 (contratos y valoraciones)
 TIPO_CONTRATO_V3 = {"completa": "ALQUILER_VIVIENDA", "vivienda_trastero": "ALQUILER_VIVIENDA", "garaje": "OTRO"}
 ESTADO_CONTRATO_V3 = {"activo": "FORMALIZADO"}
-FECHA_INICIO_CONTRATO_VALIDADA = {"CON-FRANCISCO-20250301": "2026-03-01"}  # Migration V3 §9/§27
+FECHA_INICIO_CONTRATO_VALIDADA = {
+    "CON-FRANCISCO-20250301": "2026-03-01",  # Migration V3 §9/§27
+    "CON-9F3136AA14": "2026-03-01",          # S20 R4-1: vivienda y garaje alquilados por separado
+}
+# S20 R4-2: fila de participante creada e inactivada por error de captura (misma persona y rol):
+# una sola vigencia; su origen se FUSIONA en la fila superviviente.
+PARTICIPANTE_DUPLICADO_CAPTURA = {"CPR-MARIA-AVA": "CPR-312ACF7718"}
+# S20 R4-3: la fianza la conserva el propietario y es obligacion de devolver (salvo desperfectos).
+FIANZA_COMO_OBLIGACION = True
+# S20 R4-4 / R3-4: luz de la vivienda del contrato, repercutible 100 % al inquilino que la paga.
+SERVICIOS_REPERCUTIDOS = {
+    "CON-MARINA-240901": [{"clave": "luz", "tipo_servicio": "SUMINISTRO_ELECTRICO",
+                           "actor": ("public.personas", "PER-8C62EC5126"), "porcentaje": Decimal(100)}],
+}
 ROL_PARTICIPANTE_V3 = {"inquilino": "INQUILINO", "avalista": "AVALISTA", "gestor": "GESTOR"}
 
 
@@ -1427,6 +1452,16 @@ def dominio_10_contratos(ds: Dataset, fuente: dict, ctx: dict) -> None:
             ds.mapear(cc, ck, "contrato_revision_renta_versiones", rid, "revision_v1", tipo="DIVIDIDO")
             ds.ledger.append({"regla": "D10-E", "origen": origen})
         parts = {k: p for k, p in fuente.get(cpt, {}).items() if str(p.get("contrato_id")) == ck}
+        for dup, sup in PARTICIPANTE_DUPLICADO_CAPTURA.items():
+            if dup in parts:
+                if sup not in parts or (str(parts[sup].get("persona_id")), str(parts[sup].get("rol"))) != \
+                        (str(parts[dup].get("persona_id")), str(parts[dup].get("rol"))):
+                    raise ErrorP5("S1_DUPLICADO_CAPTURA_INCOHERENTE", f"{cpt}/{dup}")
+                parts = {k: p for k, p in parts.items() if k != dup}
+                ds.mapear(cpt, dup, "contrato_participantes", fu.uuid_v3(cpt, sup, "contrato_participantes", "participante"),
+                          "participante", tipo="FUSIONADO", confianza="VALIDADA",
+                          notas="fila duplicada por error de captura (S20 R4-2)")
+                ds.ledger.append({"regla": "D10-J", "origen": f"{cpt}/{dup}", "superviviente": sup})
         inact = {}
         for k, p in parts.items():
             ic = _celda(cpt, "inactivatedon", p, ctx)
@@ -1456,6 +1491,46 @@ def dominio_10_contratos(ds: Dataset, fuente: dict, ctx: dict) -> None:
                                               "vigente_desde": desde, "vigente_hasta": hasta})
             ds.mapear(cpt, k, "contrato_participantes", prid, "participante")
             ds.ledger.append({"regla": "D10-D", "origen": f"{cpt}/{k}"})
+        principales = [(str(p.get("persona_id"))) for p in parts.values()
+                       if str(p.get("rol")).lower() == "inquilino" and _celda(cpt, "es_principal", p, ctx).valor is True]
+        fz = v("fianza")
+        if FIANZA_COMO_OBLIGACION and fz is not None and Decimal(str(fz)) > 0:
+            if len(principales) != 1:
+                raise ErrorP5("S20_CONTRAPARTE_FIANZA", f"{origen} inquilinos principales={len(principales)}")
+            oid = fu.uuid_v3(cc, ck, "entidades", "fianza")
+            ds.add("entidades", {"id": oid, "owner_user_id": ds.owner, "tipo_entidad": "DERECHO_OBLIGACION",
+                                 "nombre": f"FIANZA {ck}"})
+            ds.add("derechos_obligaciones_financieras", {
+                "entidad_id": oid, "tipo": "OBLIGACION_PAGO",
+                "contraparte_actor_id": _actor_persona_v3(ds, "public.personas", principales[0]), "moneda": "EUR",
+                "importe_original_documentado": Decimal(str(fz)), "saldo_apertura": Decimal(str(fz)),
+                "fecha_inicio_seguimiento": FECHA_INICIO_LEDGER, "fecha_vencimiento_final": None, "estado": "ACTIVA",
+                "motivo_cierre": None, "fecha_cierre": None, "notas": None})
+            ds.mapear(cc, ck, "entidades", oid, "fianza", tipo="DIVIDIDO")
+            ds.mapear(cc, ck, "derechos_obligaciones_financieras", oid, "fianza", tipo="DIVIDIDO")
+            fpid = fu.uuid_v3(cc, ck, "entidad_participaciones", "fianza.self")
+            ds.add("entidad_participaciones", {"id": fpid, "entidad_id": oid, "actor_id": ds.self_id,
+                                               "porcentaje": Decimal(100), "vigente_desde": inicio, "vigente_hasta": None})
+            ds.mapear(cc, ck, "entidad_participaciones", fpid, "fianza.self", tipo="DIVIDIDO")
+        for srv in SERVICIOS_REPERCUTIDOS.get(ck, []):
+            ao, ak = srv["actor"]
+            if not any(str(p.get("persona_id")) == ak and str(p.get("rol")).lower() == "inquilino" for p in parts.values()):
+                raise ErrorP5("S1_REPERCUSION_NO_INQUILINO", f"{origen} {ak}")
+            sid = fu.uuid_v3(cc, ck, "entidades", f"servicio.{srv['clave']}")
+            ds.add("entidades", {"id": sid, "owner_user_id": ds.owner, "tipo_entidad": "SERVICIO",
+                                 "nombre": f"{srv['tipo_servicio']} {ck}"})
+            ds.add("servicios", {"entidad_id": sid, "tipo_servicio": srv["tipo_servicio"], "categoria_default_id": None,
+                                 "fecha_inicio": None, "fecha_fin_real": None, "notas": None})
+            csid = fu.uuid_v3(cc, ck, "contrato_servicios", srv["clave"])
+            ds.add("contrato_servicios", {"id": csid, "contrato_entidad_id": eid, "servicio_entidad_id": sid,
+                                          "incluido_en_renta": False, "repercutible": True,
+                                          "actor_repercusion_id": _actor_persona_v3(ds, ao, ak),
+                                          "porcentaje_repercutible": srv["porcentaje"],
+                                          "vigente_desde": inicio, "vigente_hasta": None})
+            for t_, i_ in (("entidades", sid), ("servicios", sid), ("contrato_servicios", csid)):
+                ds.mapear(cc, ck, t_, i_, f"servicio.{srv['clave']}", tipo="DIVIDIDO", confianza="VALIDADA",
+                          notas="servicio repercutible decidido por el propietario (S20 R4-4)")
+            ds.ledger.append({"regla": "D10-K", "origen": origen})
     ds.ledger.append({"regla": "D10-G", "origen": "contextos"})
 
     cv = "public.patrimonio_compra"

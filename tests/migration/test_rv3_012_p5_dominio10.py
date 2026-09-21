@@ -7,7 +7,9 @@
 #              participantes con vigencias sin solape (sustitucion historica), persona
 #              propia como actor self, clausula de revision IPC/NINGUNA, sin servicios
 #              fabricados, y valoraciones de propiedad con total_inversion comprobado.
-# Versión: 0.1.0
+#   0.2.0: P5 v0.12.0 -> duplicado de captura fusionado, fianza como obligacion,
+#          servicio repercutible decidido.
+# Versión: 0.2.0
 # ============================================================
 from __future__ import annotations
 
@@ -61,6 +63,8 @@ def cfg(monkeypatch):
     monkeypatch.setattr(P5, "CONDICIONES_DECIDIDAS", {})
     monkeypatch.setattr(P5, "PARTICIPACION_FIN_SELF", {})
     monkeypatch.setattr(P5, "FECHA_INICIO_CONTRATO_VALIDADA", {})
+    monkeypatch.setattr(P5, "PARTICIPANTE_DUPLICADO_CAPTURA", {})
+    monkeypatch.setattr(P5, "SERVICIOS_REPERCUTIDOS", {})
 
 
 def _t(**kw):
@@ -137,7 +141,45 @@ def test_valor_desconocido_no_crea_valoracion():
     assert "FISCAL_REFERENCIA" not in {x["metodo"] for x in ds.filas["propiedad_valoraciones"].values()}
 
 
+def test_duplicado_de_captura_una_sola_vigencia_y_origen_fusionado(monkeypatch):
+    monkeypatch.setattr(P5, "PARTICIPANTE_DUPLICADO_CAPTURA", {"P3": "P4"})
+    ds = _t()
+    assert F.uuid_v3(CP, "P3", "contrato_participantes", "participante") not in ds.filas["contrato_participantes"]
+    assert (_p(ds, "P4")["vigente_desde"], _p(ds, "P4")["vigente_hasta"]) == ("2024-09-01", None)
+    orig = ds.filas["registros_origen_importacion"]
+    fus = [m for m in ds.filas["mapeos_importacion"].values() if orig[m["registro_origen_id"]]["clave_origen"] == "P3"]
+    assert len(fus) == 1 and fus[0]["tipo_mapping"] == "FUSIONADO" and \
+        fus[0]["registro_destino_id"] == _p(ds, "P4")["id"]
+    monkeypatch.setattr(P5, "PARTICIPANTE_DUPLICADO_CAPTURA", {"P3": "P1"})
+    assert _err() == "S1_DUPLICADO_CAPTURA_INCOHERENTE"
+
+
+def test_fianza_obligacion_abierta_con_inquilino_principal():
+    ds = _t(con={"fianza": "550.00"})
+    oid = F.uuid_v3(CC, "K1", "entidades", "fianza")
+    o = ds.filas["derechos_obligaciones_financieras"][oid]
+    assert (o["tipo"], o["estado"], o["saldo_apertura"], o["importe_original_documentado"]) == \
+        ("OBLIGACION_PAGO", "ACTIVA", Decimal("550.00"), Decimal("550.00"))
+    assert o["contraparte_actor_id"] == F.uuid_v3("public.personas", "PI", "actores_financieros", "actor")
+    ps = [x for x in ds.filas["entidad_participaciones"].values() if x["entidad_id"] == oid]
+    assert len(ps) == 1 and ps[0]["vigente_desde"] == "2024-09-01" and ps[0]["actor_id"] == ds.self_id
+    assert oid not in _t(con={"fianza": N}).filas["derechos_obligaciones_financieras"]
+
+
+def test_servicio_repercutible_validado_contra_el_contrato(monkeypatch):
+    srv = [{"clave": "luz", "tipo_servicio": "SUMINISTRO_ELECTRICO", "actor": ("public.personas", "PI"),
+            "porcentaje": Decimal(100)}]
+    monkeypatch.setattr(P5, "SERVICIOS_REPERCUTIDOS", {"K1": srv})
+    ds = _t()
+    cs = list(ds.filas["contrato_servicios"].values())
+    assert len(cs) == 1 and cs[0]["repercutible"] and not cs[0]["incluido_en_renta"]
+    assert (cs[0]["porcentaje_repercutible"], cs[0]["vigente_desde"]) == (Decimal(100), "2024-09-01")
+    monkeypatch.setattr(P5, "SERVICIOS_REPERCUTIDOS", {"K1": [dict(srv[0], actor=("public.personas", "PA2"))]})
+    assert _err() == "S1_REPERCUSION_NO_INQUILINO"
+
+
 @pytest.mark.skipif(not os.environ.get("GAPTO_RV3_IMPORT_URL"), reason="sin laboratorio RV3_IMPORT")
 def test_fisico_rv3_import_rollback():
-    res = P5.validar_fisico(_t(), os.environ["GAPTO_RV3_IMPORT_URL"])
+    res = P5.validar_fisico(_t(con={"fianza": "550.00"}), os.environ["GAPTO_RV3_IMPORT_URL"])
     assert (res["contratos"], res["contrato_participantes"], res["propiedad_valoraciones"]) == (1, 4, 3)
+    assert res["derechos_obligaciones_financieras"] == 1

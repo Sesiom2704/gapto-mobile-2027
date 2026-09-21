@@ -16,6 +16,7 @@
 #   python scripts/mutantes/rv3_p5.py            # todos
 #   python scripts/mutantes/rv3_p5.py M30 M33    # subconjunto
 #
+# Version: 0.6.0 (M66..M69: P5 v0.12.0, cuarta ronda S20)
 # Version: 0.5.0 (M61..M65: P5 v0.11.0, dominio 10)
 # Version: 0.4.0 (M58..M60: P5 v0.10.0, tercera ronda S20)
 # Version: 0.3.0 (M52..M57: P5 v0.9.0, dominio 9)
@@ -155,6 +156,19 @@ MUTANTES = {
     "M65": ("objeto de alquiler desconocido convertido en OTRO",
             [('tipo = TIPO_CONTRATO_V3.get(str(v("objeto_alquiler")))', 'tipo = TIPO_CONTRATO_V3.get(str(v("objeto_alquiler")), "OTRO")')],
             T12 + "::test_valor_v3_sin_mapping_falla"),
+    "M66": ("duplicado de captura creado como segunda vigencia",
+            [('                parts = {k: p for k, p in parts.items() if k != dup}\n', '')],
+            T12 + "::test_duplicado_de_captura_una_sola_vigencia_y_origen_fusionado"),
+    "M67": ("duplicado de captura sin comprobar coherencia",
+            [('raise ErrorP5("S1_DUPLICADO_CAPTURA_INCOHERENTE", f"{cpt}/{dup}")', 'pass')],
+            T12 + "::test_duplicado_de_captura_una_sola_vigencia_y_origen_fusionado"),
+    "M68": ("fianza abierta con saldo 0 en lugar de la fianza",
+            [('"importe_original_documentado": Decimal(str(fz)), "saldo_apertura": Decimal(str(fz)),',
+              '"importe_original_documentado": Decimal(str(fz)), "saldo_apertura": Decimal("0"),')],
+            T12 + "::test_fianza_obligacion_abierta_con_inquilino_principal"),
+    "M69": ("repercusion a actor que no es inquilino",
+            [('raise ErrorP5("S1_REPERCUSION_NO_INQUILINO", f"{origen} {ak}")', 'pass')],
+            T12 + "::test_servicio_repercutible_validado_contra_el_contrato"),
 }
 
 
