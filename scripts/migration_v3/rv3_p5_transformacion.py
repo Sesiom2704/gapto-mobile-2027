@@ -15,6 +15,12 @@
 #                8 financiaciones (PARCIAL v0.5.0: 4 prestamos formales con condiciones
 #                  versionadas, calendario, financiador y garantia; 7 compras financiadas;
 #                  derechos/obligaciones pendientes)
+#   v0.20.0: respuestas del propietario (2026-09-21) al bloque 1 del dominio 6: Fuensanta 50 % por
+#           participacion vigente (D6-V), Blasco Ibanez 100 % propio (D6-V), total 15,61 del cotidiano 1FRA14
+#           (D6-W). Nutricionista: se mantiene como compra financiada cancelada, sin gasto (D8-K4 sin cambio).
+#           Bloque 2 (OP-15): hecho COMPRA_FINANCIADA con GASTO total + DEUDA del principal vinculada a la
+#           financiacion, atribuidos por su participacion vigente (D6-X); cuotas de prestamo y compra cancelada
+#           sin hecho (D6-Y); compra sin participacion en el dominio 8 -> pendiente (no se presume 100 %).
 #   v0.19.0: dominio 6 bloque 1 (hechos): 811 filas (810 HECHO_EXACTO + cobro parcial D5-S) -> hechos,
 #           efectos, atribuciones, terceros, vinculos a entidades y relaciones; traspasos sin movimiento V3 como
 #           TRANSFERENCIA neutra (opcion A del propietario, D6-T); devoluciones OP-13 (gafas con origen, gasolina
@@ -89,7 +95,7 @@
 #   RV3_IMPORT (rol login no superusuario -> gapto_migrator -> gapto_owner),
 #   fuerza los diferidos con SET CONSTRAINTS ALL IMMEDIATE y hace ROLLBACK.
 #   No es P6 (P6 hace COMMIT real).
-# Versión: 0.19.0
+# Versión: 0.20.0
 # ============================================================
 from __future__ import annotations
 
@@ -104,7 +110,7 @@ from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
-VERSION = "0.19.0"
+VERSION = "0.20.0"
 TRANSFORMACION = "RV3_P5"
 _AQUI = Path(__file__).resolve().parent
 
@@ -2486,6 +2492,13 @@ GASTO_CORREGIDO_V3 = {("public.ingresos", "INGRESO-SIJREF")}  # Migration V3 §2
 ATRIBUCION_CONTRAPARTE_100 = {f"DER-LUZ-0{n}" for n in range(3, 8)}
 # Sin decision: gasto adelantado parcialmente reembolsado (Canela, tarta Ana) -> pendiente de fila.
 ATRIBUCION_DERECHO_PENDIENTE = {"DER-CANELA", "DER-ANA"}
+# Respuestas del propietario 2026-09-21 (P5 v0.20.0), por vivienda V3:
+#   Fuensanta: todo lo relacionado se reparte 50 % (participacion vigente de la propiedad) -> PARTICIPACION;
+#   Blasco Ibanez: gasto 100 % propio (contribucion a la vivienda habitual sin participacion) -> SELF_100.
+VIVIENDA_ATRIBUCION_DECIDIDA = {"VIVIENDA-42E8QW": "PARTICIPACION", "VIVIENDA-0B1D7T": "SELF_100"}
+# Respuesta 4: el total real del ticket es 15,61 (V3 guardo 15,605); el literal V3 se conserva en origen.
+IMPORTE_TOTAL_CORREGIDO = {("public.gastos_cotidianos", "GASTO_COTIDIANO-1FRA14"): Decimal("15.61")}
+COMPRAS_FINANCIADAS_D6 = True  # bloque 2 del dominio 6 (OP-15)
 # Prestamo/adelanto puro sin gasto propio (Migration V3, F03-01 punto 2: Tania-SHEIN).
 GENERACION_PURA = {"DER-SHEIN"}
 
@@ -2515,7 +2528,17 @@ LEDGER_REGLAS.update({
     "D6-T": "traspaso real sin movimiento V3 (opcion A del propietario): hecho TRANSFERENCIA sin efectos ni "
             "movimientos; excepcion legacy a la literalidad de F04-D001 (no se fabrica tesoreria).",
     "D6-U": "cotidianos: numero_participantes_total = cantidad; observaciones/comentarios -> notas.",
-    "D6-X": "compras financiadas: hecho COMPRA_FINANCIADA pendiente del bloque 2 del dominio 6.",
+    "D6-V": "vivienda con atribucion decidida por el propietario: PARTICIPACION -> reparto del total por las "
+            "entidad_participaciones vigentes en fecha_hecho (criterio PARTICIPACION_ENTIDAD, suma exacta); SELF_100 -> "
+            "100 % propietario aunque no participe en la vivienda. Sin decision -> pendiente de fila.",
+    "D6-W": "total corregido por el propietario (clase C): se usa el importe declarado; el literal V3 queda en origen.",
+    "D6-X": "compra financiada (OP-15): hecho COMPRA_FINANCIADA con GASTO por el total (nace con la compra) y DEUDA por "
+            "el principal que desembolsa el financiador (= capital_original_contratado, comprobado contra cuota x numero "
+            "de cuotas), ambos atribuidos por la participacion vigente de la financiacion y la DEUDA vinculada a ella. "
+            "La compra es anterior a fecha_inicio_seguimiento: su DEUDA no altera el saldo de apertura (D6-E); si no lo "
+            "fuese -> S9 (doble conteo). Las cuotas no crean gasto.",
+    "D6-Y": "sin hecho: compra financiada cancelada (NUTRICIONISTA, respuesta del propietario) y cuotas de prestamo "
+            "(D5-T; su expectativa es el calendario de la financiacion, D-MIG-015).",
 })
 
 
@@ -2575,11 +2598,11 @@ class _H:
         self.efectos.append(("hecho_efectos", {"id": eid, "hecho_id": self.id, "tipo_efecto": tipo_efecto,
                                                "importe_delta": delta, "categoria_id": categoria,
                                                "estado_atribucion": estado, "descripcion": None}, rol))
-        for actor, imp, crit in atribs:
+        for actor, imp, crit, *pct in atribs:
             self.hijos.append(("efecto_atribuciones", {
                 "id": fu.uuid_v3(self.co, self.cl, "efecto_atribuciones", f"{rol}.{actor}"), "efecto_id": eid,
-                "actor_id": actor, "importe_atribuido": imp, "porcentaje_aplicado": None,
-                "criterio_atribucion": crit}, f"{rol}.atribucion"))
+                "actor_id": actor, "importe_atribuido": imp, "porcentaje_aplicado": pct[0] if pct else None,
+                "criterio_atribucion": crit}, f"{rol}.atribucion.{actor}"))
         return eid
 
     def entidad(self, entidad_id, tipo_rel, efecto_id=None, rol="entidad"):
@@ -2668,8 +2691,86 @@ def dominio_6_hechos(ds: Dataset, fuente: dict, ctx: dict) -> dict:
         if (co, cl) in TRANSFERENCIA_LEGACY_DECIDIDA or ((co, cl) in ids and
                 ds.filas["hechos_financieros"][ids[(co, cl)]]["tipo_hecho_id"] == TIPOS_HECHO_SEED["TRANSFERENCIA"]):
             ds.ledger.append({"regla": "D6-T", "origen": f"{co}/{cl}"})
-    ds.ledger.append({"regla": "D6-X", "origen": "dominio 8", "resumen": "compras financiadas: bloque 2"})
+    if COMPRAS_FINANCIADAS_D6:
+        for co, cl in _filas_d8(ds, fuente):
+            fid = _financiacion_de(ds, co, cl)
+            fin = ds.filas["financiaciones"].get(fid) if fid else None
+            if fin is None or fin["tipo_financiacion"] != "COMPRA_FINANCIADA" or fin["motivo_cierre"] == "CANCELADA":
+                ds.ledger.append({"regla": "D6-Y", "origen": f"{co}/{cl}"})
+                continue
+            try:
+                h = _compra_financiada(ds, fuente, ctx, co, cl, fid, fin)
+            except PendienteD6 as p:
+                ds.pendientes.append({"dominio": 6, "origen": f"{co}/{cl}", "clase": p.clase, "codigo": p.codigo,
+                                      "detalle": p.detalle})
+                pend.append(f"{co}/{cl}")
+                continue
+            ids[(co, cl)] = h.confirmar()
+            creados["COMPRA_FINANCIADA"] = creados.get("COMPRA_FINANCIADA", 0) + 1
+            ds.ledger.append({"regla": "D6-X", "origen": f"{co}/{cl}"})
     return {"filas": len(filas), "creados": creados, "pendientes": pend}
+
+
+def _filas_d8(ds: Dataset, fuente: dict) -> list:
+    disp = (ds.reglas or {}).get("disposicion", {})
+    return sorted(tuple(o.split("/", 1)) for o in disp.get("EXCLUIDA_D8", []))
+
+
+def _financiacion_de(ds: Dataset, co: str, cl: str) -> str | None:
+    org = fu.uuid_origen(co, cl)
+    fs = {m["registro_destino_id"] for m in ds.filas["mapeos_importacion"].values()
+          if m["tabla_destino"] == "financiaciones" and m["registro_origen_id"] == org}
+    if len(fs) > 1:
+        raise ErrorP5("S7_FINANCIACION_AMBIGUA", f"{co}/{cl}")
+    return next(iter(fs), None)
+
+
+def _compra_financiada(ds, fuente, ctx, co, cl, fid, fin):
+    f = fuente[co][cl]
+    fc = _celda(co, "fecha", f, ctx)
+    if fc.estado != fu.CONOCIDO:
+        raise PendienteD6("S6", "D6_FECHA_DESCONOCIDA")
+    fecha = str(fc.valor)[:10]
+    if fecha != fin["fecha_inicio"]:
+        raise ErrorP5("S9_COMPRA_FECHA_DISTINTA_DE_FINANCIACION", f"{co}/{cl}")
+    if fin["fecha_inicio_seguimiento"] is not None and fecha >= fin["fecha_inicio_seguimiento"]:
+        raise ErrorP5("S9_COMPRA_DENTRO_DEL_SEGUIMIENTO", f"{co}/{cl}")  # su DEUDA se contaria dos veces
+    total = Decimal(fin["capital_original_contratado"])
+    cvs = [v for v in ds.filas["financiacion_condiciones_versiones"].values() if v["financiacion_entidad_id"] == fid]
+    if len(cvs) != 1 or Decimal(cvs[0]["importe_cuota_referencia"]) * cvs[0]["numero_cuotas_referencia"] != total:
+        raise PendienteD6("S20", "D6_PRINCIPAL_NO_DEMOSTRADO", f"{co}/{cl}")
+    clasif = clasificar(ds, co, cl, f)
+    if clasif[0] not in ("CAT", "NULL"):
+        raise ErrorP5("S4_COMPRA_SIN_CATEGORIA_ECONOMICA", f"{co}/{cl} {clasif}")
+    cat = clasif[1] if clasif[0] == "CAT" else None
+    ps = [p for p in ds.filas["entidad_participaciones"].values() if p["entidad_id"] == fid
+          and p["vigente_desde"] <= fecha and (p["vigente_hasta"] is None or p["vigente_hasta"] >= fecha)]
+    if not ps:  # el dominio 8 no fijo participacion para esta financiacion: no se presume 100 % propio
+        raise PendienteD6("S20", "D6_COMPRA_SIN_PARTICIPACION", f"{co}/{cl}")
+    if sum(Decimal(p["porcentaje"]) for p in ps) != 100:
+        raise ErrorP5("S9_PARTICIPACION_COMPRA_NO_CUADRA", f"{co}/{cl}")
+    ps = sorted(ps, key=lambda x: x["actor_id"])
+
+    def rep(importe):
+        return [(p["actor_id"], importe * Decimal(p["porcentaje"]) / 100, "PARTICIPACION_ENTIDAD",
+                 Decimal(p["porcentaje"])) for p in ps]
+    nombre = _texto(_celda(co, "nombre", f, ctx))
+    notas = _texto(_celda(co, "comentarios", f, ctx))
+    h = _H(ds, co, cl, "COMPRA_FINANCIADA", fecha, nombre, total, _presup(ds, cat, "GASTO"), notas)
+    h.efecto("gasto", "GASTO", total, cat, rep(total), "COMPLETA")
+    ed = h.efecto("deuda", "DEUDA", total, None, rep(total), "COMPLETA")
+    h.entidad(fid, "AFECTA_A", ed, rol="financiacion")
+    tid = _tercero_hecho(ds, co, cl, f, ctx)
+    if tid:
+        h.tercero(tid)
+    fa = fin.get("financiador_actor_id")
+    ft = ds.filas["actores_financieros"].get(fa, {}).get("tercero_id") if fa else None
+    if ft and ft != tid:
+        h.tercero(ft, "FINANCIADOR")
+    viv = _entidad_vivienda(ds, co, cl, f, ctx)
+    if viv:
+        h.entidad(viv, "AFECTA_A", rol="vivienda")
+    return h
 
 
 def _hecho_v3(ds, fuente, ctx, co, cl, derecho_de, contexto_de, ids, filas_d6=frozenset(), pendientes_d6=frozenset()):
@@ -2687,6 +2788,9 @@ def _hecho_v3(ds, fuente, ctx, co, cl, derecho_de, contexto_de, ids, filas_d6=fr
         if co != "public.ingresos" else imp
     if tot is None:
         tot = imp
+    if (co, cl) in IMPORTE_TOTAL_CORREGIDO:
+        tot = IMPORTE_TOTAL_CORREGIDO[(co, cl)]
+        ds.ledger.append({"regla": "D6-W", "origen": f"{co}/{cl}", "importe_total": str(tot)})
     if imp is None or tot is None:
         raise PendienteD6("S6", "D6_IMPORTE_DESCONOCIDO")
     if imp < 0 or tot < 0:
@@ -2702,6 +2806,21 @@ def _hecho_v3(ds, fuente, ctx, co, cl, derecho_de, contexto_de, ids, filas_d6=fr
     viv = _entidad_vivienda(ds, co, cl, f, ctx)
     S = ds.self_id
     o = (co, cl)
+    viv_v3 = _texto(_celda(co, "referencia_vivienda_id", f, ctx)) if viv else None
+    modo_viv = VIVIENDA_ATRIBUCION_DECIDIDA.get(viv_v3) if viv else None
+
+    def _reparto(total):
+        """Atribucion del total segun la decision de vivienda (D6-V); None = regla general."""
+        if modo_viv == "SELF_100":
+            return [(S, total, "MANUAL")]
+        if modo_viv != "PARTICIPACION":
+            return None
+        ps = [p for p in ds.filas["entidad_participaciones"].values() if p["entidad_id"] == viv
+              and p["vigente_desde"] <= fecha and (p["vigente_hasta"] is None or p["vigente_hasta"] >= fecha)]
+        if not ps or sum(Decimal(p["porcentaje"]) for p in ps) != 100:
+            raise ErrorP5("S9_PARTICIPACION_VIVIENDA_NO_CUADRA", f"{co}/{cl}")
+        return [(p["actor_id"], total * Decimal(p["porcentaje"]) / 100, "PARTICIPACION_ENTIDAD", Decimal(p["porcentaje"]))
+                for p in sorted(ps, key=lambda x: x["actor_id"])]
 
     def _base(h):
         if tid:
@@ -2775,7 +2894,7 @@ def _hecho_v3(ds, fuente, ctx, co, cl, derecho_de, contexto_de, ids, filas_d6=fr
         h.efecto("gasto", "GASTO", -imp, cat_d, [(S, -imp, "MANUAL")], "COMPLETA")
         return "GASTO", _base(h)
     # 4) viviendas sin participacion 100 % self: atribucion pendiente de decision
-    if viv and not _participacion_entidad_self_100(ds, viv):
+    if viv and modo_viv is None and not _participacion_entidad_self_100(ds, viv):
         raise PendienteD6("S20", "D6_ATRIBUCION_ENTIDAD_COMPARTIDA", viv)
     # 5) ingresos
     if co == "public.ingresos" and o not in GASTO_CORREGIDO_V3:
@@ -2792,6 +2911,13 @@ def _hecho_v3(ds, fuente, ctx, co, cl, derecho_de, contexto_de, ids, filas_d6=fr
     part = _dec_c(co, "cantidad", f, ctx) if co == "public.gastos_cotidianos" else None
     h = _H(ds, co, cl, "GASTO", fecha, nombre, tot, _presup(ds, cat, "GASTO"), notas,
            int(part) if part is not None else None)
+    rep = _reparto(tot)
+    if rep is not None and imp != tot:
+        raise PendienteD6("S20", "D6_REPARTO_VIVIENDA_CON_PARTE_PERSONAL", f"{imp} / {tot}")
+    if rep is not None:
+        h.efecto("gasto", "GASTO", tot, cat, rep, "COMPLETA")
+        ds.ledger.append({"regla": "D6-V", "origen": f"{co}/{cl}", "modo": modo_viv})
+        return "GASTO", _base(h)
     h.efecto("gasto", "GASTO", tot, cat, [(S, imp, "MANUAL")], "COMPLETA" if imp == tot else "PARCIAL")
     return "GASTO", _base(h)
 

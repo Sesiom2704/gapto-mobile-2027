@@ -16,6 +16,8 @@
 #   python scripts/mutantes/rv3_p5.py            # todos
 #   python scripts/mutantes/rv3_p5.py M30 M33    # subconjunto
 #
+# Version: 0.15.0 (M144..M146: P5 v0.20.0, compras financiadas OP-15; M136/M138 reanclados)
+# Version: 0.14.0 (M140..M143: P5 v0.20.0, respuestas al bloque 1 del dominio 6)
 # Version: 0.13.0 (M127..M139: P5 v0.19.0, dominio 6 bloque 1)
 # Version: 0.12.0 (M120..M126: P5 v0.18.0, respuestas A-F; M105 reanclado)
 # Version: 0.11.0 (M111..M119: P5 v0.17.0, respuestas del propietario; M92/M93 reanclados)
@@ -389,18 +391,41 @@ MUTANTES = {
              [('if d["id"] not in ATRIBUCION_CONTRAPARTE_100 or contraparte is None:', 'if d["id"] not in ATRIBUCION_CONTRAPARTE_100:')],
              T17 + "::test_repercusion_sin_contraparte_queda_pendiente_y_bloquea_su_cobro"),
     "M136": ("vivienda compartida atribuida al propietario sin decision",
-             [('    if viv and not _participacion_entidad_self_100(ds, viv):\n', '    if False:\n')],
+             [('        raise PendienteD6("S20", "D6_ATRIBUCION_ENTIDAD_COMPARTIDA", viv)', '        pass')],
              T17 + "::test_vivienda_compartida_sin_decision_queda_pendiente"),
     "M137": ("REEMBOLSO_DE omitido con generador conocido",
              [('                h.relacion(ids[gen], "REEMBOLSO_DE", imp)\n', '                pass\n')],
              T17 + "::test_repercusion_100_a_la_contraparte_y_reembolso_sin_ingreso"),
     "M138": ("fecha desconocida sustituida por una fecha fabricada",
-             [('        raise PendienteD6("S6", "D6_FECHA_DESCONOCIDA")\n    fecha = str(fc.valor)[:10]\n',
-               '        fc = None\n    fecha = str(fc.valor)[:10] if fc else "2026-01-01"\n')],
+             [('    fc = _celda(co, "fecha_inicio" if co == "public.ingresos" else "fecha", f, ctx)\n    if fc.estado != fu.CONOCIDO:\n        raise PendienteD6("S6", "D6_FECHA_DESCONOCIDA")\n    fecha = str(fc.valor)[:10]\n',
+               '    fc = _celda(co, "fecha_inicio" if co == "public.ingresos" else "fecha", f, ctx)\n    if fc.estado != fu.CONOCIDO:\n        fc = None\n    fecha = str(fc.valor)[:10] if fc else "2026-01-01"\n')],
              T17 + "::test_fecha_desconocida_no_se_fabrica"),
     "M139": ("relacion de devolucion inventada sin origen",
              [('        if orig is not None:\n            if orig not in ids:', '        if orig is None and ids:\n            h.relacion(sorted(ids.values())[0], "DEVOLUCION_DE", imp)\n        if orig is not None:\n            if orig not in ids:')],
              T17 + "::test_devolucion_sin_origen_no_inventa_relacion"),
+    # ---- 0.14.0: P5 v0.20.0, respuestas del propietario al bloque 1 del dominio 6
+    "M140": ("reparto de vivienda ignora el porcentaje (todo al propietario)",
+             [('        return [(p["actor_id"], total * Decimal(p["porcentaje"]) / 100,', '        return [(S, total * Decimal(p["porcentaje"]) / 100,')],
+             T17 + "::test_vivienda_decidida_al_50_reparte_por_participacion_vigente"),
+    "M141": ("reparto de vivienda sin filtrar vigencia",
+             [('              and p["vigente_desde"] <= fecha and (p["vigente_hasta"] is None or p["vigente_hasta"] >= fecha)]', '              ]')],
+             T17 + "::test_vivienda_decidida_al_50_reparte_por_participacion_vigente"),
+    "M142": ("decision SELF_100 ignorada",
+             [('    if viv and modo_viv is None and not _participacion_entidad_self_100(ds, viv):', '    if viv and not _participacion_entidad_self_100(ds, viv):')],
+             T17 + "::test_vivienda_decidida_100_propia_sin_participacion"),
+    "M143": ("total corregido por el propietario ignorado",
+             [('        tot = IMPORTE_TOTAL_CORREGIDO[(co, cl)]\n', '        tot = tot\n')],
+             T17 + "::test_total_corregido_por_el_propietario"),
+    # ---- 0.15.0: P5 v0.20.0, dominio 6 bloque 2 (compras financiadas OP-15)
+    "M144": ("compra financiada sin DEUDA",
+             [('    ed = h.efecto("deuda", "DEUDA", total, None, rep(total), "COMPLETA")\n', '    ed = None\n')],
+             T17 + "::test_compra_financiada_gasto_total_y_deuda_vinculada_a_la_financiacion"),
+    "M145": ("compra dentro del seguimiento aceptada (doble conteo de deuda)",
+             [('    if fin["fecha_inicio_seguimiento"] is not None and fecha >= fin["fecha_inicio_seguimiento"]:\n', '    if False:\n')],
+             T17 + "::test_compra_dentro_del_seguimiento_seria_doble_conteo"),
+    "M146": ("compra sin participacion asumida 100 % propietario",
+             [('        raise PendienteD6("S20", "D6_COMPRA_SIN_PARTICIPACION", f"{co}/{cl}")', '        ps = [{"actor_id": ds.self_id, "porcentaje": Decimal(100)}]')],
+             T17 + "::test_compra_sin_participacion_no_presume_propietario"),
 }
 
 

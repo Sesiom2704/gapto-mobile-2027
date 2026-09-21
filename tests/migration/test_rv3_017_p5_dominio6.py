@@ -9,7 +9,9 @@
 #              OP-13 negativa con limite de origen, reembolso sin INGRESO con REEMBOLSO_DE,
 #              repercusion 100 % a la contraparte, pendientes de fila sin fabricar datos,
 #              determinismo y carga fisica RV3_IMPORT con ROLLBACK.
-# Versión: 0.1.0
+#   0.2.0: atribucion por vivienda decidida (D6-V) y total corregido (D6-W), P5 v0.20.0.
+#   0.3.0: bloque 2, compras financiadas OP-15 (P5 v0.20.0).
+# Versión: 0.3.0
 # ============================================================
 from __future__ import annotations
 
@@ -82,7 +84,7 @@ def cfg(monkeypatch):
 
     def clas(ds, co, cl, f):
         t = f.get("tipo_id")
-        if t == "TX":
+        if t in ("TX", "TF"):  # TF: compra a plazos del corpus T8
             return ("NULL", None)
         if t in NAT:
             return ("FUERA", NAT[t].split(":", 1)[1].strip())
@@ -275,3 +277,95 @@ def test_fisico_atribucion_completa_descuadrada_rechazada():
     e["estado_atribucion"] = "COMPLETA"
     with pytest.raises(psycopg.errors.RaiseException):
         P5.validar_fisico(ds, os.environ["GAPTO_RV3_IMPORT_URL"])
+
+
+OTRO = "00000000-0000-5000-8000-0000000000aa"  # actor sintetico (solo validacion logica, no fisica)
+
+
+def _con_participaciones(monkeypatch, filas):
+    """Sustituye las participaciones de la vivienda V1 tras el dominio 4 por las indicadas."""
+    real = P5.dominio_4_propiedades
+
+    def d4(ds, fuente, ctx, modo_lab):
+        real(ds, fuente, ctx, modo_lab)
+        vid = F.uuid_v3("public.patrimonio", "V1", "entidades", "propiedad")
+        for k in [k for k, v in ds.filas["entidad_participaciones"].items() if v["entidad_id"] == vid]:
+            del ds.filas["entidad_participaciones"][k]
+        for n, (actor, pct, desde, hasta) in enumerate(filas):
+            ds.filas["entidad_participaciones"][f"p{n}"] = {
+                "id": f"p{n}", "entidad_id": vid, "actor_id": ds.self_id if actor == "SELF" else actor,
+                "porcentaje": Decimal(pct), "vigente_desde": desde, "vigente_hasta": hasta}
+            ds.mapear("public.patrimonio", "V1", "entidad_participaciones", f"p{n}", f"test.{n}")
+    monkeypatch.setattr(P5, "dominio_4_propiedades", d4)
+
+
+def test_vivienda_decidida_al_50_reparte_por_participacion_vigente(monkeypatch):
+    monkeypatch.setattr(P5, "VIVIENDA_ATRIBUCION_DECIDIDA", {"V1": "PARTICIPACION"})
+    _con_participaciones(monkeypatch, [("SELF", 50, "2025-01-01", None), (OTRO, 50, "2025-01-01", None),
+                                       (OTRO, 100, "2024-01-01", "2024-12-31")])  # vigencia ya vencida
+    ds = _t([_g("GF", importe=11.81, total=11.81, referencia_vivienda_id="V1")])
+    (e,) = _efectos(ds, _hecho(ds, G, "GF"))
+    assert (e["importe_delta"], e["estado_atribucion"]) == (Decimal("11.81"), "COMPLETA")
+    got = sorted((a["actor_id"] == ds.self_id, a["importe_atribuido"], a["porcentaje_aplicado"], a["criterio_atribucion"])
+                 for a in _atribs(ds, e))
+    assert got == [(False, Decimal("5.905"), Decimal("50"), "PARTICIPACION_ENTIDAD"),
+                   (True, Decimal("5.905"), Decimal("50"), "PARTICIPACION_ENTIDAD")]
+    assert sum(x[1] for x in got) == e["importe_delta"]
+
+
+def test_vivienda_decidida_100_propia_sin_participacion(monkeypatch):
+    monkeypatch.setattr(P5, "VIVIENDA_ATRIBUCION_DECIDIDA", {"V1": "SELF_100"})
+    _con_participaciones(monkeypatch, [(OTRO, 100, "2025-01-01", None)])
+    ds = _t([_g("GB", referencia_vivienda_id="V1")])
+    (e,) = _efectos(ds, _hecho(ds, G, "GB"))
+    assert [(a["actor_id"], a["importe_atribuido"]) for a in _atribs(ds, e)] == [(ds.self_id, Decimal("40"))]
+
+
+def test_total_corregido_por_el_propietario(monkeypatch):
+    monkeypatch.setattr(P5, "IMPORTE_TOTAL_CORREGIDO", {(GC, "CR"): Decimal("15.61")})
+    ds = _t([_c("CR", importe=15.61, importe_total=15.605)])
+    h = _hecho(ds, GC, "CR")
+    (e,) = _efectos(ds, h)
+    assert (h["importe_total"], e["importe_delta"], e["estado_atribucion"]) == (Decimal("15.61"), Decimal("15.61"), "COMPLETA")
+    assert _pend(ds, GC, "CR") == []
+
+
+def _fin_g1(ds):
+    return next(m["registro_destino_id"] for m in ds.filas["mapeos_importacion"].values()
+                if m["tabla_destino"] == "financiaciones" and m["registro_origen_id"] == F.uuid_origen(G, "G1"))
+
+
+def test_compra_financiada_gasto_total_y_deuda_vinculada_a_la_financiacion(monkeypatch):
+    monkeypatch.setattr(P5, "PARTICIPACION_FIN_SELF", {(G, "G1"): None})
+    ds = _t()
+    h = _hecho(ds, G, "G1")
+    assert (h["tipo_hecho_id"], h["fecha_hecho"], h["importe_total"]) == (TH["COMPRA_FINANCIADA"], "2025-01-10", Decimal("30.3"))
+    ef = {e["tipo_efecto"]: e for e in _efectos(ds, h)}
+    assert {k: v["importe_delta"] for k, v in ef.items()} == {"GASTO": Decimal("30.3"), "DEUDA": Decimal("30.3")}
+    for e in ef.values():
+        assert [(a["actor_id"], a["importe_atribuido"], a["criterio_atribucion"]) for a in _atribs(ds, e)] == \
+            [(ds.self_id, Decimal("30.3"), "PARTICIPACION_ENTIDAD")]
+    (v,) = [x for x in ds.filas["hecho_entidades"].values() if x["hecho_id"] == h["id"] and x["entidad_id"] == _fin_g1(ds)]
+    assert (v["efecto_id"], v["tipo_relacion"]) == (ef["DEUDA"]["id"], "AFECTA_A")
+    # las cuotas no crean gasto: un unico GASTO por la compra en todo el dataset para ese origen
+    assert sum(1 for e in ds.filas["hecho_efectos"].values() if e["hecho_id"] == h["id"] and e["tipo_efecto"] == "GASTO") == 1
+
+
+def test_compra_sin_participacion_no_presume_propietario():
+    ds = _t()
+    assert _hecho(ds, G, "G1") is None and _pend(ds, G, "G1") == ["D6_COMPRA_SIN_PARTICIPACION"]
+
+
+def test_compra_dentro_del_seguimiento_seria_doble_conteo(monkeypatch):
+    monkeypatch.setattr(P5, "PARTICIPACION_FIN_SELF", {(G, "G1"): None})
+    monkeypatch.setattr(P5, "FECHA_INICIO_LEDGER", "2025-01-01")
+    with pytest.raises(P5.ErrorP5) as e:
+        _t()
+    assert e.value.codigo == "S9_COMPRA_DENTRO_DEL_SEGUIMIENTO"
+
+
+@pytest.mark.skipif(not os.environ.get("GAPTO_RV3_IMPORT_URL"), reason="sin laboratorio RV3_IMPORT")
+def test_fisico_compra_financiada_rollback(monkeypatch):
+    monkeypatch.setattr(P5, "PARTICIPACION_FIN_SELF", {(G, "G1"): None})
+    res = P5.validar_fisico(_t(), os.environ["GAPTO_RV3_IMPORT_URL"])
+    assert res["hechos_financieros"] == 1 and res["hecho_efectos"] == 2 and res["hecho_entidades"] == 1
