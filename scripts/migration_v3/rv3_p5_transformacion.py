@@ -15,6 +15,9 @@
 #                8 financiaciones (PARCIAL v0.5.0: 4 prestamos formales con condiciones
 #                  versionadas, calendario, financiador y garantia; 7 compras financiadas;
 #                  derechos/obligaciones pendientes)
+#   v0.30.0: HIP. ALLENDE: vencimiento real = ultimo dia de cada mes (propietario 2026-09-22; V3 usa el 28 por su
+#           limitacion con febrero): calendario, vencimiento final previsto y fecha economica de las cuotas pagadas.
+#           Cierra el residual de la cuota 1 (vence 2024-08-31 = fecha_inicio) y el cuadre de RUN02.
 #   v0.29.0: respuestas Q-R02-1/5/7 (propietario 2026-09-22). Q-R02-1 opcion A: cuota pagada antes del corte ->
 #           dos hechos (GENERACION_DERECHO_OBLIGACION con DEUDA -capital AFECTA_A la financiacion; GASTO intereses en
 #           COSTES FINANCIEROS), fecha = vencimiento, atribucion por participacion, sin tesoreria; fecha_pago y
@@ -133,7 +136,7 @@
 #   RV3_IMPORT (rol login no superusuario -> gapto_migrator -> gapto_owner),
 #   fuerza los diferidos con SET CONSTRAINTS ALL IMMEDIATE y hace ROLLBACK.
 #   No es P6 (P6 hace COMMIT real).
-# Versión: 0.29.0
+# Versión: 0.30.0
 # ============================================================
 from __future__ import annotations
 
@@ -148,7 +151,7 @@ from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
-VERSION = "0.29.0"
+VERSION = "0.30.0"
 TRANSFORMACION = "RV3_P5"
 _AQUI = Path(__file__).resolve().parent
 
@@ -1402,6 +1405,24 @@ def _sistema(cuotas: list, tasa: Decimal, ultima: int) -> str:
     return "FRANCES" if ok and len(imp) <= 1 else "OTRO"
 
 
+# v0.30.0 (propietario 2026-09-22): la HIP. ALLENDE se carga el ULTIMO dia de cada mes; V3 registra el dia 28 para
+# esquivar su limitacion con febrero. 2027 lo representa sin artificio (F04-D020: ordinal 31 recortado al ultimo dia
+# valido del mes = fin de mes). Se aplica al calendario, al vencimiento final previsto y a la fecha economica de las
+# cuotas pagadas (D8-I). El literal V3 queda en origen; solo se admite el dia 28 (cualquier otro dia -> S9).
+VENCIMIENTO_FIN_DE_MES = {"prestamo-6d5rjp"}
+
+
+def _venc_real(prestamo: str, fecha):
+    if fecha is None or prestamo not in VENCIMIENTO_FIN_DE_MES:
+        return fecha
+    import calendar
+    f = str(fecha)[:10]
+    if f[8:10] != "28":
+        raise ErrorP5("S9_VENCIMIENTO_FIN_DE_MES_NO_28", f"{prestamo} {f}")
+    y, m = int(f[:4]), int(f[5:7])
+    return f"{y:04d}-{m:02d}-{calendar.monthrange(y, m)[1]:02d}"
+
+
 def participaciones_financiacion(ds: Dataset, co: str, cl: str, eid: str, fecha_inicio) -> None:
     """S20-7 (reparto decidido con cotitular, fuente suplementaria) o S20-9 (100 % propietario,
     vigencia PROPUESTA = fecha_inicio). Sin decision: 0 filas (D8-H, nunca se infiere)."""
@@ -1482,7 +1503,7 @@ def dominio_8_financiaciones(ds: Dataset, fuente: dict, ctx: dict, modo_lab: boo
             "capital_original_contratado": Decimal(str(g("importe_principal"))) if g("importe_principal") is not None else None,
             "saldo_principal_apertura": Decimal(str(pend)) if pend is not None else None,
             "fecha_inicio_seguimiento": FECHA_INICIO_LEDGER if pend is not None else None,
-            "fecha_inicio": g("fecha_inicio"), "fecha_vencimiento_final_prevista": g("fecha_vencimiento"),
+            "fecha_inicio": g("fecha_inicio"), "fecha_vencimiento_final_prevista": _venc_real(cp, g("fecha_vencimiento")),
             "fecha_cierre_real": None, "estado": "ACTIVA" if g("estado") == "ACTIVO" else None,
             "motivo_cierre": None, "notas": None})
         if ds.filas["financiaciones"][eid]["estado"] is None:
@@ -1500,7 +1521,7 @@ def dominio_8_financiaciones(ds: Dataset, fuente: dict, ctx: dict, modo_lab: boo
             gq = lambda col: _val(cq, col, q, ctx)
             if Decimal(str(gq("seguros") or 0)) != 0:
                 raise ErrorP5("S4_SEGUROS_SIN_DESTINO", f"{cq}/{kq}")
-            c = {"clave": kq, "num": int(gq("num_cuota")), "venc": gq("fecha_vencimiento"),
+            c = {"clave": kq, "num": int(gq("num_cuota")), "venc": _venc_real(cp, gq("fecha_vencimiento")),
                  "capital": Decimal(str(gq("capital"))), "interes": Decimal(str(gq("interes"))),
                  "comis": Decimal(str(gq("comisiones"))) if gq("comisiones") is not None else None,
                  "importe": Decimal(str(gq("importe_cuota"))), "pagada": gq("pagada"), "saldo_prev": saldo}
@@ -1508,6 +1529,8 @@ def dominio_8_financiaciones(ds: Dataset, fuente: dict, ctx: dict, modo_lab: boo
             cal.append(c)
         if [c["num"] for c in cal] != list(range(1, len(cal) + 1)):
             raise ErrorP5("S4_SECUENCIA_CUOTAS", origen)
+        if cp in VENCIMIENTO_FIN_DE_MES and cal:
+            ds.ledger.append({"regla": "D8-K-FIN_DE_MES", "origen": origen, "cuotas": len(cal)})
         if cal and sum(c["capital"] for c in cal) != principal:
             raise ErrorP5("S9_CALENDARIO_NO_CUADRA", f"{origen} suma capital != principal")
         if cal and pend is not None and principal - sum(c["capital"] for c in cal if c["pagada"] is True) != Decimal(str(pend)):
@@ -3384,7 +3407,7 @@ def cuotas_pagadas(ds: Dataset, fuente: dict, ctx: dict, res: dict) -> None:
         if venc is None:
             _residual(ds, co, "fecha_pago", cl, "Q-R02-1", "vencimiento desconocido")
             continue
-        venc = venc[:10]
+        venc = _venc_real(pr, venc[:10])
         if fin["fecha_inicio_seguimiento"] is not None and venc >= fin["fecha_inicio_seguimiento"]:
             raise ErrorP5("S9_CUOTA_DENTRO_DEL_SEGUIMIENTO", f"{co}/{cl}")  # su DEUDA se contaria dos veces
         cap, inte, tot = (_dec_c(co, c, f, ctx) for c in ("capital", "interes", "importe_cuota"))

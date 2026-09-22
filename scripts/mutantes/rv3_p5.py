@@ -16,6 +16,7 @@
 #   python scripts/mutantes/rv3_p5.py            # todos
 #   python scripts/mutantes/rv3_p5.py M30 M33    # subconjunto
 #
+# Version: 0.25.0 (M226..M232: P5 v0.30.0, vencimiento a fin de mes)
 # Version: 0.24.0 (M203..M225: P5 v0.29.0, Q-R02-1/5/7)
 # Version: 0.23.0 (M194 reescrito, M197..M202: P5 v0.28.0)
 # Version: 0.22.0 (M179..M196: P5 v0.27.0, complementos R02 — respuestas Q-R02)
@@ -67,6 +68,7 @@ T20 = "tests/migration/test_rv3_020_p5_dominio12_disposicion.py"
 T21 = "tests/migration/test_rv3_021_p5_r02_campos.py"
 T22 = "tests/migration/test_rv3_022_p5_r02_complementos.py"
 T23 = "tests/migration/test_rv3_023_p5_r02_cuotas_direcciones_omisiones.py"
+T24 = "tests/migration/test_rv3_024_p5_vencimiento_fin_de_mes.py"
 
 MUTANTES = {
     "M30": ("gate de la fuente suplementaria siempre abierto",
@@ -627,7 +629,7 @@ MUTANTES = {
              T22 + "::test_tienda_sin_hecho_se_descarta_con_traza"),
     # --- v0.24.0: P5 v0.29.0 Q-R02-1/5/7
     'M203': ('fecha economica = fecha_pago',
-             [('        venc = venc[:10]\n', '        venc = str(fp.valor)[:10]\n')],
+             [('        venc = _venc_real(pr, venc[:10])\n', '        venc = str(fp.valor)[:10]\n')],
              T23 + "::test_cuota_pagada_genera_dos_hechos_sin_tesoreria"),
     'M204': ('capital como gasto',
              [('        ed = h.efecto("capital", "DEUDA", -cap, None, rep(-cap), "COMPLETA")', '        ed = h.efecto("capital", "GASTO", cap, None, rep(cap), "COMPLETA")')],
@@ -695,6 +697,28 @@ MUTANTES = {
     'M225': ('omisiones no invocadas',
              [('    omisiones_v3(ds, fuente, ctx, res)\n', '')],
              T23 + "::test_complementos_invocan_cuotas_direcciones_y_omisiones"),
+    # --- v0.25.0: P5 v0.30.0 vencimiento a fin de mes
+    'M226': ('calendario sin fin de mes',
+             [('"venc": _venc_real(cp, gq("fecha_vencimiento")),', '"venc": gq("fecha_vencimiento"),')],
+             T24 + "::test_calendario_a_fin_de_mes_solo_en_la_financiacion_declarada"),
+    'M227': ('vencimiento final sin fin de mes',
+             [('"fecha_vencimiento_final_prevista": _venc_real(cp, g("fecha_vencimiento")),', '"fecha_vencimiento_final_prevista": g("fecha_vencimiento"),')],
+             T24 + "::test_calendario_a_fin_de_mes_solo_en_la_financiacion_declarada"),
+    'M228': ('cuota pagada sin fin de mes',
+             [('        venc = _venc_real(pr, venc[:10])\n', '        venc = venc[:10]\n')],
+             T24 + "::test_cuota_pagada_con_fecha_economica_a_fin_de_mes"),
+    'M229': ('dia V3 distinto de 28 admitido',
+             [('    if f[8:10] != "28":\n', '    if False:\n')],
+             T24 + "::test_dia_v3_distinto_de_28_falla_cerrado"),
+    'M230': ('fin de mes aplicado a todas las financiaciones',
+             [('    if fecha is None or prestamo not in VENCIMIENTO_FIN_DE_MES:\n', '    if fecha is None:\n')],
+             T24 + "::test_sin_declaracion_se_conserva_el_dia_v3"),
+    'M231': ('fin de mes como dia fijo 30',
+             [('calendar.monthrange(y, m)[1]:02d}"', '30:02d}"')],
+             T24 + "::test_calendario_a_fin_de_mes_solo_en_la_financiacion_declarada"),
+    'M232': ('sin ledger D8-K',
+             [('            ds.ledger.append({"regla": "D8-K-FIN_DE_MES"', '            (lambda *a: None)({"regla": "D8-K-FIN_DE_MES"')],
+             T24 + "::test_calendario_a_fin_de_mes_solo_en_la_financiacion_declarada"),
 }
 
 
