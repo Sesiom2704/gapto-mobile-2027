@@ -6,7 +6,9 @@
 #              como etiqueta "Capricho" del hecho, ademas de su categoria. Corpus SINTETICO sin PII. Discrimina:
 #              etiqueta unica compartida, vinculo por hecho, solo el tipo declarado, residual si el registro no
 #              tiene hecho y no colision con las etiquetas de evento.
-# Versión: 0.1.0
+# Versión: 0.2.0
+#              0.2.0 (P5 v0.32.0): Bizum como medio de cobro en notas con la cuenta V3 de recepcion; residual sin
+#              hecho; contexto Tailandia 2026 ampliado por decision del propietario.
 # ============================================================
 from __future__ import annotations
 
@@ -69,3 +71,41 @@ def test_capricho_y_evento_conviven_en_el_mismo_hecho():
 
 def test_declaracion_real():
     assert P5.ETIQUETA_TIPO_V3 == {CAP: "Capricho"}
+
+
+I = "public.ingresos"
+BIZ = "BIZ-TIPOINGRESO-6UJSD0"
+
+
+def test_bizum_en_notas_con_cuenta_de_recepcion():
+    ds = _ds()
+    h = _hecho(ds, I, "i1")
+    ds.filas["hechos_financieros"][h]["notas"] = "previa"
+    cid = F.uuid_v3("public.cuentas_bancarias", "C1", "cuentas", "cuenta")
+    ds.filas["cuentas"][cid] = {"id": cid, "nombre": "NOMINA - BANCO X"}
+    h2 = _hecho(ds, I, "i2")
+    r = _run(ds, {I: {"i1": {"id": "i1", "tipo_id": BIZ, "cuenta_id": "C1"},
+                      "i2": {"id": "i2", "tipo_id": "OTRO", "cuenta_id": "C1"}}})
+    assert ds.filas["hechos_financieros"][h]["notas"] == (
+        "previa\nV3 medio de cobro: BIZUM (cuenta V3 de recepcion: NOMINA - BANCO X)")
+    assert ds.filas["hechos_financieros"][h2]["notas"] is None and r["medio_cobro_notas"] == 1
+
+
+def test_bizum_sin_hecho_queda_residual():
+    ds = _ds()
+    _run(ds, {I: {"i1": {"id": "i1", "tipo_id": BIZ, "cuenta_id": "141"}}})
+    assert [x["pregunta"] for x in ds.trazabilidad["r02_residuales"][f"{I}.tipo_id"]] == ["D-MIG-002"]
+
+
+def test_contexto_tailandia_declarado():
+    # instancia propia del modulo: conftest vacia los catalogos reales en la instancia compartida
+    sp = importlib.util.spec_from_file_location("p5_real_026", RAIZ / "scripts" / "migration_v3" / "rv3_p5_transformacion.py")
+    real = importlib.util.module_from_spec(sp)
+    sys.modules["p5_real_026"] = real  # dataclasses exige el modulo registrado
+    try:
+        sp.loader.exec_module(real)
+    finally:
+        sys.modules.pop("p5_real_026", None)
+    tai = {k[1] for k, v in real.CONTEXTO_ADICIONAL.items() if v == "CTX-TAILANDIA-2026"}
+    assert tai == {"gasto-x2t6dm", "gasto-mpvffi", "gasto-g6r51s", "gasto-ovijms", "gasto-t631sb", "gasto-u99z4c"}
+    assert P5.MEDIO_COBRO_TIPO_V3 == {BIZ: "BIZUM"}

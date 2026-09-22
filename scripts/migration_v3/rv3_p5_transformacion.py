@@ -15,6 +15,9 @@
 #                8 financiaciones (PARCIAL v0.5.0: 4 prestamos formales con condiciones
 #                  versionadas, calendario, financiador y garantia; 7 compras financiadas;
 #                  derechos/obligaciones pendientes)
+#   v0.32.0: D-MIG-002 (propietario 2026-09-22): 5 gastos mas del contexto Tailandia 2026 (seguro, elefantes, hotel
+#           Bangkok, eSIM, vuelo Bangkok-Chiang Mai); Bizum como medio de cobro en las notas del hecho con la cuenta V3
+#           de recepcion. Suscripciones: la regla recurrente es la representacion aceptada (sin entidad servicio).
 #   v0.31.0: D-MIG-002: el tipo V3 CAPRICHOS conserva su dimension analitica como etiqueta "Capricho" del hecho
 #           (77 gastos; correccion de mapping clase B detectada por R26).
 #   v0.30.0: HIP. ALLENDE: vencimiento real = ultimo dia de cada mes (propietario 2026-09-22; V3 usa el 28 por su
@@ -138,7 +141,7 @@
 #   RV3_IMPORT (rol login no superusuario -> gapto_migrator -> gapto_owner),
 #   fuerza los diferidos con SET CONSTRAINTS ALL IMMEDIATE y hace ROLLBACK.
 #   No es P6 (P6 hace COMMIT real).
-# Versión: 0.31.0
+# Versión: 0.32.0
 # ============================================================
 from __future__ import annotations
 
@@ -153,7 +156,7 @@ from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
-VERSION = "0.31.0"
+VERSION = "0.32.0"
 TRANSFORMACION = "RV3_P5"
 _AQUI = Path(__file__).resolve().parent
 
@@ -2592,7 +2595,10 @@ VIVIENDA_ATRIBUCION_DECIDIDA = {"VIVIENDA-42E8QW": "PARTICIPACION", "VIVIENDA-0B
 IMPORTE_TOTAL_CORREGIDO = {("public.gastos_cotidianos", "GASTO_COTIDIANO-1FRA14"): Decimal("15.61")}
 COMPRAS_FINANCIADAS_D6 = True
 # Respuesta 2 (2026-09-21): el vuelo de Tailandia tambien pertenece al contexto Tailandia 2026.
-CONTEXTO_ADICIONAL = {("public.gastos", "gasto-x2t6dm"): "CTX-TAILANDIA-2026"}  # bloque 2 del dominio 6 (OP-15)
+CONTEXTO_ADICIONAL = {("public.gastos", "gasto-x2t6dm"): "CTX-TAILANDIA-2026",  # bloque 2 del dominio 6 (OP-15)
+                      # v0.32.0 (propietario 2026-09-22): D-MIG-002 viaje -> contexto
+                      **{("public.gastos", k): "CTX-TAILANDIA-2026"
+                         for k in ("gasto-mpvffi", "gasto-g6r51s", "gasto-ovijms", "gasto-t631sb", "gasto-u99z4c")}}
 # Prestamo/adelanto puro sin gasto propio (Migration V3, F03-01 punto 2: Tania-SHEIN).
 GENERACION_PURA = {"DER-SHEIN"}
 
@@ -3328,6 +3334,12 @@ EVENTO_ETIQUETA = {"AMIGOS": "AMIGOS", "FAMILIA": "FAMILIA", "ROMANTICO": "ROMAN
 # CAPRICHOS se clasifica en categorias por registro (hoja TIPOS) y ademas conserva su dimension analitica como
 # etiqueta del hecho. Correccion de mapping clase B detectada por R26 (RUN06 la materializaba; P5 la perdia).
 ETIQUETA_TIPO_V3 = {"CAP-TIPOGASTO-334BFEC7": "Capricho"}
+# v0.32.0 D-MIG-002 "Bizum -> medio de cobro" (propietario 2026-09-22: un Bizum siempre llega a la cuenta asignada).
+# 0330 solo admite el medio en hecho_aportaciones_pago.medio_pago_codigo y el historico no lleva aportaciones (D6-Q):
+# se conserva en las notas del hecho con la cuenta V3 de recepcion. La configuracion "cuenta asignada a Bizum" es
+# capacidad runtime futura, no representable en 0330 (cuenta_capacidades tiene catalogo cerrado): fuera de RV3.
+MEDIO_COBRO_TIPO_V3 = {"BIZ-TIPOINGRESO-6UJSD0": "BIZUM"}
+NOTA_MEDIO_COBRO = "V3 medio de cobro: {}"
 # Q-R02-4: tienda -> notas del hecho, concatenadas a las existentes. La referencia de cuenta fue la base del nombre
 # (anagrama, p. ej. "NOMINA - MEDIOLANUM BANCO"): se VERIFICA que el nombre la contiene como prefijo.
 NOTA_TIENDA = "V3 gastos.tienda: {}"
@@ -3541,7 +3553,8 @@ def dominio_12_r02_complementos(ds: Dataset, fuente: dict, ctx: dict) -> dict:
            "hecho_magnitudes": 0, "precio_litro_verificado": 0, "cero_desconocido": 0,
            "desconocido_decidido": 0, "correcciones": 0, "compra_notas": 0, "cuotas_capital": 0,
            "cuotas_intereses": 0, "cuota_capital_total": Decimal(0), "cuota_intereses_total": Decimal(0),
-           "direcciones_proveedor": 0, "proveedor_solo_region": 0, "omisiones_ledger": 0, "etiquetas_tipo_v3": 0}
+           "direcciones_proveedor": 0, "proveedor_solo_region": 0, "omisiones_ledger": 0, "etiquetas_tipo_v3": 0,
+           "medio_cobro_notas": 0}
     cuotas_pagadas(ds, fuente, ctx, res)
     direcciones_proveedores(ds, fuente, ctx, res)
     omisiones_v3(ds, fuente, ctx, res)
@@ -3599,6 +3612,22 @@ def dominio_12_r02_complementos(ds: Dataset, fuente: dict, ctx: dict) -> dict:
             ds.add("hecho_etiquetas", {"id": xid, "hecho_id": hid, "etiqueta_id": tid}, natural=(hid, tid))
             ds.mapear(co, cl, "hecho_etiquetas", xid, "tipo_v3", tipo="DIVIDIDO")
             res["etiquetas_tipo_v3"] += 1
+    # D-MIG-002: medio de cobro V3 -> notas del hecho (con la cuenta V3 de recepcion)
+    co = "public.ingresos"
+    for cl, f in sorted(fuente.get(co, {}).items()):
+        medio = MEDIO_COBRO_TIPO_V3.get(_texto(_celda(co, "tipo_id", f, ctx)) or "")
+        if medio is None:
+            continue
+        hid = _hecho_unico(ds, idx, co, cl)
+        if hid is None:
+            _residual(ds, co, "tipo_id", cl, "D-MIG-002", "ingreso sin hecho: el medio de cobro no tiene destino")
+            continue
+        cta = _texto(_celda(co, "cuenta_id", f, ctx))
+        nom = ds.filas["cuentas"].get(fu.uuid_v3("public.cuentas_bancarias", cta, "cuentas", "cuenta"), {}).get("nombre") \
+            if cta else None
+        _anexar_nota(ds.filas["hechos_financieros"][hid], "notas",
+                     NOTA_MEDIO_COBRO.format(medio) + (f" (cuenta V3 de recepcion: {nom})" if nom else ""))
+        res["medio_cobro_notas"] += 1
     # Q-R02-4
     co = "public.gastos"
     for cl, f in sorted(fuente.get(co, {}).items()):

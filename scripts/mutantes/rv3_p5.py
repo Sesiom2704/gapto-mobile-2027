@@ -16,6 +16,7 @@
 #   python scripts/mutantes/rv3_p5.py            # todos
 #   python scripts/mutantes/rv3_p5.py M30 M33    # subconjunto
 #
+# Version: 0.27.0 (M236..M238: P5 v0.32.0, Bizum medio de cobro)
 # Version: 0.26.0 (M233..M235: P5 v0.31.0, D-MIG-002 Capricho)
 # Version: 0.25.0 (M226..M232: P5 v0.30.0, vencimiento a fin de mes)
 # Version: 0.24.0 (M203..M225: P5 v0.29.0, Q-R02-1/5/7)
@@ -731,6 +732,16 @@ MUTANTES = {
     'M235': ('etiqueta aplicada a cualquier tipo',
              [('            nombre = ETIQUETA_TIPO_V3.get(_texto(_celda(co, "tipo_id", f, ctx)) or "")', '            nombre = "Capricho"')],
              T26 + "::test_capricho_etiqueta_unica_por_hecho"),
+    # --- v0.27.0: P5 v0.32.0 Bizum
+    'M236': ('medio de cobro no anotado',
+             [('        _anexar_nota(ds.filas["hechos_financieros"][hid], "notas",\n                     NOTA_MEDIO_COBRO', '        (lambda *a: None)(ds.filas["hechos_financieros"][hid], "notas",\n                     NOTA_MEDIO_COBRO')],
+             T26 + "::test_bizum_en_notas_con_cuenta_de_recepcion"),
+    'M237': ('Bizum sin hecho sin residual',
+             [('            _residual(ds, co, "tipo_id", cl, "D-MIG-002", "ingreso sin hecho: el medio de cobro no tiene destino")', '            pass')],
+             T26 + "::test_bizum_sin_hecho_queda_residual"),
+    'M238': ('medio sin cuenta de recepcion',
+             [('(f" (cuenta V3 de recepcion: {nom})" if nom else "")', '""')],
+             T26 + "::test_bizum_en_notas_con_cuenta_de_recepcion"),
 }
 
 
