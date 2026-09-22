@@ -16,6 +16,7 @@
 #   python scripts/mutantes/rv3_p5.py            # todos
 #   python scripts/mutantes/rv3_p5.py M30 M33    # subconjunto
 #
+# Version: 0.19.0 (M160..M162: P5 v0.24.0, presupuesto G-V3-03; M158 reanclado)
 # Version: 0.18.0 (M155..M159: P5 v0.23.0, dominio 11 cierres legacy)
 # Version: 0.17.0 (M149..M154: P5 v0.22.0, dominio 7 tesoreria legacy)
 # Version: 0.16.0 (M147..M148: P5 v0.21.0, ticket compartido; M134 reanclado)
@@ -470,12 +471,22 @@ MUTANTES = {
     "M157": ("metricas legacy habilitadas para cierres nuevos",
              [('                                   "enabled": False}, natural=(codigo,))', '                                   "enabled": True}, natural=(codigo,))')],
              T19 + "::test_metricas_legacy_deshabilitadas_para_cierres_nuevos"),
-    "M158": ("contenedor presupuestario sin pendiente",
-             [('        if k in fuente.get("public.gastos", {}) and k not in CONTENEDORES_PRESUPUESTO_DECISION:\n', '        if False:\n')],
-             T19 + "::test_contenedor_presupuestario_queda_pendiente"),
+    "M158": ("contenedor sin decision sin pendiente",
+             [('            if k in fuente.get("public.gastos", {}):\n                ds.pendientes.append({"dominio": 11,', '            if False:\n                ds.pendientes.append({"dominio": 11,')],
+             T19 + "::test_contenedor_sin_decision_queda_pendiente"),
     "M159": ("detalle sin clave de desglose",
              [('                                       "clave_desglose": f"{tipo}/{seg}", "dimensiones_snapshot": None, **v})', '                                       "clave_desglose": None, "dimensiones_snapshot": None, **v})')],
              T19 + "::test_detalle_con_clave_de_desglose_y_valores_v3"),
+    # ---- 0.19.0: P5 v0.24.0, presupuesto de contenedores G-V3-03
+    "M160": ("objetivo del presupuesto tomado del restante",
+             [('        obj = _dec_c(co, "importe_cuota", f, ctx)\n', '        obj = _dec_c(co, "importe", f, ctx)\n')],
+             T19 + "::test_presupuesto_del_mes_del_corte_con_objetivo_importe_cuota"),
+    "M161": ("carga sin transicion BORRADOR -> ACTIVO",
+             [('TRANSICIONES_CARGA = {"presupuestos": ("estado", "BORRADOR")}', 'TRANSICIONES_CARGA = {}')],
+             T19 + "::test_fisico_presupuesto_activo_via_borrador"),
+    "M162": ("alcance sin descendientes",
+             [('                                                  "entidad_id": None, "incluir_descendientes": True})', '                                                  "entidad_id": None, "incluir_descendientes": False})')],
+             T19 + "::test_alcance_por_categoria_con_descendientes"),
 }
 
 

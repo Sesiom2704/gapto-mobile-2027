@@ -7,7 +7,8 @@
 #              deshabilitado, campos inexistentes antes del rediseno de dic-2025 no convertidos
 #              en ceros, desconocido nunca cero, detalle con clave de desglose, presupuestos
 #              G-V3-03 pendientes y carga fisica RV3_IMPORT con ROLLBACK.
-# Versión: 0.1.0
+#   0.2.0: presupuesto de contenedores G-V3-03 decidido (importe_cuota = presupuesto), P5 v0.24.0.
+# Versión: 0.2.0
 # ============================================================
 from __future__ import annotations
 
@@ -119,11 +120,61 @@ def test_detalle_sin_cierre_falla():
     assert e.value.codigo == "S8_DETALLE_SIN_CIERRE"
 
 
-def test_contenedor_presupuestario_queda_pendiente(monkeypatch):
-    monkeypatch.setattr(P5, "CONTENEDORES_PRESUPUESTARIOS", {"G1"})
-    ds = _t([_c("K12", 2025, 12)])
+def _gc(k, **kw):
+    d = {"id": k, "nombre": f"BOLSA {k}", "tipo_id": "TX", "importe_cuota": 437.43, "importe": 120.0, "total": 0,
+         "periodicidad": "MENSUAL", "activo": True, "fecha": "2025-06-30", "cuenta_id": "C1"}
+    d.update(kw)
+    return ("public.gastos", k, d)
+
+
+@pytest.fixture
+def contenedor(monkeypatch):
+    monkeypatch.setattr(P5, "CONTENEDORES_PRESUPUESTARIOS", {"GC1"})
+    monkeypatch.setattr(P5, "clasificar", lambda ds, co, cl, f: ("NULL", None))
+
+
+def _linea(ds):
+    (l,) = ds.filas["presupuesto_lineas"].values()
+    return l
+
+
+def test_contenedor_sin_decision_queda_pendiente(monkeypatch, contenedor):
+    monkeypatch.setattr(P5, "PRESUPUESTO_CONTENEDORES_DECIDIDO", False)
+    ds = _t([_c("K12", 2025, 12), _gc("GC1")])
     assert [p["codigo"] for p in ds.pendientes if p.get("dominio") == 11] == ["D11_PRESUPUESTO_SEMANTICA_NO_FIABLE"]
-    assert ds.filas.get("presupuestos", {}) == {}
+    assert ds.filas["presupuestos"] == {}
+
+
+def test_presupuesto_del_mes_del_corte_con_objetivo_importe_cuota(contenedor):
+    ds = _t([_c("K12", 2025, 12), _gc("GC1")])
+    (p,) = ds.filas["presupuestos"].values()
+    assert (p["periodo_desde"], p["periodo_hasta"], p["estado"], p["perspectiva"], p["moneda"], p["version_presupuesto"]) == \
+        ("2026-09-01", "2026-09-30", "ACTIVO", "ATRIBUIBLE", "EUR", 1)
+    l = _linea(ds)
+    assert (l["tipo_linea"], l["naturaleza_economica"], l["importe_objetivo"], l["metodo_estimacion"]) == \
+        ("BOLSA", "GASTO", Decimal("437.43"), "MANUAL")  # el restante V3 (120) no es el objetivo
+    assert ds.filas["presupuesto_linea_alcances"] == {}  # sin categoria unica: sin alcance (D11-H)
+
+
+def test_alcance_por_categoria_con_descendientes(monkeypatch, contenedor):
+    monkeypatch.setattr(P5, "clasificar", lambda ds, co, cl, f: ("CAT", "00000000-0000-5000-8000-0000000000c1"))
+    ds = _t([_c("K12", 2025, 12), _gc("GC1")])
+    (a,) = ds.filas["presupuesto_linea_alcances"].values()
+    assert (a["categoria_id"], a["incluir_descendientes"], a["presupuesto_linea_id"]) == \
+        ("00000000-0000-5000-8000-0000000000c1", True, _linea(ds)["id"])
+
+
+def test_presupuesto_sin_objetivo_conocido_falla(contenedor):
+    with pytest.raises(P5.ErrorP5) as e:
+        _t([_c("K12", 2025, 12), _gc("GC1", importe_cuota=N)])
+    assert e.value.codigo == "S6_PRESUPUESTO_SIN_OBJETIVO"
+
+
+@pytest.mark.skipif(not os.environ.get("GAPTO_RV3_IMPORT_URL"), reason="sin laboratorio RV3_IMPORT")
+def test_fisico_presupuesto_activo_via_borrador(contenedor):
+    ds = _t([_c("K12", 2025, 12), _gc("GC1")])
+    res = P5.validar_fisico(ds, os.environ["GAPTO_RV3_IMPORT_URL"])
+    assert (res["presupuestos"], res["presupuesto_lineas"]) == (1, 1)
 
 
 @pytest.mark.skipif(not os.environ.get("GAPTO_RV3_IMPORT_URL"), reason="sin laboratorio RV3_IMPORT")

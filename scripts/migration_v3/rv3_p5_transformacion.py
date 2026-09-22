@@ -15,6 +15,8 @@
 #                8 financiaciones (PARCIAL v0.5.0: 4 prestamos formales con condiciones
 #                  versionadas, calendario, financiador y garantia; 7 compras financiadas;
 #                  derechos/obligaciones pendientes)
+#   v0.24.0: presupuesto de los 6 contenedores G-V3-03 (respuesta del propietario: importe_cuota = presupuesto
+#           mensual, importe = restante): un presupuesto ACTIVO del mes del corte con 6 BOLSAS (D11-F/D11-H).
 #   v0.23.0: dominio 11 (cierres): 13 cierres V3 -> snapshots IMPORTADO_LEGACY/CAJA/V3_SNAPSHOT; cabecera y
 #           detalle como cierre_metricas con bundle LEGACY_V3_* deshabilitado (DB Schema §61/§65); sin snapshots
 #           de saldos/posiciones/presupuesto que V3 no conserva. Presupuestos G-V3-03 pendientes (Migration V3 §4).
@@ -104,7 +106,7 @@
 #   RV3_IMPORT (rol login no superusuario -> gapto_migrator -> gapto_owner),
 #   fuerza los diferidos con SET CONSTRAINTS ALL IMMEDIATE y hace ROLLBACK.
 #   No es P6 (P6 hace COMMIT real).
-# Versión: 0.23.0
+# Versión: 0.24.0
 # ============================================================
 from __future__ import annotations
 
@@ -119,7 +121,7 @@ from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
-VERSION = "0.23.0"
+VERSION = "0.24.0"
 TRANSFORMACION = "RV3_P5"
 _AQUI = Path(__file__).resolve().parent
 
@@ -149,6 +151,7 @@ ORDEN_TABLAS = [
     "hechos_financieros", "hecho_efectos", "efecto_atribuciones", "hecho_terceros", "hecho_entidades",
     "hecho_relaciones", "movimientos_tesoreria", "transferencias", "hecho_movimientos_tesoreria",
     "metricas_definicion", "cierres_mensuales", "cierre_metricas",
+    "presupuestos", "presupuesto_lineas", "presupuesto_linea_alcances",
     "fuentes_importacion", "registros_origen_importacion", "mapeos_importacion",
 ]
 
@@ -3058,8 +3061,10 @@ CAMPOS_REDISENO = {"liquidez_total", "n_cotidianos", "n_recurrentes_gas", "n_rec
                    "n_unicos_ing", "gastos_cotidianos_esperados", "gastos_cotidianos_reales",
                    "gastos_gestionables_esperados", "gastos_gestionables_reales", "desv_cotidianos",
                    "desv_gestionables"}
-# G-V3-03: semantica importe/total no fiable (Migration V3 §4); presupuesto pendiente de decision del propietario.
-CONTENEDORES_PRESUPUESTO_DECISION = {}  # clave V3 -> {"importe_objetivo": Decimal, "periodo": (desde, hasta)}
+# G-V3-03 (respuesta del propietario 2026-09-21): importe_cuota = presupuesto mensual; importe = restante que V3
+# iba restando y reescribia al reiniciar el mes (V3 no conserva presupuestos anteriores). Se crea un unico
+# presupuesto ACTIVO para el mes del corte; no se inventan meses anteriores.
+PRESUPUESTO_CONTENEDORES_DECIDIDO = True
 
 LEDGER_REGLAS.update({
     "D11-A": "cierre V3 -> cierres_mensuales: periodo = mes natural (anio, mes); cerrado_at = fecha_cierre V3 (timestamp "
@@ -3076,7 +3081,15 @@ LEDGER_REGLAS.update({
              "cada cierre V3 que las usa.",
     "D11-E": "sin cierre_saldos_cuenta / cierre_presupuesto_lineas / cierre_posiciones_entidad: V3 no conserva esos "
              "snapshots y no se reconstruyen desde el estado posterior (INV-RV3-08).",
-    "D11-F": "contenedores G-V3-03: sin presupuesto mientras el propietario no fije objetivo y periodo (pendiente).",
+    "D11-F": "contenedores G-V3-03 -> un presupuesto ACTIVO del mes del corte (version 1, moneda EUR, perspectiva "
+             "ATRIBUIBLE: V3 consumia la parte personal, Migration V3 §18) con una BOLSA de GASTO por contenedor; "
+             "importe_objetivo = importe_cuota V3 (presupuesto mensual, metodo MANUAL); alcance = categoria del "
+             "contenedor con descendientes. El restante V3 (importe) no se persiste: se deriva de los hechos. Meses "
+             "anteriores no existen en V3 y no se inventan.",
+    "D11-I": "carga fisica del presupuesto: INSERT en BORRADOR, lineas y alcances, y transicion a ACTIVO en la misma "
+             "transaccion (guarda de congelacion de 0330); el dataset refleja el estado final.",
+    "D11-H": "contenedor sin categoria unica (clasificacion NULL decidida): linea sin alcance; conserva el objetivo pero no "
+             "captura efectos hasta que se le asigne alcance.",
 })
 
 
@@ -3157,16 +3170,61 @@ def dominio_11_cierres(ds: Dataset, fuente: dict, ctx: dict) -> dict:
                                        "clave_desglose": f"{tipo}/{seg}", "dimensiones_snapshot": None, **v})
             ds.mapear(co, cl, "cierre_metricas", rid, codigo, tipo="DIVIDIDO")
             n_det += 1
+    pres = _presupuesto_contenedores(ds, fuente, ctx) if PRESUPUESTO_CONTENEDORES_DECIDIDO else {}
     pend = []
-    for k in sorted(CONTENEDORES_PRESUPUESTARIOS):
-        if k in fuente.get("public.gastos", {}) and k not in CONTENEDORES_PRESUPUESTO_DECISION:
-            ds.pendientes.append({"dominio": 11, "origen": f"public.gastos/{k}", "clase": "S20",
-                                  "codigo": "D11_PRESUPUESTO_SEMANTICA_NO_FIABLE", "detalle": "Migration V3 §4"})
-            pend.append(k)
+    if not PRESUPUESTO_CONTENEDORES_DECIDIDO:
+        for k in sorted(CONTENEDORES_PRESUPUESTARIOS):
+            if k in fuente.get("public.gastos", {}):
+                ds.pendientes.append({"dominio": 11, "origen": f"public.gastos/{k}", "clase": "S20",
+                                      "codigo": "D11_PRESUPUESTO_SEMANTICA_NO_FIABLE", "detalle": "Migration V3 §4"})
+                pend.append(k)
     return {"cierres": len(ids), "metricas_cabecera": n_met, "metricas_detalle": n_det,
             "definiciones_legacy": sum(1 for m in ds.filas["metricas_definicion"].values()
                                        if m["codigo"].startswith("LEGACY_V3_")),
-            "presupuestos_pendientes": pend}
+            "presupuestos_pendientes": pend, "presupuesto": pres}
+
+
+def _presupuesto_contenedores(ds: Dataset, fuente: dict, ctx: dict) -> dict:
+    import calendar
+    co = "public.gastos"
+    claves = sorted(k for k in CONTENEDORES_PRESUPUESTARIOS if k in fuente.get(co, {}))
+    if not claves:
+        return {}
+    anio, mes = int(FECHA_INICIO_LEDGER[:4]), int(FECHA_INICIO_LEDGER[5:7])
+    desde = f"{anio:04d}-{mes:02d}-01"
+    hasta = f"{anio:04d}-{mes:02d}-{calendar.monthrange(anio, mes)[1]:02d}"
+    pid = fu.uuid_v3("RV3_PRESUPUESTO", desde, "presupuestos", "presupuesto")
+    ds.add("presupuestos", {"id": pid, "owner_user_id": ds.owner, "periodo_desde": desde, "periodo_hasta": hasta,
+                            "moneda": MONEDA_V3, "perspectiva": "ATRIBUIBLE", "version_presupuesto": 1,
+                            "reemplaza_presupuesto_id": None, "estado": "ACTIVO", "generado_desde_cierre_id": None},
+           natural=(ds.owner, desde, hasta))
+    lineas, sin_alcance = 0, []
+    for cl in claves:
+        f = fuente[co][cl]
+        obj = _dec_c(co, "importe_cuota", f, ctx)
+        if obj is None or obj < 0:
+            raise ErrorP5("S6_PRESUPUESTO_SIN_OBJETIVO", f"{co}/{cl}")
+        ds.mapear(co, cl, "presupuestos", pid, "presupuesto", tipo="FUSIONADO")
+        lid = fu.uuid_v3(co, cl, "presupuesto_lineas", "linea")
+        ds.add("presupuesto_lineas", {"id": lid, "presupuesto_id": pid, "nombre": _texto(_celda(co, "nombre", f, ctx)),
+                                      "tipo_linea": "BOLSA", "naturaleza_economica": "GASTO", "prioridad_consumo": None,
+                                      "importe_base_calculado": None, "importe_objetivo": obj,
+                                      "metodo_estimacion": "MANUAL", "meses_historico": None, "notas": None})
+        ds.mapear(co, cl, "presupuesto_lineas", lid, "linea", tipo="DIVIDIDO")
+        lineas += 1
+        r = clasificar(ds, co, cl, f)
+        if r[0] == "CAT":
+            aid = fu.uuid_v3(co, cl, "presupuesto_linea_alcances", "alcance")
+            ds.add("presupuesto_linea_alcances", {"id": aid, "presupuesto_linea_id": lid, "categoria_id": r[1],
+                                                  "entidad_id": None, "incluir_descendientes": True})
+            ds.mapear(co, cl, "presupuesto_linea_alcances", aid, "alcance", tipo="DIVIDIDO")
+        elif r[0] == "NULL":
+            sin_alcance.append(cl)
+            ds.ledger.append({"regla": "D11-H", "origen": f"{co}/{cl}"})
+        else:
+            raise ErrorP5("S4_CONTENEDOR_NO_ES_GASTO", f"{co}/{cl} {r}")
+        ds.ledger.append({"regla": "D11-F", "origen": f"{co}/{cl}"})
+    return {"periodo": [desde, hasta], "lineas": lineas, "sin_alcance": sin_alcance}
 
 
 def transformar(b0: dict, sha_run06: str, modo_lab: bool = False,
@@ -3236,6 +3294,11 @@ def orden_insercion(ds: Dataset, tabla: str) -> list:
     return sorted(filas, key=lambda f: (prof(f), f))
 
 
+# Ciclo de vida exigido por 0330 al cargar (no cambia el dataset): la fila se inserta en el estado inicial y,
+# tras sus hijos, se transiciona al estado final (fn_guard_presupuesto_congelado: solo BORRADOR admite lineas).
+TRANSICIONES_CARGA = {"presupuestos": ("estado", "BORRADOR")}
+
+
 def validar_fisico(ds: Dataset, dsn_import: str) -> dict:
     """Carga en una transaccion bajo RV3_IMPORT y SIEMPRE revierte."""
     import psycopg
@@ -3249,10 +3312,15 @@ def validar_fisico(ds: Dataset, dsn_import: str) -> dict:
             for t in ORDEN_TABLAS:
                 for fid in orden_insercion(ds, t):
                     f = ds.filas[t][fid]
+                    if t in TRANSICIONES_CARGA:
+                        f = {**f, TRANSICIONES_CARGA[t][0]: TRANSICIONES_CARGA[t][1]}
                     cols = sorted(f)
                     vals = [Jsonb(f[k]) if isinstance(f[k], (dict, list)) else f[k] for k in cols]
                     c.execute(f"INSERT INTO gapto.{t} ({', '.join(cols)}) VALUES "
                               f"({', '.join(['%s'] * len(cols))})", vals)
+            for t, (col, _ini) in TRANSICIONES_CARGA.items():
+                for fid in orden_insercion(ds, t):
+                    c.execute(f"UPDATE gapto.{t} SET {col} = %s WHERE id = %s", (ds.filas[t][fid][col], fid))
             c.execute("SET CONSTRAINTS ALL IMMEDIATE")
             for t in ORDEN_TABLAS:
                 res[t] = c.execute(f"SELECT count(*) FROM gapto.{t}").fetchone()[0]
@@ -3285,7 +3353,7 @@ def main() -> int:
     informe = {"version": VERSION, "hash_dataset": h, "recuentos": ds.recuentos(),
                "ledger_reglas": LEDGER_REGLAS, "ledger": ds.ledger, "pendientes": ds.pendientes,
                "preguntas": ds.preguntas, "clasificacion": ds.clasificacion, "decisiones_sha256": dec.sha256 if dec else None,
-               "fisico": fisico, "reglas": ds.reglas, "hechos": ds.hechos, "tesoreria": ds.tesoreria, "cierres": ds.cierres, "dominios": {"implementados": [1, "2-parcial", 3, "4-propiedad", 5, "6", 7, "11-cierres", "8-financiaciones", "8B-derechos", "9-inversiones", "10-contratos-valoraciones", "12-base"], "pendientes": ["2-resto", "4-resto", "11-presupuestos"], "modo_lab": a.modo_lab},
+               "fisico": fisico, "reglas": ds.reglas, "hechos": ds.hechos, "tesoreria": ds.tesoreria, "cierres": ds.cierres, "dominios": {"implementados": [1, "2-parcial", 3, "4-propiedad", 5, "6", 7, "11", "8-financiaciones", "8B-derechos", "9-inversiones", "10-contratos-valoraciones", "12-base"], "pendientes": ["2-resto", "4-resto"], "modo_lab": a.modo_lab},
                "ts": datetime.now(timezone.utc).isoformat()}
     a.salida.mkdir(parents=True, exist_ok=True)
     p = a.salida / f"rv3_p5_{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"
