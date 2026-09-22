@@ -13,7 +13,8 @@
 #   0.3.0: bloque 2, compras financiadas OP-15 (P5 v0.20.0).
 #   0.4.0: ticket compartido (D6-Z), P5 v0.21.0.
 #   0.4.1: la tabla de movimientos existe desde el dominio 7; se afirma que el dominio 6 no genera filas.
-# Versión: 0.4.1
+#   0.4.2: el helper de participaciones retira tambien los mapeos de las filas que borra (P5 v0.25.0).
+# Versión: 0.4.2
 # ============================================================
 from __future__ import annotations
 
@@ -294,6 +295,10 @@ def _con_participaciones(monkeypatch, filas):
         vid = F.uuid_v3("public.patrimonio", "V1", "entidades", "propiedad")
         for k in [k for k, v in ds.filas["entidad_participaciones"].items() if v["entidad_id"] == vid]:
             del ds.filas["entidad_participaciones"][k]
+            # 0.4.2: retirar tambien sus mapeos (P5 v0.25.0 rechaza mapeos a destinos inexistentes)
+            for mk in [mk for mk, m in ds.filas["mapeos_importacion"].items()
+                       if (m["tabla_destino"], m["registro_destino_id"]) == ("entidad_participaciones", k)]:
+                del ds.filas["mapeos_importacion"][mk]
         for n, (actor, pct, desde, hasta) in enumerate(filas):
             ds.filas["entidad_participaciones"][f"p{n}"] = {
                 "id": f"p{n}", "entidad_id": vid, "actor_id": ds.self_id if actor == "SELF" else actor,

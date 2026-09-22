@@ -15,6 +15,11 @@
 #                8 financiaciones (PARCIAL v0.5.0: 4 prestamos formales con condiciones
 #                  versionadas, calendario, financiador y garantia; 7 compras financiadas;
 #                  derechos/obligaciones pendientes)
+#   v0.25.0: resto del dominio 12 (R05 completo): disposicion de todo origen. Gastos de referencia de
+#           cuota (D5-T) VINCULADO a su financiacion; taxonomia V3 reemplazada (D-MIG-001) con codigo de
+#           disposicion PROPUESTO (OBSOLETO) pendiente de decision; decision de clasificacion VINCULADA a
+#           cada destino donde se aplico (con verificacion de coherencia). R05 estricto: origen sin
+#           disposicion -> S8; mapeo a destino inexistente -> S8 (R-RV3-002).
 #   v0.24.0: presupuesto de los 6 contenedores G-V3-03 (respuesta del propietario: importe_cuota = presupuesto
 #           mensual, importe = restante): un presupuesto ACTIVO del mes del corte con 6 BOLSAS (D11-F/D11-H).
 #   v0.23.0: dominio 11 (cierres): 13 cierres V3 -> snapshots IMPORTADO_LEGACY/CAJA/V3_SNAPSHOT; cabecera y
@@ -106,7 +111,7 @@
 #   RV3_IMPORT (rol login no superusuario -> gapto_migrator -> gapto_owner),
 #   fuerza los diferidos con SET CONSTRAINTS ALL IMMEDIATE y hace ROLLBACK.
 #   No es P6 (P6 hace COMMIT real).
-# Versión: 0.24.0
+# Versión: 0.25.0
 # ============================================================
 from __future__ import annotations
 
@@ -121,7 +126,7 @@ from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
-VERSION = "0.24.0"
+VERSION = "0.25.0"
 TRANSFORMACION = "RV3_P5"
 _AQUI = Path(__file__).resolve().parent
 
@@ -387,6 +392,7 @@ class Dataset:
     hechos: dict = field(default_factory=dict)
     tesoreria: dict = field(default_factory=dict)
     cierres: dict = field(default_factory=dict)
+    trazabilidad: dict = field(default_factory=dict)
 
     def add(self, tabla: str, fila: dict, natural: tuple | None = None) -> str:
         fid = fila[PK.get(tabla, "id")]
@@ -405,11 +411,12 @@ class Dataset:
     def mapear(self, cont: str, clave: str, tabla: str, destino: str, rol: str,
                tipo: str = "CREADO", confianza: str = "ALTA", notas: str | None = None) -> None:
         origen = fu.uuid_origen(cont, clave)
-        mid = fu.uuid_v3(cont, clave, "mapeos_importacion", f"{tabla}.{rol}")
+        etq = tabla or "sin_destino"  # OBSOLETO/IGNORADO sin destino (DB Schema §77)
+        mid = fu.uuid_v3(cont, clave, "mapeos_importacion", f"{etq}.{rol}")
         self.add("mapeos_importacion", {
             "id": mid, "registro_origen_id": origen, "tabla_destino": tabla,
             "registro_destino_id": destino, "tipo_mapping": tipo,
-            "transformacion_codigo": f"{TRANSFORMACION}.{tabla}.{rol}",
+            "transformacion_codigo": f"{TRANSFORMACION}.{etq}.{rol}",
             "transformacion_version": VERSION, "confianza": confianza, "notas": notas})
 
     def hash(self) -> str:
@@ -3227,6 +3234,107 @@ def _presupuesto_contenedores(ds: Dataset, fuente: dict, ctx: dict) -> dict:
     return {"periodo": [desde, hasta], "lineas": lineas, "sin_alcance": sin_alcance}
 
 
+# ------------------------------------------------------------ dominio 12: disposicion (R05)
+DOMINIO_12_DISPOSICION_ACTIVO = True
+# D-MIG-001: rama/segmento/tipo V3 se eliminan conceptualmente; los maestros 2027 usan ruta semantica propia
+# (MV3 §24) y el tipo no se proyecta a categoria (MV3 §14): el registro no tiene destino. El canon no define
+# la diferencia OBSOLETO/IGNORADO (DB Schema §77); RUN06 uso IGNORADO. Propuesta OBSOLETO pendiente (S20).
+TAXONOMIA_V3_REEMPLAZADA = ("public.tipo_gasto", "public.tipo_ingreso", "public.tipo_ramas_gasto",
+                            "public.tipo_ramas_ingreso", "public.tipo_segmentos_gasto")
+DISPOSICION_TAXONOMIA_V3 = "OBSOLETO"
+DISPOSICION_TAXONOMIA_ESTADO = "PROPUESTA"
+# Respuesta D (2026-09-21): la cuota de prestamo no tiene regla; su expectativa es el calendario de la
+# financiacion. El gasto V3 de referencia queda VINCULADO a esa financiacion (D5-T).
+GASTO_REFERENCIA_CUOTA_VINCULADO = True
+# Solo los efectos economicos llevan categoria (dominio 6); DEUDA/DERECHO_COBRO/... no la reciben.
+EFECTOS_CATEGORIZABLES = ("GASTO", "INGRESO")
+
+
+def dominio_12_disposicion(ds: Dataset, fuente: dict) -> None:
+    """Disposicion explicita de los origenes que ningun dominio transforma (R05 / INV-RV3-02)."""
+    tz = ds.trazabilidad
+    tz.setdefault("contenedores_pendientes", [])
+    # 1) gastos V3 de referencia de cuota de prestamo (D5-T)
+    n_ref = 0
+    if GASTO_REFERENCIA_CUOTA_VINCULADO:
+        for e in ds.ledger:
+            if e.get("regla") != "D5-T":
+                continue
+            co, cl = e["origen"].split("/", 1)
+            pr = _texto(_val_d12(fuente, co, cl, "prestamo_id"))
+            eid = fu.uuid_v3("public.prestamo", pr, "entidades", "financiacion")
+            if eid not in ds.filas["financiaciones"]:
+                raise ErrorP5("S8_HUERFANO", f"{co}/{cl} prestamo_id={pr}")
+            ds.mapear(co, cl, "financiaciones", eid, "expectativa_cuota", tipo="VINCULADO",
+                      notas="D5-T: expectativa de la cuota = calendario de la financiacion; sin regla propia")
+            n_ref += 1
+    tz["gastos_referencia_cuota_vinculados"] = n_ref
+    # 2) taxonomia V3 reemplazada por el arbol 2027
+    presentes = [c for c in TAXONOMIA_V3_REEMPLAZADA if c in fuente]
+    filas = sum(len(fuente[c]) for c in presentes)
+    ya = {m["registro_origen_id"] for m in ds.filas["mapeos_importacion"].values()}
+    for c in presentes:
+        for cl in fuente[c]:
+            if fu.uuid_origen(c, cl) in ya:
+                raise ErrorP5("S1_TAXONOMIA_V3_CON_DESTINO", f"{c}/{cl}")
+    materializar = DISPOSICION_TAXONOMIA_ESTADO == "CONFIRMADA" or ds.modo_lab
+    if filas and DISPOSICION_TAXONOMIA_ESTADO != "CONFIRMADA":
+        ds.pendientes.append({"S20": "DISPOSICION_TAXONOMIA_V3", "estado": DISPOSICION_TAXONOMIA_ESTADO,
+                              "propuesta": DISPOSICION_TAXONOMIA_V3, "alternativa": "IGNORADO (RUN06)",
+                              "filas": filas, "bloquea_gate": True,
+                              "efecto": "materializada solo en laboratorio" if ds.modo_lab
+                              else "origenes sin disposicion hasta la decision"})
+    if filas and materializar:
+        for c in presentes:
+            for cl in sorted(fuente[c]):
+                ds.mapear(c, cl, None, None, "disposicion", tipo=DISPOSICION_TAXONOMIA_V3,
+                          notas="D-MIG-001: taxonomia V3 reemplazada por el arbol de categorias 2027 (sin destino)")
+    elif filas:
+        tz["contenedores_pendientes"] = presentes
+    tz["taxonomia_v3"] = {"filas": filas, "disposicion": DISPOSICION_TAXONOMIA_V3 if materializar else None,
+                          "estado": DISPOSICION_TAXONOMIA_ESTADO}
+    # 3) decision de clasificacion: VINCULADA a cada destino donde se aplico, verificando que se aplico
+    tz["clasificacion_vinculos"] = _vincular_clasificacion(ds) if ds.categorias else 0
+
+
+def _val_d12(fuente, co, cl, col):
+    return fu.normalizar(co, col, fuente[co][cl].get(col), fuente[co][cl], fu.contexto_de(fuente))
+
+
+def _vincular_clasificacion(ds: Dataset) -> int:
+    dec = ds.decisiones
+    if dec is None or not dec.doc.get("clasificacion"):
+        return 0
+    clave_dec = f"clasificacion/{dec.doc['clasificacion']['id']}"
+    por_origen = {}
+    for m in ds.filas["mapeos_importacion"].values():
+        por_origen.setdefault(m["registro_origen_id"], []).append(m)
+    n = 0
+    for clave, v in sorted(dec.doc["clasificacion"]["registros"].items()):
+        co, cl = clave.split("/", 1)
+        if v is None:
+            esperadas = {None}
+        elif isinstance(v, dict) and "desglose" in v:
+            esperadas = {_cat_por_ruta(ds, r) for r, _x in v["desglose"]}
+        else:
+            esperadas = {_cat_por_ruta(ds, v)}
+        for m in sorted(por_origen.get(fu.uuid_origen(co, cl), []), key=lambda x: x["id"]):
+            t, did = m["tabla_destino"], m["registro_destino_id"]
+            if t == "hecho_efectos":
+                f = ds.filas[t][did]
+                if f["tipo_efecto"] not in EFECTOS_CATEGORIZABLES:
+                    continue
+            elif t != "regla_versiones":
+                continue
+            f = ds.filas[t][did]
+            if f["categoria_id"] not in esperadas:
+                raise ErrorP5("S9_CLASIFICACION_NO_APLICADA", f"{clave} -> {t}/{did}")
+            ds.mapear(CONT_DECISIONES, clave_dec, t, did, f"clasificacion.{did}", tipo="VINCULADO",
+                      confianza="VALIDADA", notas=f"categoria decidida para {clave}")
+            n += 1
+    return n
+
+
 def transformar(b0: dict, sha_run06: str, modo_lab: bool = False,
                 decisiones: "Decisiones | None" = None) -> Dataset:
     fuente = fu.fuente_b0(b0)
@@ -3256,18 +3364,24 @@ def transformar(b0: dict, sha_run06: str, modo_lab: bool = False,
                 ds.tesoreria = dominio_7_tesoreria(ds, fuente, ctx)
     if DOMINIO_11_ACTIVO and CIERRES_V3 in fuente:
         ds.cierres = dominio_11_cierres(ds, fuente, ctx)
+    if DOMINIO_12_DISPOSICION_ACTIVO:
+        dominio_12_disposicion(ds, fuente)
     verificar_trazabilidad(ds)
     return ds
 
 
 def verificar_trazabilidad(ds: Dataset) -> None:
-    """R05 parcial: todo destino creado tiene mapeo; todo mapeo apunta a origen existente."""
+    """R05: todo destino creado tiene mapeo; todo mapeo apunta a origen y destino existentes (R-RV3-002:
+    referencia polimorfica sin FK, validada aqui); con el dominio 12 completo, todo origen tiene disposicion."""
     origenes = set(ds.filas["registros_origen_importacion"])
     destinos_mapeados = {(m["tabla_destino"], m["registro_destino_id"])
                          for m in ds.filas["mapeos_importacion"].values()}
     for m in ds.filas["mapeos_importacion"].values():
         if m["registro_origen_id"] not in origenes:
             raise ErrorP5("S8_MAPEO_SIN_ORIGEN", m["id"])
+        t = m["tabla_destino"]
+        if t is not None and (t not in ds.filas or m["registro_destino_id"] not in ds.filas[t]):
+            raise ErrorP5("S8_MAPEO_DESTINO_INEXISTENTE", f"{m['id']} -> {t}/{m['registro_destino_id']}")
     exentas = {"fuentes_importacion", "registros_origen_importacion", "mapeos_importacion"}
     for t in ORDEN_TABLAS:
         if t in exentas:
@@ -3275,6 +3389,18 @@ def verificar_trazabilidad(ds: Dataset) -> None:
         for fid in ds.filas[t]:
             if (t, fid) not in destinos_mapeados:
                 raise ErrorP5("S8_DESTINO_SIN_ORIGEN", f"{t}/{fid}")
+    if not DOMINIO_12_DISPOSICION_ACTIVO:
+        return
+    con = {m["registro_origen_id"] for m in ds.filas["mapeos_importacion"].values()}
+    ro = ds.filas["registros_origen_importacion"]
+    sin = sorted(f"{ro[o]['contenedor_origen']}/{ro[o]['clave_origen']}" for o in origenes - con)
+    en_decision = [k for k in sin if k.split("/", 1)[0] in ds.trazabilidad.get("contenedores_pendientes", ())]
+    resto = [k for k in sin if k not in set(en_decision)]
+    if resto:
+        raise ErrorP5("S8_ORIGEN_SIN_DISPOSICION", f"{len(resto)}: {', '.join(resto[:5])}")
+    ds.trazabilidad.update({"R05_origenes": len(origenes), "R05_con_disposicion": len(origenes) - len(sin),
+                            "R05_sin_disposicion_pendiente_decision": len(en_decision),
+                            "R05_destinos_sin_origen": 0, "R05_mapeos_destino_inexistente": 0})
 
 
 # ------------------------------------------------------------ validacion fisica
@@ -3353,7 +3479,7 @@ def main() -> int:
     informe = {"version": VERSION, "hash_dataset": h, "recuentos": ds.recuentos(),
                "ledger_reglas": LEDGER_REGLAS, "ledger": ds.ledger, "pendientes": ds.pendientes,
                "preguntas": ds.preguntas, "clasificacion": ds.clasificacion, "decisiones_sha256": dec.sha256 if dec else None,
-               "fisico": fisico, "reglas": ds.reglas, "hechos": ds.hechos, "tesoreria": ds.tesoreria, "cierres": ds.cierres, "dominios": {"implementados": [1, "2-parcial", 3, "4-propiedad", 5, "6", 7, "11", "8-financiaciones", "8B-derechos", "9-inversiones", "10-contratos-valoraciones", "12-base"], "pendientes": ["2-resto", "4-resto"], "modo_lab": a.modo_lab},
+               "fisico": fisico, "reglas": ds.reglas, "hechos": ds.hechos, "tesoreria": ds.tesoreria, "cierres": ds.cierres, "trazabilidad": ds.trazabilidad, "dominios": {"implementados": [1, "2-parcial", 3, "4-propiedad", 5, "6", 7, "11", "8-financiaciones", "8B-derechos", "9-inversiones", "10-contratos-valoraciones", "12-disposicion-R05"], "pendientes": ["12-reconciliacion-R01..R26", "P5b"], "modo_lab": a.modo_lab},
                "ts": datetime.now(timezone.utc).isoformat()}
     a.salida.mkdir(parents=True, exist_ok=True)
     p = a.salida / f"rv3_p5_{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"

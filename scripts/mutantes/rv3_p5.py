@@ -16,6 +16,7 @@
 #   python scripts/mutantes/rv3_p5.py            # todos
 #   python scripts/mutantes/rv3_p5.py M30 M33    # subconjunto
 #
+# Version: 0.20.0 (M163..M171: P5 v0.25.0, resto del dominio 12 — R05 completo)
 # Version: 0.19.0 (M160..M162: P5 v0.24.0, presupuesto G-V3-03; M158 reanclado)
 # Version: 0.18.0 (M155..M159: P5 v0.23.0, dominio 11 cierres legacy)
 # Version: 0.17.0 (M149..M154: P5 v0.22.0, dominio 7 tesoreria legacy)
@@ -58,6 +59,7 @@ T16 = "tests/migration/test_rv3_016_p5_dominio5.py"
 T17 = "tests/migration/test_rv3_017_p5_dominio6.py"
 T18 = "tests/migration/test_rv3_018_p5_dominio7.py"
 T19 = "tests/migration/test_rv3_019_p5_dominio11.py"
+T20 = "tests/migration/test_rv3_020_p5_dominio12_disposicion.py"
 
 MUTANTES = {
     "M30": ("gate de la fuente suplementaria siempre abierto",
@@ -487,6 +489,34 @@ MUTANTES = {
     "M162": ("alcance sin descendientes",
              [('                                                  "entidad_id": None, "incluir_descendientes": True})', '                                                  "entidad_id": None, "incluir_descendientes": False})')],
              T19 + "::test_alcance_por_categoria_con_descendientes"),
+    # ---- 0.20.0: P5 v0.25.0, resto del dominio 12 (R05 completo)
+    'M163': ('R05 estricto desactivado (origen sin disposicion tolerado)',
+             [('    if resto:\n        raise ErrorP5("S8_ORIGEN_SIN_DISPOSICION"', '    if False:\n        raise ErrorP5("S8_ORIGEN_SIN_DISPOSICION"')],
+             T20 + "::test_origen_sin_disposicion_falla_s8"),
+    'M164': ('mapeo a destino inexistente tolerado',
+             [('if t is not None and (t not in ds.filas or m["registro_destino_id"] not in ds.filas[t]):', 'if False:')],
+             T20 + "::test_mapeo_a_destino_inexistente_falla_s8"),
+    'M165': ('gasto de referencia de cuota sin vincular',
+             [('if e.get("regla") != "D5-T":', 'if e.get("regla") != "D5-X":')],
+             T20 + "::test_gasto_de_referencia_de_cuota_vinculado_a_su_financiacion"),
+    'M166': ('codigo de disposicion presupuesto fuera de laboratorio',
+             [('materializar = DISPOSICION_TAXONOMIA_ESTADO == "CONFIRMADA" or ds.modo_lab', 'materializar = True')],
+             T20 + "::test_taxonomia_fuera_de_laboratorio_no_presupone_codigo_y_bloquea"),
+    'M167': ('propuesta de disposicion sin pendiente S20',
+             [('if filas and DISPOSICION_TAXONOMIA_ESTADO != "CONFIRMADA":', 'if False:')],
+             T20 + "::test_taxonomia_en_laboratorio_sin_destino_con_propuesta_y_pendiente"),
+    'M168': ('pendiente de decision excusa cualquier origen',
+             [('en_decision = [k for k in sin if k.split("/", 1)[0] in ds.trazabilidad.get("contenedores_pendientes", ())]', 'en_decision = list(sin)')],
+             T20 + "::test_origen_sin_disposicion_falla_s8"),
+    'M169': ('taxonomia con destino no detectada',
+             [('            if fu.uuid_origen(c, cl) in ya:', '            if False:')],
+             T20 + "::test_taxonomia_con_destino_es_contradictoria"),
+    'M170': ('clasificacion vinculada sin verificar que se aplico',
+             [('if f["categoria_id"] not in esperadas:', 'if False:')],
+             T20 + "::test_clasificacion_no_aplicada_falla_s9"),
+    'M171': ('clasificacion vinculada a efectos no categorizables',
+             [('if f["tipo_efecto"] not in EFECTOS_CATEGORIZABLES:', 'if False:')],
+             T20 + "::test_clasificacion_vinculada_solo_donde_se_aplico"),
 }
 
 
