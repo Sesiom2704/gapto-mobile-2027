@@ -6,7 +6,8 @@
 #              como etiqueta "Capricho" del hecho, ademas de su categoria. Corpus SINTETICO sin PII. Discrimina:
 #              etiqueta unica compartida, vinculo por hecho, solo el tipo declarado, residual si el registro no
 #              tiene hecho y no colision con las etiquetas de evento.
-# Versión: 0.2.0
+# Versión: 0.2.1
+#              0.2.1 (P5 v0.33.0): Tailandia 2026 con los 5 candidatos confirmados; el hotel de agosto no.
 #              0.2.0 (P5 v0.32.0): Bizum como medio de cobro en notas con la cuenta V3 de recepcion; residual sin
 #              hecho; contexto Tailandia 2026 ampliado por decision del propietario.
 # ============================================================
@@ -107,5 +108,8 @@ def test_contexto_tailandia_declarado():
     finally:
         sys.modules.pop("p5_real_026", None)
     tai = {k[1] for k, v in real.CONTEXTO_ADICIONAL.items() if v == "CTX-TAILANDIA-2026"}
-    assert tai == {"gasto-x2t6dm", "gasto-mpvffi", "gasto-g6r51s", "gasto-ovijms", "gasto-t631sb", "gasto-u99z4c"}
+    assert tai == {"gasto-x2t6dm", "gasto-mpvffi", "gasto-g6r51s", "gasto-ovijms", "gasto-t631sb", "gasto-u99z4c",
+                   "gasto-kcbwxz", "gasto-xg1mue", "GASTO_COTIDIANO-4A80N3", "GASTO_COTIDIANO-HCCO1Y",
+                   "GASTO_COTIDIANO-1FRA14"}
+    assert "GASTO_COTIDIANO-0J3XPQ" not in tai  # hotel de agosto: el propietario confirma que NO
     assert P5.MEDIO_COBRO_TIPO_V3 == {BIZ: "BIZUM"}

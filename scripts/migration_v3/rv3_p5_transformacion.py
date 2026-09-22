@@ -15,6 +15,9 @@
 #                8 financiaciones (PARCIAL v0.5.0: 4 prestamos formales con condiciones
 #                  versionadas, calendario, financiador y garantia; 7 compras financiadas;
 #                  derechos/obligaciones pendientes)
+#   v0.33.0: Tailandia 2026 + 5 registros confirmados por el propietario (vuelo Siem Reap-Bangkok, vuelo DMK-SAI,
+#           carga Revolut, 2 cotidianos de hotel); el contexto se aplica tambien a traspasos y todo contexto decidido se
+#           verifica aplicado (S8_CONTEXTO_NO_APLICADO; antes un traspaso lo habria descartado en silencio).
 #   v0.32.0: D-MIG-002 (propietario 2026-09-22): 5 gastos mas del contexto Tailandia 2026 (seguro, elefantes, hotel
 #           Bangkok, eSIM, vuelo Bangkok-Chiang Mai); Bizum como medio de cobro en las notas del hecho con la cuenta V3
 #           de recepcion. Suscripciones: la regla recurrente es la representacion aceptada (sin entidad servicio).
@@ -141,7 +144,7 @@
 #   RV3_IMPORT (rol login no superusuario -> gapto_migrator -> gapto_owner),
 #   fuerza los diferidos con SET CONSTRAINTS ALL IMMEDIATE y hace ROLLBACK.
 #   No es P6 (P6 hace COMMIT real).
-# Versión: 0.32.0
+# Versión: 0.33.0
 # ============================================================
 from __future__ import annotations
 
@@ -156,7 +159,7 @@ from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
-VERSION = "0.32.0"
+VERSION = "0.33.0"
 TRANSFORMACION = "RV3_P5"
 _AQUI = Path(__file__).resolve().parent
 
@@ -2598,7 +2601,10 @@ COMPRAS_FINANCIADAS_D6 = True
 CONTEXTO_ADICIONAL = {("public.gastos", "gasto-x2t6dm"): "CTX-TAILANDIA-2026",  # bloque 2 del dominio 6 (OP-15)
                       # v0.32.0 (propietario 2026-09-22): D-MIG-002 viaje -> contexto
                       **{("public.gastos", k): "CTX-TAILANDIA-2026"
-                         for k in ("gasto-mpvffi", "gasto-g6r51s", "gasto-ovijms", "gasto-t631sb", "gasto-u99z4c")}}
+                         for k in ("gasto-mpvffi", "gasto-g6r51s", "gasto-ovijms", "gasto-t631sb", "gasto-u99z4c",
+                                   "gasto-kcbwxz", "gasto-xg1mue")},  # v0.33.0: + vuelo Siem Reap, carga Revolut
+                      **{("public.gastos_cotidianos", k): "CTX-TAILANDIA-2026"  # v0.33.0 (propietario 2026-09-22)
+                         for k in ("GASTO_COTIDIANO-4A80N3", "GASTO_COTIDIANO-HCCO1Y", "GASTO_COTIDIANO-1FRA14")}}
 # Prestamo/adelanto puro sin gasto propio (Migration V3, F03-01 punto 2: Tania-SHEIN).
 GENERACION_PURA = {"DER-SHEIN"}
 
@@ -2822,6 +2828,13 @@ def dominio_6_hechos(ds: Dataset, fuente: dict, ctx: dict) -> dict:
             ids[(co, cl)] = h.confirmar()
             creados["COMPRA_FINANCIADA"] = creados.get("COMPRA_FINANCIADA", 0) + 1
             ds.ledger.append({"regla": "D6-X", "origen": f"{co}/{cl}"})
+    # v0.33.0: todo contexto decidido debe quedar aplicado a su hecho (nunca descartado en silencio)
+    ctx_ok = {(x["hecho_id"], x["entidad_id"]) for x in ds.filas["hecho_entidades"].values()}
+    for o, cids in sorted(contexto_de.items()):
+        if o in ids:
+            for cid in cids:
+                if (ids[o], cid) not in ctx_ok:
+                    raise ErrorP5("S8_CONTEXTO_NO_APLICADO", f"{o[0]}/{o[1]}")
     return {"filas": len(filas), "creados": creados, "pendientes": pend}
 
 
@@ -2950,6 +2963,8 @@ def _hecho_v3(ds, fuente, ctx, co, cl, derecho_de, contexto_de, ids, filas_d6=fr
         if cat is not None:
             raise ErrorP5("S1_CATEGORIA_EN_TRANSFERENCIA", f"{co}/{cl}")
         h = _H(ds, co, cl, "TRANSFERENCIA", fecha, nombre, tot, False, notas)
+        for cid in contexto_de.get(o, []):  # v0.33.0: el contexto tambien aplica a un traspaso (sin tercero/vivienda)
+            h.entidad(cid, "RELACIONADO_CON", rol="contexto")
         return "TRANSFERENCIA", h
     # 2) derechos de cobro
     if o in derecho_de:

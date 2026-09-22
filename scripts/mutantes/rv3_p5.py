@@ -16,6 +16,7 @@
 #   python scripts/mutantes/rv3_p5.py            # todos
 #   python scripts/mutantes/rv3_p5.py M30 M33    # subconjunto
 #
+# Version: 0.28.0 (M239..M240: P5 v0.33.0, contexto en traspaso y guarda S8)
 # Version: 0.27.0 (M236..M238: P5 v0.32.0, Bizum medio de cobro)
 # Version: 0.26.0 (M233..M235: P5 v0.31.0, D-MIG-002 Capricho)
 # Version: 0.25.0 (M226..M232: P5 v0.30.0, vencimiento a fin de mes)
@@ -742,6 +743,13 @@ MUTANTES = {
     'M238': ('medio sin cuenta de recepcion',
              [('(f" (cuenta V3 de recepcion: {nom})" if nom else "")', '""')],
              T26 + "::test_bizum_en_notas_con_cuenta_de_recepcion"),
+    # --- v0.28.0: P5 v0.33.0 contextos
+    'M239': ('contexto no aplicado a traspasos',
+             [('        for cid in contexto_de.get(o, []):  # v0.33.0: el contexto tambien aplica a un traspaso (sin tercero/vivienda)\n            h.entidad(cid, "RELACIONADO_CON", rol="contexto")\n', '')],
+             "tests/migration/test_rv3_017_p5_dominio6.py::test_contexto_se_aplica_a_traspaso_y_gasto"),
+    'M240': ('contexto no aplicado admitido en silencio',
+             [('                if (ids[o], cid) not in ctx_ok:\n', '                if False:\n')],
+             "tests/migration/test_rv3_017_p5_dominio6.py::test_contexto_no_aplicado_falla_cerrado"),
 }
 
 

@@ -15,7 +15,8 @@
 #   0.4.1: la tabla de movimientos existe desde el dominio 7; se afirma que el dominio 6 no genera filas.
 #   0.4.2: el helper de participaciones retira tambien los mapeos de las filas que borra (P5 v0.25.0).
 #   0.5.0: invitado con importe V3 = total -> atribucion propia 0 (D6-INV, P5 v0.26.0).
-# Versión: 0.5.0
+#   0.6.0: contexto decidido aplicado tambien a un traspaso; contexto no aplicado -> S8 (P5 v0.33.0).
+# Versión: 0.6.0
 # ============================================================
 from __future__ import annotations
 
@@ -419,3 +420,34 @@ def test_ticket_compartido_con_actor_atribucion_completa(monkeypatch):
     ef = {e["tipo_efecto"]: e for e in _efectos(ds, _hecho(ds, GC, "CT"))}
     got = sorted((a["actor_id"] == ds.self_id, a["importe_atribuido"]) for a in _atribs(ds, ef["GASTO"]))
     assert got == [(False, Decimal("11")), (True, Decimal("27.33"))] and ef["GASTO"]["estado_atribucion"] == "COMPLETA"
+
+
+def _dec_ctx(*registros):
+    return P5.Decisiones(sha256="0" * 64, doc={"id": "T", "personas": {}, "participaciones": [], "contextos": [
+        {"id": "CTX-T", "nombre": "Viaje T", "tipo": "VIAJE", "registros": list(registros)}]})
+
+
+def _ctx_de(ds, co, cl):
+    h = _hecho(ds, co, cl)
+    ents = {e["id"]: e for e in ds.filas["entidades"].values()}
+    return [(ents[x["entidad_id"]]["nombre"], x["tipo_relacion"]) for x in ds.filas["hecho_entidades"].values()
+            if x["hecho_id"] == h["id"] and ents[x["entidad_id"]]["tipo_entidad"] == "CONTEXTO"]
+
+
+def test_contexto_se_aplica_a_traspaso_y_gasto():
+    ds = P5.transformar(T8._b0(T12._filas(extra=(_g("GT", tipo_id="TT", importe=200, total=200), _g("GC1")))), SHA,
+                        modo_lab=True, decisiones=_dec_ctx(f"{G}/GT", f"{G}/GC1"))
+    assert _hecho(ds, G, "GT")["tipo_hecho_id"] == TH["TRANSFERENCIA"]
+    assert _ctx_de(ds, G, "GT") == [("Viaje T", "RELACIONADO_CON")] == _ctx_de(ds, G, "GC1")
+
+
+def test_contexto_no_aplicado_falla_cerrado(monkeypatch):
+    real = P5._H.entidad
+
+    def sin_contexto(self, entidad_id, tipo_rel, efecto_id=None, rol="entidad"):
+        if rol != "contexto":
+            real(self, entidad_id, tipo_rel, efecto_id, rol)
+    monkeypatch.setattr(P5._H, "entidad", sin_contexto)
+    with pytest.raises(P5.ErrorP5) as e:
+        P5.transformar(T8._b0(T12._filas(extra=(_g("GC1"),))), SHA, modo_lab=True, decisiones=_dec_ctx(f"{G}/GC1"))
+    assert e.value.codigo == "S8_CONTEXTO_NO_APLICADO"
