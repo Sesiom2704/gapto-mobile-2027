@@ -9,7 +9,11 @@
 #              --commit; sin el flag la transaccion se revierte (ensayo). Falla cerrado (STOP) si el hash del
 #              dataset regenerado difiere del autorizado o si la BD no es virgen. No cambia la semantica de P5:
 #              reutiliza ORDEN_TABLAS, orden_insercion y TRANSICIONES_CARGA de P5.
-# Versión: 0.1.0
+#              0.2.0 (P11, contrato D-F): replay terminal. Antes de cualquier escritura, en una transaccion READ ONLY,
+#              si las fuentes del dataset ya existen en la BD se compara celda a celda la carga existente con el
+#              dataset: identico -> YA_APLICADA_SIN_CAMBIOS sin DML ni xid; distinto o parcial -> conflicto tipado
+#              S7_CONFLICTO_REPLAY (nunca upsert). Sin fuentes previas, el flujo de primera carga es el de 0.1.0.
+# Versión: 0.2.0
 # ============================================================
 from __future__ import annotations
 
@@ -148,9 +152,48 @@ def comprobar_pre_commit(P5, c, ds) -> dict:
             "mapeos_destino_inexistente": 0, "mapeos_sin_origen": 0}
 
 
-def ejecutar(P5, ds, dsn: str, commit: bool) -> dict:
+def _p8m():
+    spec = importlib.util.spec_from_file_location("rv3_p8_material", _AQUI / "rv3_p8_material.py")
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["rv3_p8_material"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def detectar_replay(P5, c, ds) -> dict | None:
+    """None si ninguna fuente del dataset esta en la BD (primera carga). Si estan todas y la carga es identica al
+    dataset -> YA_APLICADA_SIN_CAMBIOS. En otro caso -> StopP6 S7_CONFLICTO_REPLAY."""
+    fuentes = sorted(ds.filas["fuentes_importacion"])
+    presentes = {str(r[0]) for r in c.execute("SELECT id FROM gapto.fuentes_importacion WHERE id = ANY(%s::uuid[])",
+                                              (fuentes,)).fetchall()}
+    if not presentes:
+        return None
+    if presentes != set(fuentes):
+        raise StopP6("S7_CONFLICTO_REPLAY", f"fuentes presentes {len(presentes)}/{len(fuentes)}")
+    M = _p8m()
+    material = M.leer_material(P5, c)
+    dif = M.comparar_celdas(P5, material, ds, {})
+    if dif:
+        raise StopP6("S7_CONFLICTO_REPLAY", json.dumps(dif))
+    return {"resultado": "YA_APLICADA_SIN_CAMBIOS", "fuentes": len(fuentes),
+            "filas_comparadas": sum(len(v) for v in material.values())}
+
+
+def ejecutar(P5, ds, dsn: str, commit: bool, dsn_auditoria: str | None = None) -> dict:
     import psycopg
     ev = {"inicio_utc": _dt.datetime.now(_dt.timezone.utc).isoformat()}
+    with psycopg.connect(dsn) as c:  # fase de deteccion de replay: READ ONLY, sin xid ni DML
+        c.execute("SET TRANSACTION READ ONLY")
+        _contexto(c, ds.owner)
+        replay = detectar_replay(P5, c, ds)
+        asignado = c.execute("SELECT pg_current_xact_id_if_assigned()").fetchone()[0]
+        c.rollback()
+    if replay is not None:
+        ev.update(replay=replay, xid_asignado=asignado, commit="NINGUNO (replay terminal sin DML)",
+                  fin_utc=_dt.datetime.now(_dt.timezone.utc).isoformat())
+        return ev
+    if dsn_auditoria:  # primera carga: virginidad global certificada antes de abrir la transaccion de escritura
+        ev["virgen_global"] = verificar_virgen_global(P5, dsn_auditoria)
     with psycopg.connect(dsn) as c:  # autocommit False: psycopg abre la transaccion en el primer execute
         _contexto(c, ds.owner)
         ev["perfil"] = c.execute("SELECT session_user, current_user").fetchone()
@@ -195,9 +238,7 @@ def main(argv=None) -> int:
         comprobar_hash(h, a.hash_autorizado)
         if ds.pendientes:
             raise StopP6("S20_PENDIENTES_P5", str(len(ds.pendientes)))
-        if a.dsn_auditoria:
-            ev["virgen_global"] = verificar_virgen_global(P5, a.dsn_auditoria)
-        ev.update(ejecutar(P5, ds, a.dsn_import, a.commit))
+        ev.update(ejecutar(P5, ds, a.dsn_import, a.commit, a.dsn_auditoria))
         rc = 0
     except StopP6 as e:
         ev["stop"] = {"codigo": e.codigo, "detalle": str(e)}
@@ -208,7 +249,7 @@ def main(argv=None) -> int:
     a.salida.mkdir(parents=True, exist_ok=True)
     (a.salida / "rv3_p6_carga.json").write_text(json.dumps(ev, ensure_ascii=False, indent=1, default=str),
                                                 encoding="utf-8")
-    print(json.dumps({k: ev.get(k) for k in ("hash_dataset", "commit", "stop", "error", "txid_confirmado")},
+    print(json.dumps({k: ev.get(k) for k in ("hash_dataset", "commit", "replay", "stop", "error", "txid_confirmado")},
                      default=str))
     return rc
 

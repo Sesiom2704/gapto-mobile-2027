@@ -7,9 +7,11 @@
 #              PASS | DELTA_CLASIFICADO (delta explicado por decision/regla trazada) | FAIL (delta sin clasificar) |
 #              PENDIENTE_FASE (solo evaluable en P6/P7). Todo delta no clasificado es FAIL (contrato RV3 §11).
 #              No sustituye a P8 post-carga: la repite sobre la base cargada cuando exista P6.
+#              0.2.2: R09/R11 comparan importes por igualdad numerica (la BD devuelve numeric con escala fisica,
+#                     p. ej. 9207.9300 = 9207.93); antes comparaban texto y fallaban sobre la BD material.
 #              0.2.1: R26 clasifica ademas regiones/localidades declaradas por el propietario (Q-R02-5).
 #              0.2.0: R26 clasifica las 46 tablas con delta frente a RUN06 (regla trazada por tabla).
-# Versión: 0.2.1
+# Versión: 0.2.2
 # ============================================================
 from __future__ import annotations
 
@@ -102,7 +104,7 @@ def reconciliar(P5, ds, fuente: dict, run06: dict | None = None) -> list:
                                                                                      if c["saldo_apertura"] is not None)},
                   PASS if ok8 else FAIL))
     s9 = sum(Decimal(str(c["saldo_apertura"])) for c in v3 if c["saldo_apertura"] is not None)
-    out.append(_eq("R09", "saldo bruto de apertura V3", str(BASE["R09"]), str(s9)))
+    out.append(_eq("R09", "saldo bruto de apertura V3", BASE["R09"], s9))  # igualdad numerica, no textual
     # R10
     ligados = {t[k] for t in F["transferencias"].values() for k in t if k.startswith("movimiento_")}
     ajustes = [m for m in F["movimientos_tesoreria"].values() if m["id"] not in ligados]
@@ -114,8 +116,7 @@ def reconciliar(P5, ds, fuente: dict, run06: dict | None = None) -> list:
     fins = [f for f in F["financiaciones"].values() if f["entidad_id"] in ids_pr]
     cuotas = sum(1 for q in F["financiacion_cuotas"].values() if q["financiacion_entidad_id"] in ids_pr)
     deuda = sum(Decimal(str(f["saldo_principal_apertura"])) for f in fins if f["saldo_principal_apertura"] is not None)
-    out.append(_eq("R11", "prestamos / cuotas / deuda de apertura", tuple(str(x) for x in BASE["R11"]),
-                   (str(len(fins)), str(cuotas), str(deuda))))
+    out.append(_eq("R11", "prestamos / cuotas / deuda de apertura", BASE["R11"], (len(fins), cuotas, deuda)))
     # R12
     cf = [h for h in H.values() if TH[h["tipo_hecho_id"]] == "COMPRA_FINANCIADA"]
     dec = [h for h in cf if origen[("hechos_financieros", h["id"])]["clave_origen"] in P5.COMPRA_FINANCIADA_DECIDIDA]
