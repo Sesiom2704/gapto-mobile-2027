@@ -16,6 +16,8 @@
 #   python scripts/mutantes/rv3_p5.py            # todos
 #   python scripts/mutantes/rv3_p5.py M30 M33    # subconjunto
 #
+# Version: 0.30.0 (M253..M257: P5 v0.35.0, localidad declarada Q-R02-5)
+# Version: 0.29.0 (M241..M252: P5 v0.34.0, D11-D LEGACY_V3 y SAA2 compra 100 % propia)
 # Version: 0.28.0 (M239..M240: P5 v0.33.0, contexto en traspaso y guarda S8)
 # Version: 0.27.0 (M236..M238: P5 v0.32.0, Bizum medio de cobro)
 # Version: 0.26.0 (M233..M235: P5 v0.31.0, D-MIG-002 Capricho)
@@ -73,6 +75,7 @@ T22 = "tests/migration/test_rv3_022_p5_r02_complementos.py"
 T23 = "tests/migration/test_rv3_023_p5_r02_cuotas_direcciones_omisiones.py"
 T24 = "tests/migration/test_rv3_024_p5_vencimiento_fin_de_mes.py"
 T26 = "tests/migration/test_rv3_026_p5_etiqueta_capricho.py"
+T28 = "tests/migration/test_rv3_028_p5_legacy_v3_y_compra_100_propia.py"
 
 MUTANTES = {
     "M30": ("gate de la fuente suplementaria siempre abierto",
@@ -750,6 +753,59 @@ MUTANTES = {
     'M240': ('contexto no aplicado admitido en silencio',
              [('                if (ids[o], cid) not in ctx_ok:\n', '                if False:\n')],
              "tests/migration/test_rv3_017_p5_dominio6.py::test_contexto_no_aplicado_falla_cerrado"),
+    # --- v0.29.0: P5 v0.34.0 bloqueantes D11-D y SAA2
+    'M241': ('legacy habilitada admitida',
+             [('        if m["enabled"] is not False:\n', '        if False:\n')],
+             T28 + "::test_legacy_habilitada_falla"),
+    'M242': ('legacy finge equivalencia moderna',
+             [('        if m["codigo"][len(PREFIJO_LEGACY):] in METRICAS_SEED_0330 or m["codigo"] in METRICAS_SEED_0330:\n', '        if False:\n')],
+             T28 + "::test_legacy_que_finge_equivalencia_moderna_falla"),
+    'M243': ('legacy fuera de snapshot admitida',
+             [('            if c is None or c["origen_cierre"] != "IMPORTADO_LEGACY" or c["metodologia_version"] != "V3_SNAPSHOT":\n', '            if False:\n')],
+             T28 + "::test_legacy_fuera_de_snapshot_falla"),
+    'M244': ('legacy huerfana admitida',
+             [('    if huerfanas:\n', '    if False:\n')],
+             T28 + "::test_legacy_sin_uso_falla"),
+    'M245': ('residuo legacy admitido',
+             [('                if isinstance(v, str) and PREFIJO_LEGACY in v and not', '                if False and isinstance(v, str) and PREFIJO_LEGACY in v and not')],
+             T28 + "::test_residuo_legacy_en_dato_de_dominio_falla"),
+    'M246': ('caso 100 % propio aunque no sea compra',
+             [('        if h is None or h["tipo_hecho_id"] != TIPOS_HECHO_SEED["COMPRA_FINANCIADA"]:\n', '        if h is None:\n')],
+             T28 + "::test_saa2_reinterpretado_falla"),
+    'M247': ('caso 100 % propio con efectos distintos',
+             [('        if sorted(e["tipo_efecto"] for e in efs) != ["DEUDA", "GASTO"]:\n', '        if False:\n')],
+             T28 + "::test_saa2_reinterpretado_falla"),
+    'M248': ('caso 100 % propio con atribucion compartida o parcial',
+             [('            if e["estado_atribucion"] != "COMPLETA" or len(ats) != 1 or ats[0]["actor_id"] != ds.self_id \\\n                    or Decimal(str(ats[0]["importe_atribuido"])) != Decimal(str(e["importe_delta"])):\n', '            if False:\n')],
+             T28 + "::test_saa2_reinterpretado_falla"),
+    'M249': ('caso 100 % propio con importe distinto',
+             [('            if e["tipo_efecto"] == "GASTO" and Decimal(str(e["importe_delta"])) != total:\n', '            if False:\n')],
+             T28 + "::test_saa2_reinterpretado_falla"),
+    'M250': ('caso 100 % propio recuperable',
+             [('        if any(hid in (r["hecho_origen_id"], r["hecho_destino_id"]) for r in F["hecho_relaciones"].values()):\n', '        if False:\n')],
+             T28 + "::test_saa2_reinterpretado_falla"),
+    'M251': ('caso 100 % propio con aportacion',
+             [('        if any(a["hecho_id"] == hid for a in F.get("hecho_aportaciones_pago", {}).values()):\n', '        if False:\n')],
+             T28 + "::test_saa2_reinterpretado_falla"),
+    'M252': ('caso 100 % propio sin participacion propia',
+             [('        if len(fin) != 1 or len(ps) != 1 or ps[0]["actor_id"] != ds.self_id or Decimal(ps[0]["porcentaje"]) != 100:\n', '        if False:\n')],
+             T28 + "::test_saa2_reinterpretado_falla"),
+    # --- v0.30.0: P5 v0.35.0 localidad declarada
+    'M253': ('decision de localidad ignorada',
+             [('        lk, decidida = None, LOCALIDAD_PROVEEDOR_DECIDIDA.get(cl)\n', '        lk, decidida = None, None\n')],
+             T23 + "::test_localidad_decidida_por_codigo_ignora_literal_incoherente"),
+    'M254': ('codigo decidido inexistente admitido',
+             [('                if clave not in L:\n                    raise ErrorP5("S8_LOCALIDAD_DECIDIDA_INEXISTENTE"', '                if False:\n                    raise ErrorP5("S8_LOCALIDAD_DECIDIDA_INEXISTENTE"')],
+             T23 + "::test_localidad_decidida_inexistente_falla"),
+    'M255': ('localidad nueva sin trazar',
+             [('                    ds.mapear(co, cl, tabla, _id_declarada(clave, rol), f"{rol}_declarada", tipo="FUSIONADO",', '                    (lambda *a, **k: None)(co, cl, tabla, _id_declarada(clave, rol), f"{rol}_declarada", tipo="FUSIONADO",')],
+             T23 + "::test_localidad_nueva_declarada_una_vez_y_trazada_a_cada_fila"),
+    'M256': ('pais declarado sin maestro admitido',
+             [('    if len(pais) != 1:\n        raise ErrorP5("S8_PAIS_DECLARADO_SIN_MAESTRO"', '    if False:\n        raise ErrorP5("S8_PAIS_DECLARADO_SIN_MAESTRO"')],
+             T23 + "::test_localidad_nueva_sin_pais_en_maestro_falla"),
+    'M257': ('ledger sin literales V3',
+             [('"v3": {"localidad": loc, "localidad_id": lid_v3, "comunidad": com, "pais": pais}', '"v3": None')],
+             T23 + "::test_localidad_decidida_por_codigo_ignora_literal_incoherente"),
 }
 
 

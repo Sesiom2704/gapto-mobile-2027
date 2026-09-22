@@ -15,6 +15,12 @@
 #                8 financiaciones (PARCIAL v0.5.0: 4 prestamos formales con condiciones
 #                  versionadas, calendario, financiador y garantia; 7 compras financiadas;
 #                  derechos/obligaciones pendientes)
+#   v0.35.0: Q-R02-5: localidad de los 10 residuales declarada por el propietario (2026-09-22): 6 -> MADRID (localidad
+#           y region nuevas, ausentes del maestro V3, trazadas FUSIONADO a las filas que las declaran); ITV -> AGUILAS;
+#           Loteria y Saba -> MURCIA; Cueva del Diablo -> ALCALA DE JUCAR. Literales V3 incoherentes en ledger.
+#   v0.34.0: bloqueantes P5: D11-D -> verificacion anti-regresion del bundle LEGACY_V3_* (verificar_legacy_v3);
+#           seguro SAA2 -> caso verificado compra financiada 100 % propia (verificar_compra_100_propia). Sin cambio
+#           de dataset.
 #   v0.33.0: Tailandia 2026 + 5 registros confirmados por el propietario (vuelo Siem Reap-Bangkok, vuelo DMK-SAI,
 #           carga Revolut, 2 cotidianos de hotel); el contexto se aplica tambien a traspasos y todo contexto decidido se
 #           verifica aplicado (S8_CONTEXTO_NO_APLICADO; antes un traspaso lo habria descartado en silencio).
@@ -144,11 +150,12 @@
 #   RV3_IMPORT (rol login no superusuario -> gapto_migrator -> gapto_owner),
 #   fuerza los diferidos con SET CONSTRAINTS ALL IMMEDIATE y hace ROLLBACK.
 #   No es P6 (P6 hace COMMIT real).
-# Versión: 0.33.0
+# Versión: 0.35.0
 # ============================================================
 from __future__ import annotations
 
 import argparse
+import collections
 import hashlib
 import importlib.util
 import json
@@ -159,7 +166,7 @@ from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
-VERSION = "0.33.0"
+VERSION = "0.35.0"
 TRANSFORMACION = "RV3_P5"
 _AQUI = Path(__file__).resolve().parent
 
@@ -3414,6 +3421,20 @@ CATEGORIA_INTERESES_CUOTA = "COSTES FINANCIEROS > INTERESES Y COSTES DE FINANCIA
 # la unica. comunidad/pais solo VALIDAN la localidad (region/pais del maestro V3); no se inventan CP ni via: el texto
 # libre de "direccion" va a observaciones (no se presupone que sea una via).
 DIRECCION_PROVEEDOR_TIPO = "COMERCIAL"
+# v0.35.0 (propietario 2026-09-22): localidad de los 10 residuales Q-R02-5 declarada por el propietario.
+#   ("ID", clave V3 de public.localidades): la fila V3 guarda el codigo en el campo nombre o un codigo coherente;
+#   ("NUEVA", clave de LOCALIDADES_DECLARADAS): localidad y region ausentes del maestro V3, aportadas por el propietario.
+# La comunidad/pais V3 incoherente con la decision se conserva en origen y ledger (clase C), no bloquea.
+LOCALIDAD_PROVEEDOR_DECIDIDA = {
+    **{k: ("NUEVA", "MADRID") for k in ("CAF-PROVEEDOR-KO9HYH", "CÓM-PROVEEDOR-74FZBZ", "EST-PROVEEDOR-3X548H",
+                                         "RAM-PROVEEDOR-LB0QD3", "RIN-PROVEEDOR-9B8JHJ", "TEL-PROVEEDOR-9ZOEYQ")},
+    "ITV-PROVEEDOR-JSRGO7": ("ID", "1"),    # AGUILAS
+    "LOT-PROVEEDOR-QLSPRE": ("ID", "9"),    # MURCIA (V3 comunidad ALICANTE incoherente)
+    "SAB-PROVEEDOR-AL3ACE": ("ID", "9"),    # MURCIA
+    "PROV-2FWYAS": ("ID", "25"),            # ALCALA DE JUCAR (V3 nombre ALBOREA incorrecto)
+}
+# Localidades/regiones declaradas por el propietario que el maestro V3 no tiene (nombre como el literal V3).
+LOCALIDADES_DECLARADAS = {"MADRID": {"region": "MADRID", "pais": "ESPAÑA"}}
 # v0.29.0 Q-R02-7 (propietario 2026-09-22): la omision no es hecho ni previsiones; se conserva en origen + ledger.
 CAMPOS_LEDGER = {("public.gastos", "ultimo_omitido_on"), ("public.gastos", "omitido_count"),
                  ("public.ingresos", "ultimo_omitido_on"), ("public.ingresos", "omitido_count"),
@@ -3486,6 +3507,35 @@ def cuotas_pagadas(ds: Dataset, fuente: dict, ctx: dict, res: dict) -> None:
         res["cuota_intereses_total"] += inte
 
 
+def _id_declarada(clave: str, rol: str) -> str:
+    return fu.uuid_v3("RV3_GEO_DECLARADA", clave, "regiones" if rol == "region" else "localidades", rol)
+
+
+def _localidad_declarada(ds: Dataset, clave: str) -> str:
+    d = LOCALIDADES_DECLARADAS[clave]
+    pais = [p["id"] for p in ds.filas["paises"].values() if _norm(p["nombre"]) == _norm(d["pais"])]
+    if len(pais) != 1:
+        raise ErrorP5("S8_PAIS_DECLARADO_SIN_MAESTRO", f"{clave}: {d['pais']}")
+    rid, lid = _id_declarada(clave, "region"), _id_declarada(clave, "localidad")
+    ds.add("regiones", {"id": rid, "pais_id": pais[0], "parent_region_id": None, "nombre": d["region"],
+                        "tipo_region": None, "codigo_oficial": None})
+    ds.add("localidades", {"id": lid, "region_id": rid, "nombre": clave, "codigo_oficial": None,
+                           "codigo_oficial_tipo": None})
+    return lid
+
+
+def _alta_direccion_proveedor(ds, co, cl, tid, localidad_id, dire) -> None:
+    did = fu.uuid_v3(co, cl, "direcciones", "direccion")
+    ds.add("direcciones", {"id": did, "owner_user_id": ds.owner, "localidad_id": localidad_id,
+                           "codigo_postal": None, "via_tipo": None, "via_nombre": None, "numero": None, "bloque": None,
+                           "escalera": None, "planta": None, "puerta": None, "observaciones": dire})
+    ds.mapear(co, cl, "direcciones", did, "direccion", tipo="DIVIDIDO")
+    xid = fu.uuid_v3(co, cl, "tercero_direcciones", DIRECCION_PROVEEDOR_TIPO.lower())
+    ds.add("tercero_direcciones", {"id": xid, "tercero_id": tid, "direccion_id": did,
+                                   "tipo": DIRECCION_PROVEEDOR_TIPO, "principal": True})
+    ds.mapear(co, cl, "tercero_direcciones", xid, "direccion_comercial", tipo="DIVIDIDO")
+
+
 def direcciones_proveedores(ds: Dataset, fuente: dict, ctx: dict, res: dict) -> None:
     co, L = "public.proveedores", fuente.get("public.localidades", {})
     R, PA = fuente.get("public.regiones", {}), fuente.get("public.paises", {})
@@ -3501,7 +3551,29 @@ def direcciones_proveedores(ds: Dataset, fuente: dict, ctx: dict, res: dict) -> 
         if tid not in ds.filas["terceros"]:
             _residual(ds, co, "localidad", cl, "Q-R02-5", "proveedor sin tercero")
             continue
-        lk = None
+        lk, decidida = None, LOCALIDAD_PROVEEDOR_DECIDIDA.get(cl)
+        if decidida is not None:
+            modo, clave = decidida
+            if modo == "ID":
+                if clave not in L:
+                    raise ErrorP5("S8_LOCALIDAD_DECIDIDA_INEXISTENTE", f"{co}/{cl} -> {clave}")
+                lk = clave
+            else:
+                lid_nueva = _localidad_declarada(ds, clave)
+            ds.ledger.append({"regla": "R02-Q5-DECIDIDA", "origen": f"{co}/{cl}", "decision": f"{modo}:{clave}",
+                              "v3": {"localidad": loc, "localidad_id": lid_v3, "comunidad": com, "pais": pais}})
+            if modo == "NUEVA":
+                _alta_direccion_proveedor(ds, co, cl, tid, lid_nueva, dire)
+                for rol in ("region", "localidad"):
+                    tabla = "regiones" if rol == "region" else "localidades"
+                    ds.mapear(co, cl, tabla, _id_declarada(clave, rol), f"{rol}_declarada", tipo="FUSIONADO",
+                              confianza="VALIDADA", notas="declarada por el propietario (2026-09-22)")
+                res["direcciones_proveedor"] += 1
+                continue
+            _alta_direccion_proveedor(ds, co, cl, tid,
+                                      fu.uuid_v3("public.localidades", lk, "localidades", "localidad"), dire)
+            res["direcciones_proveedor"] += 1
+            continue
         if lid_v3 is not None:
             if lid_v3 not in L:
                 _residual(ds, co, "localidad", cl, "Q-R02-5", f"localidad_id {lid_v3} inexistente")
@@ -3530,16 +3602,8 @@ def direcciones_proveedores(ds: Dataset, fuente: dict, ctx: dict, res: dict) -> 
             ds.ledger.append({"regla": "R02-Q5-SIN_LOCALIDAD", "origen": f"{co}/{cl}"})
             res["proveedor_solo_region"] += 1
             continue
-        did = fu.uuid_v3(co, cl, "direcciones", "direccion")
-        ds.add("direcciones", {"id": did, "owner_user_id": ds.owner,
-                               "localidad_id": fu.uuid_v3("public.localidades", lk, "localidades", "localidad") if lk else None,
-                               "codigo_postal": None, "via_tipo": None, "via_nombre": None, "numero": None, "bloque": None,
-                               "escalera": None, "planta": None, "puerta": None, "observaciones": dire})
-        ds.mapear(co, cl, "direcciones", did, "direccion", tipo="DIVIDIDO")
-        xid = fu.uuid_v3(co, cl, "tercero_direcciones", DIRECCION_PROVEEDOR_TIPO.lower())
-        ds.add("tercero_direcciones", {"id": xid, "tercero_id": tid, "direccion_id": did,
-                                       "tipo": DIRECCION_PROVEEDOR_TIPO, "principal": True})
-        ds.mapear(co, cl, "tercero_direcciones", xid, "direccion_comercial", tipo="DIVIDIDO")
+        _alta_direccion_proveedor(ds, co, cl, tid,
+                                  fu.uuid_v3("public.localidades", lk, "localidades", "localidad") if lk else None, dire)
         res["direcciones_proveedor"] += 1
 
 
@@ -4006,8 +4070,88 @@ def transformar(b0: dict, sha_run06: str, modo_lab: bool = False,
         dominio_12_disposicion(ds, fuente)
         if DOMINIO_12_R02_ACTIVO:
             ds.trazabilidad.update(r02_disposicion_campos(ds, fuente, leidos))
+    if DOMINIO_11_ACTIVO and CIERRES_V3 in fuente:
+        ds.trazabilidad["legacy_v3"] = verificar_legacy_v3(ds)
+    if DOMINIO_5_ACTIVO and DOMINIO_6_ACTIVO:
+        ds.trazabilidad["casos_compra_100_propia"] = verificar_compra_100_propia(ds, fuente)
     verificar_trazabilidad(ds)
     return ds
+
+
+# v0.34.0 D11-D (DB Schema: "Legacy V3 puede aportar bundles especificos LEGACY_V3_* ... sin fingir equivalencias
+# modernas"; seeds de sistema identificados por codigo). Anti-regresion del bundle: solo vive como codigo de
+# metricas_definicion (catalogo global, sin datos tenant), deshabilitado, sin colisionar con seeds modernos, usado
+# exclusivamente por snapshots de cierres IMPORTADO_LEGACY/V3_SNAPSHOT y nunca como dato en otras tablas.
+PREFIJO_LEGACY = "LEGACY_V3_"
+METRICAS_SEED_0330 = {"APORTACION_INVERSION_NETA", "TRANSFERENCIA_AHORRO_NETA", "AHORRO_NETO_PYL"}  # DB Schema seeds
+TRAZABILIDAD_TEXTO = {("mapeos_importacion", "transformacion_codigo")}  # traza del mapping, no dato de dominio
+
+
+def verificar_legacy_v3(ds: Dataset) -> dict:
+    F = ds.filas
+    met = {m["id"]: m for m in F["metricas_definicion"].values() if str(m["codigo"]).startswith(PREFIJO_LEGACY)}
+    for m in met.values():
+        if m["enabled"] is not False:
+            raise ErrorP5("S1_LEGACY_V3_HABILITADA", m["codigo"])
+        if m["codigo"][len(PREFIJO_LEGACY):] in METRICAS_SEED_0330 or m["codigo"] in METRICAS_SEED_0330:
+            raise ErrorP5("S1_LEGACY_V3_FINGE_EQUIVALENCIA", m["codigo"])
+    usos = collections.Counter()
+    cierres = F["cierres_mensuales"]
+    for cm in F["cierre_metricas"].values():
+        if cm["metrica_id"] in met:
+            c = cierres.get(cm["cierre_id"])
+            if c is None or c["origen_cierre"] != "IMPORTADO_LEGACY" or c["metodologia_version"] != "V3_SNAPSHOT":
+                raise ErrorP5("S1_LEGACY_V3_FUERA_DE_SNAPSHOT", met[cm["metrica_id"]]["codigo"])
+            usos[cm["metrica_id"]] += 1
+    huerfanas = sorted(met[m]["codigo"] for m in met if not usos[m])
+    if huerfanas:
+        raise ErrorP5("S8_LEGACY_V3_SIN_USO", ", ".join(huerfanas))
+    for t, filas in F.items():
+        for fila in filas.values():
+            for k, v in fila.items():
+                if isinstance(v, str) and PREFIJO_LEGACY in v and not (t == "metricas_definicion" and k == "codigo") \
+                        and (t, k) not in TRAZABILIDAD_TEXTO:
+                    raise ErrorP5("S1_LEGACY_V3_RESIDUO", f"{t}.{k}")
+    return {"definiciones": len(met), "valores_snapshot": sum(usos.values())}
+
+
+# v0.34.0 caso verificado del propietario: seguro SAA2 = compra financiada 100 % propia (D8-K2 + S20-9). Falla cerrado
+# si vuelve a interpretarse como compartida, parcial o recuperable. Solo aplica si el origen existe en la fuente.
+CASO_COMPRA_100_PROPIA = {("public.gastos", "gasto-ep2gra")}
+
+
+def verificar_compra_100_propia(ds: Dataset, fuente: dict) -> dict:
+    F, res = ds.filas, {}
+    for co, cl in sorted(CASO_COMPRA_100_PROPIA):
+        if cl not in fuente.get(co, {}):
+            continue
+        o = f"{co}/{cl}"
+        hid = fu.uuid_v3(co, cl, "hechos_financieros", "hecho")
+        h = F["hechos_financieros"].get(hid)
+        if h is None or h["tipo_hecho_id"] != TIPOS_HECHO_SEED["COMPRA_FINANCIADA"]:
+            raise ErrorP5("S9_CASO_100_PROPIO_NO_ES_COMPRA", o)
+        total = Decimal(str(h["importe_total"]))
+        efs = [e for e in F["hecho_efectos"].values() if e["hecho_id"] == hid]
+        if sorted(e["tipo_efecto"] for e in efs) != ["DEUDA", "GASTO"]:
+            raise ErrorP5("S9_CASO_100_PROPIO_EFECTOS", f"{o}: {sorted(e['tipo_efecto'] for e in efs)}")
+        for e in efs:
+            ats = [a for a in F["efecto_atribuciones"].values() if a["efecto_id"] == e["id"]]
+            if e["estado_atribucion"] != "COMPLETA" or len(ats) != 1 or ats[0]["actor_id"] != ds.self_id \
+                    or Decimal(str(ats[0]["importe_atribuido"])) != Decimal(str(e["importe_delta"])):
+                raise ErrorP5("S9_CASO_100_PROPIO_ATRIBUCION", f"{o} {e['tipo_efecto']}")
+            if e["tipo_efecto"] == "GASTO" and Decimal(str(e["importe_delta"])) != total:
+                raise ErrorP5("S9_CASO_100_PROPIO_IMPORTE", o)
+        if any(hid in (r["hecho_origen_id"], r["hecho_destino_id"]) for r in F["hecho_relaciones"].values()):
+            raise ErrorP5("S9_CASO_100_PROPIO_RECUPERABLE", o)
+        if any(a["hecho_id"] == hid for a in F.get("hecho_aportaciones_pago", {}).values()):
+            raise ErrorP5("S9_CASO_100_PROPIO_APORTACION", o)
+        fin = [x["entidad_id"] for x in F["hecho_entidades"].values() if x["hecho_id"] == hid
+               and x["entidad_id"] in F["financiaciones"]]
+        ps = [p for p in F["entidad_participaciones"].values() if fin and p["entidad_id"] == fin[0]]
+        if len(fin) != 1 or len(ps) != 1 or ps[0]["actor_id"] != ds.self_id or Decimal(ps[0]["porcentaje"]) != 100:
+            raise ErrorP5("S9_CASO_100_PROPIO_PARTICIPACION", o)
+        res[o] = {"total": str(total), "gasto_propio": str(total), "financiacion": fin[0]}
+    return res
 
 
 def verificar_trazabilidad(ds: Dataset) -> None:

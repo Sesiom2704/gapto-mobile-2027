@@ -7,8 +7,9 @@
 #              PASS | DELTA_CLASIFICADO (delta explicado por decision/regla trazada) | FAIL (delta sin clasificar) |
 #              PENDIENTE_FASE (solo evaluable en P6/P7). Todo delta no clasificado es FAIL (contrato RV3 §11).
 #              No sustituye a P8 post-carga: la repite sobre la base cargada cuando exista P6.
+#              0.2.1: R26 clasifica ademas regiones/localidades declaradas por el propietario (Q-R02-5).
 #              0.2.0: R26 clasifica las 46 tablas con delta frente a RUN06 (regla trazada por tabla).
-# Versión: 0.2.0
+# Versión: 0.2.1
 # ============================================================
 from __future__ import annotations
 
@@ -287,13 +288,16 @@ CLASIFICACION_R26 = {
     "contrato_revision_renta_versiones": "D10-E: una version por contrato (IPC o NINGUNA); RUN06 solo las IPC",
     "servicios": "D10-K: servicio repercutible decidido por el propietario (luz de Allende)",
     "contrato_servicios": "D10-K: servicio repercutible al inquilino",
-    "direcciones": "4 propiedades (D4-A) + 154 proveedores COMERCIAL (Q-R02-5); RUN06: 4 + 1",
+    "direcciones": "4 propiedades (D4-A) + 164 proveedores COMERCIAL (Q-R02-5, 10 con localidad declarada por el "
+                   "propietario); RUN06: 4 + 1",
+    "regiones": "+1 region MADRID declarada por el propietario (ausente del maestro V3, Q-R02-5)",
+    "localidades": "+1 localidad MADRID declarada por el propietario (ausente del maestro V3, Q-R02-5)",
     # --- decisiones RV3 y respuestas del propietario
     "transferencias": "DV-7: -58 autotransferencias de RUN06 son ajustes (AJUSTE_SALDO); 83 reales",
     "movimientos_tesoreria": "DV-7: 83 x 2 OPERACION + 58 AJUSTE_SALDO = 224 (RUN06 282)",
     "hecho_movimientos_tesoreria": "conciliacion de las 83 transferencias (166); RUN06 no la materializaba",
     "contrato_participantes": "fusion N:1 de participante duplicado por captura (D10-J, clase C)",
-    "tercero_direcciones": "Q-R02-5: direcciones COMERCIAL de proveedores (propietario 2026-09-22)",
+    "tercero_direcciones": "Q-R02-5: 164 direcciones COMERCIAL de proveedores (propietario 2026-09-22)",
     "hecho_etiquetas": "201 evento (Q-R02-2) + 77 Capricho (D-MIG-002)",
     "hecho_magnitudes": "RUN06 77 = km 24 + litros 26 + precio 27; 0330 49 = km 24 (12.811 corregido a 128.111) + "
                         "litros 25 (R35KCY desconocido por decision); precio_litro control derivado (Q-R02-3)",

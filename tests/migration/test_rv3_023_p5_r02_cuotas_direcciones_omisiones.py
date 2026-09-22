@@ -10,7 +10,9 @@
 #              Q-R02-5: tercero_direcciones COMERCIAL principal, localidad por id o por nombre, residual si no
 #              resuelve o es incoherente, comunidad/pais solo validan, texto libre a observaciones.
 #              Q-R02-7: omisiones solo a ledger, sin previsiones ni hechos. R02: SOLO_ORIGEN_Y_LEDGER exige lectura.
-# Versión: 0.1.0
+# Versión: 0.2.0
+#              0.2.0 (P5 v0.35.0): localidad declarada por el propietario para residuales Q-R02-5: por codigo del
+#              maestro V3 o como localidad/region nueva ausente del maestro (FUSIONADO a cada fila que la declara).
 # ============================================================
 from __future__ import annotations
 
@@ -246,3 +248,67 @@ def test_complementos_invocan_cuotas_direcciones_y_omisiones():
     fuente["public.gastos"] = {"g1": {"id": "g1", "ultimo_omitido_on": "2026-05-04T10:47:34", "omitido_count": 1}}
     r = P5.dominio_12_r02_complementos(ds, fuente, F.contexto_de(fuente))
     assert (r["cuotas_capital"], r["cuotas_intereses"], r["direcciones_proveedor"], r["omisiones_ledger"]) == (1, 1, 1, 1)
+
+
+def _geo_pais():
+    ds = P5.Dataset(owner="o")
+    pid = F.uuid_v3("public.paises", "1", "paises", "pais")
+    ds.filas["paises"][pid] = {"id": pid, "nombre": "ESPAÑA"}
+    return ds
+
+
+def test_localidad_decidida_por_codigo_ignora_literal_incoherente(monkeypatch):
+    monkeypatch.setattr(P5, "LOCALIDAD_PROVEEDOR_DECIDIDA", {"a": ("ID", "11")})
+    ds = _geo_pais()
+    r = _prov(ds, [_p("a", localidad="9", comunidad="ANDALUCIA")])
+    assert r["direcciones_proveedor"] == 1 and not ds.trazabilidad.get("r02_residuales")
+    (d,) = ds.filas["direcciones"].values()
+    assert d["localidad_id"] == F.uuid_v3("public.localidades", "11", "localidades", "localidad")
+    led = [e for e in ds.ledger if e["regla"] == "R02-Q5-DECIDIDA"]
+    assert led[0]["decision"] == "ID:11" and led[0]["v3"]["comunidad"] == "ANDALUCIA"
+
+
+def test_localidad_decidida_inexistente_falla(monkeypatch):
+    monkeypatch.setattr(P5, "LOCALIDAD_PROVEEDOR_DECIDIDA", {"a": ("ID", "99")})
+    with pytest.raises(P5.ErrorP5) as e:
+        _prov(_geo_pais(), [_p("a", localidad="X")])
+    assert e.value.codigo == "S8_LOCALIDAD_DECIDIDA_INEXISTENTE"
+
+
+def test_localidad_nueva_declarada_una_vez_y_trazada_a_cada_fila(monkeypatch):
+    monkeypatch.setattr(P5, "LOCALIDAD_PROVEEDOR_DECIDIDA", {"a": ("NUEVA", "MADRID"), "b": ("NUEVA", "MADRID")})
+    monkeypatch.setattr(P5, "LOCALIDADES_DECLARADAS", {"MADRID": {"region": "MADRID", "pais": "ESPAÑA"}})
+    ds = _geo_pais()
+    r = _prov(ds, [_p("a", localidad="MADRID", comunidad="MADRID"), _p("b", localidad="MADRID")])
+    assert r["direcciones_proveedor"] == 2
+    lid = P5._id_declarada("MADRID", "localidad")
+    rid = P5._id_declarada("MADRID", "region")
+    assert ds.filas["localidades"][lid] == {"id": lid, "region_id": rid, "nombre": "MADRID", "codigo_oficial": None,
+                                             "codigo_oficial_tipo": None}
+    assert ds.filas["regiones"][rid]["pais_id"] in ds.filas["paises"]
+    assert {d["localidad_id"] for d in ds.filas["direcciones"].values()} == {lid}
+    fus = sorted((m["tabla_destino"], m["tipo_mapping"]) for m in ds.filas["mapeos_importacion"].values()
+                 if m["registro_destino_id"] in (lid, rid))
+    assert fus == [("localidades", "FUSIONADO")] * 2 + [("regiones", "FUSIONADO")] * 2
+
+
+def test_localidad_nueva_sin_pais_en_maestro_falla(monkeypatch):
+    monkeypatch.setattr(P5, "LOCALIDAD_PROVEEDOR_DECIDIDA", {"a": ("NUEVA", "X")})
+    monkeypatch.setattr(P5, "LOCALIDADES_DECLARADAS", {"X": {"region": "R", "pais": "FRANCIA"}})
+    with pytest.raises(P5.ErrorP5) as e:
+        _prov(_geo_pais(), [_p("a", localidad="X")])
+    assert e.value.codigo == "S8_PAIS_DECLARADO_SIN_MAESTRO"
+
+
+def test_declaracion_real_diez_proveedores():
+    sp = importlib.util.spec_from_file_location("p5_real_023", RAIZ / "scripts" / "migration_v3" / "rv3_p5_transformacion.py")
+    real = importlib.util.module_from_spec(sp)
+    sys.modules["p5_real_023"] = real
+    try:
+        sp.loader.exec_module(real)
+    finally:
+        sys.modules.pop("p5_real_023", None)
+    dec = real.LOCALIDAD_PROVEEDOR_DECIDIDA
+    assert len(dec) == 10 and sum(1 for v in dec.values() if v == ("NUEVA", "MADRID")) == 6
+    assert dec["ITV-PROVEEDOR-JSRGO7"] == ("ID", "1") and dec["PROV-2FWYAS"] == ("ID", "25")
+    assert dec["LOT-PROVEEDOR-QLSPRE"] == dec["SAB-PROVEEDOR-AL3ACE"] == ("ID", "9")
