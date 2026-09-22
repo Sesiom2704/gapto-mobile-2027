@@ -16,6 +16,7 @@
 #   python scripts/mutantes/rv3_p5.py            # todos
 #   python scripts/mutantes/rv3_p5.py M30 M33    # subconjunto
 #
+# Version: 0.24.0 (M203..M225: P5 v0.29.0, Q-R02-1/5/7)
 # Version: 0.23.0 (M194 reescrito, M197..M202: P5 v0.28.0)
 # Version: 0.22.0 (M179..M196: P5 v0.27.0, complementos R02 — respuestas Q-R02)
 # Version: 0.21.0 (M172..M178: P5 v0.26.0, D6-INV, valoracion terminal y R02)
@@ -65,6 +66,7 @@ T19 = "tests/migration/test_rv3_019_p5_dominio11.py"
 T20 = "tests/migration/test_rv3_020_p5_dominio12_disposicion.py"
 T21 = "tests/migration/test_rv3_021_p5_r02_campos.py"
 T22 = "tests/migration/test_rv3_022_p5_r02_complementos.py"
+T23 = "tests/migration/test_rv3_023_p5_r02_cuotas_direcciones_omisiones.py"
 
 MUTANTES = {
     "M30": ("gate de la fuente suplementaria siempre abierto",
@@ -623,6 +625,76 @@ MUTANTES = {
     'M202': ('tienda sin hecho no deja traza de descarte',
              [('            ds.trazabilidad.setdefault("r02_descartes", []).append(', '            (lambda *a: None)(')],
              T22 + "::test_tienda_sin_hecho_se_descarta_con_traza"),
+    # --- v0.24.0: P5 v0.29.0 Q-R02-1/5/7
+    'M203': ('fecha economica = fecha_pago',
+             [('        venc = venc[:10]\n', '        venc = str(fp.valor)[:10]\n')],
+             T23 + "::test_cuota_pagada_genera_dos_hechos_sin_tesoreria"),
+    'M204': ('capital como gasto',
+             [('        ed = h.efecto("capital", "DEUDA", -cap, None, rep(-cap), "COMPLETA")', '        ed = h.efecto("capital", "GASTO", cap, None, rep(cap), "COMPLETA")')],
+             T23 + "::test_cuota_pagada_genera_dos_hechos_sin_tesoreria"),
+    'M205': ('un unico hecho por origen (sin sufijo)',
+             [('        self.rol_hecho = "hecho" if sufijo is None else f"hecho.{sufijo}"', '        self.rol_hecho = "hecho"')],
+             T23 + "::test_cuota_pagada_genera_dos_hechos_sin_tesoreria"),
+    'M206': ('intereses sin categoria',
+             [('            h.efecto("intereses", "GASTO", inte, cat, rep(inte), "COMPLETA")', '            h.efecto("intereses", "GASTO", inte, None, rep(inte), "COMPLETA")')],
+             T23 + "::test_cuota_pagada_genera_dos_hechos_sin_tesoreria"),
+    'M207': ('participacion de cuota sin cuadre',
+             [('        if sum(Decimal(p["porcentaje"]) for p in ps) != 100:\n            raise ErrorP5("S9_PARTICIPACION_CUOTA_NO_CUADRA"', '        if False:\n            raise ErrorP5("S9_PARTICIPACION_CUOTA_NO_CUADRA"')],
+             T23 + "::test_participacion_que_no_suma_100_falla"),
+    'M208': ('pagada y fecha_pago incoherentes admitidas',
+             [('        if bool(pagada) != (fp.estado == fu.CONOCIDO):', '        if False:')],
+             T23 + "::test_pagada_y_fecha_pago_incoherentes_fallan"),
+    'M209': ('cuota sin cuadre admitida',
+             [(' or cap + inte != tot:', ':')],
+             T23 + "::test_cuota_que_no_cuadra_falla"),
+    'M210': ('cuota dentro del seguimiento admitida',
+             [('        if fin["fecha_inicio_seguimiento"] is not None and venc >= fin["fecha_inicio_seguimiento"]:', '        if False:')],
+             T23 + "::test_cuota_dentro_del_seguimiento_falla_por_doble_conteo"),
+    'M211': ('comisiones ignoradas',
+             [('        if any((_dec_c(co, c, f, ctx) or 0) != 0 for c in ("comisiones", "seguros")):', '        if False:')],
+             T23 + "::test_sin_participacion_vigente_o_con_comisiones_queda_residual"),
+    'M212': ('sin participacion no queda residual',
+             [('        if not ps:  # sin participacion decidida', '        if False:  # sin participacion decidida')],
+             T23 + "::test_sin_participacion_vigente_o_con_comisiones_queda_residual"),
+    'M213': ('ledger sin fecha_pago',
+             [('"fecha_pago": str(fp.valor)[:10], ', '')],
+             T23 + "::test_cuota_pagada_genera_dos_hechos_sin_tesoreria"),
+    'M214': ('direccion no principal',
+             [('"tipo": DIRECCION_PROVEEDOR_TIPO, "principal": True', '"tipo": DIRECCION_PROVEEDOR_TIPO, "principal": False')],
+             T23 + "::test_direccion_comercial_por_id_y_por_nombre"),
+    'M215': ('nombre e id incoherentes admitidos',
+             [('            if loc is not None and _norm(loc) != _norm(nom("public.localidades", L[lid_v3])):', '            if False:')],
+             T23 + "::test_localidad_no_resuelta_o_incoherente_queda_residual"),
+    'M216': ('localidad ambigua admitida',
+             [('            if len(cand) != 1:\n                _residual(ds, co, "localidad"', '            if not cand:\n                _residual(ds, co, "localidad"')],
+             T23 + "::test_localidad_no_resuelta_o_incoherente_queda_residual"),
+    'M217': ('comunidad sin validar',
+             [('            if com is not None and (reg is None or _norm(com) != _norm(nom("public.regiones", reg))):', '            if False:')],
+             T23 + "::test_localidad_no_resuelta_o_incoherente_queda_residual"),
+    'M218': ('pais sin validar',
+             [('            if pais is not None and (pa is None or _norm(pais) != _norm(nom("public.paises", pa))):', '            if False:')],
+             T23 + "::test_localidad_no_resuelta_o_incoherente_queda_residual"),
+    'M219': ('texto libre de direccion perdido',
+             [('"puerta": None, "observaciones": dire})', '"puerta": None, "observaciones": None})')],
+             T23 + "::test_direccion_comercial_por_id_y_por_nombre"),
+    'M220': ('solo comunidad/pais crea direccion',
+             [('        if lk is None and dire is None:', '        if False:')],
+             T23 + "::test_solo_comunidad_o_pais_no_crea_direccion"),
+    'M221': ('omision fuera del ledger',
+             [('            ds.ledger.append({"regla": "R02-Q7-OMISION"', '            (lambda *a: None)({"regla": "R02-Q7-OMISION"')],
+             T23 + "::test_omisiones_solo_en_ledger"),
+    'M222': ('campo de ledger sin exigir lectura',
+             [('                if (c, col) not in leidos:\n                    raise ErrorP5("S4_LEDGER_NO_EJECUTADO"', '                if False:\n                    raise ErrorP5("S4_LEDGER_NO_EJECUTADO"')],
+             T23 + "::test_r02_campo_de_ledger_exige_su_lectura"),
+    'M223': ('cuotas no invocadas',
+             [('    cuotas_pagadas(ds, fuente, ctx, res)\n', '')],
+             T23 + "::test_complementos_invocan_cuotas_direcciones_y_omisiones"),
+    'M224': ('direcciones no invocadas',
+             [('    direcciones_proveedores(ds, fuente, ctx, res)\n', '')],
+             T23 + "::test_complementos_invocan_cuotas_direcciones_y_omisiones"),
+    'M225': ('omisiones no invocadas',
+             [('    omisiones_v3(ds, fuente, ctx, res)\n', '')],
+             T23 + "::test_complementos_invocan_cuotas_direcciones_y_omisiones"),
 }
 
 

@@ -15,6 +15,12 @@
 #                8 financiaciones (PARCIAL v0.5.0: 4 prestamos formales con condiciones
 #                  versionadas, calendario, financiador y garantia; 7 compras financiadas;
 #                  derechos/obligaciones pendientes)
+#   v0.29.0: respuestas Q-R02-1/5/7 (propietario 2026-09-22). Q-R02-1 opcion A: cuota pagada antes del corte ->
+#           dos hechos (GENERACION_DERECHO_OBLIGACION con DEUDA -capital AFECTA_A la financiacion; GASTO intereses en
+#           COSTES FINANCIEROS), fecha = vencimiento, atribucion por participacion, sin tesoreria; fecha_pago y
+#           gasto_id a origen + ledger. Q-R02-5: tercero_direcciones COMERCIAL principal; comunidad/pais solo validan.
+#           Q-R02-7: omisiones solo en origen + ledger, sin previsiones ni hechos; kpi/cobrado estado UX/ciclo.
+#           Clase R02 SOLO_ORIGEN_Y_LEDGER. D8-I y D6-Y reescritos (D6-Y no se revierte: se complementa).
 #   v0.28.0: respuestas Q-R02 (2) del propietario (2026-09-22): km V3 12811 corregido a 128111 (error de captura,
 #           literal conservado en origen y ledger); precio de UZ8U27 y litros/precio de R35KCY DESCONOCIDOS por
 #           decision; magnitud "Kilometraje"; tienda de gestionable sin hecho DESCARTADA; patrimonio_compra.notas ->
@@ -127,7 +133,7 @@
 #   RV3_IMPORT (rol login no superusuario -> gapto_migrator -> gapto_owner),
 #   fuerza los diferidos con SET CONSTRAINTS ALL IMMEDIATE y hace ROLLBACK.
 #   No es P6 (P6 hace COMMIT real).
-# Versión: 0.28.0
+# Versión: 0.29.0
 # ============================================================
 from __future__ import annotations
 
@@ -142,7 +148,7 @@ from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
-VERSION = "0.28.0"
+VERSION = "0.29.0"
 TRANSFORMACION = "RV3_P5"
 _AQUI = Path(__file__).resolve().parent
 
@@ -163,7 +169,7 @@ ORDEN_TABLAS = [
     "terceros", "tercero_personas", "clasificaciones_tercero", "tercero_clasificaciones",
     "tercero_roles", "actores_financieros",
     "cuentas", "cuenta_capacidades", "cuenta_participaciones",
-    "direcciones", "entidades", "propiedades", "entidad_participaciones",
+    "direcciones", "tercero_direcciones", "entidades", "propiedades", "entidad_participaciones",
     "financiaciones", "financiacion_condiciones_versiones", "financiacion_cuotas", "entidad_relaciones",
     "derechos_obligaciones_financieras", "inversiones", "inversion_objetivos_versiones", "inversion_valoraciones",
     "reglas_financieras", "regla_versiones", "regla_excepciones",
@@ -278,8 +284,11 @@ LEDGER_REGLAS = {
     "D8-G": "cuota V3 con total distinto de componentes: se conservan ambos sin correccion (Migration V3 §27).",
     "D8-H": "entidad_participaciones de la financiacion: 0 filas (no modelada, D-107); Migration V3 §29 "
             "prohibe inferirla desde propiedad o cuenta. Pendiente S20.",
-    "D8-I": "PENDIENTE S20 (v0.26.0): el pago de las 85 cuotas pagadas (fecha_pago/gasto_id) NO esta dispuesto; "
-            "financiacion_cuotas no tiene flag de pagado (DB Schema §56).",
+    "D8-I": "Cuota pagada antes del corte (Q-R02-1 opcion A, propietario 2026-09-22; OP-16 / C-06): dos hechos por "
+            "cuota con fecha economica = vencimiento y sin tesoreria: GENERACION_DERECHO_OBLIGACION con DEUDA -capital "
+            "(AFECTA_A la financiacion; fuera del saldo derivado porque vence antes de fecha_inicio_seguimiento, D8-E) "
+            "y GASTO por intereses (COSTES FINANCIEROS). fecha_pago y gasto_id quedan en origen y ledger (R02-Q1). "
+            "financiacion_cuotas sigue sin flag de pagado (DB Schema §56).",
     "D8-J": "cuota con vencimiento anterior al corte y no pagada en V3: se conserva la fecha V3 sin "
             "desplazarla (Migration V3 §7: calendario desplazado). Clase C.",
     "D8-K": "compra financiada = gasto con tipo_gasto FINANCIACION y cuotas; capital = cuotas x importe_cuota "
@@ -2603,8 +2612,10 @@ LEDGER_REGLAS.update({
             "de cuotas), ambos atribuidos por la participacion vigente de la financiacion y la DEUDA vinculada a ella. "
             "La compra es anterior a fecha_inicio_seguimiento: su DEUDA no altera el saldo de apertura (D6-E); si no lo "
             "fuese -> S9 (doble conteo). Las cuotas no crean gasto.",
-    "D6-Y": "sin hecho: compra financiada cancelada (NUTRICIONISTA, respuesta del propietario) y cuotas de prestamo "
-            "(D5-T; su expectativa es el calendario de la financiacion, D-MIG-015).",
+    "D6-Y": "sin hecho: compra financiada cancelada (NUTRICIONISTA, respuesta del propietario) y gastos V3 de "
+            "referencia de cuota de prestamo (D5-T; su expectativa es el calendario de la financiacion, D-MIG-015). "
+            "La realidad de cada cuota PAGADA se materializa desde prestamo_cuota (D8-I, v0.29.0), no desde el gasto de "
+            "referencia: no hay doble conteo.",
 })
 
 
@@ -2647,9 +2658,12 @@ def _participacion_entidad_self_100(ds, eid) -> bool:
 class _H:
     """Constructor de un hecho y sus hijos, todos mapeados al registro origen."""
 
-    def __init__(self, ds, co, cl, tipo, fecha, concepto, importe_total, presupuestable, notas=None, participantes=None):
+    def __init__(self, ds, co, cl, tipo, fecha, concepto, importe_total, presupuestable, notas=None, participantes=None,
+                 sufijo=None):
         self.ds, self.co, self.cl = ds, co, cl
-        self.id = fu.uuid_v3(co, cl, "hechos_financieros", "hecho")
+        # sufijo: varios hechos del MISMO registro origen (v0.29.0, cuota pagada = capital + intereses, OP-16/C-06)
+        self.rol_hecho = "hecho" if sufijo is None else f"hecho.{sufijo}"
+        self.id = fu.uuid_v3(co, cl, "hechos_financieros", self.rol_hecho)
         self.efectos, self.hijos = [], []
         self.fila = {"id": self.id, "owner_user_id": ds.owner, "tipo_hecho_id": TIPOS_HECHO_SEED[tipo],
                      "fecha_hecho": fecha, "concepto": concepto, "importe_total": importe_total,
@@ -2691,7 +2705,7 @@ class _H:
     def confirmar(self):
         ds = self.ds
         ds.add("hechos_financieros", self.fila)
-        ds.mapear(self.co, self.cl, "hechos_financieros", self.id, "hecho")
+        ds.mapear(self.co, self.cl, "hechos_financieros", self.id, self.rol_hecho)
         for tabla, fila, rol in self.efectos + self.hijos:
             ds.add(tabla, fila)
             ds.mapear(self.co, self.cl, tabla, fila["id"], rol, tipo="DIVIDIDO")
@@ -3305,7 +3319,8 @@ DESCONOCIDO_PROPIETARIO = {
 # v0.28.0 (propietario 2026-09-22): error de captura corregido; el literal V3 se conserva en origen y ledger.
 # Clave -> (valor V3 exigido, valor corregido). Si V3 no trae exactamente el valor exigido: fallo cerrado S9.
 CORRECCION_CAPTURA_PROPIETARIO = {("GASTO_COTIDIANO-JAAYWD", "km"): (Decimal("12811"), Decimal("128111"))}
-CAMPOS_VERIFICADOS = {("public.cuentas_bancarias", "referencia"), ("public.gastos_cotidianos", "precio_litro")}
+CAMPOS_VERIFICADOS = {("public.cuentas_bancarias", "referencia"), ("public.gastos_cotidianos", "precio_litro"),
+                      ("public.proveedores", "comunidad"), ("public.proveedores", "pais")}
 
 
 def _residual(ds: Dataset, co: str, col: str, cl: str, pregunta: str, motivo: str) -> None:
@@ -3337,6 +3352,153 @@ def _positivo(co, col, f, ctx) -> Decimal | None:
     return v if v is not None and v > 0 else None
 
 
+# v0.29.0 Q-R02-1 (opcion A): cuota pagada antes del corte -> dos hechos (capital / intereses), sin tesoreria.
+CATEGORIA_INTERESES_CUOTA = "COSTES FINANCIEROS > INTERESES Y COSTES DE FINANCIACION"
+# v0.29.0 Q-R02-5: direccion del proveedor como tercero_direcciones COMERCIAL (propietario 2026-09-22), principal si es
+# la unica. comunidad/pais solo VALIDAN la localidad (region/pais del maestro V3); no se inventan CP ni via: el texto
+# libre de "direccion" va a observaciones (no se presupone que sea una via).
+DIRECCION_PROVEEDOR_TIPO = "COMERCIAL"
+# v0.29.0 Q-R02-7 (propietario 2026-09-22): la omision no es hecho ni previsiones; se conserva en origen + ledger.
+CAMPOS_LEDGER = {("public.gastos", "ultimo_omitido_on"), ("public.gastos", "omitido_count"),
+                 ("public.ingresos", "ultimo_omitido_on"), ("public.ingresos", "omitido_count"),
+                 ("public.prestamo_cuota", "fecha_pago"), ("public.prestamo_cuota", "gasto_id")}
+
+
+def cuotas_pagadas(ds: Dataset, fuente: dict, ctx: dict, res: dict) -> None:
+    co = "public.prestamo_cuota"
+    cat = None
+    for cl, f in sorted(fuente.get(co, {}).items()):
+        fp = _celda(co, "fecha_pago", f, ctx)
+        pagada = _bool(_celda(co, "pagada", f, ctx))
+        if bool(pagada) != (fp.estado == fu.CONOCIDO):
+            raise ErrorP5("S9_CUOTA_PAGO_INCOHERENTE", f"{co}/{cl}")
+        if not pagada:
+            continue
+        pr = _texto(_celda(co, "prestamo_id", f, ctx))
+        eid = fu.uuid_v3("public.prestamo", pr, "entidades", "financiacion") if pr else None
+        fin = ds.filas["financiaciones"].get(eid)
+        if fin is None:
+            _residual(ds, co, "fecha_pago", cl, "Q-R02-1", "financiacion no creada")
+            continue
+        venc = _texto(_celda(co, "fecha_vencimiento", f, ctx))
+        if venc is None:
+            _residual(ds, co, "fecha_pago", cl, "Q-R02-1", "vencimiento desconocido")
+            continue
+        venc = venc[:10]
+        if fin["fecha_inicio_seguimiento"] is not None and venc >= fin["fecha_inicio_seguimiento"]:
+            raise ErrorP5("S9_CUOTA_DENTRO_DEL_SEGUIMIENTO", f"{co}/{cl}")  # su DEUDA se contaria dos veces
+        cap, inte, tot = (_dec_c(co, c, f, ctx) for c in ("capital", "interes", "importe_cuota"))
+        if cap is None or inte is None or tot is None or cap < 0 or inte < 0 or cap + inte != tot:
+            raise ErrorP5("S9_CUOTA_NO_CUADRA", f"{co}/{cl}")
+        if any((_dec_c(co, c, f, ctx) or 0) != 0 for c in ("comisiones", "seguros")):
+            _residual(ds, co, "fecha_pago", cl, "Q-R02-1", "comisiones/seguros no modelados en la cuota")
+            continue
+        ps = sorted((p for p in ds.filas["entidad_participaciones"].values() if p["entidad_id"] == eid
+                     and p["vigente_desde"] <= venc and (p["vigente_hasta"] is None or p["vigente_hasta"] >= venc)),
+                    key=lambda x: x["actor_id"])
+        if not ps:  # sin participacion decidida no se presume 100 % propio (D8-H)
+            _residual(ds, co, "fecha_pago", cl, "Q-R02-1", "financiacion sin participacion vigente")
+            continue
+        if sum(Decimal(p["porcentaje"]) for p in ps) != 100:
+            raise ErrorP5("S9_PARTICIPACION_CUOTA_NO_CUADRA", f"{co}/{cl}")
+
+        def rep(importe):
+            return [(p["actor_id"], importe * Decimal(p["porcentaje"]) / 100, "PARTICIPACION_ENTIDAD",
+                     Decimal(p["porcentaje"])) for p in ps]
+        nombre = ds.filas["entidades"].get(eid, {}).get("nombre") or "financiacion"
+        n = _celda(co, "num_cuota", f, ctx).valor
+        if cap > 0:
+            h = _H(ds, co, cl, "GENERACION_DERECHO_OBLIGACION", venc, f"Cuota {n} {nombre}: capital", cap, False,
+                   sufijo="capital")
+            ed = h.efecto("capital", "DEUDA", -cap, None, rep(-cap), "COMPLETA")
+            h.entidad(eid, "AFECTA_A", ed, rol="financiacion")
+            h.confirmar()
+            res["cuotas_capital"] += 1
+        if inte > 0:
+            if cat is None:
+                cat = _cat_por_ruta(ds, CATEGORIA_INTERESES_CUOTA)
+            h = _H(ds, co, cl, "GASTO", venc, f"Cuota {n} {nombre}: intereses", inte, _presup(ds, cat, "GASTO"),
+                   sufijo="intereses")
+            h.efecto("intereses", "GASTO", inte, cat, rep(inte), "COMPLETA")
+            h.entidad(eid, "RELACIONADO_CON", rol="financiacion_intereses")
+            h.confirmar()
+            res["cuotas_intereses"] += 1
+        ds.ledger.append({"regla": "R02-Q1", "origen": f"{co}/{cl}", "vencimiento": venc,
+                          "fecha_pago": str(fp.valor)[:10], "gasto_referencia": _texto(_celda(co, "gasto_id", f, ctx)),
+                          "capital": str(cap), "intereses": str(inte)})
+        res["cuota_capital_total"] += cap
+        res["cuota_intereses_total"] += inte
+
+
+def direcciones_proveedores(ds: Dataset, fuente: dict, ctx: dict, res: dict) -> None:
+    co, L = "public.proveedores", fuente.get("public.localidades", {})
+    R, PA = fuente.get("public.regiones", {}), fuente.get("public.paises", {})
+
+    def nom(cont, fila):
+        return _texto(_celda(cont, "nombre", fila, ctx)) or ""
+    for cl, f in sorted(fuente.get(co, {}).items()):
+        lid_v3, loc, com, pais, dire = (_texto(_celda(co, c, f, ctx))
+                                        for c in ("localidad_id", "localidad", "comunidad", "pais", "direccion"))
+        if not any((lid_v3, loc, com, pais, dire)):
+            continue
+        tid = fu.uuid_v3(co, cl, "terceros", "tercero")
+        if tid not in ds.filas["terceros"]:
+            _residual(ds, co, "localidad", cl, "Q-R02-5", "proveedor sin tercero")
+            continue
+        lk = None
+        if lid_v3 is not None:
+            if lid_v3 not in L:
+                _residual(ds, co, "localidad", cl, "Q-R02-5", f"localidad_id {lid_v3} inexistente")
+                continue
+            if loc is not None and _norm(loc) != _norm(nom("public.localidades", L[lid_v3])):
+                _residual(ds, co, "localidad", cl, "Q-R02-5", "nombre e id de localidad incoherentes")
+                continue
+            lk = lid_v3
+        elif loc is not None:
+            cand = [k for k, x in sorted(L.items()) if _norm(nom("public.localidades", x)) == _norm(loc)]
+            if len(cand) != 1:
+                _residual(ds, co, "localidad", cl, "Q-R02-5",
+                          "localidad sin maestro" if not cand else "localidad ambigua")
+                continue
+            lk = cand[0]
+        if lk is not None:
+            reg = R.get(str(L[lk].get("region_id")))
+            if com is not None and (reg is None or _norm(com) != _norm(nom("public.regiones", reg))):
+                _residual(ds, co, "localidad", cl, "Q-R02-5", "comunidad incoherente con la localidad")
+                continue
+            pa = PA.get(str(reg.get("pais_id"))) if reg else None
+            if pais is not None and (pa is None or _norm(pais) != _norm(nom("public.paises", pa))):
+                _residual(ds, co, "localidad", cl, "Q-R02-5", "pais incoherente con la localidad")
+                continue
+        if lk is None and dire is None:  # solo comunidad/pais: sirven para validar, no se materializan
+            ds.ledger.append({"regla": "R02-Q5-SIN_LOCALIDAD", "origen": f"{co}/{cl}"})
+            res["proveedor_solo_region"] += 1
+            continue
+        did = fu.uuid_v3(co, cl, "direcciones", "direccion")
+        ds.add("direcciones", {"id": did, "owner_user_id": ds.owner,
+                               "localidad_id": fu.uuid_v3("public.localidades", lk, "localidades", "localidad") if lk else None,
+                               "codigo_postal": None, "via_tipo": None, "via_nombre": None, "numero": None, "bloque": None,
+                               "escalera": None, "planta": None, "puerta": None, "observaciones": dire})
+        ds.mapear(co, cl, "direcciones", did, "direccion", tipo="DIVIDIDO")
+        xid = fu.uuid_v3(co, cl, "tercero_direcciones", DIRECCION_PROVEEDOR_TIPO.lower())
+        ds.add("tercero_direcciones", {"id": xid, "tercero_id": tid, "direccion_id": did,
+                                       "tipo": DIRECCION_PROVEEDOR_TIPO, "principal": True})
+        ds.mapear(co, cl, "tercero_direcciones", xid, "direccion_comercial", tipo="DIVIDIDO")
+        res["direcciones_proveedor"] += 1
+
+
+def omisiones_v3(ds: Dataset, fuente: dict, ctx: dict, res: dict) -> None:
+    for co in ("public.gastos", "public.ingresos"):
+        for cl, f in sorted(fuente.get(co, {}).items()):
+            fecha = _texto(_celda(co, "ultimo_omitido_on", f, ctx))
+            n = _dec_c(co, "omitido_count", f, ctx)
+            if fecha is None and not n:
+                continue
+            ds.ledger.append({"regla": "R02-Q7-OMISION", "origen": f"{co}/{cl}", "ultimo_omitido_on": fecha,
+                              "omitido_count": None if n is None else str(n)})
+            res["omisiones_ledger"] += 1
+
+
 def _tolerancia_formula(litros: Decimal, precio: Decimal) -> Decimal:
     """V3 calculaba el tercer valor y redondeaba/truncaba a la precision mostrada: el error admisible es una unidad
     del ultimo decimal de cada factor ponderada por el otro (nunca un umbral absoluto inventado)."""
@@ -3348,7 +3510,12 @@ def dominio_12_r02_complementos(ds: Dataset, fuente: dict, ctx: dict) -> dict:
     idx = _hechos_de_origen(ds)
     res = {"rango_pago": 0, "etiquetas": 0, "hecho_etiquetas": 0, "tienda_notas": 0, "referencias_verificadas": 0,
            "hecho_magnitudes": 0, "precio_litro_verificado": 0, "cero_desconocido": 0,
-           "desconocido_decidido": 0, "correcciones": 0, "compra_notas": 0}
+           "desconocido_decidido": 0, "correcciones": 0, "compra_notas": 0, "cuotas_capital": 0,
+           "cuotas_intereses": 0, "cuota_capital_total": Decimal(0), "cuota_intereses_total": Decimal(0),
+           "direcciones_proveedor": 0, "proveedor_solo_region": 0, "omisiones_ledger": 0}
+    cuotas_pagadas(ds, fuente, ctx, res)
+    direcciones_proveedores(ds, fuente, ctx, res)
+    omisiones_v3(ds, fuente, ctx, res)
     # Q-R02-6
     co = "public.prestamo"
     for cl, f in sorted(fuente.get(co, {}).items()):
@@ -3528,6 +3695,12 @@ DISPOSICION_CAMPOS = {
         ("public.tipo_ingreso", "rama_id"), ("public.tipo_ramas_gasto", "nombre"), ("public.tipo_ramas_ingreso", "nombre"),
         ("public.tipo_segmentos_gasto", "nombre"), ("public.inversion", "tipo_gasto_id"))},
     ("public.gastos", "pagado"): "ESTADO_CICLO_V3: estado del ciclo mensual, no hecho (Migration V3 §4)",
+    # v0.29.0 Q-R02-7 (propietario 2026-09-22): estado de UX / ciclo mensual; la omision no es hecho financiero
+    **{(c, "kpi"): "ESTADO_UX_V3: marca de seguimiento en la UX V3, sin efecto financiero (Q-R02-7)"
+       for c in ("public.gastos", "public.ingresos")},
+    **{(c, "omitido_este_mes"): "ESTADO_CICLO_V3: estado del ciclo mensual; se reinicia cada mes (Q-R02-7)"
+       for c in ("public.gastos", "public.ingresos")},
+    ("public.ingresos", "cobrado"): "ESTADO_CICLO_V3: estado del ciclo mensual, no hecho (Q-R02-7; analogia MV3 §4)",
     ("public.gastos_cotidianos", "pagado"): "ESTADO_UX_V3: legado UX, no deuda ni estado financiero (Migration V3 §5)",
     ("public.gastos_cotidianos", "cuenta_id"): "SOLO_ORIGEN_CANON: no prueba movimiento bancario (Migration V3 §18)",
     ("public.users", "password"): "SECRETO: no se migra al dominio (Migration V3 §24)",
@@ -3548,14 +3721,9 @@ DISPOSICION_CAMPOS = {
     ("public.proveedores", "acepta_urgencias"): "DIFERIDO: modulo operativo de alquileres/incidencias (Migration V3 §25)",
 }
 # Campos con valor sin destino ni regla canonica: decision del propietario/arquitectura (S20).
-CAMPOS_PENDIENTES = {
-    ("public.prestamo_cuota", "fecha_pago"): "Q-R02-1", ("public.prestamo_cuota", "gasto_id"): "Q-R02-1",
-    # v0.27.0: Q-R02-2/3/6 y tienda/referencia de Q-R02-4 tienen destino (dominio_12_r02_complementos);
-    # lo que no se materializa queda como residual por fila (r02_residuales), nunca como CONSUMIDO.
-    **{("public.proveedores", c): "Q-R02-5" for c in ("localidad", "localidad_id", "comunidad", "pais", "direccion")},
-    **{(c, col): "Q-R02-7" for c in ("public.gastos", "public.ingresos")
-       for col in ("kpi", "omitido_count", "omitido_este_mes", "ultimo_omitido_on")},
-    ("public.ingresos", "cobrado"): "Q-R02-7",
+CAMPOS_PENDIENTES: dict = {
+    # v0.29.0: todas las preguntas Q-R02 tienen respuesta (1..7). Lo no materializable de una fila concreta queda
+    # como residual por fila (r02_residuales, PENDIENTE_S20), nunca como CONSUMIDO.
 }
 
 
@@ -3576,6 +3744,11 @@ def r02_disposicion_campos(ds: Dataset, fuente: dict, leidos: set) -> dict:
                 if (c, col) not in leidos:
                     raise ErrorP5("S4_VERIFICACION_NO_EJECUTADA", f"{c}.{col}")
                 clases["CONTROL_DERIVADO_VERIFICADO"] = clases.get("CONTROL_DERIVADO_VERIFICADO", 0) + 1
+                continue
+            if (c, col) in CAMPOS_LEDGER:
+                if (c, col) not in leidos:
+                    raise ErrorP5("S4_LEDGER_NO_EJECUTADO", f"{c}.{col}")
+                clases["SOLO_ORIGEN_Y_LEDGER"] = clases.get("SOLO_ORIGEN_Y_LEDGER", 0) + 1
                 continue
             if (c, col) in leidos:
                 clases["CONSUMIDO"] = clases.get("CONSUMIDO", 0) + 1
