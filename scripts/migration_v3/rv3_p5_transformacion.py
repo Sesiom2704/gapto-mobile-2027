@@ -15,6 +15,15 @@
 #                8 financiaciones (PARCIAL v0.5.0: 4 prestamos formales con condiciones
 #                  versionadas, calendario, financiador y garantia; 7 compras financiadas;
 #                  derechos/obligaciones pendientes)
+#   v0.36.0: mandato correctivo 2026-09-22 (B0 + S1/G5). B0: la contraparte de FIANZA CON-MARINA-240901 es
+#           Francisco Moreno desde el origen (decision del propietario; la regla D10-I 'inquilino principal' daba
+#           Marina) -> FIANZA_CONTRAPARTE_DECIDIDA (D10-K), unico cambio material sobre B0. S1 (solo se activan
+#           si sus filas origen existen): contrato recreado V3 (CON-08D54D30C8) fusionado en el contrato real
+#           CON-MARINA-240901 (cancelacion V3 = artificio tecnico, D10-L; principalidad de los cotitulares segun el
+#           registro recreado, D10-M; renta versionada 550 -> 561 en una sola regla, D5-S1R); clasificaciones por
+#           registro de las altas S1 (CLASIFICACION_REGISTRO_S1); derecho DER-LUZ-08 cobrado sin factura generadora
+#           en S1 (DERECHOS_S1, contraparte Francisco); decisiones sobre filas B0 ausentes en S1 ->
+#           NO_APLICA_S1_FILA_AUSENTE (G1). transformar() admite ausentes_s1.
 #   v0.35.0: Q-R02-5: localidad de los 10 residuales declarada por el propietario (2026-09-22): 6 -> MADRID (localidad
 #           y region nuevas, ausentes del maestro V3, trazadas FUSIONADO a las filas que las declaran); ITV -> AGUILAS;
 #           Loteria y Saba -> MURCIA; Cueva del Diablo -> ALCALA DE JUCAR. Literales V3 incoherentes en ledger.
@@ -150,7 +159,7 @@
 #   RV3_IMPORT (rol login no superusuario -> gapto_migrator -> gapto_owner),
 #   fuerza los diferidos con SET CONSTRAINTS ALL IMMEDIATE y hace ROLLBACK.
 #   No es P6 (P6 hace COMMIT real).
-# Versión: 0.35.0
+# Versión: 0.36.0
 # ============================================================
 from __future__ import annotations
 
@@ -166,7 +175,7 @@ from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
-VERSION = "0.35.0"
+VERSION = "0.36.0"
 TRANSFORMACION = "RV3_P5"
 _AQUI = Path(__file__).resolve().parent
 
@@ -394,6 +403,20 @@ LEDGER_REGLAS = {
     "D10-I": "fianza V3 > 0 -> OBLIGACION_PAGO abierta (S20 R4-3): importe y saldo al corte = fianza; "
               "contraparte = inquilino principal V3 del contrato; participacion 100 % propietario desde el inicio "
               "del contrato (criterio S20 R2-7); los desperfectos futuros se registraran como hechos.",
+    "D10-L": "registro V3 recreado por el cambio de renta (mandato 2026-09-22, decision B): la cancelacion V3 del "
+             "original es un artificio tecnico (el contrato sigue vigente, estado segun el recreado); el recreado, su "
+             "fianza, su revision y sus participantes se FUSIONAN en el contrato real; su fecha_fin no se aplica "
+             "(literal en origen).",
+    "D10-M": "cotitulares de un contrato recreado: principal segun el registro recreado (decision A: ambos al mismo "
+             "nivel, principal=false no significa secundario; 0330 solo admite un principal por rol).",
+    "D10-N": "contraparte de la fianza decidida por el propietario desde el origen del contrato (Allende: Francisco "
+             "Moreno); prevalece sobre la regla del inquilino principal y se valida que sea inquilino.",
+    "D5-S1R": "renta de contrato recreado: una sola regla con version siguiente desde el alta del recreado; la version "
+            "anterior termina el dia previo (contiguas; si no -> S9). Sin segunda regla ni ingreso duplicado.",
+    "D8B-S1": "derecho S1 cobrado antes del corte sin factura generadora en la fuente (caso A: el inquilino paga antes "
+              "del cargo); su importe se suma al canon de transitorias como control declarado.",
+    "NO_APLICA_S1_FILA_AUSENTE": "decision B0 sobre una fila legitimamente ausente en S1 (G1): no se ejecuta contra S1, "
+                                 "se conserva y queda trazada contra B0.",
     "D10-J": "fila de participante duplicada por captura (S20 R4-2): no se crea; su origen se FUSIONA en la "
               "superviviente, que cubre desde el inicio del contrato. Corrige Migration V3 §27 (ambas vigencias).",
     "D10-K": "servicio repercutible decidido (S20 R4-4): entidad SERVICIO + contrato_servicios repercutible "
@@ -845,6 +868,18 @@ def _cat_por_ruta(ds: Dataset, ruta_norm: str) -> str:
     raise ErrorP5("S1_CATEGORIA_NO_CANONICA", ruta_norm)
 
 
+# Mandato 2026-09-22 (C/D/E): categoria de altas S1 de tipo POR_REGISTRO. Solo actua si la fila existe (S1).
+CLASIFICACION_REGISTRO_S1 = {
+    "public.gastos/gasto-81srs1": "VIVIENDA Y HOGAR > Suministros > Electricidad",       # LUZ FUEN17 - 8/26
+    "public.gastos/gasto-f7i6dm": "OCIO Y CULTURA > Videojuegos",                         # CONSOLA RETRO
+    "public.gastos/gasto-pty1ta": "COMUNICACIONES Y DIGITAL > Software y servicios digitales",  # CLAUDE
+}
+
+
+def _norm_ruta(ruta: str) -> str:
+    return " > ".join(_norm(x.strip()) for x in ruta.split(">"))
+
+
 def clasificar(ds: Dataset, co: str, cl: str, fila: dict) -> tuple:
     """-> ('CAT', id) | ('NULL', None) | ('FUERA', naturaleza) | ('DESGLOSE', [(id, Decimal)])."""
     regs = (ds.decisiones.doc.get("clasificacion") or {}).get("registros", {}) if ds.decisiones else {}
@@ -852,6 +887,8 @@ def clasificar(ds: Dataset, co: str, cl: str, fila: dict) -> tuple:
     tipo = CATEGORIA_POR_TIPO_V3.get(str(fila.get("tipo_id")))
     if tipo is None:
         raise ErrorP5("S4_TIPO_SIN_CLASIFICACION", f"{clave} tipo={fila.get('tipo_id')}")
+    if clave not in regs and clave in CLASIFICACION_REGISTRO_S1:  # altas S1 (mandato 2026-09-22, C/D/E)
+        return ("CAT", _cat_por_ruta(ds, _norm_ruta(CLASIFICACION_REGISTRO_S1[clave])))
     if clave in regs:
         v = regs[clave]
         if v is None:
@@ -876,6 +913,9 @@ def verificar_clasificacion(ds: Dataset, fuente: dict) -> dict:
     for clave in regs:
         co, cl = clave.split("/", 1)
         if cl not in fuente.get(co, {}):
+            if clave in getattr(ds, "ausentes_s1", ()):  # G1: decision B0 conservada, no se ejecuta contra S1
+                ds.ledger.append({"regla": "NO_APLICA_S1_FILA_AUSENTE", "origen": clave, "decision": "clasificacion"})
+                continue  # su disposicion fisica se registra en el mapeo IGNORADO del item de decision
             raise ErrorP5("S8_CLASIFICACION_SIN_ORIGEN", clave)
     cuenta = {}
     for co in CONTENEDORES_OPERATIVOS:
@@ -1702,8 +1742,18 @@ DERECHOS_V3 = [
     {"id": "DER-ISA-ENTRADA", "genera": None, "evidencia": [(_I, "INGRESO-WPIL1Z")], "modo": "INDETERMINADA"},
 ]
 CANON_TRANSITORIAS = (7, Decimal("330.11"))
+# Mandato 2026-09-22 (F): LUZ ALLEN 8/26 cobrada por Francisco antes del corte; la factura generadora aun no existe
+# en S1 (caso A: el inquilino paga antes del cargo) -> derecho sin hecho generador, liquidado por su cobro. Solo
+# se activa si su evidencia existe (S1). Su importe entra en el canon de transitorias como control declarado.
+DERECHOS_S1 = [
+    {"id": "DER-LUZ-08", "genera": None, "evidencia": [(_I, "INGRESO-TEZTS7")], "modo": "TRANSITORIA"},
+]
+
+
+def derechos_activos(fuente: dict) -> list:
+    return DERECHOS_V3 + [d for d in DERECHOS_S1 if all(k in fuente.get(c, {}) for c, k in d["evidencia"])]
 # S20 R3-4: la luz de Allende la paga el inquilino Francisco (persona V3), validado contra el contrato.
-CONTRAPARTE_V3_DECIDIDA = {f"DER-LUZ-0{n}": ("public.personas", "PER-8C62EC5126") for n in range(3, 8)}
+CONTRAPARTE_V3_DECIDIDA = {f"DER-LUZ-0{n}": ("public.personas", "PER-8C62EC5126") for n in range(3, 9)}  # 8: S1
 PARTICIPACION_DERECHO_SELF = True  # S20 R2-7 (2026-09-21)
 CANON_UNIVERSIDAD = Decimal("1352.00")
 
@@ -1759,7 +1809,13 @@ def _validar_inquilino(fuente, ctx, co, cl, persona, did) -> None:
 
 def dominio_8b_derechos(ds: Dataset, fuente: dict, ctx: dict) -> None:
     trans_n, trans_total = 0, Decimal(0)
-    for d in DERECHOS_V3:
+    activos = derechos_activos(fuente)
+    canon_n, canon_total = CANON_TRANSITORIAS
+    for d in activos:
+        if d in DERECHOS_S1 and d["modo"] == "TRANSITORIA":  # control declarado de las transitorias S1
+            canon_n, canon_total = canon_n + 1, canon_total + _importe_v3(fuente, ctx, *d["evidencia"][0])
+            ds.ledger.append({"regla": "D8B-S1", "origen": "/".join(d["evidencia"][0]), "derecho": d["id"]})
+    for d in activos:
         origenes = ([d["genera"]] if d["genera"] else []) + d["evidencia"]
         co, cl = origenes[0]
         if cl not in fuente.get(co, {}):
@@ -1839,7 +1895,7 @@ def dominio_8b_derechos(ds: Dataset, fuente: dict, ctx: dict) -> None:
                  "INDETERMINADA": "D8B-D"}[modo]
         for r in ("D8B-A", regla, "D8B-E") if regla != "D8B-A" else ("D8B-A", "D8B-E"):
             ds.ledger.append({"regla": r, "origen": f"{co}/{cl}", "derecho": d["id"]})
-    if (trans_n, trans_total) != CANON_TRANSITORIAS:
+    if (trans_n, trans_total) != (canon_n, canon_total):
         raise ErrorP5("S9_TRANSITORIAS_CANON", f"{trans_n} / {trans_total}")
 
 
@@ -1966,6 +2022,42 @@ SERVICIOS_REPERCUTIDOS = {
                            "actor": ("public.personas", "PER-8C62EC5126"), "porcentaje": Decimal(100)}],
 }
 ROL_PARTICIPANTE_V3 = {"inquilino": "INQUILINO", "avalista": "AVALISTA", "gestor": "GESTOR"}
+# Mandato correctivo 2026-09-22 (§6): la fianza de Allende es de Francisco Moreno desde el origen del contrato.
+# Prevalece sobre la regla D10-I (inquilino principal); se valida que sea inquilino del contrato.
+FIANZA_CONTRAPARTE_DECIDIDA = {"CON-MARINA-240901": ("public.personas", "PER-8C62EC5126")}
+# Mandato 2026-09-22 (§3-§5, decision B): registro V3 recreado por la limitacion de V3 al cambiar la renta. No es
+# un contrato economico: se FUSIONA en el contrato real. Solo actua si el recreado existe (S1).
+CONTRATO_RECREADO_V3 = {"CON-08D54D30C8": {"original": "CON-MARINA-240901",
+                                           "ingreso_original": "INGRESO-X02C1W",
+                                           "ingreso_recreado": "INGRESO-8C6EZJ"}}
+
+
+def recreaciones_activas(fuente: dict) -> dict:
+    """recreado -> spec, solo si recreado y original existen; la fusion debe ser determinista (si no, S9)."""
+    cc, cpt = "public.contratos", "public.contratos_participantes"
+    out = {}
+    for rk, spec in CONTRATO_RECREADO_V3.items():
+        C = fuente.get(cc, {})
+        if rk not in C:
+            continue
+        ok = spec["original"]
+        if ok not in C:
+            raise ErrorP5("S9_RECREACION_SIN_ORIGINAL", f"{rk} -> {ok}")
+        o, r = C[ok], C[rk]
+        inq = lambda ck: sorted(str(p.get("persona_id")) for p in fuente.get(cpt, {}).values()
+                                if str(p.get("contrato_id")) == ck and str(p.get("rol")).lower() == "inquilino")
+        prueba = {
+            "vivienda": str(o.get("patrimonio_id")) == str(r.get("patrimonio_id")),
+            "inquilinos": inq(ok) == inq(rk) and bool(inq(rk)),
+            "fianza": Decimal(str(o.get("fianza"))) == Decimal(str(r.get("fianza"))),
+            "objeto": str(o.get("objeto_alquiler")) == str(r.get("objeto_alquiler")),
+            "baja_alta_mismo_dia": str(o.get("estado")) == "cancelado"
+            and str(o.get("inactivatedon"))[:10] == str(r.get("fecha_inicio"))[:10] == str(r.get("createon"))[:10],
+        }
+        if not all(prueba.values()):
+            raise ErrorP5("S9_RECREACION_NO_DETERMINISTA", f"{rk} -> {ok}: {prueba}")
+        out[rk] = spec
+    return out
 
 
 def _dia(ts: str, delta: int = 0) -> str:
@@ -1977,7 +2069,11 @@ def dominio_10_contratos(ds: Dataset, fuente: dict, ctx: dict) -> None:
     cc, cpt = "public.contratos", "public.contratos_participantes"
     persona_propia = {m["registro_origen_id"] for m in ds.filas["mapeos_importacion"].values()
                       if m["tabla_destino"] == "usuarios" and m["tipo_mapping"] == "VINCULADO"}
+    recreados = recreaciones_activas(fuente)
+    recreado_de = {spec["original"]: rk for rk, spec in recreados.items()}
     for ck, c in sorted(fuente.get(cc, {}).items()):
+        if ck in recreados:
+            continue  # se fusiona tras dar de alta su contrato original
         g = lambda col: _celda(cc, col, c, ctx)
         v = lambda col: g(col).valor if g(col).estado == fu.CONOCIDO else None
         origen = f"{cc}/{ck}"
@@ -1986,6 +2082,11 @@ def dominio_10_contratos(ds: Dataset, fuente: dict, ctx: dict) -> None:
             raise ErrorP5("S8_HUERFANO", f"{origen} patrimonio_id")
         tipo = TIPO_CONTRATO_V3.get(str(v("objeto_alquiler")))
         est = ESTADO_CONTRATO_V3.get(str(v("estado")))
+        rk = recreado_de.get(ck)
+        if rk is not None:  # D10-L: la cancelacion V3 del original es un artificio tecnico de la recreacion
+            est = ESTADO_CONTRATO_V3.get(str(fuente[cc][rk].get("estado")))
+            ds.ledger.append({"regla": "D10-L", "origen": origen, "recreado": f"{cc}/{rk}",
+                              "literal_v3": {"estado": v("estado"), "inactivatedon": str(v("inactivatedon"))}})
         if tipo is None or est is None:
             raise ErrorP5("S4_CONTRATO_SIN_MAPPING", f"{origen} objeto={v('objeto_alquiler')} estado={v('estado')}")
         inicio = FECHA_INICIO_CONTRATO_VALIDADA.get(ck, v("fecha_inicio"))
@@ -2044,8 +2145,16 @@ def dominio_10_contratos(ds: Dataset, fuente: dict, ctx: dict) -> None:
                 raise ErrorP5("S9_VIGENCIA_PARTICIPANTE", f"{cpt}/{k}")
             prid = fu.uuid_v3(cpt, k, "contrato_participantes", "participante")
             es_p = _celda(cpt, "es_principal", p, ctx)
+            principal = bool(es_p.valor) if es_p.estado == fu.CONOCIDO else False
+            if rk is not None:  # D10-M: cotitulares al mismo nivel segun el registro recreado (decision A)
+                gemelo = [q for q in fuente.get(cpt, {}).values() if str(q.get("contrato_id")) == rk
+                          and (str(q.get("persona_id")), str(q.get("rol"))) == (per, rolv)]
+                if gemelo:
+                    principal = gemelo[0].get("es_principal") is True
+                    ds.ledger.append({"regla": "D10-M", "origen": f"{cpt}/{k}", "principal_v3_original": es_p.valor,
+                                      "principal": principal})
             ds.add("contrato_participantes", {"id": prid, "contrato_entidad_id": eid, "actor_id": actor, "rol": rol,
-                                              "principal": bool(es_p.valor) if es_p.estado == fu.CONOCIDO else False,
+                                              "principal": principal,
                                               "vigente_desde": desde, "vigente_hasta": hasta})
             ds.mapear(cpt, k, "contrato_participantes", prid, "participante")
             ds.ledger.append({"regla": "D10-D", "origen": f"{cpt}/{k}"})
@@ -2053,7 +2162,14 @@ def dominio_10_contratos(ds: Dataset, fuente: dict, ctx: dict) -> None:
                        if str(p.get("rol")).lower() == "inquilino" and _celda(cpt, "es_principal", p, ctx).valor is True]
         fz = v("fianza")
         if FIANZA_COMO_OBLIGACION and fz is not None and Decimal(str(fz)) > 0:
-            if len(principales) != 1:
+            if ck in FIANZA_CONTRAPARTE_DECIDIDA:  # D10-N: contraparte decidida desde el origen del contrato
+                _po, pk = FIANZA_CONTRAPARTE_DECIDIDA[ck]
+                if not any(str(p.get("persona_id")) == pk and str(p.get("rol")).lower() == "inquilino"
+                           for p in parts.values()):
+                    raise ErrorP5("S1_FIANZA_CONTRAPARTE_NO_INQUILINO", f"{origen} {pk}")
+                principales = [pk]
+                ds.ledger.append({"regla": "D10-N", "origen": origen, "contraparte": pk})
+            elif len(principales) != 1:
                 raise ErrorP5("S20_CONTRAPARTE_FIANZA", f"{origen} inquilinos principales={len(principales)}")
             oid = fu.uuid_v3(cc, ck, "entidades", "fianza")
             ds.add("entidades", {"id": oid, "owner_user_id": ds.owner, "tipo_entidad": "DERECHO_OBLIGACION",
@@ -2089,6 +2205,36 @@ def dominio_10_contratos(ds: Dataset, fuente: dict, ctx: dict) -> None:
                 ds.mapear(cc, ck, t_, i_, f"servicio.{srv['clave']}", tipo="DIVIDIDO", confianza="VALIDADA",
                           notas="servicio repercutible decidido por el propietario (S20 R4-4)")
             ds.ledger.append({"regla": "D10-K", "origen": origen})
+    for rk, spec in sorted(recreados.items()):  # D10-L: el registro recreado se fusiona en el contrato real
+        ok, r = spec["original"], fuente[cc][rk]
+        eid = fu.uuid_v3(cc, ok, "entidades", "contrato")
+        if eid not in ds.filas["contratos"]:
+            raise ErrorP5("S8_HUERFANO", f"{cc}/{ok} (original de {rk})")
+        notas = "registro V3 recreado por el cambio de renta; mismo contrato real (mandato 2026-09-22, decision B)"
+        for t_ in ("entidades", "contratos"):
+            ds.mapear(cc, rk, t_, eid, "contrato", tipo="FUSIONADO", confianza="VALIDADA", notas=notas)
+        fz = r.get("fianza")
+        if fz is not None and Decimal(str(fz)) > 0:
+            oid = fu.uuid_v3(cc, ok, "entidades", "fianza")
+            if oid not in ds.filas["derechos_obligaciones_financieras"]:
+                raise ErrorP5("S8_HUERFANO", f"fianza de {ok}")
+            ds.mapear(cc, rk, "derechos_obligaciones_financieras", oid, "fianza", tipo="FUSIONADO",
+                      confianza="VALIDADA", notas="misma fianza de 550: no hay segundo deposito")
+        rev = fu.uuid_v3(cc, ok, "contrato_revision_renta_versiones", "v1")
+        if r.get("incremento_ipc") is not None and rev in ds.filas["contrato_revision_renta_versiones"]:
+            ds.mapear(cc, rk, "contrato_revision_renta_versiones", rev, "revision_v1", tipo="FUSIONADO",
+                      confianza="VALIDADA")
+        for pk_, q in sorted(fuente.get(cpt, {}).items()):
+            if str(q.get("contrato_id")) != rk:
+                continue
+            gem = [k for k, p in fuente.get(cpt, {}).items() if str(p.get("contrato_id")) == ok
+                   and (str(p.get("persona_id")), str(p.get("rol"))) == (str(q.get("persona_id")), str(q.get("rol")))]
+            if len(gem) != 1:
+                raise ErrorP5("S9_RECREACION_PARTICIPANTE_SIN_GEMELO", f"{cpt}/{pk_}")
+            ds.mapear(cpt, pk_, "contrato_participantes", fu.uuid_v3(cpt, gem[0], "contrato_participantes", "participante"),
+                      "participante", tipo="FUSIONADO", confianza="VALIDADA", notas=notas)
+        ds.ledger.append({"regla": "D10-L", "origen": f"{cc}/{rk}", "original": f"{cc}/{ok}",
+                          "fecha_fin_v3_no_aplicada": str(r.get("fecha_fin"))})
     ds.ledger.append({"regla": "D10-G", "origen": "contextos"})
 
     cv = "public.patrimonio_compra"
@@ -2422,7 +2568,11 @@ def dominio_5_reglas(ds: Dataset, fuente: dict, ctx: dict) -> dict:
             c = _celda(I, "contrato_alquiler", f, ctx)
             if c.estado == fu.CONOCIDO and _texto(c):
                 rentas.setdefault(_texto(c), []).append((cl, f))
+    recreados = recreaciones_activas(fuente)
+    recreado_de = {spec["original"]: rk for rk, spec in recreados.items()}
     for ck, ct in sorted(fuente.get(C, {}).items()):
+        if ck in recreados:
+            continue  # su renta es la version siguiente de la regla del contrato original (D5-S1R)
         ren = _celda(C, "renta_mensual", ct, ctx)
         if ren.estado != fu.CONOCIDO or ren.valor is None:
             continue
@@ -2444,10 +2594,33 @@ def dominio_5_reglas(ds: Dataset, fuente: dict, ctx: dict) -> dict:
         rid = fu.uuid_v3(C, ck, "reglas_financieras", "renta")
         ini_i = _d(_celda(I, "fecha_inicio", fi, ctx))
         led = ["D5-A", "D5-L", "D5-D", "D5-G"] + notas + (["D10-B"] if ini_i != con["fecha_inicio"] else [])
-        _alta_regla(ds, rid, _texto(_celda(I, "concepto", fi, ctx)), eid, [(C, ck), (I, kl)],
-                    [([(I, kl), (C, ck)], "renta.v1", v)], led)
+        origs, vers = [(C, ck), (I, kl)], [([(I, kl), (C, ck)], "renta.v1", v)]
+        rk = recreado_de.get(ck)
+        if rk is not None:  # D5-S1R: el cambio de renta es una nueva version de la misma regla, no otra regla
+            spec, ctr = recreados[rk], fuente[C][rk]
+            f2 = rentas.pop(rk, [])
+            if kl != spec["ingreso_original"] or len(f2) != 1 or f2[0][0] != spec["ingreso_recreado"]:
+                raise ErrorP5("S9_RECREACION_RENTA_NO_DETERMINISTA", f"{C}/{rk} filas={[x[0] for x in f2]}")
+            kl2, fi2 = f2[0]
+            try:
+                v2, notas2 = _version(ds, I, kl2, fi2, ctx, "INGRESO", desde=str(ctr.get("fecha_inicio"))[:10])
+            except PendienteD5 as p:
+                pendiente(I, kl2, p)
+                continue
+            ren2 = Decimal(str(_celda(C, "renta_mensual", ctr, ctx).valor))
+            if v2["importe_fijo"] != ren2 or v2["periodicidad"] != "MENSUAL" or v2["intervalo"] != 1:
+                raise ErrorP5("S9_RENTA_INCOMPATIBLE", f"{C}/{rk} ingreso={v2['importe_fijo']} renta={ren2}")
+            if v["vigente_hasta"] != _dia(v2["vigente_desde"], -1):
+                raise ErrorP5("S9_RENTA_VERSIONES_NO_CONTIGUAS", f"{C}/{ck} {v['vigente_hasta']} / {v2['vigente_desde']}")
+            origs += [(C, rk), (I, kl2)]
+            vers.append(([(I, kl2), (C, rk)], "renta.v2", v2))
+            led = led + ["D5-S1R"] + notas2
+            hechos.add((I, kl2))
+            ds.ledger.append({"regla": "D5-S1R", "origen": f"{I}/{kl2}", "regla_de": f"{C}/{ck}",
+                              "v1_hasta": v["vigente_hasta"], "v2_desde": v2["vigente_desde"]})
+        _alta_regla(ds, rid, _texto(_celda(I, "concepto", fi, ctx)), eid, origs, vers, led)
         con["regla_renta_id"] = rid
-        disp["FUSIONADA"].append((f"{I}/{kl}+{C}/{ck}", rid))
+        disp["FUSIONADA"].append(("+".join(f"{a}/{b}" for a, b in origs), rid))
         hechos.add((I, kl))
     if rentas:
         raise ErrorP5("S8_CONTRATO_AUSENTE", str(sorted(rentas)))
@@ -2591,7 +2764,7 @@ DEVOLUCION_DECIDIDA = {("public.ingresos", "INGRESO-5SRKF6"): ("public.gastos", 
                        ("public.ingresos", "INGRESO-6AMJ79"): None}
 GASTO_CORREGIDO_V3 = {("public.ingresos", "INGRESO-SIJREF")}  # Migration V3 §23: ventiladores = gasto de 85 EUR
 # Respuesta 3 (2026-09-21): la luz de Allende la soporta 100 % el inquilino (contraparte del derecho).
-ATRIBUCION_CONTRAPARTE_100 = {f"DER-LUZ-0{n}" for n in range(3, 8)}
+ATRIBUCION_CONTRAPARTE_100 = {f"DER-LUZ-0{n}" for n in range(3, 9)}  # 8: S1 (sin gasto generador aun)
 # Sin decision: gasto adelantado parcialmente reembolsado (Canela, tarta Ana) -> pendiente de fila.
 ATRIBUCION_DERECHO_PENDIENTE = {"DER-CANELA"}
 # Respuesta 1 (2026-09-21): ticket pagado entero y compartido; la parte del otro participante es el importe del
@@ -2770,7 +2943,7 @@ def _filas_dominio_6(ds: Dataset, fuente: dict) -> list:
 def dominio_6_hechos(ds: Dataset, fuente: dict, ctx: dict) -> dict:
     filas = _filas_dominio_6(ds, fuente)
     derecho_de = {}  # (co, cl) -> (id derecho, rol 'genera'|'cobro')
-    for d in DERECHOS_V3:
+    for d in derechos_activos(fuente):
         origenes = ([d["genera"]] if d["genera"] else []) + d["evidencia"]
         eid = fu.uuid_v3(origenes[0][0], origenes[0][1], "entidades", "derecho")
         if eid not in ds.filas["derechos_obligaciones_financieras"]:
@@ -4033,7 +4206,7 @@ def _vincular_clasificacion(ds: Dataset) -> int:
 
 
 def transformar(b0: dict, sha_run06: str, modo_lab: bool = False,
-                decisiones: "Decisiones | None" = None) -> Dataset:
+                decisiones: "Decisiones | None" = None, ausentes_s1: frozenset = frozenset()) -> Dataset:
     fuente = fu.fuente_b0(b0)
     leidos: set = set()
     if DOMINIO_12_DISPOSICION_ACTIVO and DOMINIO_12_R02_ACTIVO:
@@ -4041,6 +4214,7 @@ def transformar(b0: dict, sha_run06: str, modo_lab: bool = False,
     ctx = fu.contexto_de(fuente)
     (cu,) = fuente["public.users"].keys()
     ds = Dataset(owner=owner_de(cu), modo_lab=modo_lab, decisiones=decisiones)
+    ds.ausentes_s1 = frozenset(ausentes_s1)  # G1: solo el escenario S1 lo informa
     dominio_12_trazabilidad(ds, b0, sha_run06)
     dominio_1(ds, fuente, ctx)
     dominio_2(ds, fuente, ctx)
@@ -4180,6 +4354,20 @@ def verificar_trazabilidad(ds: Dataset) -> None:
     sin = sorted(f"{ro[o]['contenedor_origen']}/{ro[o]['clave_origen']}" for o in origenes - con)
     en_decision = [k for k in sin if k.split("/", 1)[0] in ds.trazabilidad.get("contenedores_pendientes", ())]
     resto = [k for k in sin if k not in set(en_decision)]
+    if getattr(ds, "ausentes_s1", ()):  # G1: decision sobre una fila B0 legitimamente ausente en S1
+        ausentes, quedan = set(ds.ausentes_s1), []
+        for k in resto:
+            it = next((i for i in (ds.decisiones.doc.get("participaciones", []) if ds.decisiones else [])
+                       if f"{CONT_DECISIONES}/participacion/{i['id']}" == k), None)
+            if it is not None and it.get("origen") in ausentes:
+                ds.mapear(CONT_DECISIONES, f"participacion/{it['id']}", None, None, "no_aplica_s1",
+                          tipo="IGNORADO", confianza="VALIDADA",
+                          notas=f"NO_APLICA_S1_FILA_AUSENTE: {it['origen']} no existe en S1 (G1)")
+                ds.ledger.append({"regla": "NO_APLICA_S1_FILA_AUSENTE", "origen": it["origen"],
+                                  "decision": f"participacion/{it['id']}"})
+                continue
+            quedan.append(k)
+        resto = quedan
     if resto:
         raise ErrorP5("S8_ORIGEN_SIN_DISPOSICION", f"{len(resto)}: {', '.join(resto[:5])}")
     ds.trazabilidad.update({"R05_origenes": len(origenes), "R05_con_disposicion": len(origenes) - len(sin),

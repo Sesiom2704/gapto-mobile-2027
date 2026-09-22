@@ -16,6 +16,8 @@
 #   python scripts/mutantes/rv3_p5.py            # todos
 #   python scripts/mutantes/rv3_p5.py M30 M33    # subconjunto
 #
+# Version: 0.32.0 (M271: G1 sobre decisiones de participacion, P5 v0.36.0)
+# Version: 0.31.0 (M258..M270: P5 v0.36.0, fianza decidida y decisiones S1)
 # Version: 0.30.0 (M253..M257: P5 v0.35.0, localidad declarada Q-R02-5)
 # Version: 0.29.0 (M241..M252: P5 v0.34.0, D11-D LEGACY_V3 y SAA2 compra 100 % propia)
 # Version: 0.28.0 (M239..M240: P5 v0.33.0, contexto en traspaso y guarda S8)
@@ -76,6 +78,8 @@ T23 = "tests/migration/test_rv3_023_p5_r02_cuotas_direcciones_omisiones.py"
 T24 = "tests/migration/test_rv3_024_p5_vencimiento_fin_de_mes.py"
 T26 = "tests/migration/test_rv3_026_p5_etiqueta_capricho.py"
 T28 = "tests/migration/test_rv3_028_p5_legacy_v3_y_compra_100_propia.py"
+T32 = "tests/migration/test_rv3_032_p5_b0_s1_decisiones.py"
+T33 = "tests/migration/test_rv3_033_s1_suplementario.py"
 
 MUTANTES = {
     "M30": ("gate de la fuente suplementaria siempre abierto",
@@ -120,7 +124,7 @@ MUTANTES = {
             [('or cobros[0][1] >= FECHA_INICIO_LEDGER:', ':')],
             T10 + "::test_transitoria_cobrada_tras_el_corte_falla"),
     "M43": ("canon de transitorias no comprobado",
-            [('    if (trans_n, trans_total) != CANON_TRANSITORIAS:\n', '    if False:\n')],
+            [('    if (trans_n, trans_total) != (canon_n, canon_total):\n', '    if False:\n')],
             T10 + "::test_canon_de_transitorias"),
     "M44": ("principal de Universidad inventado desde los cobros",
             [('            sub.update(saldo_apertura=Decimal("0"), fecha_inicio_seguimiento=FECHA_INICIO_LEDGER,\n',
@@ -293,7 +297,7 @@ MUTANTES = {
             [("ISA_TIPOS_ADMITIDOS = {\"REEMBOLSO\", \"GENERACION_DERECHO_OBLIGACION\"}", "ISA_TIPOS_ADMITIDOS = {\"REEMBOLSO\", \"GENERACION_DERECHO_OBLIGACION\", \"INGRESO\"}")],
             T16 + "::test_isa_como_ingreso_rechazado"),
     "M97": ("renta duplicada (contrato + ingreso como dos reglas)",
-            [("        disp[\"FUSIONADA\"].append((f\"{I}/{kl}+{C}/{ck}\", rid))\n        hechos.add((I, kl))", "        disp[\"FUSIONADA\"].append((f\"{I}/{kl}+{C}/{ck}\", rid))")],
+            [("        disp[\"FUSIONADA\"].append((\"+\".join(f\"{a}/{b}\" for a, b in origs), rid))\n        hechos.add((I, kl))", "        disp[\"FUSIONADA\"].append((\"+\".join(f\"{a}/{b}\" for a, b in origs), rid))")],
             T16 + "::test_renta_n1_contrato_mas_ingreso"),
     "M98": ("regla_renta_id no completado",
             [("        con[\"regla_renta_id\"] = rid", "        pass")],
@@ -806,12 +810,56 @@ MUTANTES = {
     'M257': ('ledger sin literales V3',
              [('"v3": {"localidad": loc, "localidad_id": lid_v3, "comunidad": com, "pais": pais}', '"v3": None')],
              T23 + "::test_localidad_decidida_por_codigo_ignora_literal_incoherente"),
+    # --- v0.31.0: P5 v0.36.0 fianza decidida y decisiones S1
+    'M258': ('fianza decidida ignorada',
+             [('            if ck in FIANZA_CONTRAPARTE_DECIDIDA:  # D10-N', '            if False:  # D10-N')],
+             T32 + "::test_fianza_contraparte_decidida_desde_origen_y_no_marina"),
+    'M259': ('fianza decidida a no inquilino admitida',
+             [('                if not any(str(p.get("persona_id")) == pk and str(p.get("rol")).lower() == "inquilino"', '                if False and not any(str(p.get("persona_id")) == pk and str(p.get("rol")).lower() == "inquilino"')],
+             T32 + "::test_fianza_decidida_a_no_inquilino_falla"),
+    'M260': ('contrato recreado creado como segundo contrato',
+             [('        if ck in recreados:\n            continue  # se fusiona', '        if False:\n            continue  # se fusiona')],
+             T32 + "::test_un_solo_contrato_real_vigente_desde_2024"),
+    'M261': ('cancelacion V3 tomada como real',
+             [('            est = ESTADO_CONTRATO_V3.get(str(fuente[cc][rk].get("estado")))', '            est = est')],
+             T32 + "::test_un_solo_contrato_real_vigente_desde_2024"),
+    'M262': ('cotitular hereda el principal V3 original',
+             [('                    principal = gemelo[0].get("es_principal") is True', '                    principal = principal')],
+             T32 + "::test_cotitulares_mismo_nivel_y_participantes_originales_continuan"),
+    'M263': ('fusion no determinista admitida',
+             [('        if not all(prueba.values()):', '        if False:')],
+             T32 + "::test_fusion_no_determinista_falla"),
+    'M264': ('versiones de renta con hueco admitidas',
+             [('            if v["vigente_hasta"] != _dia(v2["vigente_desde"], -1):', '            if False:')],
+             T32 + "::test_renta_con_hueco_entre_versiones_falla"),
+    'M265': ('renta nueva sin version',
+             [('            vers.append(([(I, kl2), (C, rk)], "renta.v2", v2))', '            pass')],
+             T32 + "::test_renta_versionada_en_una_sola_regla"),
+    'M266': ('G1 ignorado',
+             [('            if clave in getattr(ds, "ausentes_s1", ()):', '            if False:')],
+             T32 + "::test_decision_sobre_fila_ausente_en_s1"),
+    'M267': ('clasificacion S1 ignorada',
+             [('    if clave not in regs and clave in CLASIFICACION_REGISTRO_S1:', '    if False:')],
+             T32 + "::test_clasificacion_por_registro_s1"),
+    'M268': ('derechos S1 nunca activos',
+             [('    return DERECHOS_V3 + [d for d in DERECHOS_S1 if all(k in fuente.get(c, {}) for c, k in d["evidencia"])]', '    return DERECHOS_V3')],
+             T32 + "::test_derecho_s1_cobrado_antes_del_cargo_sin_ingreso"),
+    'M269': ('derecho S1 fuera del canon',
+             [('            canon_n, canon_total = canon_n + 1, canon_total + _importe_v3(fuente, ctx, *d["evidencia"][0])', '            pass')],
+             T32 + "::test_derecho_s1_cobrado_antes_del_cargo_sin_ingreso"),
+    'M270': ('participante del recreado sin gemelo admitido',
+             [('            if len(gem) != 1:\n                raise ErrorP5("S9_RECREACION_PARTICIPANTE_SIN_GEMELO"', '            if False:\n                raise ErrorP5("S9_RECREACION_PARTICIPANTE_SIN_GEMELO"')],
+             T32 + "::test_participante_del_recreado_sin_gemelo_falla"),
+    # --- v0.32.0: G1 sobre decisiones de participacion
+    'M271': ('decision de participacion sobre fila ausente no se dispone (G1)',
+             [('            if it is not None and it.get("origen") in ausentes:', '            if False:')],
+             T33 + "::test_decision_de_participacion_sobre_fila_ausente_queda_ignorada"),
 }
 
 
 def _copia() -> Path:
     d = Path(tempfile.mkdtemp(prefix="rv3mut_"))
-    for sub in ("scripts/migration_v3", "tests/migration"):
+    for sub in ("scripts/migration_v3", "scripts/postgres", "tests/migration"):  # postgres: huellas D-111 (P7)
         shutil.copytree(RAIZ / sub, d / sub, ignore=shutil.ignore_patterns("__pycache__"))
     return d
 
