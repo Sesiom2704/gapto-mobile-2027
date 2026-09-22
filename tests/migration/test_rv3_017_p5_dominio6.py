@@ -14,7 +14,8 @@
 #   0.4.0: ticket compartido (D6-Z), P5 v0.21.0.
 #   0.4.1: la tabla de movimientos existe desde el dominio 7; se afirma que el dominio 6 no genera filas.
 #   0.4.2: el helper de participaciones retira tambien los mapeos de las filas que borra (P5 v0.25.0).
-# Versión: 0.4.2
+#   0.5.0: invitado con importe V3 = total -> atribucion propia 0 (D6-INV, P5 v0.26.0).
+# Versión: 0.5.0
 # ============================================================
 from __future__ import annotations
 
@@ -146,6 +147,17 @@ def test_invitado_conserva_total_y_parte_personal_cero_sin_actor_ficticio():
     (e,) = _efectos(ds, h)
     assert (e["importe_delta"], e["estado_atribucion"]) == (Decimal("30"), "PARCIAL")
     assert [(a["actor_id"], a["importe_atribuido"]) for a in _atribs(ds, e)] == [(ds.self_id, Decimal("0"))]
+
+
+@pytest.mark.parametrize("importe", [30, 12])
+def test_invitado_con_importe_v3_distinto_de_cero_atribucion_propia_cero(importe):
+    # 0.5.0 (P5 v0.26.0, D6-INV): en B0 63/67 invitados guardan importe = total; el canon (MV3 §27) fija
+    # atribucion personal explicita 0 para tipo_pago=2, cualquiera que sea el importe V3.
+    ds = _t([_c("CI", tipo_pago=2, importe=importe, importe_total=30, cantidad=3)])
+    (e,) = _efectos(ds, _hecho(ds, GC, "CI"))
+    assert (e["importe_delta"], e["estado_atribucion"]) == (Decimal("30"), "PARCIAL")
+    assert [(a["actor_id"], a["importe_atribuido"]) for a in _atribs(ds, e)] == [(ds.self_id, Decimal("0"))]
+    assert any(x.get("regla") == "D6-INV" and x["importe_v3"] == str(Decimal(importe)) for x in ds.ledger)
 
 
 def test_a_medias_parcial_y_pago_propio_completo():

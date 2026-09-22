@@ -16,6 +16,7 @@
 #   python scripts/mutantes/rv3_p5.py            # todos
 #   python scripts/mutantes/rv3_p5.py M30 M33    # subconjunto
 #
+# Version: 0.21.0 (M172..M178: P5 v0.26.0, D6-INV, valoracion terminal y R02)
 # Version: 0.20.0 (M163..M171: P5 v0.25.0, resto del dominio 12 — R05 completo)
 # Version: 0.19.0 (M160..M162: P5 v0.24.0, presupuesto G-V3-03; M158 reanclado)
 # Version: 0.18.0 (M155..M159: P5 v0.23.0, dominio 11 cierres legacy)
@@ -60,6 +61,7 @@ T17 = "tests/migration/test_rv3_017_p5_dominio6.py"
 T18 = "tests/migration/test_rv3_018_p5_dominio7.py"
 T19 = "tests/migration/test_rv3_019_p5_dominio11.py"
 T20 = "tests/migration/test_rv3_020_p5_dominio12_disposicion.py"
+T21 = "tests/migration/test_rv3_021_p5_r02_campos.py"
 
 MUTANTES = {
     "M30": ("gate de la fuente suplementaria siempre abierto",
@@ -517,6 +519,28 @@ MUTANTES = {
     'M171': ('clasificacion vinculada a efectos no categorizables',
              [('if f["tipo_efecto"] not in EFECTOS_CATEGORIZABLES:', 'if False:')],
              T20 + "::test_clasificacion_vinculada_solo_donde_se_aplico"),
+    # ---- 0.21.0: P5 v0.26.0, D6-INV, valoracion terminal (F01-B01) y R02
+    'M172': ('invitado con atribucion propia = importe V3 (D6-INV omitida)',
+             [('            imp = Decimal("0")\n    rep = _reparto(tot)', '    rep = _reparto(tot)')],
+             T17 + "::test_invitado_con_importe_v3_distinto_de_cero_atribucion_propia_cero"),
+    'M173': ('valor terminal de inversion cerrada omitido',
+             [('        if terminal is not None:', '        if False:')],
+             T11 + "::test_cerrada_con_valor_terminal_como_valoracion_cierre_sin_fecha"),
+    'M174': ('fecha de valoracion terminal inventada',
+             [('"id": vid, "inversion_entidad_id": eid, "fecha_valoracion": None,', '"id": vid, "inversion_entidad_id": eid, "fecha_valoracion": v("fecha_inicio"),')],
+             T11 + "::test_cerrada_con_valor_terminal_como_valoracion_cierre_sin_fecha"),
+    'M175': ('valor terminal en inversion activa tolerado',
+             [('            if estado != "CERRADA":\n                raise ErrorP5("S1_VALOR_TERMINAL_EN_INVERSION_ACTIVA"', '            if False:\n                raise ErrorP5("S1_VALOR_TERMINAL_EN_INVERSION_ACTIVA"')],
+             T11 + "::test_valor_terminal_en_inversion_activa_falla"),
+    'M176': ('SIN_VALOR sin verificar ausencia',
+             [('            elif con_valor == 0:', '            elif True:')],
+             T21 + "::test_campo_con_un_solo_valor_no_es_sin_valor"),
+    'M177': ('campo pendiente sin pendiente S20',
+             [('    for q, campos in sorted(pend.items()):', '    for q, campos in sorted({}.items()):')],
+             T21 + "::test_pendientes_agrupados_por_pregunta_y_bloqueantes"),
+    'M178': ('todo campo tratado como consumido',
+             [('            if (c, col) in leidos:', '            if True:')],
+             T21 + "::test_clases_de_disposicion"),
 }
 
 

@@ -10,7 +10,9 @@
 #              taxonomia con destino contradictoria -> S1, decision de clasificacion VINCULADA solo a los
 #              destinos donde se aplico (GASTO/INGRESO y versiones de regla) con verificacion de
 #              coherencia (S9), determinismo y carga fisica RV3_IMPORT con ROLLBACK.
-# Versión: 0.1.0
+#   0.2.0: OBSOLETO CONFIRMADO por el propietario (P5 v0.26.0); la rama PROPUESTA se ejercita
+#          explicitamente para conservar su discriminacion.
+# Versión: 0.2.0
 # ============================================================
 from __future__ import annotations
 
@@ -65,8 +67,9 @@ def _envolver(monkeypatch, nombre, extra):
 
 
 # ---------------------------------------------------------------- R05 completo
-def test_todo_origen_tiene_disposicion_en_laboratorio():
-    ds = _t()
+@pytest.mark.parametrize("lab", [True, False])
+def test_todo_origen_tiene_disposicion(lab):
+    ds = _t(lab=lab)
     tz = ds.trazabilidad
     assert tz["R05_origenes"] == len(ds.filas["registros_origen_importacion"]) == tz["R05_con_disposicion"]
     assert (tz["R05_sin_disposicion_pendiente_decision"], tz["R05_destinos_sin_origen"],
@@ -109,7 +112,15 @@ def test_gasto_de_referencia_de_cuota_vinculado_a_su_financiacion():
 
 
 # ---------------------------------------------------------------- taxonomia V3 reemplazada (D-MIG-001)
-def test_taxonomia_en_laboratorio_sin_destino_con_propuesta_y_pendiente():
+def test_taxonomia_confirmada_por_defecto_es_obsoleto_sin_pendiente():
+    assert (P5.DISPOSICION_TAXONOMIA_V3, P5.DISPOSICION_TAXONOMIA_ESTADO) == ("OBSOLETO", "CONFIRMADA")
+    ds = _t(lab=False)
+    assert {m["tipo_mapping"] for k in ("TH", "TP", "TF") for m in _maps(ds, TG, k)} == {"OBSOLETO"}
+    assert not [p for p in ds.pendientes if p.get("S20") == "DISPOSICION_TAXONOMIA_V3"]
+
+
+def test_taxonomia_en_laboratorio_sin_destino_con_propuesta_y_pendiente(monkeypatch):
+    monkeypatch.setattr(P5, "DISPOSICION_TAXONOMIA_ESTADO", "PROPUESTA")
     ds = _t()
     for k in ("TH", "TP", "TF"):
         (m,) = _maps(ds, TG, k)
@@ -119,7 +130,8 @@ def test_taxonomia_en_laboratorio_sin_destino_con_propuesta_y_pendiente():
     assert (p["filas"], p["bloquea_gate"], p["propuesta"]) == (3, True, "OBSOLETO")
 
 
-def test_taxonomia_fuera_de_laboratorio_no_presupone_codigo_y_bloquea():
+def test_taxonomia_fuera_de_laboratorio_no_presupone_codigo_y_bloquea(monkeypatch):
+    monkeypatch.setattr(P5, "DISPOSICION_TAXONOMIA_ESTADO", "PROPUESTA")
     ds = _t(lab=False)
     assert all(not _maps(ds, TG, k) for k in ("TH", "TP", "TF"))
     assert any(p.get("S20") == "DISPOSICION_TAXONOMIA_V3" and p["bloquea_gate"] for p in ds.pendientes)

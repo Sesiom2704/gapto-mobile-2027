@@ -15,6 +15,12 @@
 #                8 financiaciones (PARCIAL v0.5.0: 4 prestamos formales con condiciones
 #                  versionadas, calendario, financiador y garantia; 7 compras financiadas;
 #                  derechos/obligaciones pendientes)
+#   v0.26.0: R02 ejecutable: consumo de columnas instrumentado + disposicion declarada; campo con valor sin
+#           disposicion -> S4; sin destino ni regla canonica -> pendiente S20 (Q-R02-1..7).
+#           Cotidiano invitado (tipo_pago=2) con atribucion propia 0 (MV3 §27; D6-INV corrige D6-B);
+#           valoracion terminal de inversion cerrada (F01-B01) -> inversion_valoraciones; D9-E corregida.
+#           Decisiones del propietario (2026-09-22): disposicion de la taxonomia V3 = OBSOLETO CONFIRMADA
+#           (R05 2.632/2.632 fuera de laboratorio) y VINCULADO gasto de referencia -> financiacion RATIFICADO.
 #   v0.25.0: resto del dominio 12 (R05 completo): disposicion de todo origen. Gastos de referencia de
 #           cuota (D5-T) VINCULADO a su financiacion; taxonomia V3 reemplazada (D-MIG-001) con codigo de
 #           disposicion PROPUESTO (OBSOLETO) pendiente de decision; decision de clasificacion VINCULADA a
@@ -111,7 +117,7 @@
 #   RV3_IMPORT (rol login no superusuario -> gapto_migrator -> gapto_owner),
 #   fuerza los diferidos con SET CONSTRAINTS ALL IMMEDIATE y hace ROLLBACK.
 #   No es P6 (P6 hace COMMIT real).
-# Versión: 0.25.0
+# Versión: 0.26.0
 # ============================================================
 from __future__ import annotations
 
@@ -126,7 +132,7 @@ from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
-VERSION = "0.25.0"
+VERSION = "0.26.0"
 TRANSFORMACION = "RV3_P5"
 _AQUI = Path(__file__).resolve().parent
 
@@ -149,7 +155,7 @@ ORDEN_TABLAS = [
     "cuentas", "cuenta_capacidades", "cuenta_participaciones",
     "direcciones", "entidades", "propiedades", "entidad_participaciones",
     "financiaciones", "financiacion_condiciones_versiones", "financiacion_cuotas", "entidad_relaciones",
-    "derechos_obligaciones_financieras", "inversiones", "inversion_objetivos_versiones",
+    "derechos_obligaciones_financieras", "inversiones", "inversion_objetivos_versiones", "inversion_valoraciones",
     "reglas_financieras", "regla_versiones", "regla_excepciones",
     "contratos", "contrato_participantes", "contrato_revision_renta_versiones", "propiedad_valoraciones",
     "servicios", "contrato_servicios", "contextos",
@@ -261,7 +267,7 @@ LEDGER_REGLAS = {
     "D8-G": "cuota V3 con total distinto de componentes: se conservan ambos sin correccion (Migration V3 §27).",
     "D8-H": "entidad_participaciones de la financiacion: 0 filas (no modelada, D-107); Migration V3 §29 "
             "prohibe inferirla desde propiedad o cuenta. Pendiente S20.",
-    "D8-I": "pagada/fecha_pago/gasto_id de prestamo_cuota se disponen en dominio 6 (hechos); "
+    "D8-I": "PENDIENTE S20 (v0.26.0): el pago de las 85 cuotas pagadas (fecha_pago/gasto_id) NO esta dispuesto; "
             "financiacion_cuotas no tiene flag de pagado (DB Schema §56).",
     "D8-J": "cuota con vencimiento anterior al corte y no pagada en V3: se conserva la fecha V3 sin "
             "desplazarla (Migration V3 §7: calendario desplazado). Clase C.",
@@ -319,8 +325,9 @@ LEDGER_REGLAS = {
              "inversion_objetivos_versiones con vigencia NULL (inicio no demostrado; D-MIG-016). Nunca valoracion.",
     "D9-D": "capital_invertido_apertura NULL: aporte_estimado no es capital real (D-MIG-016).",
     "D9-E": "resultado final V3 (retorno_final_total, plazo_final) de una inversion cerrada: plazo_real_meses si "
-             "conocido; el retorno realizado se dispone en dominio 6 (hecho), nunca como objetivo. fecha_fin_real "
-             "y motivo_cierre desconocidos -> NULL (Migration V3 §27).",
+             "conocido; retorno_final_total -> inversion_valoraciones CIERRE/DIRECTA/IMPORTACION con fecha NULL (F01-B01, "
+             "Migration V3 §32/§35; v0.26.0 corrige la version anterior que lo remitia a un hecho no implementado), "
+             "nunca objetivo, hecho ni tesoreria. fecha_fin_real y motivo_cierre desconocidos -> NULL.",
     "D9-F": "tipo_producto NOT NULL sin dato V3: TIPO_PRODUCTO_PROPUESTO por inversion; fuera de laboratorio "
              "falla S20 hasta confirmacion del propietario.",
     "D9-G": "entidad_participaciones de inversiones: 100 % propietario desde fecha_inicio V3 (S20 R3-2).",
@@ -1838,6 +1845,18 @@ def dominio_9_inversiones(ds: Dataset, fuente: dict, ctx: dict) -> None:
             "notas": " ".join(x for x in (_texto(g("descripcion")) if g("descripcion").estado == fu.CONOCIDO else None,
                                           NOTA_TIPO_PRODUCTO.get(ci)) if x) or None})
         ds.mapear(cont, ci, "inversiones", eid, "inversion", tipo="DIVIDIDO")
+        terminal = v("retorno_final_total")
+        if terminal is not None:
+            # F01-B01 (Migration V3 §32/§35): valor terminal real de la inversion cerrada -> valoracion CIERRE,
+            # fecha desconocida -> NULL, sin hecho ni tesorerIa (no prueba el cobro de liquidacion).
+            if estado != "CERRADA":
+                raise ErrorP5("S1_VALOR_TERMINAL_EN_INVERSION_ACTIVA", origen)
+            vid = fu.uuid_v3(cont, ci, "inversion_valoraciones", "valoracion:cierre")
+            ds.add("inversion_valoraciones", {
+                "id": vid, "inversion_entidad_id": eid, "fecha_valoracion": None, "tipo_valoracion": "CIERRE",
+                "alcance_valoracion": "DIRECTA", "valor_total": Decimal(str(terminal)), "fuente": "IMPORTACION",
+                "notas": "retorno_final_total V3 (valor bruto terminal); fecha de cierre real desconocida"})
+            ds.mapear(cont, ci, "inversion_valoraciones", vid, "valoracion:cierre", tipo="DIVIDIDO")
         if PARTICIPACION_INVERSION_SELF:
             if not v("fecha_inicio"):
                 raise ErrorP5("S6_VIGENCIA_INVERSION_SIN_FECHA", origen)
@@ -2557,6 +2576,9 @@ LEDGER_REGLAS.update({
     "D6-S": "vivienda V3 -> hecho_entidades AFECTA_A (nivel hecho); contexto decidido -> RELACIONADO_CON.",
     "D6-T": "traspaso real sin movimiento V3 (opcion A del propietario): hecho TRANSFERENCIA sin efectos ni "
             "movimientos; excepcion legacy a la literalidad de F04-D001 (no se fabrica tesoreria).",
+    "D6-INV": "cotidiano tipo_pago=2 (invitado): efecto GASTO por importe_total, atribucion propia explicita 0,00 y "
+              "PARCIAL sin actores ficticios, aunque V3 guarde importe = total (Migration V3 §18/§27; v0.26.0 corrige "
+              "la omision de D6-B); el importe V3 queda en origen y en ledger.",
     "D6-U": "cotidianos: numero_participantes_total = cantidad; observaciones/comentarios -> notas.",
     "D6-V": "vivienda con atribucion decidida por el propietario: PARTICIPACION -> reparto del total por las "
             "entidad_participaciones vigentes en fecha_hecho (criterio PARTICIPACION_ENTIDAD, suma exacta); SELF_100 -> "
@@ -2955,6 +2977,12 @@ def _hecho_v3(ds, fuente, ctx, co, cl, derecho_de, contexto_de, ids, filas_d6=fr
     part = _dec_c(co, "cantidad", f, ctx) if co == "public.gastos_cotidianos" else None
     h = _H(ds, co, cl, "GASTO", fecha, nombre, tot, _presup(ds, cat, "GASTO"), notas,
            int(part) if part is not None else None)
+    if co == _GC and INVITADO_ATRIBUCION_CERO:
+        tp = _celda(co, "tipo_pago", f, ctx)
+        if tp.estado == fu.CONOCIDO and str(tp.valor).strip() == "2":
+            # Migration V3 §18/§27: invitado -> total conservado, atribucion personal explicita 0, resto PARCIAL.
+            ds.ledger.append({"regla": "D6-INV", "origen": f"{co}/{cl}", "importe_v3": str(imp)})
+            imp = Decimal("0")
     rep = _reparto(tot)
     if rep is not None and imp != tot:
         raise PendienteD6("S20", "D6_REPARTO_VIVIENDA_CON_PARTE_PERSONAL", f"{imp} / {tot}")
@@ -2964,6 +2992,9 @@ def _hecho_v3(ds, fuente, ctx, co, cl, derecho_de, contexto_de, ids, filas_d6=fr
         return "GASTO", _base(h)
     h.efecto("gasto", "GASTO", tot, cat, [(S, imp, "MANUAL")], "COMPLETA" if imp == tot else "PARCIAL")
     return "GASTO", _base(h)
+
+
+INVITADO_ATRIBUCION_CERO = True  # regla canonica (MV3 §27), no anclada a claves V3
 
 
 # ------------------------------------------------------------ dominio 7 (tesoreria)
@@ -3234,17 +3265,125 @@ def _presupuesto_contenedores(ds: Dataset, fuente: dict, ctx: dict) -> dict:
     return {"periodo": [desde, hasta], "lineas": lineas, "sin_alcance": sin_alcance}
 
 
+
+# ------------------------------------------------------------ dominio 12: R02 (disposicion campo a campo)
+class _Fila(dict):
+    """Fila V3 que registra las columnas que la transformacion consume (evidencia de R02)."""
+    __slots__ = ("_c", "_leidos")
+
+    def get(self, k, d=None):
+        self._leidos.add((self._c, k))
+        return dict.get(self, k, d)
+
+    def __getitem__(self, k):
+        self._leidos.add((self._c, k))
+        return dict.__getitem__(self, k)
+
+    def __contains__(self, k):
+        self._leidos.add((self._c, k))
+        return dict.__contains__(self, k)
+
+
+def _instrumentar(fuente: dict, leidos: set) -> dict:
+    out = {}
+    for c, t in fuente.items():
+        out[c] = {}
+        for k, fila in t.items():
+            x = _Fila(fila)
+            x._c, x._leidos = c, leidos
+            out[c][k] = x
+    return out
+
+
+CAMPOS_IDENTIDAD = {"id": "IDENTIDAD_ORIGEN", "user_id": "TENANT"}
+CAMPOS_AUDITORIA = {"createon", "modifiedon", "created_at", "updated_at", "fecha_creacion", "inactivatedon"}
+_TAX = "TAXONOMIA_OBSOLETA: D-MIG-001 (rama/segmento/tipo eliminados en 2027)"
+_CTL = "CONTROL_DERIVADO: dato calculado/redundante; se conserva en origen como evidencia de reconciliacion"
+DISPOSICION_CAMPOS = {
+    **{(c, col): _TAX for c, col in (
+        ("public.gastos", "rama"), ("public.gastos", "segmento_id"), ("public.ingresos", "rama_id"),
+        ("public.tipo_gasto", "rama_id"), ("public.tipo_gasto", "segmento_id"), ("public.tipo_ingreso", "nombre"),
+        ("public.tipo_ingreso", "rama_id"), ("public.tipo_ramas_gasto", "nombre"), ("public.tipo_ramas_ingreso", "nombre"),
+        ("public.tipo_segmentos_gasto", "nombre"), ("public.inversion", "tipo_gasto_id"))},
+    ("public.gastos", "pagado"): "ESTADO_CICLO_V3: estado del ciclo mensual, no hecho (Migration V3 §4)",
+    ("public.gastos_cotidianos", "pagado"): "ESTADO_UX_V3: legado UX, no deuda ni estado financiero (Migration V3 §5)",
+    ("public.gastos_cotidianos", "cuenta_id"): "SOLO_ORIGEN_CANON: no prueba movimiento bancario (Migration V3 §18)",
+    ("public.users", "password"): "SECRETO: no se migra al dominio (Migration V3 §24)",
+    ("public.users", "is_active"): "FUERA_DOMINIO: autenticacion separada de la migracion financiera (Migration V3 §24)",
+    ("public.users", "role"): "FUERA_DOMINIO: autenticacion separada de la migracion financiera (Migration V3 §24)",
+    **{(c, col): _CTL for c, col in (
+        ("public.movimientos_cuenta", "saldo_destino_antes"), ("public.movimientos_cuenta", "saldo_destino_despues"),
+        ("public.prestamo_cuota", "saldo_posterior"), ("public.prestamo", "cuotas_pagadas"),
+        ("public.prestamo", "intereses_pendientes"), ("public.prestamo", "plazo_meses"),
+        ("public.patrimonio_compra", "impuestos_pct"), ("public.patrimonio", "direccion_completa"),
+        ("public.cierre_mensual_detalle", "fecha_cierre"), ("public.contratos_participantes", "observaciones"),
+        ("public.ingresos", "ingresos_cobrados"), ("public.proveedores", "subsegmento"),
+        ("public.cuentas_bancarias", "liquidez_inicial"))},
+    ("public.prestamo", "comision_apertura"): "CONOCIDO_SIN_EFECTO: 0,00 conocido; no hay coste que registrar",
+    ("public.prestamo", "otros_gastos_iniciales"): "CONOCIDO_SIN_EFECTO: 0,00 conocido; no hay coste que registrar",
+    **{("public.contratos", col): "CONOCIDO_SIN_EFECTO: false = suministro no incluido; no crea contrato_servicios"
+       for col in ("incluye_agua", "incluye_internet", "incluye_luz")},
+    ("public.proveedores", "acepta_urgencias"): "DIFERIDO: modulo operativo de alquileres/incidencias (Migration V3 §25)",
+}
+# Campos con valor sin destino ni regla canonica: decision del propietario/arquitectura (S20).
+CAMPOS_PENDIENTES = {
+    ("public.prestamo_cuota", "fecha_pago"): "Q-R02-1", ("public.prestamo_cuota", "gasto_id"): "Q-R02-1",
+    ("public.gastos_cotidianos", "evento"): "Q-R02-2",
+    **{("public.gastos_cotidianos", c): "Q-R02-3" for c in ("km", "litros", "precio_litro")},
+    ("public.gastos", "tienda"): "Q-R02-4", ("public.cuentas_bancarias", "referencia"): "Q-R02-4",
+    ("public.patrimonio_compra", "notas"): "Q-R02-4",
+    **{("public.proveedores", c): "Q-R02-5" for c in ("localidad", "localidad_id", "comunidad", "pais", "direccion")},
+    ("public.prestamo", "rango_pago"): "Q-R02-6",
+    **{(c, col): "Q-R02-7" for c in ("public.gastos", "public.ingresos")
+       for col in ("kpi", "omitido_count", "omitido_este_mes", "ultimo_omitido_on")},
+    ("public.ingresos", "cobrado"): "Q-R02-7",
+}
+
+
+def r02_disposicion_campos(ds: Dataset, fuente: dict, leidos: set) -> dict:
+    ctx = fu.contexto_de(fuente)
+    clases, pend = {}, {}
+    for c in sorted(fuente):
+        cols = sorted(set().union(*[set(dict.keys(r)) for r in fuente[c].values()]))
+        for col in cols:
+            if (c, col) in leidos:
+                clases["CONSUMIDO"] = clases.get("CONSUMIDO", 0) + 1
+                continue
+            con_valor = sum(1 for r in fuente[c].values()
+                            if fu.normalizar(c, col, dict.get(r, col), r, ctx).estado == fu.CONOCIDO)
+            if col in CAMPOS_IDENTIDAD:
+                k = CAMPOS_IDENTIDAD[col]
+            elif col in CAMPOS_AUDITORIA:
+                k = "AUDITORIA_V3"
+            elif (c, col) in DISPOSICION_CAMPOS:
+                k = DISPOSICION_CAMPOS[(c, col)].split(":", 1)[0]
+            elif con_valor == 0:
+                k = "SIN_VALOR"
+            elif (c, col) in CAMPOS_PENDIENTES:
+                pend.setdefault(CAMPOS_PENDIENTES[(c, col)], []).append(f"{c}.{col} ({con_valor})")
+                k = "PENDIENTE_S20"
+            else:
+                raise ErrorP5("S4_CAMPO_SIN_DISPOSICION", f"{c}.{col} ({con_valor} valores)")
+            clases[k] = clases.get(k, 0) + 1
+    for q, campos in sorted(pend.items()):
+        ds.pendientes.append({"S20": "R02_CAMPO_SIN_DESTINO", "pregunta": q, "campos": campos, "bloquea_gate": True,
+                              "efecto": "valor conservado solo en origen hasta la decision"})
+    return {"R02_campos_b0": sum(clases.values()), "R02_por_clase": dict(sorted(clases.items()))}
+
+
 # ------------------------------------------------------------ dominio 12: disposicion (R05)
 DOMINIO_12_DISPOSICION_ACTIVO = True
+DOMINIO_12_R02_ACTIVO = True  # exige el pipeline completo (todos los dominios consumen sus columnas)
 # D-MIG-001: rama/segmento/tipo V3 se eliminan conceptualmente; los maestros 2027 usan ruta semantica propia
 # (MV3 §24) y el tipo no se proyecta a categoria (MV3 §14): el registro no tiene destino. El canon no define
-# la diferencia OBSOLETO/IGNORADO (DB Schema §77); RUN06 uso IGNORADO. Propuesta OBSOLETO pendiente (S20).
+# la diferencia OBSOLETO/IGNORADO (DB Schema §77); RUN06 uso IGNORADO. OBSOLETO CONFIRMADO por el propietario
+# (2026-09-22): el concepto V3 queda eliminado en 2027, no es un dato que se decida ignorar.
 TAXONOMIA_V3_REEMPLAZADA = ("public.tipo_gasto", "public.tipo_ingreso", "public.tipo_ramas_gasto",
                             "public.tipo_ramas_ingreso", "public.tipo_segmentos_gasto")
 DISPOSICION_TAXONOMIA_V3 = "OBSOLETO"
-DISPOSICION_TAXONOMIA_ESTADO = "PROPUESTA"
+DISPOSICION_TAXONOMIA_ESTADO = "CONFIRMADA"
 # Respuesta D (2026-09-21): la cuota de prestamo no tiene regla; su expectativa es el calendario de la
-# financiacion. El gasto V3 de referencia queda VINCULADO a esa financiacion (D5-T).
+# financiacion. El gasto V3 de referencia queda VINCULADO a esa financiacion (D5-T; RATIFICADO 2026-09-22).
 GASTO_REFERENCIA_CUOTA_VINCULADO = True
 # Solo los efectos economicos llevan categoria (dominio 6); DEUDA/DERECHO_COBRO/... no la reciben.
 EFECTOS_CATEGORIZABLES = ("GASTO", "INGRESO")
@@ -3338,6 +3477,9 @@ def _vincular_clasificacion(ds: Dataset) -> int:
 def transformar(b0: dict, sha_run06: str, modo_lab: bool = False,
                 decisiones: "Decisiones | None" = None) -> Dataset:
     fuente = fu.fuente_b0(b0)
+    leidos: set = set()
+    if DOMINIO_12_DISPOSICION_ACTIVO and DOMINIO_12_R02_ACTIVO:
+        fuente = _instrumentar(fuente, leidos)
     ctx = fu.contexto_de(fuente)
     (cu,) = fuente["public.users"].keys()
     ds = Dataset(owner=owner_de(cu), modo_lab=modo_lab, decisiones=decisiones)
@@ -3366,6 +3508,8 @@ def transformar(b0: dict, sha_run06: str, modo_lab: bool = False,
         ds.cierres = dominio_11_cierres(ds, fuente, ctx)
     if DOMINIO_12_DISPOSICION_ACTIVO:
         dominio_12_disposicion(ds, fuente)
+        if DOMINIO_12_R02_ACTIVO:
+            ds.trazabilidad.update(r02_disposicion_campos(ds, fuente, leidos))
     verificar_trazabilidad(ds)
     return ds
 

@@ -10,7 +10,8 @@
 #              fila V3 que es cuenta no se duplica y coherencia del ROI objetivo.
 #   0.2.0: P5 v0.10.0 -> tipos CONFIRMADOS en produccion (la fixture fija PROPUESTA,
 #          baseline del mecanismo), nota del joint venture y participacion 100 %.
-# Versión: 0.2.0
+#   0.3.0: valor terminal de inversion cerrada -> inversion_valoraciones CIERRE (P5 v0.26.0).
+# Versión: 0.3.0
 # ============================================================
 from __future__ import annotations
 
@@ -114,6 +115,24 @@ def test_cerrada_sin_fecha_ni_motivo_inventados():
     i = _i(_t(), "IC")
     assert (i["estado"], i["fecha_fin_real"], i["motivo_cierre"], i["plazo_real_meses"]) == ("CERRADA", None, None, 8)
     assert i["notas"] == "Edificio Tipo declarado: JOINT VENTURE"
+
+
+def test_cerrada_con_valor_terminal_como_valoracion_cierre_sin_fecha():
+    # 0.3.0 (P5 v0.26.0): F01-B01 / Migration V3 §32/§35
+    ds = _t()
+    eid = F.uuid_v3(IV, "IC", "entidades", "inversion")
+    (v,) = ds.filas["inversion_valoraciones"].values()
+    assert v["id"] == F.uuid_v3(IV, "IC", "inversion_valoraciones", "valoracion:cierre")
+    assert (v["inversion_entidad_id"], v["fecha_valoracion"], v["tipo_valoracion"], v["alcance_valoracion"],
+            v["valor_total"], v["fuente"]) == (eid, None, "CIERRE", "DIRECTA", Decimal("130.00"), "IMPORTACION")
+    # el valor terminal no fabrica objetivo, hecho ni tesoreria
+    assert not ds.filas["hechos_financieros"] and not ds.filas["movimientos_tesoreria"]
+    assert all(o["valor_objetivo_total"] != Decimal("130.00") for o in ds.filas["inversion_objetivos_versiones"].values())
+
+
+def test_valor_terminal_en_inversion_activa_falla():
+    filas = [x for x in _filas() if (x[0], x[1]) != (IV, "IA")] + [_inv("IA", retorno_final_total="10.00")]
+    assert _err(filas=filas) == "S1_VALOR_TERMINAL_EN_INVERSION_ACTIVA"
 
 
 def test_participacion_100_propietario_desde_fecha_inicio(monkeypatch):
