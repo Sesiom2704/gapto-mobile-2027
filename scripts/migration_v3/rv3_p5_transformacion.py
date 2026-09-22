@@ -15,6 +15,10 @@
 #                8 financiaciones (PARCIAL v0.5.0: 4 prestamos formales con condiciones
 #                  versionadas, calendario, financiador y garantia; 7 compras financiadas;
 #                  derechos/obligaciones pendientes)
+#   v0.28.0: respuestas Q-R02 (2) del propietario (2026-09-22): km V3 12811 corregido a 128111 (error de captura,
+#           literal conservado en origen y ledger); precio de UZ8U27 y litros/precio de R35KCY DESCONOCIDOS por
+#           decision; magnitud "Kilometraje"; tienda de gestionable sin hecho DESCARTADA; patrimonio_compra.notas ->
+#           propiedades.notas.
 #   v0.27.0: respuestas Q-R02 del propietario (2026-09-22): rango_pago -> financiaciones.notas (Q-R02-6; la
 #           ventana no es derivable del calendario); evento -> etiquetas + hecho_etiquetas con variantes unificadas
 #           (Q-R02-2); tienda -> notas del hecho y referencia de cuenta VERIFICADA como prefijo del nombre (Q-R02-4);
@@ -123,7 +127,7 @@
 #   RV3_IMPORT (rol login no superusuario -> gapto_migrator -> gapto_owner),
 #   fuerza los diferidos con SET CONSTRAINTS ALL IMMEDIATE y hace ROLLBACK.
 #   No es P6 (P6 hace COMMIT real).
-# Versión: 0.27.0
+# Versión: 0.28.0
 # ============================================================
 from __future__ import annotations
 
@@ -138,7 +142,7 @@ from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
-VERSION = "0.27.0"
+VERSION = "0.28.0"
 TRANSFORMACION = "RV3_P5"
 _AQUI = Path(__file__).resolve().parent
 
@@ -3284,11 +3288,23 @@ EVENTO_ETIQUETA = {"AMIGOS": "AMIGOS", "FAMILIA": "FAMILIA", "ROMANTICO": "ROMAN
 # Q-R02-4: tienda -> notas del hecho, concatenadas a las existentes. La referencia de cuenta fue la base del nombre
 # (anagrama, p. ej. "NOMINA - MEDIOLANUM BANCO"): se VERIFICA que el nombre la contiene como prefijo.
 NOTA_TIENDA = "V3 gastos.tienda: {}"
+# v0.28.0 (propietario 2026-09-22): la tienda de un gestionable sin hecho (destino = regla, sin notas en 0330) se
+# DESCARTA; patrimonio_compra.notas -> propiedades.notas (describe la propiedad, no la valoracion).
+NOTA_COMPRA_PROPIEDAD = "V3 patrimonio_compra.notas: {}"
 # Q-R02-3: km = lectura del odometro al repostar; litros = cantidad; precio_litro = importe_total / litros (formula
 # V3: dados dos, V3 calculaba el tercero) -> control derivado VERIFICADO, no magnitud. 0 = DESCONOCIDO: sin magnitud.
-MAGNITUDES_V3 = {"km": ("Odómetro", "km", 0), "litros": ("Combustible", "l", 2)}
+MAGNITUDES_V3 = {"km": ("Kilometraje", "km", 0), "litros": ("Combustible", "l", 2)}
 # Capturas cuyo litraje pudo calcularse desde un precio no real: no se materializan hasta que decida el propietario.
-CAPTURA_DUDOSA_REPOSTAJE = {"GASTO_COTIDIANO-R35KCY": "precio_litro 1,00 con litros = importe"}
+CAPTURA_DUDOSA_REPOSTAJE: dict = {}
+# v0.28.0 (propietario 2026-09-22): valores de repostaje DECIDIDOS DESCONOCIDOS (no se materializan, no son pendiente).
+DESCONOCIDO_PROPIETARIO = {
+    ("GASTO_COTIDIANO-UZ8U27", "precio_litro"): "litros 0 y precio 17785: desconocido (propietario 2026-09-22)",
+    ("GASTO_COTIDIANO-R35KCY", "litros"): "30 l a 1,00 EUR/l: desconocido (propietario 2026-09-22)",
+    ("GASTO_COTIDIANO-R35KCY", "precio_litro"): "30 l a 1,00 EUR/l: desconocido (propietario 2026-09-22)",
+}
+# v0.28.0 (propietario 2026-09-22): error de captura corregido; el literal V3 se conserva en origen y ledger.
+# Clave -> (valor V3 exigido, valor corregido). Si V3 no trae exactamente el valor exigido: fallo cerrado S9.
+CORRECCION_CAPTURA_PROPIETARIO = {("GASTO_COTIDIANO-JAAYWD", "km"): (Decimal("12811"), Decimal("128111"))}
 CAMPOS_VERIFICADOS = {("public.cuentas_bancarias", "referencia"), ("public.gastos_cotidianos", "precio_litro")}
 
 
@@ -3331,7 +3347,8 @@ def dominio_12_r02_complementos(ds: Dataset, fuente: dict, ctx: dict) -> dict:
     """Destinos de los campos V3 decididos por el propietario (Q-R02-2/3/4/6). Lo no materializable queda residual."""
     idx = _hechos_de_origen(ds)
     res = {"rango_pago": 0, "etiquetas": 0, "hecho_etiquetas": 0, "tienda_notas": 0, "referencias_verificadas": 0,
-           "hecho_magnitudes": 0, "precio_litro_verificado": 0, "cero_desconocido": 0}
+           "hecho_magnitudes": 0, "precio_litro_verificado": 0, "cero_desconocido": 0,
+           "desconocido_decidido": 0, "correcciones": 0, "compra_notas": 0}
     # Q-R02-6
     co = "public.prestamo"
     for cl, f in sorted(fuente.get(co, {}).items()):
@@ -3377,7 +3394,9 @@ def dominio_12_r02_complementos(ds: Dataset, fuente: dict, ctx: dict) -> dict:
             continue
         hid = _hecho_unico(ds, idx, co, cl)
         if hid is None:
-            _residual(ds, co, "tienda", cl, "Q-R02-4", "sin hecho: su destino (regla) no tiene notas en 0330")
+            ds.trazabilidad.setdefault("r02_descartes", []).append(
+                {"origen": f"{co}/{cl}", "campo": "tienda", "motivo": "destino regla sin notas en 0330 (propietario)"})
+            ds.ledger.append({"regla": "R02-Q4-DESCARTE", "origen": f"{co}/{cl}"})
             continue
         _anexar_nota(ds.filas["hechos_financieros"][hid], "notas", NOTA_TIENDA.format(t))
         res["tienda_notas"] += 1
@@ -3398,6 +3417,20 @@ def dominio_12_r02_complementos(ds: Dataset, fuente: dict, ctx: dict) -> dict:
     for cl, f in sorted(fuente.get(co, {}).items(),
                         key=lambda x: (str(_celda(co, "fecha", x[1], ctx).valor), x[0])):
         vals = {c: _dec_c(co, c, f, ctx) for c in ("km", "litros", "precio_litro")}
+        for c in list(vals):
+            if (cl, c) in CORRECCION_CAPTURA_PROPIETARIO:
+                v3, nuevo = CORRECCION_CAPTURA_PROPIETARIO[(cl, c)]
+                if vals[c] != v3:
+                    raise ErrorP5("S9_CORRECCION_SOBRE_VALOR_DISTINTO", f"{co}/{cl}.{c}: V3={vals[c]} exigido={v3}")
+                vals[c] = nuevo
+                ds.ledger.append({"regla": "R02-Q3-CORRECCION", "origen": f"{co}/{cl}", "campo": c,
+                                  "v3": str(v3), "corregido": str(nuevo)})
+                res["correcciones"] += 1
+            if (cl, c) in DESCONOCIDO_PROPIETARIO and vals[c] is not None and vals[c] > 0:
+                ds.ledger.append({"regla": "R02-Q3-DESCONOCIDO", "origen": f"{co}/{cl}", "campo": c,
+                                  "motivo": DESCONOCIDO_PROPIETARIO[(cl, c)]})
+                vals[c] = None
+                res["desconocido_decidido"] += 1
         res["cero_desconocido"] += sum(1 for v in vals.values() if v == 0)
         km, litros, precio = (v if v is not None and v > 0 else None for v in vals.values())
         if km is None and litros is None and precio is None:
@@ -3437,6 +3470,20 @@ def dominio_12_r02_complementos(ds: Dataset, fuente: dict, ctx: dict) -> dict:
                    natural=(hid, mid))
             ds.mapear(co, cl, "hecho_magnitudes", vid, col, tipo="DIVIDIDO")
             res["hecho_magnitudes"] += 1
+    # patrimonio_compra.notas -> propiedades.notas
+    co = "public.patrimonio_compra"
+    for cl, f in sorted(fuente.get(co, {}).items()):
+        nota = _texto(_celda(co, "notas", f, ctx))
+        if nota is None:
+            continue
+        pat = _texto(_celda(co, "patrimonio_id", f, ctx))
+        eid = fu.uuid_v3("public.patrimonio", pat, "entidades", "propiedad") if pat else None
+        if eid not in ds.filas["propiedades"]:
+            _residual(ds, co, "notas", cl, "Q-R02-4", "propiedad no creada")
+            continue
+        _anexar_nota(ds.filas["propiedades"][eid], "notas", NOTA_COMPRA_PROPIEDAD.format(nota))
+        res["compra_notas"] += 1
+    res["descartes"] = len(ds.trazabilidad.get("r02_descartes", []))
     res["residuales"] = {k: len(v) for k, v in sorted(ds.trazabilidad.get("r02_residuales", {}).items())}
     return res
 
@@ -3505,7 +3552,6 @@ CAMPOS_PENDIENTES = {
     ("public.prestamo_cuota", "fecha_pago"): "Q-R02-1", ("public.prestamo_cuota", "gasto_id"): "Q-R02-1",
     # v0.27.0: Q-R02-2/3/6 y tienda/referencia de Q-R02-4 tienen destino (dominio_12_r02_complementos);
     # lo que no se materializa queda como residual por fila (r02_residuales), nunca como CONSUMIDO.
-    ("public.patrimonio_compra", "notas"): "Q-R02-4",
     **{("public.proveedores", c): "Q-R02-5" for c in ("localidad", "localidad_id", "comunidad", "pais", "direccion")},
     **{(c, col): "Q-R02-7" for c in ("public.gastos", "public.ingresos")
        for col in ("kpi", "omitido_count", "omitido_este_mes", "ultimo_omitido_on")},

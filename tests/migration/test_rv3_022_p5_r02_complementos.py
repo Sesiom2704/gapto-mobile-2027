@@ -9,7 +9,10 @@
 #              de cuenta verificada como prefijo del nombre; km/litros -> magnitudes, 0 = DESCONOCIDO,
 #              odometro regresivo, precio no verificable o captura dudosa -> residual; tolerancia de la
 #              formula V3; y R02: residual -> PENDIENTE_S20 aunque se haya leido, verificado exige lectura.
-# Versión: 0.1.0
+#              0.2.0 (P5 v0.28.0): correccion de captura decidida (y fallo cerrado si el valor V3 no es el
+#              exigido), desconocido decidido sin residual, "Kilometraje", tienda sin hecho DESCARTADA y
+#              patrimonio_compra.notas -> propiedades.notas.
+# Versión: 0.2.0
 # ============================================================
 from __future__ import annotations
 
@@ -119,10 +122,12 @@ def test_tienda_se_concatena_a_las_notas_del_hecho():
     assert r["tienda_notas"] == 1 and not _resid(ds)
 
 
-def test_tienda_sin_hecho_es_residual():
+def test_tienda_sin_hecho_se_descarta_con_traza():
     ds = _ds()
-    _run(ds, {G: {"g1": {"id": "g1", "tienda": "APOLO FITNESS"}}})
-    assert _resid(ds) == {f"{G}.tienda": [("g1", "Q-R02-4")]}
+    r = _run(ds, {G: {"g1": {"id": "g1", "tienda": "APOLO FITNESS"}}})
+    assert not _resid(ds) and r["descartes"] == 1
+    assert [d["origen"] for d in ds.trazabilidad["r02_descartes"]] == [f"{G}/g1"]
+    assert any(e.get("regla") == "R02-Q4-DESCARTE" for e in ds.ledger)
 
 
 def test_hecho_no_unico_falla_cerrado():
@@ -154,7 +159,7 @@ def test_magnitudes_odometro_y_litros_cero_es_desconocido():
                        "c2": _cot("c2", "2025-06-02", km="0", litros="0", precio_litro="0")}})
     vals = {(v["hecho_id"], v["unidad"]): v["valor"] for v in ds.filas["hecho_magnitudes"].values()}
     assert vals == {(h1, "km"): Decimal("115940"), (h1, "l"): Decimal("36")}
-    assert sorted(m["nombre"] for m in ds.filas["magnitudes"].values()) == ["Combustible", "Odómetro"]
+    assert sorted(m["nombre"] for m in ds.filas["magnitudes"].values()) == ["Combustible", "Kilometraje"]
     assert r["precio_litro_verificado"] == 1 and r["cero_desconocido"] == 3 and not _resid(ds)
     assert h2 not in {v["hecho_id"] for v in ds.filas["hecho_magnitudes"].values()}
 
@@ -242,3 +247,46 @@ def test_transformar_invoca_los_complementos(monkeypatch):
         monkeypatch.setattr(P5, k, v)
     ds = P5.transformar(t8._b0(t8._filas()), "0" * 64, modo_lab=True)
     assert llamadas == [ds.owner] and "r02_complementos" in ds.trazabilidad
+
+
+def test_correccion_de_captura_decidida(monkeypatch):
+    monkeypatch.setattr(P5, "CORRECCION_CAPTURA_PROPIETARIO", {("c2", "km"): (Decimal("12811"), Decimal("128111"))})
+    ds = _ds()
+    for cl in ("c1", "c2", "c3"):
+        _hecho(ds, GC, cl)
+    r = _run(ds, {GC: {"c1": _cot("c1", "2026-01-15", km="128097"), "c2": _cot("c2", "2026-01-30", km="12811"),
+                       "c3": _cot("c3", "2026-02-13", km="129385")}})
+    assert sorted(v["valor"] for v in ds.filas["hecho_magnitudes"].values()) == [
+        Decimal("128097"), Decimal("128111"), Decimal("129385")]
+    assert r["correcciones"] == 1 and not _resid(ds)
+    assert any(e.get("regla") == "R02-Q3-CORRECCION" and e["v3"] == "12811" for e in ds.ledger)
+
+
+def test_correccion_sobre_valor_distinto_falla_cerrado(monkeypatch):
+    monkeypatch.setattr(P5, "CORRECCION_CAPTURA_PROPIETARIO", {("c1", "km"): (Decimal("12811"), Decimal("128111"))})
+    ds = _ds()
+    _hecho(ds, GC, "c1")
+    with pytest.raises(P5.ErrorP5) as e:
+        _run(ds, {GC: {"c1": _cot("c1", km="12812")}})
+    assert e.value.codigo == "S9_CORRECCION_SOBRE_VALOR_DISTINTO"
+
+
+def test_desconocido_decidido_no_materializa_ni_queda_pendiente(monkeypatch):
+    monkeypatch.setattr(P5, "DESCONOCIDO_PROPIETARIO", {("c1", "precio_litro"): "m", ("c2", "litros"): "m",
+                                                        ("c2", "precio_litro"): "m"})
+    ds = _ds()
+    for cl in ("c1", "c2"):
+        _hecho(ds, GC, cl)
+    r = _run(ds, {GC: {"c1": _cot("c1", litros="0", precio_litro="17785"),
+                       "c2": _cot("c2", litros="30", precio_litro="1", importe_total="30")}})
+    assert not ds.filas["hecho_magnitudes"] and not _resid(ds) and r["desconocido_decidido"] == 3
+
+
+def test_notas_de_compra_a_notas_de_la_propiedad():
+    ds = _ds()
+    eid = F.uuid_v3("public.patrimonio", "V1", "entidades", "propiedad")
+    ds.filas["propiedades"][eid] = {"entidad_id": eid, "notas": "previa"}
+    r = _run(ds, {"public.patrimonio_compra": {"V1": {"patrimonio_id": "V1", "notas": "casa como inversion"},
+                                               "V2": {"patrimonio_id": "V2", "notas": "otra"}}})
+    assert ds.filas["propiedades"][eid]["notas"] == "previa\n" + P5.NOTA_COMPRA_PROPIEDAD.format("casa como inversion")
+    assert r["compra_notas"] == 1 and _resid(ds) == {"public.patrimonio_compra.notas": [("V2", "Q-R02-4")]}

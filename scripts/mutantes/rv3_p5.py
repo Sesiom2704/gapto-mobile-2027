@@ -16,6 +16,7 @@
 #   python scripts/mutantes/rv3_p5.py            # todos
 #   python scripts/mutantes/rv3_p5.py M30 M33    # subconjunto
 #
+# Version: 0.23.0 (M194 reescrito, M197..M202: P5 v0.28.0)
 # Version: 0.22.0 (M179..M196: P5 v0.27.0, complementos R02 — respuestas Q-R02)
 # Version: 0.21.0 (M172..M178: P5 v0.26.0, D6-INV, valoracion terminal y R02)
 # Version: 0.20.0 (M163..M171: P5 v0.25.0, resto del dominio 12 — R05 completo)
@@ -593,10 +594,9 @@ MUTANTES = {
              [('                if (c, col) not in leidos:\n                    raise ErrorP5("S4_VERIFICACION_NO_EJECUTADA"',
                '                if False:\n                    raise ErrorP5("S4_VERIFICACION_NO_EJECUTADA"')],
              T22 + "::test_r02_verificado_exige_que_la_verificacion_se_ejecute"),
-    'M194': ('tienda sin hecho no queda residual',
-             [('            _residual(ds, co, "tienda", cl, "Q-R02-4", "sin hecho: su destino (regla) no tiene notas en 0330")',
-               '            pass')],
-             T22 + "::test_tienda_sin_hecho_es_residual"),
+    'M194': ('tienda sin hecho no se descarta con traza',
+             [('            ds.ledger.append({"regla": "R02-Q4-DESCARTE", "origen": f"{co}/{cl}"})\n', '')],
+             T22 + "::test_tienda_sin_hecho_se_descarta_con_traza"),
     'M195': ('rango_pago sin financiacion no queda residual',
              [('            _residual(ds, co, "rango_pago", cl, "Q-R02-6", "financiacion no creada")', '            pass')],
              T22 + "::test_rango_pago_sin_financiacion_es_residual"),
@@ -604,6 +604,25 @@ MUTANTES = {
              [('    if DOMINIO_12_R02_COMPLEMENTOS_ACTIVO:\n        ds.trazabilidad["r02_complementos"]',
                '    if False:\n        ds.trazabilidad["r02_complementos"]')],
              T22 + "::test_transformar_invoca_los_complementos"),
+    'M197': ('la correccion de captura no se aplica',
+             [('                vals[c] = nuevo\n', '')],
+             T22 + "::test_correccion_de_captura_decidida"),
+    'M198': ('correccion aplicada sobre cualquier valor V3',
+             [('                if vals[c] != v3:\n', '                if False:\n')],
+             T22 + "::test_correccion_sobre_valor_distinto_falla_cerrado"),
+    'M199': ('desconocido decidido ignorado',
+             [('            if (cl, c) in DESCONOCIDO_PROPIETARIO and vals[c] is not None and vals[c] > 0:',
+               '            if False:')],
+             T22 + "::test_desconocido_decidido_no_materializa_ni_queda_pendiente"),
+    'M200': ('notas de compra no llegan a la propiedad',
+             [('        _anexar_nota(ds.filas["propiedades"][eid], "notas", NOTA_COMPRA_PROPIEDAD.format(nota))\n', '')],
+             T22 + "::test_notas_de_compra_a_notas_de_la_propiedad"),
+    'M201': ('propiedad inexistente sin residual',
+             [('            _residual(ds, co, "notas", cl, "Q-R02-4", "propiedad no creada")', '            pass')],
+             T22 + "::test_notas_de_compra_a_notas_de_la_propiedad"),
+    'M202': ('tienda sin hecho no deja traza de descarte',
+             [('            ds.trazabilidad.setdefault("r02_descartes", []).append(', '            (lambda *a: None)(')],
+             T22 + "::test_tienda_sin_hecho_se_descarta_con_traza"),
 }
 
 
