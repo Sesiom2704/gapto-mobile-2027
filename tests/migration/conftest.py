@@ -10,6 +10,7 @@
 #              catalogo declara CATALOGOS_V3_REALES = True y aporta su corpus.
 #              Asi los tests historicos verifican su baseline sin bloquear los
 #              bloques posteriores (Working Method).
+#   0.13.0: aisla los complementos R02 (DOMINIO_12_R02_COMPLEMENTOS_ACTIVO salvo modulos con R02C = True), P5 v0.27.0.
 #   0.12.0: aisla R02 del dominio 12 (DOMINIO_12_R02_ACTIVO salvo modulos con R02 = True), P5 v0.26.0.
 #   0.11.0: aisla la disposicion R05 del dominio 12 (DOMINIO_12_DISPOSICION_ACTIVO salvo modulos con
 #           DOMINIO_12 = True), P5 v0.25.0.
@@ -23,7 +24,7 @@
 #   0.4.0: aisla fusiones, inicio/fin y compras financiadas decididas (P5 v0.17.0).
 #   0.3.0: aisla tambien los catalogos del dominio 5 (P5 v0.16.0).
 #   0.2.0: aisla tambien el arbol de categorias canonico (CATEGORIAS_ACTIVAS, P5 v0.13.0).
-# Versión: 0.12.0
+# Versión: 0.13.0
 # ============================================================
 from __future__ import annotations
 
@@ -56,6 +57,9 @@ def _aislar_catalogos_v3(request, monkeypatch):
     # los tests historicos verifican su baseline sin el bloque posterior (Working Method).
     if hasattr(p5, "DOMINIO_5_ACTIVO") and not getattr(request.module, "DOMINIO_5", False):
         monkeypatch.setattr(p5, "DOMINIO_5_ACTIVO", False)
+    # 0.13.0: complementos R02 (respuestas Q-R02): exigen hechos del dominio 6
+    if hasattr(p5, "DOMINIO_12_R02_COMPLEMENTOS_ACTIVO") and not getattr(request.module, "R02C", False):
+        monkeypatch.setattr(p5, "DOMINIO_12_R02_COMPLEMENTOS_ACTIVO", False)
     # 0.12.0: igual para R02 (disposicion campo a campo; exige el pipeline completo)
     if hasattr(p5, "DOMINIO_12_R02_ACTIVO") and not getattr(request.module, "R02", False):
         monkeypatch.setattr(p5, "DOMINIO_12_R02_ACTIVO", False)

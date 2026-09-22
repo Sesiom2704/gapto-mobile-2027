@@ -16,6 +16,7 @@
 #   python scripts/mutantes/rv3_p5.py            # todos
 #   python scripts/mutantes/rv3_p5.py M30 M33    # subconjunto
 #
+# Version: 0.22.0 (M179..M196: P5 v0.27.0, complementos R02 — respuestas Q-R02)
 # Version: 0.21.0 (M172..M178: P5 v0.26.0, D6-INV, valoracion terminal y R02)
 # Version: 0.20.0 (M163..M171: P5 v0.25.0, resto del dominio 12 — R05 completo)
 # Version: 0.19.0 (M160..M162: P5 v0.24.0, presupuesto G-V3-03; M158 reanclado)
@@ -62,6 +63,7 @@ T18 = "tests/migration/test_rv3_018_p5_dominio7.py"
 T19 = "tests/migration/test_rv3_019_p5_dominio11.py"
 T20 = "tests/migration/test_rv3_020_p5_dominio12_disposicion.py"
 T21 = "tests/migration/test_rv3_021_p5_r02_campos.py"
+T22 = "tests/migration/test_rv3_022_p5_r02_complementos.py"
 
 MUTANTES = {
     "M30": ("gate de la fuente suplementaria siempre abierto",
@@ -541,6 +543,67 @@ MUTANTES = {
     'M178': ('todo campo tratado como consumido',
              [('            if (c, col) in leidos:', '            if True:')],
              T21 + "::test_clases_de_disposicion"),
+    # --- v0.22.0: P5 v0.27.0 complementos R02 (respuestas Q-R02 2026-09-22)
+    'M179': ('la nota sobrescribe en vez de concatenar',
+             [('    fila[campo] = nota if not fila.get(campo) else f"{fila[campo]}\\n{nota}"', '    fila[campo] = nota')],
+             T22 + "::test_rango_pago_a_notas_de_financiacion_concatenadas"),
+    'M180': ('variantes de evento no unificadas',
+             [('        nombre = EVENTO_ETIQUETA[ev.upper()]', '        nombre = ev.upper()')],
+             T22 + "::test_evento_variantes_unificadas_una_etiqueta_por_valor"),
+    'M181': ('evento sin hecho no queda residual',
+             [('            _residual(ds, co, "evento", cl, "Q-R02-2", "cotidiano sin hecho (pendiente de fila)")', '            pass')],
+             T22 + "::test_evento_sin_hecho_no_fabrica_etiqueta"),
+    'M182': ('evento desconocido admitido en silencio',
+             [('            raise ErrorP5("S4_EVENTO_SIN_ETIQUETA", f"{co}/{cl} {ev!r}")', '            continue')],
+             T22 + "::test_evento_desconocido_falla_cerrado"),
+    'M183': ('hecho no unico admitido',
+             [('    if len(hs) > 1:\n        raise ErrorP5("S7_HECHO_NO_UNICO"', '    if False:\n        raise ErrorP5("S7_HECHO_NO_UNICO"')],
+             T22 + "::test_hecho_no_unico_falla_cerrado"),
+    'M184': ('referencia de cuenta sin verificar',
+             [('        if not nom.upper().startswith(ref.upper()):', '        if False:')],
+             T22 + "::test_referencia_de_cuenta_verificada_como_prefijo_del_nombre"),
+    'M185': ('0 tratado como valor conocido',
+             [('        km, litros, precio = (v if v is not None and v > 0 else None for v in vals.values())',
+               '        km, litros, precio = (v for v in vals.values())')],
+             T22 + "::test_magnitudes_odometro_y_litros_cero_es_desconocido"),
+    'M186': ('odometro regresivo aceptado',
+             [('            if maximo_km is not None and km < maximo_km:', '            if False:')],
+             T22 + "::test_odometro_regresivo_es_residual_y_no_rebaja_el_maximo"),
+    'M187': ('la lectura residual rebaja el maximo del odometro',
+             [('inferior a una lectura anterior ({maximo_km})")\n                km = None',
+               'inferior a una lectura anterior ({maximo_km})")\n                maximo_km, km = km, None')],
+             T22 + "::test_odometro_regresivo_es_residual_y_no_rebaja_el_maximo"),
+    'M188': ('precio_litro no se verifica con la formula',
+             [('            elif abs(litros * precio - tot) > _tolerancia_formula(litros, precio):', '            elif False:')],
+             T22 + "::test_precio_que_no_cumple_la_formula_o_sin_litros_es_residual"),
+    'M189': ('tolerancia de un solo factor',
+             [(' + precio * Decimal(1).scaleb(litros.as_tuple().exponent)', '')],
+             T22 + "::test_tolerancia_de_la_formula_es_una_unidad_de_cada_factor"),
+    'M190': ('precio sin litros no queda residual',
+             [('                _residual(ds, co, "precio_litro", cl, "Q-R02-3b", "precio sin litros ni importe con que verificarlo")',
+               '                pass')],
+             T22 + "::test_precio_que_no_cumple_la_formula_o_sin_litros_es_residual"),
+    'M191': ('captura dudosa materializada',
+             [('        if cl in CAPTURA_DUDOSA_REPOSTAJE:', '        if False:')],
+             T22 + "::test_captura_dudosa_no_materializa_litros"),
+    'M192': ('residual clasificado como consumido',
+             [('            if resid:\n', '            if False:\n')],
+             T22 + "::test_r02_residual_es_pendiente_aunque_se_haya_leido"),
+    'M193': ('verificado sin exigir su ejecucion',
+             [('                if (c, col) not in leidos:\n                    raise ErrorP5("S4_VERIFICACION_NO_EJECUTADA"',
+               '                if False:\n                    raise ErrorP5("S4_VERIFICACION_NO_EJECUTADA"')],
+             T22 + "::test_r02_verificado_exige_que_la_verificacion_se_ejecute"),
+    'M194': ('tienda sin hecho no queda residual',
+             [('            _residual(ds, co, "tienda", cl, "Q-R02-4", "sin hecho: su destino (regla) no tiene notas en 0330")',
+               '            pass')],
+             T22 + "::test_tienda_sin_hecho_es_residual"),
+    'M195': ('rango_pago sin financiacion no queda residual',
+             [('            _residual(ds, co, "rango_pago", cl, "Q-R02-6", "financiacion no creada")', '            pass')],
+             T22 + "::test_rango_pago_sin_financiacion_es_residual"),
+    'M196': ('transformar no invoca los complementos',
+             [('    if DOMINIO_12_R02_COMPLEMENTOS_ACTIVO:\n        ds.trazabilidad["r02_complementos"]',
+               '    if False:\n        ds.trazabilidad["r02_complementos"]')],
+             T22 + "::test_transformar_invoca_los_complementos"),
 }
 
 

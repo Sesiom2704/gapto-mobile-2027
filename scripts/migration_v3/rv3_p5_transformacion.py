@@ -15,6 +15,12 @@
 #                8 financiaciones (PARCIAL v0.5.0: 4 prestamos formales con condiciones
 #                  versionadas, calendario, financiador y garantia; 7 compras financiadas;
 #                  derechos/obligaciones pendientes)
+#   v0.27.0: respuestas Q-R02 del propietario (2026-09-22): rango_pago -> financiaciones.notas (Q-R02-6; la
+#           ventana no es derivable del calendario); evento -> etiquetas + hecho_etiquetas con variantes unificadas
+#           (Q-R02-2); tienda -> notas del hecho y referencia de cuenta VERIFICADA como prefijo del nombre (Q-R02-4);
+#           km (odometro) y litros -> magnitudes + hecho_magnitudes, precio_litro = control derivado VERIFICADO por
+#           la formula V3 y 0 = DESCONOCIDO (Q-R02-3). Lo no materializable queda residual por fila (pendiente S20),
+#           nunca CONSUMIDO.
 #   v0.26.0: R02 ejecutable: consumo de columnas instrumentado + disposicion declarada; campo con valor sin
 #           disposicion -> S4; sin destino ni regla canonica -> pendiente S20 (Q-R02-1..7).
 #           Cotidiano invitado (tipo_pago=2) con atribucion propia 0 (MV3 §27; D6-INV corrige D6-B);
@@ -117,7 +123,7 @@
 #   RV3_IMPORT (rol login no superusuario -> gapto_migrator -> gapto_owner),
 #   fuerza los diferidos con SET CONSTRAINTS ALL IMMEDIATE y hace ROLLBACK.
 #   No es P6 (P6 hace COMMIT real).
-# Versión: 0.26.0
+# Versión: 0.27.0
 # ============================================================
 from __future__ import annotations
 
@@ -132,7 +138,7 @@ from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
-VERSION = "0.26.0"
+VERSION = "0.27.0"
 TRANSFORMACION = "RV3_P5"
 _AQUI = Path(__file__).resolve().parent
 
@@ -161,6 +167,7 @@ ORDEN_TABLAS = [
     "servicios", "contrato_servicios", "contextos",
     "hechos_financieros", "hecho_efectos", "efecto_atribuciones", "hecho_terceros", "hecho_entidades",
     "hecho_relaciones", "movimientos_tesoreria", "transferencias", "hecho_movimientos_tesoreria",
+    "etiquetas", "hecho_etiquetas", "magnitudes", "hecho_magnitudes",
     "metricas_definicion", "cierres_mensuales", "cierre_metricas",
     "presupuestos", "presupuesto_lineas", "presupuesto_linea_alcances",
     "fuentes_importacion", "registros_origen_importacion", "mapeos_importacion",
@@ -3266,6 +3273,174 @@ def _presupuesto_contenedores(ds: Dataset, fuente: dict, ctx: dict) -> dict:
 
 
 
+# ------------------------------------------------------------ dominio 12: complementos R02 (respuestas Q-R02, 2026-09-22)
+DOMINIO_12_R02_COMPLEMENTOS_ACTIVO = True
+# Q-R02-6 (propietario 2026-09-22, opcion recomendada): la ventana de cargo V3 NO es derivable del calendario
+# (hay un prestamo con ventana 28-31 y vencimientos el dia 27) -> financiaciones.notas con etiqueta de origen.
+NOTA_RANGO_PAGO = "V3 prestamo.rango_pago (ventana de cargo, dias del mes): {}"
+# Q-R02-2: evento -> etiquetas + hecho_etiquetas, un catalogo por valor; variantes unificadas por el propietario.
+EVENTO_ETIQUETA = {"AMIGOS": "AMIGOS", "FAMILIA": "FAMILIA", "ROMANTICO": "ROMANTICO", "LABORAL": "LABORAL",
+                   "AMIGOS DE": "AMIGOS", "FAMILIA DE": "FAMILIA", "ROMANTIC": "ROMANTICO"}
+# Q-R02-4: tienda -> notas del hecho, concatenadas a las existentes. La referencia de cuenta fue la base del nombre
+# (anagrama, p. ej. "NOMINA - MEDIOLANUM BANCO"): se VERIFICA que el nombre la contiene como prefijo.
+NOTA_TIENDA = "V3 gastos.tienda: {}"
+# Q-R02-3: km = lectura del odometro al repostar; litros = cantidad; precio_litro = importe_total / litros (formula
+# V3: dados dos, V3 calculaba el tercero) -> control derivado VERIFICADO, no magnitud. 0 = DESCONOCIDO: sin magnitud.
+MAGNITUDES_V3 = {"km": ("Odómetro", "km", 0), "litros": ("Combustible", "l", 2)}
+# Capturas cuyo litraje pudo calcularse desde un precio no real: no se materializan hasta que decida el propietario.
+CAPTURA_DUDOSA_REPOSTAJE = {"GASTO_COTIDIANO-R35KCY": "precio_litro 1,00 con litros = importe"}
+CAMPOS_VERIFICADOS = {("public.cuentas_bancarias", "referencia"), ("public.gastos_cotidianos", "precio_litro")}
+
+
+def _residual(ds: Dataset, co: str, col: str, cl: str, pregunta: str, motivo: str) -> None:
+    ds.trazabilidad.setdefault("r02_residuales", {}).setdefault(f"{co}.{col}", []).append(
+        {"origen": f"{co}/{cl}", "pregunta": pregunta, "motivo": motivo})
+
+
+def _hechos_de_origen(ds: Dataset) -> dict:
+    out = {}
+    for m in ds.filas["mapeos_importacion"].values():
+        if m["tabla_destino"] == "hechos_financieros" and m["tipo_mapping"] == "CREADO":
+            out.setdefault(m["registro_origen_id"], []).append(m["registro_destino_id"])
+    return out
+
+
+def _hecho_unico(ds: Dataset, idx: dict, co: str, cl: str) -> str | None:
+    hs = sorted(set(idx.get(fu.uuid_origen(co, cl), [])))
+    if len(hs) > 1:
+        raise ErrorP5("S7_HECHO_NO_UNICO", f"{co}/{cl}: {len(hs)}")
+    return hs[0] if hs else None
+
+
+def _anexar_nota(fila: dict, campo: str, nota: str) -> None:
+    fila[campo] = nota if not fila.get(campo) else f"{fila[campo]}\n{nota}"
+
+
+def _positivo(co, col, f, ctx) -> Decimal | None:
+    v = _dec_c(co, col, f, ctx)
+    return v if v is not None and v > 0 else None
+
+
+def _tolerancia_formula(litros: Decimal, precio: Decimal) -> Decimal:
+    """V3 calculaba el tercer valor y redondeaba/truncaba a la precision mostrada: el error admisible es una unidad
+    del ultimo decimal de cada factor ponderada por el otro (nunca un umbral absoluto inventado)."""
+    return litros * Decimal(1).scaleb(precio.as_tuple().exponent) + precio * Decimal(1).scaleb(litros.as_tuple().exponent)
+
+
+def dominio_12_r02_complementos(ds: Dataset, fuente: dict, ctx: dict) -> dict:
+    """Destinos de los campos V3 decididos por el propietario (Q-R02-2/3/4/6). Lo no materializable queda residual."""
+    idx = _hechos_de_origen(ds)
+    res = {"rango_pago": 0, "etiquetas": 0, "hecho_etiquetas": 0, "tienda_notas": 0, "referencias_verificadas": 0,
+           "hecho_magnitudes": 0, "precio_litro_verificado": 0, "cero_desconocido": 0}
+    # Q-R02-6
+    co = "public.prestamo"
+    for cl, f in sorted(fuente.get(co, {}).items()):
+        r = _texto(_celda(co, "rango_pago", f, ctx))
+        if r is None:
+            continue
+        eid = fu.uuid_v3(co, cl, "entidades", "financiacion")
+        if eid not in ds.filas["financiaciones"]:
+            _residual(ds, co, "rango_pago", cl, "Q-R02-6", "financiacion no creada")
+            continue
+        _anexar_nota(ds.filas["financiaciones"][eid], "notas", NOTA_RANGO_PAGO.format(r))
+        ds.ledger.append({"regla": "R02-Q6", "origen": f"{co}/{cl}"})
+        res["rango_pago"] += 1
+    # Q-R02-2
+    co = "public.gastos_cotidianos"
+    for cl, f in sorted(fuente.get(co, {}).items()):
+        ev = _texto(_celda(co, "evento", f, ctx))
+        if ev is None:
+            continue
+        if ev.upper() not in EVENTO_ETIQUETA:
+            raise ErrorP5("S4_EVENTO_SIN_ETIQUETA", f"{co}/{cl} {ev!r}")
+        hid = _hecho_unico(ds, idx, co, cl)
+        if hid is None:
+            _residual(ds, co, "evento", cl, "Q-R02-2", "cotidiano sin hecho (pendiente de fila)")
+            continue
+        nombre = EVENTO_ETIQUETA[ev.upper()]
+        tid = fu.uuid_v3("RV3_ETIQUETA", nombre, "etiquetas", "etiqueta")
+        if tid not in ds.filas["etiquetas"]:
+            res["etiquetas"] += 1
+        ds.add("etiquetas", {"id": tid, "owner_user_id": ds.owner, "nombre": nombre}, natural=(ds.owner, nombre.lower()))
+        ds.mapear(co, cl, "etiquetas", tid, "etiqueta", tipo="VINCULADO")
+        hid_e = fu.uuid_v3(co, cl, "hecho_etiquetas", "evento")
+        ds.add("hecho_etiquetas", {"id": hid_e, "hecho_id": hid, "etiqueta_id": tid}, natural=(hid, tid))
+        ds.mapear(co, cl, "hecho_etiquetas", hid_e, "evento", tipo="DIVIDIDO")
+        if ev.upper() != nombre:
+            ds.ledger.append({"regla": "R02-Q2-VARIANTE", "origen": f"{co}/{cl}", "v3": ev, "etiqueta": nombre})
+        res["hecho_etiquetas"] += 1
+    # Q-R02-4
+    co = "public.gastos"
+    for cl, f in sorted(fuente.get(co, {}).items()):
+        t = _texto(_celda(co, "tienda", f, ctx))
+        if t is None:
+            continue
+        hid = _hecho_unico(ds, idx, co, cl)
+        if hid is None:
+            _residual(ds, co, "tienda", cl, "Q-R02-4", "sin hecho: su destino (regla) no tiene notas en 0330")
+            continue
+        _anexar_nota(ds.filas["hechos_financieros"][hid], "notas", NOTA_TIENDA.format(t))
+        res["tienda_notas"] += 1
+    co = "public.cuentas_bancarias"
+    for cl, f in sorted(fuente.get(co, {}).items()):
+        ref = _texto(_celda(co, "referencia", f, ctx))
+        if ref is None:
+            continue
+        cid = fu.uuid_v3(co, cl, "cuentas", "cuenta")
+        nom = ds.filas["cuentas"].get(cid, {}).get("nombre") or ""
+        if not nom.upper().startswith(ref.upper()):
+            _residual(ds, co, "referencia", cl, "Q-R02-4", "la referencia no forma parte del nombre de la cuenta")
+            continue
+        res["referencias_verificadas"] += 1
+    # Q-R02-3
+    co = "public.gastos_cotidianos"
+    maximo_km = None
+    for cl, f in sorted(fuente.get(co, {}).items(),
+                        key=lambda x: (str(_celda(co, "fecha", x[1], ctx).valor), x[0])):
+        vals = {c: _dec_c(co, c, f, ctx) for c in ("km", "litros", "precio_litro")}
+        res["cero_desconocido"] += sum(1 for v in vals.values() if v == 0)
+        km, litros, precio = (v if v is not None and v > 0 else None for v in vals.values())
+        if km is None and litros is None and precio is None:
+            continue
+        hid = _hecho_unico(ds, idx, co, cl)
+        if cl in CAPTURA_DUDOSA_REPOSTAJE:
+            for c in ("litros", "precio_litro"):
+                _residual(ds, co, c, cl, "Q-R02-3b", CAPTURA_DUDOSA_REPOSTAJE[cl])
+            litros = precio = None
+        if precio is not None:
+            tot = _dec_c(co, "importe_total", f, ctx)
+            if litros is None or tot is None:
+                _residual(ds, co, "precio_litro", cl, "Q-R02-3b", "precio sin litros ni importe con que verificarlo")
+            elif abs(litros * precio - tot) > _tolerancia_formula(litros, precio):
+                _residual(ds, co, "precio_litro", cl, "Q-R02-3b", f"litros x precio != importe_total ({tot})")
+            else:
+                res["precio_litro_verificado"] += 1
+        if km is not None:
+            if maximo_km is not None and km < maximo_km:
+                _residual(ds, co, "km", cl, "Q-R02-3b", f"odometro {km} inferior a una lectura anterior ({maximo_km})")
+                km = None
+            else:
+                maximo_km = km
+        for col, v in (("km", km), ("litros", litros)):
+            if v is None:
+                continue
+            if hid is None:
+                _residual(ds, co, col, cl, "Q-R02-3", "cotidiano sin hecho (pendiente de fila)")
+                continue
+            nombre, unidad, prec = MAGNITUDES_V3[col]
+            mid = fu.uuid_v3("RV3_MAGNITUD", col, "magnitudes", "magnitud")
+            ds.add("magnitudes", {"id": mid, "owner_user_id": ds.owner, "nombre": nombre, "unidad_default": unidad,
+                                  "precision_decimales": prec}, natural=(ds.owner, nombre))
+            ds.mapear(co, cl, "magnitudes", mid, f"magnitud.{col}", tipo="VINCULADO")
+            vid = fu.uuid_v3(co, cl, "hecho_magnitudes", col)
+            ds.add("hecho_magnitudes", {"id": vid, "hecho_id": hid, "magnitud_id": mid, "valor": v, "unidad": unidad},
+                   natural=(hid, mid))
+            ds.mapear(co, cl, "hecho_magnitudes", vid, col, tipo="DIVIDIDO")
+            res["hecho_magnitudes"] += 1
+    res["residuales"] = {k: len(v) for k, v in sorted(ds.trazabilidad.get("r02_residuales", {}).items())}
+    return res
+
+
 # ------------------------------------------------------------ dominio 12: R02 (disposicion campo a campo)
 class _Fila(dict):
     """Fila V3 que registra las columnas que la transformacion consume (evidencia de R02)."""
@@ -3328,12 +3503,10 @@ DISPOSICION_CAMPOS = {
 # Campos con valor sin destino ni regla canonica: decision del propietario/arquitectura (S20).
 CAMPOS_PENDIENTES = {
     ("public.prestamo_cuota", "fecha_pago"): "Q-R02-1", ("public.prestamo_cuota", "gasto_id"): "Q-R02-1",
-    ("public.gastos_cotidianos", "evento"): "Q-R02-2",
-    **{("public.gastos_cotidianos", c): "Q-R02-3" for c in ("km", "litros", "precio_litro")},
-    ("public.gastos", "tienda"): "Q-R02-4", ("public.cuentas_bancarias", "referencia"): "Q-R02-4",
+    # v0.27.0: Q-R02-2/3/6 y tienda/referencia de Q-R02-4 tienen destino (dominio_12_r02_complementos);
+    # lo que no se materializa queda como residual por fila (r02_residuales), nunca como CONSUMIDO.
     ("public.patrimonio_compra", "notas"): "Q-R02-4",
     **{("public.proveedores", c): "Q-R02-5" for c in ("localidad", "localidad_id", "comunidad", "pais", "direccion")},
-    ("public.prestamo", "rango_pago"): "Q-R02-6",
     **{(c, col): "Q-R02-7" for c in ("public.gastos", "public.ingresos")
        for col in ("kpi", "omitido_count", "omitido_este_mes", "ultimo_omitido_on")},
     ("public.ingresos", "cobrado"): "Q-R02-7",
@@ -3346,6 +3519,18 @@ def r02_disposicion_campos(ds: Dataset, fuente: dict, leidos: set) -> dict:
     for c in sorted(fuente):
         cols = sorted(set().union(*[set(dict.keys(r)) for r in fuente[c].values()]))
         for col in cols:
+            resid = ds.trazabilidad.get("r02_residuales", {}).get(f"{c}.{col}")
+            if resid:
+                for q in sorted({r["pregunta"] for r in resid}):
+                    n = sum(1 for r in resid if r["pregunta"] == q)
+                    pend.setdefault(q, []).append(f"{c}.{col} ({n} filas residuales)")
+                clases["PENDIENTE_S20"] = clases.get("PENDIENTE_S20", 0) + 1
+                continue
+            if (c, col) in CAMPOS_VERIFICADOS:
+                if (c, col) not in leidos:
+                    raise ErrorP5("S4_VERIFICACION_NO_EJECUTADA", f"{c}.{col}")
+                clases["CONTROL_DERIVADO_VERIFICADO"] = clases.get("CONTROL_DERIVADO_VERIFICADO", 0) + 1
+                continue
             if (c, col) in leidos:
                 clases["CONSUMIDO"] = clases.get("CONSUMIDO", 0) + 1
                 continue
@@ -3506,6 +3691,8 @@ def transformar(b0: dict, sha_run06: str, modo_lab: bool = False,
                 ds.tesoreria = dominio_7_tesoreria(ds, fuente, ctx)
     if DOMINIO_11_ACTIVO and CIERRES_V3 in fuente:
         ds.cierres = dominio_11_cierres(ds, fuente, ctx)
+    if DOMINIO_12_R02_COMPLEMENTOS_ACTIVO:
+        ds.trazabilidad["r02_complementos"] = dominio_12_r02_complementos(ds, fuente, ctx)
     if DOMINIO_12_DISPOSICION_ACTIVO:
         dominio_12_disposicion(ds, fuente)
         if DOMINIO_12_R02_ACTIVO:
@@ -3623,7 +3810,7 @@ def main() -> int:
     informe = {"version": VERSION, "hash_dataset": h, "recuentos": ds.recuentos(),
                "ledger_reglas": LEDGER_REGLAS, "ledger": ds.ledger, "pendientes": ds.pendientes,
                "preguntas": ds.preguntas, "clasificacion": ds.clasificacion, "decisiones_sha256": dec.sha256 if dec else None,
-               "fisico": fisico, "reglas": ds.reglas, "hechos": ds.hechos, "tesoreria": ds.tesoreria, "cierres": ds.cierres, "trazabilidad": ds.trazabilidad, "dominios": {"implementados": [1, "2-parcial", 3, "4-propiedad", 5, "6", 7, "11", "8-financiaciones", "8B-derechos", "9-inversiones", "10-contratos-valoraciones", "12-disposicion-R05"], "pendientes": ["12-reconciliacion-R01..R26", "P5b"], "modo_lab": a.modo_lab},
+               "fisico": fisico, "reglas": ds.reglas, "hechos": ds.hechos, "tesoreria": ds.tesoreria, "cierres": ds.cierres, "trazabilidad": ds.trazabilidad, "dominios": {"implementados": [1, "2-parcial", 3, "4-propiedad", 5, "6", 7, "11", "8-financiaciones", "8B-derechos", "9-inversiones", "10-contratos-valoraciones", "12-disposicion-R05", "12-R02-complementos"], "pendientes": ["12-reconciliacion-R01..R26", "P5b"], "modo_lab": a.modo_lab},
                "ts": datetime.now(timezone.utc).isoformat()}
     a.salida.mkdir(parents=True, exist_ok=True)
     p = a.salida / f"rv3_p5_{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"
