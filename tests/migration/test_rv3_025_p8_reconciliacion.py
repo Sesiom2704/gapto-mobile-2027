@@ -7,7 +7,8 @@
 #              atribucion sin estado (R20), derecho con importe 0 fabricado (R21), hecho no TRANSFERENCIA sin
 #              efectos (R17), cuenta derivada con saldo inferido (R08), delta RUN06 sin clasificar (R26); y que un
 #              delta RUN06 clasificado queda DELTA_CLASIFICADO y R25 PENDIENTE_FASE.
-# Versión: 0.1.0
+# Versión: 0.2.0
+#              0.2.0: la clasificacion R26 resuelve el alias RUN06 -> 0330 y toda tabla con delta exige regla.
 # ============================================================
 from __future__ import annotations
 
@@ -92,6 +93,12 @@ def test_delta_run06_sin_clasificar_es_fail_y_clasificado_es_delta():
     ds = _ds()
     ds.filas["transferencias"]["t"] = {"id": "t", "movimiento_salida_id": "a", "movimiento_entrada_id": "b"}
     assert _estado(ds, "R26", {"transferencias": 2}) == "DELTA_CLASIFICADO"
-    ds.filas["servicios"]["s"] = {"id": "s"}
+    ds.filas["cuentas"]["c"] = {"id": "c", "saldo_apertura": None}  # tabla sin regla de delta declarada
     assert _estado(ds, "R26", {"transferencias": 2}) == "FAIL"
     assert _estado(ds, "R26") == "PENDIENTE_FASE" and _estado(ds, "R25") == "PENDIENTE_FASE"
+
+
+def test_r26_resuelve_el_alias_run06():
+    ds = _ds()
+    assert _estado(ds, "R26", {"fin_condiciones_versiones": 3}) == "DELTA_CLASIFICADO"
+    assert all(v for v in P8.CLASIFICACION_R26.values())

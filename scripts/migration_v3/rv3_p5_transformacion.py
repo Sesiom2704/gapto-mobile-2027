@@ -15,6 +15,8 @@
 #                8 financiaciones (PARCIAL v0.5.0: 4 prestamos formales con condiciones
 #                  versionadas, calendario, financiador y garantia; 7 compras financiadas;
 #                  derechos/obligaciones pendientes)
+#   v0.31.0: D-MIG-002: el tipo V3 CAPRICHOS conserva su dimension analitica como etiqueta "Capricho" del hecho
+#           (77 gastos; correccion de mapping clase B detectada por R26).
 #   v0.30.0: HIP. ALLENDE: vencimiento real = ultimo dia de cada mes (propietario 2026-09-22; V3 usa el 28 por su
 #           limitacion con febrero): calendario, vencimiento final previsto y fecha economica de las cuotas pagadas.
 #           Cierra el residual de la cuota 1 (vence 2024-08-31 = fecha_inicio) y el cuadre de RUN02.
@@ -136,7 +138,7 @@
 #   RV3_IMPORT (rol login no superusuario -> gapto_migrator -> gapto_owner),
 #   fuerza los diferidos con SET CONSTRAINTS ALL IMMEDIATE y hace ROLLBACK.
 #   No es P6 (P6 hace COMMIT real).
-# Versión: 0.30.0
+# Versión: 0.31.0
 # ============================================================
 from __future__ import annotations
 
@@ -151,7 +153,7 @@ from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
-VERSION = "0.30.0"
+VERSION = "0.31.0"
 TRANSFORMACION = "RV3_P5"
 _AQUI = Path(__file__).resolve().parent
 
@@ -3322,6 +3324,10 @@ NOTA_RANGO_PAGO = "V3 prestamo.rango_pago (ventana de cargo, dias del mes): {}"
 # Q-R02-2: evento -> etiquetas + hecho_etiquetas, un catalogo por valor; variantes unificadas por el propietario.
 EVENTO_ETIQUETA = {"AMIGOS": "AMIGOS", "FAMILIA": "FAMILIA", "ROMANTICO": "ROMANTICO", "LABORAL": "LABORAL",
                    "AMIGOS DE": "AMIGOS", "FAMILIA DE": "FAMILIA", "ROMANTIC": "ROMANTICO"}
+# v0.31.0 D-MIG-002 (Migration V3 §12, decision aprobada): "capricho -> Etiqueta/atributo analitico". El tipo V3
+# CAPRICHOS se clasifica en categorias por registro (hoja TIPOS) y ademas conserva su dimension analitica como
+# etiqueta del hecho. Correccion de mapping clase B detectada por R26 (RUN06 la materializaba; P5 la perdia).
+ETIQUETA_TIPO_V3 = {"CAP-TIPOGASTO-334BFEC7": "Capricho"}
 # Q-R02-4: tienda -> notas del hecho, concatenadas a las existentes. La referencia de cuenta fue la base del nombre
 # (anagrama, p. ej. "NOMINA - MEDIOLANUM BANCO"): se VERIFICA que el nombre la contiene como prefijo.
 NOTA_TIENDA = "V3 gastos.tienda: {}"
@@ -3535,7 +3541,7 @@ def dominio_12_r02_complementos(ds: Dataset, fuente: dict, ctx: dict) -> dict:
            "hecho_magnitudes": 0, "precio_litro_verificado": 0, "cero_desconocido": 0,
            "desconocido_decidido": 0, "correcciones": 0, "compra_notas": 0, "cuotas_capital": 0,
            "cuotas_intereses": 0, "cuota_capital_total": Decimal(0), "cuota_intereses_total": Decimal(0),
-           "direcciones_proveedor": 0, "proveedor_solo_region": 0, "omisiones_ledger": 0}
+           "direcciones_proveedor": 0, "proveedor_solo_region": 0, "omisiones_ledger": 0, "etiquetas_tipo_v3": 0}
     cuotas_pagadas(ds, fuente, ctx, res)
     direcciones_proveedores(ds, fuente, ctx, res)
     omisiones_v3(ds, fuente, ctx, res)
@@ -3576,6 +3582,23 @@ def dominio_12_r02_complementos(ds: Dataset, fuente: dict, ctx: dict) -> dict:
         if ev.upper() != nombre:
             ds.ledger.append({"regla": "R02-Q2-VARIANTE", "origen": f"{co}/{cl}", "v3": ev, "etiqueta": nombre})
         res["hecho_etiquetas"] += 1
+    # D-MIG-002: tipo V3 con dimension analitica -> etiqueta del hecho
+    for co in ("public.gastos", "public.gastos_cotidianos"):
+        for cl, f in sorted(fuente.get(co, {}).items()):
+            nombre = ETIQUETA_TIPO_V3.get(_texto(_celda(co, "tipo_id", f, ctx)) or "")
+            if nombre is None:
+                continue
+            hid = _hecho_unico(ds, idx, co, cl)
+            if hid is None:
+                _residual(ds, co, "tipo_id", cl, "D-MIG-002", "registro sin hecho: la etiqueta solo aplica a hechos")
+                continue
+            tid = fu.uuid_v3("RV3_ETIQUETA", nombre, "etiquetas", "etiqueta")
+            ds.add("etiquetas", {"id": tid, "owner_user_id": ds.owner, "nombre": nombre}, natural=(ds.owner, nombre.lower()))
+            ds.mapear(co, cl, "etiquetas", tid, "etiqueta_tipo", tipo="VINCULADO")
+            xid = fu.uuid_v3(co, cl, "hecho_etiquetas", "tipo_v3")
+            ds.add("hecho_etiquetas", {"id": xid, "hecho_id": hid, "etiqueta_id": tid}, natural=(hid, tid))
+            ds.mapear(co, cl, "hecho_etiquetas", xid, "tipo_v3", tipo="DIVIDIDO")
+            res["etiquetas_tipo_v3"] += 1
     # Q-R02-4
     co = "public.gastos"
     for cl, f in sorted(fuente.get(co, {}).items()):

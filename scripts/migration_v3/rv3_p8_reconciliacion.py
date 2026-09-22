@@ -7,7 +7,8 @@
 #              PASS | DELTA_CLASIFICADO (delta explicado por decision/regla trazada) | FAIL (delta sin clasificar) |
 #              PENDIENTE_FASE (solo evaluable en P6/P7). Todo delta no clasificado es FAIL (contrato RV3 §11).
 #              No sustituye a P8 post-carga: la repite sobre la base cargada cuando exista P6.
-# Versión: 0.1.0
+#              0.2.0: R26 clasifica las 46 tablas con delta frente a RUN06 (regla trazada por tabla).
+# Versión: 0.2.0
 # ============================================================
 from __future__ import annotations
 
@@ -212,7 +213,7 @@ def reconciliar(P5, ds, fuente: dict, run06: dict | None = None) -> list:
         for t, m in rc.items():
             if m and t not in {ALIAS_RUN06.get(x, x) for x in run06}:
                 delta[t] = {"run06": None, "0330": m}
-        clas = {t: CLASIFICACION_R26.get(t) for t in delta}
+        clas = {t: CLASIFICACION_R26.get(ALIAS_RUN06.get(t, t)) for t in delta}
         sin = sorted(t for t, v in clas.items() if v is None)
         out.append(_r("R26", "delta frente a RUN06 explicado", "0 deltas sin clasificar",
                       {"tablas_con_delta": len(delta), "sin_clasificar": sin, "delta": delta,
@@ -223,18 +224,118 @@ def reconciliar(P5, ds, fuente: dict, run06: dict | None = None) -> list:
 
 # Clasificacion de deltas RUN06 -> 0330 ya demostrada por reglas trazadas. Lo ausente aqui es FAIL (sin clasificar).
 CLASIFICACION_R26 = {
+    # --- trazabilidad (su recuento es consecuencia del resto; B0 = 2.501 lo certifica R03)
+    "registros_origen_importacion": "B0 = 2.501 (R03) + 131 registros de fuentes suplementarias (decisiones, arbol)",
+    "fuentes_importacion": "B0 + 2 fuentes suplementarias (decisiones del propietario, arbol de categorias MV3)",
+    "mapeos_importacion": "tabla de trazabilidad: refleja los destinos creados (R05); sin valor de reconciliacion propio",
+    # --- modelo logico v0.8 frente a 0330 (R-RV3-007)
+    "configuracion_usuario": "tabla del modelo v0.8 inexistente en 0330; timezone/locale por DEFAULT (H-P5-03)",
+    "tipos_hecho": "catalogo de sistema sembrado por la migration 0150 (7 tipos), no es dato importado",
+    # --- filas RUN06 sin origen (R05 prohibe destinos sin origen) y dimensiones demostradas
+    "actores_financieros": "RUN06: 294 sin origen (uno por tercero); 0330: self + 6 personas + 2 financiadores (D8-C) "
+                           "+ 4 declarados por el propietario (S20): solo donde el rol financiero se demuestra",
+    "tercero_roles": "RUN06: 279 roles sin origen deducidos del nombre (H-P5-04 lo prohibe); 0330: 2 FINANCIADOR "
+                     "(D8-C) + 1 declarado por el propietario",
+    "terceros": "279 proveedores + personas 7->6 (D2-C: la persona que es el propio usuario no es tercero) + 4 "
+                "declarados por el propietario; RUN06 tenia 7 sin origen",
+    "tercero_personas": "personas 7->6 (D2-C) + 3 personas declaradas por el propietario (D8-C3 / S20)",
+    "categorias_financieras": "arbol canonico Migration V3 §15.2 (D2-E): 93 nodos; los 97 de RUN06 no tenian origen",
+    "clasificaciones_tercero": "DV-9: 22 ramas + 34 subsegmentos V3 con jerarquia demostrada",
+    "tercero_clasificaciones": "DV-9: clasificacion de los 279 proveedores",
+    "cuenta_capacidades": "D3-D: V3 no tiene el dato; solo las declaradas por el propietario (44); RUN06: 21 sin origen",
+    "contextos": "D10-G: V3 no tiene contextos; 2 decididos por el propietario; RUN06: 3 sin origen",
+    "etiquetas": "4 de evento con variantes unificadas (Q-R02-2) + Capricho (D-MIG-002); RUN06: 8 sin origen "
+                 "(7 variantes de evento sin unificar + Capricho)",
+    "magnitudes": "Kilometraje y Combustible (Q-R02-3); precio por litro es control derivado, no magnitud",
+    "metricas_definicion": "metricas LEGACY_V3_* solo para campos presentes (D11-B/C/G): 21 cabecera + 5 detalle; "
+                           "RUN06: 31 sin origen",
+    # --- financiero
+    "financiaciones": "22 compras financiadas (7 tipo V3 FINANCIACION D8-K + 14 decididas D8-K2 + 1 cancelada D8-K4) "
+                      "+ 4 prestamos; RUN06 solo las 7 D8-K",
+    "financiacion_condiciones_versiones": "una version por compra (22) + 5 de prestamos (una version adicional "
+                                          "decidida, CONDICIONES_DECIDIDAS)",
+    "entidades": "26 financiaciones + 14 derechos/obligaciones (D8B, fianzas D10-I) + 7 inversiones + 4 propiedades + "
+                 "3 contratos + 2 contextos + 1 servicio (D10-K); RUN06: 7 sin origen",
+    "entidad_participaciones": "participacion por entidad solo cuando esta decidida: financiaciones (D8-H2, 50/50 "
+                               "Fuensanta), derechos/obligaciones (D8B-F, D10-I), inversiones (D9-G), propiedades "
+                               "(D4-C, S20); RUN06 solo 4 propiedades, incluida Blasco 1 % contraria a D4-D",
+    "entidad_relaciones": "D8-B: hipotecas GARANTIZADA_POR su vivienda",
+    "derechos_obligaciones_financieras": "11 derechos de cobro (catalogo DERECHOS_V3, D8B-A) + 3 fianzas OBLIGACION_PAGO "
+                                         "(D10-I); RUN06: 4 sin origen",
+    "hechos_financieros": "gastos +14 (compras D8-K2, reglas en RUN06), ingresos +1 (D5-S), transferencias reales +83 "
+                          "(F04-D001), prestamos -4 (RUN06 creaba hecho de alta; 0330 fija la deuda como apertura, "
+                          "D8-E), cuotas pagadas +136 (D8-I, Q-R02-1)",
+    "hecho_efectos": "gastos +35 / ingresos +1 (DEUDA de compras D6-X y DERECHO_COBRO D6-E/Z), prestamos -4 (D8-E), "
+                     "cuotas pagadas +136 (D8-I)",
+    "efecto_atribuciones": "gastos +64 / ingresos +5 (atribucion por cada efecto nuevo, repartos D6-V/D6-Z/D8B-F), "
+                           "cuotas pagadas +144 (D8-I: 136 efectos, 8 con dos actores por Fuensanta 50/50)",
+    "hecho_entidades": "vinculos por efecto a financiacion/derecho/vivienda/contexto (D6-E/S/X) y cuotas pagadas "
+                       "+136 (D8-I); RUN06: 4 sin origen",
+    "hecho_terceros": "ingresos -14: RUN06 creaba 'contraparte' sin demostrarla (D5-H/D6-R; la contraparte de un "
+                      "derecho vive en la posicion, D8B-C/H); gastos +6 por compras D8-K2 con proveedor V3",
+    "hecho_relaciones": "RUN06: 18 filas = 9 pares con duplicados (+11 sin origen); 0330: 6 REEMBOLSO_DE + 1 "
+                        "DEVOLUCION_DE (D6-D/F). PAGO CURSO 3/4 no generan derecho: son transferencias a ahorro "
+                        "(RV3-D003 §23.5, D8B-G)",
+    "reglas_financieras": "77 origenes RUN06 - 20 (15 compras D8-K2 -> dominio 8; 4 cuotas D5-T; 1 cobro parcial D5-S) "
+                          "= 57 origenes -> 50 reglas por 7 fusiones N:1 (3 rentas D5-L, Mediolanum D5-K, 3 D5-K3)",
+    "regla_versiones": "mismos -20 origenes; 57 versiones - 3 rentas fusionadas con su contrato (D5-L) = 54",
+    "cierre_metricas": "cabecera 273->225 (D11-G: campos inexistentes antes de dic-2025 = 0 por ausencia de modulo, "
+                       "sin metrica); detalle 96->235 (D11-C: cada campo numerico del detalle)",
+    "presupuestos": "D11-F: contenedores G-V3-03 -> presupuesto del mes del corte",
+    "presupuesto_lineas": "D11-F: una bolsa por contenedor (6)",
+    "presupuesto_linea_alcances": "D11-F/H: 5 alcances; un contenedor sin categoria unica queda sin alcance",
+    "contrato_revision_renta_versiones": "D10-E: una version por contrato (IPC o NINGUNA); RUN06 solo las IPC",
+    "servicios": "D10-K: servicio repercutible decidido por el propietario (luz de Allende)",
+    "contrato_servicios": "D10-K: servicio repercutible al inquilino",
+    "direcciones": "4 propiedades (D4-A) + 154 proveedores COMERCIAL (Q-R02-5); RUN06: 4 + 1",
+    # --- decisiones RV3 y respuestas del propietario
     "transferencias": "DV-7: -58 autotransferencias de RUN06 son ajustes (AJUSTE_SALDO); 83 reales",
     "movimientos_tesoreria": "DV-7: 83 x 2 OPERACION + 58 AJUSTE_SALDO = 224 (RUN06 282)",
     "hecho_movimientos_tesoreria": "conciliacion de las 83 transferencias (166); RUN06 no la materializaba",
-    "contrato_participantes": "fusion N:1 de participante duplicado por captura (clase C)",
-    "registros_origen_importacion": "+131 registros de fuentes suplementarias (decisiones/catalogos); B0 = 2501",
-    "fuentes_importacion": "+2 fuentes suplementarias (decisiones del propietario, arbol de categorias)",
+    "contrato_participantes": "fusion N:1 de participante duplicado por captura (D10-J, clase C)",
     "tercero_direcciones": "Q-R02-5: direcciones COMERCIAL de proveedores (propietario 2026-09-22)",
-    "etiquetas": "Q-R02-2: 4 etiquetas de evento con variantes unificadas (propietario 2026-09-22)",
-    "hecho_etiquetas": "Q-R02-2: una por cotidiano con evento y hecho (201)",
-    "magnitudes": "Q-R02-3: Kilometraje y Combustible; precio_litro es control derivado, no magnitud",
-    "hecho_magnitudes": "Q-R02-3: km y litros > 0 (0 = desconocido), precio_litro derivado",
+    "hecho_etiquetas": "201 evento (Q-R02-2) + 77 Capricho (D-MIG-002)",
+    "hecho_magnitudes": "RUN06 77 = km 24 + litros 26 + precio 27; 0330 49 = km 24 (12.811 corregido a 128.111) + "
+                        "litros 25 (R35KCY desconocido por decision); precio_litro control derivado (Q-R02-3)",
 }
+
+
+def _primario(mapeos, contenedor_de, alias=lambda t: t) -> dict:
+    """Destino -> contenedor de su origen primario (CREADO/DIVIDIDO/FUSIONADO antes que VINCULADO; public antes que
+    fuentes suplementarias). Devuelve {tabla: {contenedor: n}}."""
+    rank = {"CREADO": 0, "DIVIDIDO": 0, "FUSIONADO": 0, "VINCULADO": 1}
+    mejor = {}
+    for m in mapeos:
+        t = m.get("tabla_destino")
+        if not t:
+            continue
+        c = contenedor_de.get(m["registro_origen_id"], "?")
+        k = (alias(t), m["registro_destino_id"])
+        v = (rank.get(str(m["tipo_mapping"]).upper(), 2), c.startswith("rv3."), c)
+        if k not in mejor or v < mejor[k]:
+            mejor[k] = v
+    out = collections.defaultdict(collections.Counter)
+    for (t, _), v in mejor.items():
+        out[t][v[2]] += 1
+    return out
+
+
+def _por_origen(wb, ds) -> dict:
+    """Evidencia de R26: recuento por tabla y contenedor origen en RUN06 y en el dataset (+ filas RUN06 sin origen)."""
+    hoja = {}
+    for ws in wb.worksheets:
+        if ws.title in ("mapeos_importacion", "registros_origen_importacion") or not ws.title.startswith("00_"):
+            rows = ws.iter_rows(values_only=True)
+            cab = next(rows, None)
+            if cab and ws.title in ("mapeos_importacion", "registros_origen_importacion"):
+                hoja[ws.title] = [dict(zip(cab, r)) for r in rows if any(v not in (None, "") for v in r)]
+    ro6 = {r["id"]: r["contenedor_origen"] for r in hoja.get("registros_origen_importacion", [])}
+    a = _primario(hoja.get("mapeos_importacion", []), ro6, lambda t: ALIAS_RUN06.get(t, t))
+    ro = {r["id"]: r["contenedor_origen"] for r in ds.filas["registros_origen_importacion"].values()}
+    b = _primario(ds.filas["mapeos_importacion"].values(), ro)
+    return {t: {c: [a[t].get(c, 0), b[t].get(c, 0)] for c in sorted(set(a[t]) | set(b[t]))
+                if a[t].get(c, 0) != b[t].get(c, 0)} for t in sorted(set(a) | set(b))
+            if any(a[t].get(c, 0) != b[t].get(c, 0) for c in set(a[t]) | set(b[t]))}
 
 
 def main(argv=None) -> int:
@@ -257,6 +358,9 @@ def main(argv=None) -> int:
         run06[ws.title] = sum(1 for i, row in enumerate(ws.iter_rows(values_only=True))
                               if i and any(v not in (None, "") for v in row))
     res = reconciliar(P5, ds, fu.fuente_b0(b0), run06)
+    r26 = next(r for r in res if r["id"] == "R26")
+    if isinstance(r26.get("obtenido"), dict):
+        r26["obtenido"]["evidencia_por_origen"] = _por_origen(wb, ds)
     a.salida.mkdir(parents=True, exist_ok=True)
     (a.salida / "rv3_p8_reconciliacion.json").write_text(
         json.dumps({"p5_version": P5.VERSION, "hash_dataset": ds.hash(), "resultados": res},

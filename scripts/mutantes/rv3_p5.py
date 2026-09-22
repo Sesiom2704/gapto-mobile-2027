@@ -16,6 +16,7 @@
 #   python scripts/mutantes/rv3_p5.py            # todos
 #   python scripts/mutantes/rv3_p5.py M30 M33    # subconjunto
 #
+# Version: 0.26.0 (M233..M235: P5 v0.31.0, D-MIG-002 Capricho)
 # Version: 0.25.0 (M226..M232: P5 v0.30.0, vencimiento a fin de mes)
 # Version: 0.24.0 (M203..M225: P5 v0.29.0, Q-R02-1/5/7)
 # Version: 0.23.0 (M194 reescrito, M197..M202: P5 v0.28.0)
@@ -69,6 +70,7 @@ T21 = "tests/migration/test_rv3_021_p5_r02_campos.py"
 T22 = "tests/migration/test_rv3_022_p5_r02_complementos.py"
 T23 = "tests/migration/test_rv3_023_p5_r02_cuotas_direcciones_omisiones.py"
 T24 = "tests/migration/test_rv3_024_p5_vencimiento_fin_de_mes.py"
+T26 = "tests/migration/test_rv3_026_p5_etiqueta_capricho.py"
 
 MUTANTES = {
     "M30": ("gate de la fuente suplementaria siempre abierto",
@@ -719,6 +721,16 @@ MUTANTES = {
     'M232': ('sin ledger D8-K',
              [('            ds.ledger.append({"regla": "D8-K-FIN_DE_MES"', '            (lambda *a: None)({"regla": "D8-K-FIN_DE_MES"')],
              T24 + "::test_calendario_a_fin_de_mes_solo_en_la_financiacion_declarada"),
+    # --- v0.26.0: P5 v0.31.0 D-MIG-002
+    'M233': ('capricho sin vinculo al hecho',
+             [('            ds.add("hecho_etiquetas", {"id": xid, "hecho_id": hid, "etiqueta_id": tid}, natural=(hid, tid))\n', '')],
+             T26 + "::test_capricho_etiqueta_unica_por_hecho"),
+    'M234': ('capricho sin hecho sin residual',
+             [('                _residual(ds, co, "tipo_id", cl, "D-MIG-002", "registro sin hecho: la etiqueta solo aplica a hechos")', '                pass')],
+             T26 + "::test_capricho_sin_hecho_queda_residual"),
+    'M235': ('etiqueta aplicada a cualquier tipo',
+             [('            nombre = ETIQUETA_TIPO_V3.get(_texto(_celda(co, "tipo_id", f, ctx)) or "")', '            nombre = "Capricho"')],
+             T26 + "::test_capricho_etiqueta_unica_por_hecho"),
 }
 
 
