@@ -16,6 +16,11 @@
 #   deuda, cobrar un derecho, materializar una prevision y reconocer una
 #   compra financiada son las cuatro situaciones donde el motor podria contar
 #   dos veces la misma realidad. Cada oraculo lo comprueba explicitamente.
+# Version: 0.2.0
+#   0.2.0 (F04-D046 R1 · A19): signo canonico. Compras, gasoil, luz, intereses,
+#   alquiler y revision IPC son GASTO +X; la devolucion de C-04 es GASTO -30.
+#   Tesoreria y liquidez intactas. R2: devolucion y suplemento declaran
+#   `presupuestable`.
 # Version: 0.1.0
 # ============================================================
 
@@ -155,7 +160,7 @@ def test_c02_luz_recurrente_prevision_y_realidad(
         contexto,
         hecho_id=datos.hecho_id,
         row_version_esperada=creado.row_version,
-        efectos=[efecto("GASTO", -real)],
+        efectos=[efecto("GASTO", real)],
     ).row_version
     pieza = movimiento(cuenta, -real, descripcion="recibo luz")
     mov = motor.tesoreria.registrar_movimiento(contexto, pieza)
@@ -182,7 +187,7 @@ def test_c02_luz_recurrente_prevision_y_realidad(
     # INV-12: un solo gasto, del importe REAL. La desviacion frente a los
     # 62,00 previstos es desviacion, no un segundo hecho.
     assert efectos_de(admin, contexto.owner_user_id, datos.hecho_id) == {
-        "GASTO": -real
+        "GASTO": real
     }
     assert contar(
         admin,
@@ -222,7 +227,7 @@ def test_c03_gasoil_reembolsable(
         contexto,
         hecho_id=datos.hecho_id,
         row_version_esperada=creado.row_version,
-        efectos=[efecto("GASTO", -total, atribuciones=(atribucion(actor_a, -total),))],
+        efectos=[efecto("GASTO", total, atribuciones=(atribucion(actor_a, total),))],
     ).row_version
     pieza = movimiento(cuenta, -total, descripcion="gasolinera")
     mov = motor.tesoreria.registrar_movimiento(contexto, pieza)
@@ -292,7 +297,7 @@ def test_c04_devolucion_parcial(
         contexto,
         hecho_id=datos.hecho_id,
         row_version_esperada=creado.row_version,
-        efectos=[efecto("GASTO", -total)],
+        efectos=[efecto("GASTO", total)],
     ).row_version
     pieza = movimiento(cuenta, -total, descripcion="compra")
     mov = motor.tesoreria.registrar_movimiento(contexto, pieza)
@@ -313,6 +318,7 @@ def test_c04_devolucion_parcial(
             hecho_original_id=datos.hecho_id,
             tipo_efecto="GASTO",
             importe=devuelto,
+            presupuestable=True,
             fecha_hecho=dt.date(2026, 6, 20),
             moneda="EUR",
             concepto="devolucion parcial",
@@ -320,10 +326,10 @@ def test_c04_devolucion_parcial(
     )
 
     assert efectos_de(admin, contexto.owner_user_id, datos.hecho_id) == {
-        "GASTO": -total
+        "GASTO": total
     }
     assert efectos_de(admin, contexto.owner_user_id, devolucion_id) == {
-        "GASTO": devuelto
+        "GASTO": -devuelto
     }
     sin_naturaleza(admin, contexto.owner_user_id, devolucion_id, "INGRESO")
     assert contar(
@@ -389,7 +395,7 @@ def test_c06_hipoteca_cuota_separa_capital_e_intereses(
         contexto,
         hecho_id=datos.hecho_id,
         row_version_esperada=creado.row_version,
-        efectos=[efecto("GASTO", -intereses)],
+        efectos=[efecto("GASTO", intereses)],
     ).row_version
     pieza = movimiento(cuenta, -(capital + intereses), descripcion="cuota hipoteca")
     mov = motor.tesoreria.registrar_movimiento(contexto, pieza)
@@ -401,7 +407,7 @@ def test_c06_hipoteca_cuota_separa_capital_e_intereses(
     )
 
     assert efectos_de(admin, contexto.owner_user_id, datos.hecho_id) == {
-        "GASTO": -intereses
+        "GASTO": intereses
     }
     assert liquidez(admin, contexto.owner_user_id, cuenta) == -(capital + intereses)
 
@@ -435,7 +441,7 @@ def test_c08_compra_financiada_reconoce_el_gasto_una_sola_vez(
         contexto,
         hecho_id=datos.hecho_id,
         row_version_esperada=creado.row_version,
-        efectos=[efecto("GASTO", -total)],
+        efectos=[efecto("GASTO", total)],
     )
     posicion, alta = _alta_posicion(
         motor,
@@ -464,7 +470,7 @@ def test_c08_compra_financiada_reconoce_el_gasto_una_sola_vez(
         "JOIN gapto.hechos_financieros h ON h.id = e.hecho_id "
         "WHERE h.owner_user_id = %s AND e.tipo_efecto = 'GASTO'",
         (contexto.owner_user_id,),
-    ) == (-total,)
+    ) == (total,)
 
 
 # ==================================================================
@@ -497,7 +503,7 @@ def test_c09_alquiler_con_revision_es_realidad_nueva(
         contexto,
         hecho_id=datos.hecho_id,
         row_version_esperada=creado.row_version,
-        efectos=[efecto("GASTO", -renta)],
+        efectos=[efecto("GASTO", renta)],
     )
 
     suplemento_id = uuid.uuid4()
@@ -507,7 +513,8 @@ def test_c09_alquiler_con_revision_es_realidad_nueva(
             hecho_id=suplemento_id,
             efecto_id=uuid.uuid4(),
             tipo_efecto="GASTO",
-            importe_delta=-revision,
+            importe_delta=revision,  # revision IPC: aumenta el coste
+            presupuestable=True,
             fecha_hecho=dt.date(2026, 7, 15),
             moneda="EUR",
             fecha_demostrada=True,
@@ -518,10 +525,10 @@ def test_c09_alquiler_con_revision_es_realidad_nueva(
     )
 
     assert efectos_de(admin, contexto.owner_user_id, datos.hecho_id) == {
-        "GASTO": -renta
+        "GASTO": renta
     }
     assert efectos_de(admin, contexto.owner_user_id, suplemento_id) == {
-        "GASTO": -revision
+        "GASTO": revision
     }
     assert valor(
         admin,

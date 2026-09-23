@@ -38,6 +38,10 @@
 #   python scripts/mutantes/f0406.py            # todos
 #   python scripts/mutantes/f0406.py N14         # un lote
 #
+# Version: 0.1.4
+#   0.1.4 (F04-D046 R2): N8 apunta a `SuplementosService._datos_hecho`, que
+#   desde R2 construye la raiz del suplemento para el alta y el replay. La
+#   invariante vigilada no cambia; solo el punto de mutacion.
 # Version: 0.1.3
 #   0.1.3 (iteracion correctiva): N8 discrimina por OPERACION y no por fechas;
 #   E-B4-04 deja de apoyarse en la regla retirada; N11 queda clasificado con
@@ -405,8 +409,8 @@ MUTANTES: list[Mutante] = [
         invariante='OP-18 crea realidad NUEVA y no edita el hecho relacionado',
         descripcion='OP-18 reutiliza la identidad del hecho ajustado en vez de crear una nueva',
         fichero=SRV_SUP,
-        viejo='                    hecho_id=datos.hecho_id,\n                    fecha_hecho=datos.fecha_hecho,',
-        nuevo='                    hecho_id=datos.hecho_ajustado_id or datos.hecho_id,\n                    fecha_hecho=datos.fecha_hecho,',
+        viejo='            hecho_id=datos.hecho_id,\n            fecha_hecho=datos.fecha_hecho,',
+        nuevo='            hecho_id=datos.hecho_ajustado_id or datos.hecho_id,\n            fecha_hecho=datos.fecha_hecho,',
         discriminante='test_op18_crea_realidad_nueva_y_no_edita_el_original',
         suite=SUITE_B4,
     ),

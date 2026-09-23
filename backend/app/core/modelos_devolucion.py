@@ -22,6 +22,15 @@
 #   conserva la naturaleza del original (INV-05): devolver un GASTO produce un
 #   GASTO negativo, jamas un INGRESO. El campo permite devolver un error de
 #   dominio legible a quien lo intente, en vez de ignorarlo en silencio.
+# Version: 0.2.0
+#   0.2.0 (F04-D046 R2 · A20/A08-bis): la devolucion recibe su propia decision
+#   historica `presupuestable` y su localizacion. OP-13 ya no fija `false` ni
+#   `NO_APLICA`. Con naturaleza GASTO o INGRESO `presupuestable` es obligatorio
+#   y sin default: el motor no decide si la devolucion reduce el consumo
+#   presupuestario. Con DEUDA o DERECHO_COBRO el hecho no contiene GASTO ni
+#   INGRESO y `presupuestable=false` se deriva por contrato (declarar `true`
+#   se rechaza). La localizacion aplicable sin dato es DESCONOCIDA; NO_APLICA
+#   solo si el llamante lo declara expresamente. Nunca se hereda del origen.
 # Version: 0.1.0
 # ============================================================
 
@@ -43,6 +52,10 @@ TIPO_RELACION_DEVOLUCION: Final = "DEVOLUCION_DE"
 NATURALEZAS_DEVOLUBLES: Final = frozenset(
     {"GASTO", "INGRESO", "DEUDA", "DERECHO_COBRO"}
 )
+
+# F04-D046 R2. Naturalezas elegibles para presupuesto (INV-11). Un hecho sin
+# ninguna de ellas tiene `presupuestable=false` derivado por contrato.
+NATURALEZAS_PRESUPUESTABLES: Final = frozenset({"GASTO", "INGRESO"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +93,12 @@ class DatosDevolucion:
 
     # Solo para rechazar: una devolucion conserva la naturaleza del original.
     tipo_efecto_devolucion: str | None = None
+    # F04-D046 R2. Decision historica propia de la devolucion. Sin default:
+    # obligatoria con GASTO/INGRESO; derivada `false` con DEUDA/DERECHO_COBRO.
+    presupuestable: bool | None = None
+    # F04-D046 R2. Localizacion analitica. Sin dato -> DESCONOCIDA.
+    estado_localizacion: str | None = None
+    localidad_id: uuid.UUID | None = None
 
     @property
     def con_caja(self) -> bool:

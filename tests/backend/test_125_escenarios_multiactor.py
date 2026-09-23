@@ -9,6 +9,11 @@
 #   sus suites— sino que la combinacion no produzca una conclusion que nadie
 #   decidio: una atribucion nacida de un porcentaje de cuenta, una deuda
 #   nacida de una diferencia, un residual completado para cuadrar.
+# Version: 0.2.0
+#   0.2.0 (F04-D046 R1 · A19): signo canonico. La cena y el recargo son GASTO
+#   +X; sus atribuciones heredan el signo (F04-D007); la devolucion es GASTO
+#   -X; la correccion del importe mal leido es +40. La tesoreria no cambia.
+#   R2: devolucion y recargo declaran `presupuestable`.
 # Version: 0.1.0
 # ============================================================
 
@@ -109,7 +114,7 @@ def _gasto(importe=TOTAL, atribuciones=(), estado=None) -> DatosEfecto:
     return DatosEfecto(
         efecto_id=uuid.uuid4(),
         tipo_efecto="GASTO",
-        importe_delta=-importe,
+        importe_delta=importe,  # F04-D046 R1: GASTO +X aumenta el gasto
         estado_atribucion=estado or ("COMPLETA" if atribuciones else "NO_DISPONIBLE"),
         atribuciones=tuple(atribuciones),
     )
@@ -119,7 +124,7 @@ def _atribucion(actor_id, importe, criterio="MANUAL") -> DatosAtribucion:
     return DatosAtribucion(
         atribucion_id=uuid.uuid4(),
         actor_id=actor_id,
-        importe_atribuido=-importe,
+        importe_atribuido=importe,  # F04-D007: hereda el signo
         criterio_atribucion=criterio,
     )
 
@@ -234,7 +239,7 @@ def test_c10_propiedad_compartida_propone_pero_no_decide(
         "FROM gapto.efecto_atribuciones a "
         "JOIN gapto.hecho_efectos e ON e.id = a.efecto_id WHERE e.hecho_id = %s",
         (hecho.hecho_id,),
-    ) == (2, -TOTAL)
+    ) == (2, TOTAL)
 
 
 def test_n3_la_participacion_no_materializa_atribuciones_por_si_sola(
@@ -297,7 +302,7 @@ def test_c13_cuenta_compartida_no_reparte_el_gasto(
         "SELECT count(*), sum(a.importe_atribuido) FROM gapto.efecto_atribuciones a "
         "JOIN gapto.hecho_efectos e ON e.id = a.efecto_id WHERE e.hecho_id = %s",
         (hecho.hecho_id,),
-    ) == (1, -TOTAL)
+    ) == (1, TOTAL)
     assert leer_fila(
         admin,
         contexto.owner_user_id,
@@ -375,7 +380,7 @@ def test_a1_atribucion_parcial_con_residual_desconocido(
         "LEFT JOIN gapto.efecto_atribuciones a ON a.efecto_id = e.id "
         "WHERE e.hecho_id = %s GROUP BY e.estado_atribucion",
         (hecho.hecho_id,),
-    ) == ("PARCIAL", 1, -MITAD)
+    ) == ("PARCIAL", 1, MITAD)
 
 
 def test_atribucion_completa_que_no_suma_el_efecto_se_rechaza(
@@ -562,7 +567,7 @@ def test_a18_importe_falso_se_corrige_sin_crear_hecho(
             hecho_id=hecho.hecho_id,
             row_version_esperada=resultado.row_version,
             motivo="el importe del ticket estaba mal leido",
-            efectos_a_actualizar={efecto.efecto_id: {"importe_delta": D("-40.0000")}},
+            efectos_a_actualizar={efecto.efecto_id: {"importe_delta": D("40.0000")}},
         ),
     )
     assert leer_fila(
@@ -600,7 +605,8 @@ def test_a19_realidad_posterior_distinta_es_un_hecho_nuevo(
             hecho_id=suplemento_id,
             efecto_id=uuid.uuid4(),
             tipo_efecto="GASTO",
-            importe_delta=D("-3.5000"),
+            importe_delta=D("3.5000"),  # recargo: aumenta el gasto
+            presupuestable=True,
             fecha_hecho=dt.date(2026, 6, 5),
             moneda="EUR",
             fecha_demostrada=True,
@@ -615,7 +621,7 @@ def test_a19_realidad_posterior_distinta_es_un_hecho_nuevo(
         contexto.owner_user_id,
         "SELECT sum(importe_delta) FROM gapto.hecho_efectos WHERE hecho_id = %s",
         (hecho.hecho_id,),
-    ) == (-TOTAL,)
+    ) == (TOTAL,)
     assert leer_fila(
         admin,
         contexto.owner_user_id,
@@ -677,6 +683,7 @@ def test_a10_devolucion_posterior_sobre_gasto_compartido(
             fecha_hecho=dt.date(2026, 6, 10),
             moneda="EUR",
             concepto="devolucion parcial del restaurante",
+            presupuestable=True,
         ),
     )
 
@@ -686,23 +693,24 @@ def test_a10_devolucion_posterior_sobre_gasto_compartido(
         contexto.owner_user_id,
         "SELECT sum(importe_delta) FROM gapto.hecho_efectos WHERE hecho_id = %s",
         (hecho.hecho_id,),
-    ) == (-TOTAL,)
+    ) == (TOTAL,)
     assert leer_fila(
         admin,
         contexto.owner_user_id,
         "SELECT count(*), sum(importe_atribuido) FROM gapto.efecto_atribuciones a "
         "JOIN gapto.hecho_efectos e ON e.id = a.efecto_id WHERE e.hecho_id = %s",
         (hecho.hecho_id,),
-    ) == (2, -TOTAL)
+    ) == (2, TOTAL)
 
-    # La devolucion es GASTO positivo, no INGRESO, y cuelga por DEVOLUCION_DE.
+    # La devolucion es GASTO NEGATIVO (reduce el gasto), no INGRESO, y cuelga
+    # por DEVOLUCION_DE.
     assert leer_fila(
         admin,
         contexto.owner_user_id,
         "SELECT tipo_efecto, importe_delta FROM gapto.hecho_efectos "
         "WHERE hecho_id = %s",
         (devolucion_id,),
-    ) == ("GASTO", D("10.0000"))
+    ) == ("GASTO", D("-10.0000"))
     assert leer_fila(
         admin,
         contexto.owner_user_id,

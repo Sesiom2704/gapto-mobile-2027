@@ -19,6 +19,9 @@
 #   NINGUNA CARRERA SE SINCRONIZA CON SLEEPS. Se usa una barrera explicita: los
 #   dos hilos se sueltan a la vez y despues se mira el resultado, que solo
 #   admite dos formas y ninguna deja estado invalido.
+# Version: 0.2.0
+#   0.2.0 (F04-D046 R1 · A19): la cena es GASTO +44,50 y la correccion lo
+#   lleva a +40,00 (signo canonico). Sin tesoreria. Mismos interleavings.
 # Version: 0.1.0
 # ============================================================
 
@@ -318,7 +321,7 @@ def test_i3_oraculo_secuencial(
             DatosEfecto(
                 efecto_id=efecto_id,
                 tipo_efecto="GASTO",
-                importe_delta=D("-44.5000"),
+                importe_delta=D("44.5000"),
                 estado_atribucion="NO_DISPONIBLE",
             )
         ],
@@ -338,7 +341,7 @@ def test_i3_oraculo_secuencial(
                 hecho_id=hecho_id,
                 row_version_esperada=tras_efectos.row_version,
                 motivo="el importe era otro",
-                efectos_a_actualizar={efecto_id: {"importe_delta": D("-40.0000")}},
+                efectos_a_actualizar={efecto_id: {"importe_delta": D("40.0000")}},
             ),
         )
     assert excepcion.value.codigo is CodigoError.VERSION_DESFASADA
@@ -349,7 +352,7 @@ def test_i3_oraculo_secuencial(
             hecho_id=hecho_id,
             row_version_esperada=tras_participante.row_version,
             motivo="el importe era otro",
-            efectos_a_actualizar={efecto_id: {"importe_delta": D("-40.0000")}},
+            efectos_a_actualizar={efecto_id: {"importe_delta": D("40.0000")}},
         ),
     )
     assert leer_fila(
@@ -357,7 +360,7 @@ def test_i3_oraculo_secuencial(
         contexto.owner_user_id,
         "SELECT importe_delta FROM gapto.hecho_efectos WHERE id = %s",
         (efecto_id,),
-    ) == (D("-40.0000"),)
+    ) == (D("40.0000"),)
     # La correccion no ha tocado a los participantes.
     assert _identificados(admin, contexto, hecho_id) == 1
 
@@ -383,7 +386,7 @@ def test_i3_enriquecimiento_y_correccion_concurrentes(
             DatosEfecto(
                 efecto_id=efecto_id,
                 tipo_efecto="GASTO",
-                importe_delta=D("-44.5000"),
+                importe_delta=D("44.5000"),
                 estado_atribucion="NO_DISPONIBLE",
             )
         ],
@@ -406,7 +409,7 @@ def test_i3_enriquecimiento_y_correccion_concurrentes(
                     row_version_esperada=version_actual,
                     motivo="el importe era otro",
                     efectos_a_actualizar={
-                        efecto_id: {"importe_delta": D("-40.0000")}
+                        efecto_id: {"importe_delta": D("40.0000")}
                     },
                 ),
             )
@@ -424,6 +427,6 @@ def test_i3_enriquecimiento_y_correccion_concurrentes(
     )[0]
     identificados = _identificados(admin, contexto, hecho_id)
     assert (importe, identificados) in (
-        (D("-40.0000"), 0),
-        (D("-44.5000"), 1),
+        (D("40.0000"), 0),
+        (D("44.5000"), 1),
     )

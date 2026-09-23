@@ -12,6 +12,10 @@
 #   El precedente es reciente y caro: F04-07 descubrio que un efecto con
 #   reparto COMPLETA tenia el importe inmutable. Ni F04-02 ni F04-06 fallaban
 #   por separado. El hueco vivia entre ambas.
+# Version: 0.2.0
+#   0.2.0 (F04-D046 R1 · A19): signo canonico en X-01..X-12 (GASTO +X, atribuciones +X, correccion de
+#   reparto +40/+25/+15). X-08: la devolucion declara `presupuestable` (R2).
+#   X-12: el recargo es GASTO +12,40 y declara `presupuestable`. Tesoreria intacta.
 # Version: 0.1.0
 # ============================================================
 
@@ -111,7 +115,7 @@ def _gasto_simple(motor: Motor, contexto, importe, concepto="gasto"):
         contexto,
         hecho_id=datos.hecho_id,
         row_version_esperada=creado.row_version,
-        efectos=[efecto("GASTO", -importe)],
+        efectos=[efecto("GASTO", importe)],
     ).row_version
     return datos, version
 
@@ -198,7 +202,7 @@ def test_x01_prevision_realidad_movimiento_conciliacion(
         ),
     )
     assert efectos_de(admin, contexto.owner_user_id, datos.hecho_id) == {
-        "GASTO": -importe
+        "GASTO": importe
     }
     assert liquidez(admin, contexto.owner_user_id, cuenta) == -importe
 
@@ -289,7 +293,7 @@ def test_x03_compra_financiada_y_pagos_sucesivos(
         contexto,
         hecho_id=datos.hecho_id,
         row_version_esperada=creado.row_version,
-        efectos=[efecto("GASTO", -total)],
+        efectos=[efecto("GASTO", total)],
     )
     posicion, alta = _posicion(
         motor,
@@ -320,7 +324,7 @@ def test_x03_compra_financiada_y_pagos_sucesivos(
         "JOIN gapto.hechos_financieros h ON h.id = e.hecho_id "
         "WHERE h.owner_user_id = %s AND e.tipo_efecto = 'GASTO'",
         (contexto.owner_user_id,),
-    ) == (-total,)
+    ) == (total,)
 
 
 # ==================================================================
@@ -351,10 +355,10 @@ def test_x04_diferencia_atribucion_aportacion_no_crea_posicion(
             efectos=[
                 efecto(
                     "GASTO",
-                    -CENA,
+                    CENA,
                     atribuciones=(
-                        atribucion(actor_a, -MITAD),
-                        atribucion(actor_b, -MITAD),
+                        atribucion(actor_a, MITAD),
+                        atribucion(actor_b, MITAD),
                     ),
                 )
             ],
@@ -394,10 +398,10 @@ def test_x05_posicion_explicita_posterior_al_gasto_compartido(
             efectos=[
                 efecto(
                     "GASTO",
-                    -CENA,
+                    CENA,
                     atribuciones=(
-                        atribucion(actor_a, -MITAD),
-                        atribucion(actor_b, -MITAD),
+                        atribucion(actor_a, MITAD),
+                        atribucion(actor_b, MITAD),
                     ),
                 )
             ],
@@ -419,7 +423,7 @@ def test_x05_posicion_explicita_posterior_al_gasto_compartido(
     ).segmento(contraparte, "EUR")
     assert segmento.estado == DETERMINADO and segmento.neto == MITAD
     assert efectos_de(admin, contexto.owner_user_id, datos.hecho_id) == {
-        "GASTO": -CENA
+        "GASTO": CENA
     }
 
 
@@ -442,9 +446,9 @@ def test_x06_correccion_de_reparto_y_lectura_posterior(
     debe seguir siendo legible por el resto del motor. Un efecto corregido a
     medias dejaria el agregado en un estado que nadie sabe interpretar.
     """
-    a = atribucion(actor_a, -MITAD)
-    b = atribucion(actor_b, -MITAD)
-    efecto_cena = efecto("GASTO", -CENA, atribuciones=(a, b))
+    a = atribucion(actor_a, MITAD)
+    b = atribucion(actor_b, MITAD)
+    efecto_cena = efecto("GASTO", CENA, atribuciones=(a, b))
     datos = hecho(concepto="cena mal leida", importe_total=CENA)
     resultado = motor.compartidos.registrar_gasto_compartido(
         contexto,
@@ -457,16 +461,16 @@ def test_x06_correccion_de_reparto_y_lectura_posterior(
             hecho_id=datos.hecho_id,
             row_version_esperada=resultado.row_version,
             motivo="el ticket eran 40,00 con reparto 25/15",
-            efectos_a_actualizar={efecto_cena.efecto_id: {"importe_delta": D("-40.0000")}},
+            efectos_a_actualizar={efecto_cena.efecto_id: {"importe_delta": D("40.0000")}},
             atribuciones_a_actualizar={
-                a.atribucion_id: {"importe_atribuido": D("-25.0000")},
-                b.atribucion_id: {"importe_atribuido": D("-15.0000")},
+                a.atribucion_id: {"importe_atribuido": D("25.0000")},
+                b.atribucion_id: {"importe_atribuido": D("15.0000")},
             },
         ),
     )
 
     assert efectos_de(admin, contexto.owner_user_id, datos.hecho_id) == {
-        "GASTO": D("-40.0000")
+        "GASTO": D("40.0000")
     }
     assert valor(
         admin,
@@ -476,7 +480,7 @@ def test_x06_correccion_de_reparto_y_lectura_posterior(
         "JOIN gapto.efecto_atribuciones a ON a.efecto_id = e.id "
         "WHERE e.hecho_id = %s GROUP BY e.estado_atribucion",
         (datos.hecho_id,),
-    ) == ("COMPLETA", 2, D("-40.0000"))
+    ) == ("COMPLETA", 2, D("40.0000"))
     # Un solo hecho: corregir no crea realidad nueva.
     assert contar(
         admin,
@@ -511,7 +515,7 @@ def test_x07_retirar_participante_no_toca_el_total(
         contexto,
         DatosGastoCompartido(
             hecho=datos,
-            efectos=[efecto("GASTO", -CENA)],
+            efectos=[efecto("GASTO", CENA)],
             participantes=[
                 DatosParticipante(participante_id=uuid.uuid4(), actor_id=actor_a),
                 participante_b,
@@ -562,10 +566,10 @@ def test_x08_devolucion_sobre_gasto_compartido(
             efectos=[
                 efecto(
                     "GASTO",
-                    -CENA,
+                    CENA,
                     atribuciones=(
-                        atribucion(actor_a, -MITAD),
-                        atribucion(actor_b, -MITAD),
+                        atribucion(actor_a, MITAD),
+                        atribucion(actor_b, MITAD),
                     ),
                 )
             ],
@@ -584,10 +588,11 @@ def test_x08_devolucion_sobre_gasto_compartido(
             fecha_hecho=dt.date(2026, 6, 10),
             moneda="EUR",
             concepto="devolucion del restaurante",
+            presupuestable=True,
         ),
     )
     assert efectos_de(admin, contexto.owner_user_id, datos.hecho_id) == {
-        "GASTO": -CENA
+        "GASTO": CENA
     }
     assert valor(
         admin,
@@ -595,7 +600,7 @@ def test_x08_devolucion_sobre_gasto_compartido(
         "SELECT count(*), sum(a.importe_atribuido) FROM gapto.efecto_atribuciones a "
         "JOIN gapto.hecho_efectos e ON e.id = a.efecto_id WHERE e.hecho_id = %s",
         (datos.hecho_id,),
-    ) == (2, -CENA)
+    ) == (2, CENA)
     sin_naturaleza(admin, contexto.owner_user_id, devolucion_id, "INGRESO")
 
 
@@ -820,7 +825,8 @@ def test_x12_realidad_suplementaria_con_fecha_economica_propia(
             hecho_id=suplemento_id,
             efecto_id=uuid.uuid4(),
             tipo_efecto="GASTO",
-            importe_delta=D("-12.4000"),
+            importe_delta=D("12.4000"),  # recargo: aumenta el gasto
+            presupuestable=True,
             fecha_hecho=fecha_economica,
             moneda="EUR",
             fecha_demostrada=True,
@@ -837,7 +843,7 @@ def test_x12_realidad_suplementaria_con_fecha_economica_propia(
         (suplemento_id,),
     ) == (fecha_economica,)
     assert efectos_de(admin, contexto.owner_user_id, datos.hecho_id) == {
-        "GASTO": D("-200.0000")
+        "GASTO": D("200.0000")
     }
     assert contar(
         admin,

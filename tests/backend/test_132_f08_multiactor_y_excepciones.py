@@ -17,6 +17,14 @@
 #
 #   E-01/E-02/E-03 cubren las tres operaciones que ningun caso canonico
 #   ejercita: OP-02, OP-03 y OP-11.
+# Version: 0.2.0
+#   0.2.0 (F04-D046 R1 · A19 + A19-bis): signo canonico en C-10/C-11/C-13/C-21
+#   y E-01 (GASTO +X, atribuciones +X; tesoreria intacta). C-12 se SUSTITUYE
+#   por el caso canonico de Project Memory: peluqueria 15 pagada por la pareja
+#   con obligacion explicita; cena 44,50 pagada por el usuario con atribucion
+#   explicita de la pareja 15, sin 29,50 por resta, y derecho explicito 15;
+#   OP-20 neto 0 sin escribir nada. La version anterior modelaba solo
+#   posiciones y con la direccion invertida.
 # Version: 0.1.0
 # ============================================================
 
@@ -199,10 +207,10 @@ def test_c10_propiedad_compartida(
             efectos=[
                 efecto(
                     "GASTO",
-                    -derrama,
+                    derrama,
                     atribuciones=(
-                        atribucion(actor_a, -mitad, criterio="PARTICIPACION_ENTIDAD"),
-                        atribucion(actor_b, -mitad, criterio="PARTICIPACION_ENTIDAD"),
+                        atribucion(actor_a, mitad, criterio="PARTICIPACION_ENTIDAD"),
+                        atribucion(actor_b, mitad, criterio="PARTICIPACION_ENTIDAD"),
                     ),
                 )
             ],
@@ -213,7 +221,7 @@ def test_c10_propiedad_compartida(
 
     # El hecho conserva el 100 %: un solo hecho de 300, no dos de 150.
     assert efectos_de(admin, contexto.owner_user_id, datos.hecho_id) == {
-        "GASTO": -derrama
+        "GASTO": derrama
     }
     assert valor(
         admin,
@@ -221,7 +229,7 @@ def test_c10_propiedad_compartida(
         "SELECT count(*), sum(a.importe_atribuido) FROM gapto.efecto_atribuciones a "
         "JOIN gapto.hecho_efectos e ON e.id = a.efecto_id WHERE e.hecho_id = %s",
         (datos.hecho_id,),
-    ) == (2, -derrama)
+    ) == (2, derrama)
     assert valor(
         admin,
         contexto.owner_user_id,
@@ -263,11 +271,11 @@ def test_c11_cena_compartida_con_reparto_desconocido(
             efectos=[
                 efecto(
                     "GASTO",
-                    -CENA,
+                    CENA,
                     estado="PARCIAL",
                     atribuciones=(
-                        atribucion(actor_a, -D("11.1250")),
-                        atribucion(actor_b, -D("11.1250")),
+                        atribucion(actor_a, D("11.1250")),
+                        atribucion(actor_b, D("11.1250")),
                     ),
                 )
             ],
@@ -286,7 +294,7 @@ def test_c11_cena_compartida_con_reparto_desconocido(
         "LEFT JOIN gapto.efecto_atribuciones a ON a.efecto_id = e.id "
         "WHERE e.hecho_id = %s GROUP BY e.estado_atribucion",
         (datos.hecho_id,),
-    ) == ("PARCIAL", 2, -MITAD)
+    ) == ("PARCIAL", 2, MITAD)
     assert valor(
         admin,
         contexto.owner_user_id,
@@ -312,80 +320,217 @@ def test_c11_cena_compartida_con_reparto_desconocido(
 
 @cubre(
     casos=["C-12"],
-    operaciones=["OP-01", "OP-04", "OP-05", "OP-06", "OP-12", "OP-20"],
-    invariantes=["INV-04", "INV-10", "INV-17"],
-    naturalezas=["DERECHO_COBRO", "DEUDA"],
-    dimensiones=["D3", "D7"],
+    operaciones=["OP-01", "OP-04", "OP-05", "OP-06", "OP-08", "OP-09", "OP-12", "OP-19", "OP-20"],
+    invariantes=["INV-02", "INV-03", "INV-04", "INV-10", "INV-17"],
+    naturalezas=["GASTO", "DERECHO_COBRO", "DEUDA"],
+    dimensiones=["D1", "D2", "D3", "D5", "D7", "D8"],
     propiedades=["P-F08-14", "P-F08-26", "P-F08-27", "P-F08-28"],
 )
 def test_c12_gate_neteo_no_extingue_nada(
-    motor: Motor, contexto: ContextoOperacion, contraparte, admin
+    motor: Motor, contexto: ContextoOperacion, actor_a, contraparte, cuenta, admin
 ) -> None:
-    """Derecho de 15 por la peluqueria, obligacion de 44,50 por la cena.
+    """C-12 canonico (Project Memory, caso gate; F04-D046 R1 · A19-bis).
 
-    El neto es -29,50 y NO ocurre nada mas. Es el caso gate porque es donde
-    mas tienta convertir el analisis en realidad: transformar 15 en 0 y 44,50
-    en 29,50 seria compensacion extintiva, que exige acuerdo o ley y
-    permanece fuera de alcance bajo `F04-PEND-COMP-EXT`.
+    Hecho A · peluqueria 15,00: gasto del usuario (GASTO +15, atribucion self
+    15 explicita) pagado integramente por la pareja (aportacion 15 sin
+    vinculo). El usuario no mueve dinero. La obligacion de 15 frente a la
+    pareja nace por DECISION EXPLICITA (INV-04), no por diferencia de importes.
+
+    Hecho B · cena 44,50 con tres participantes, pagada por el usuario desde su
+    cuenta (movimiento -44,50, aportacion self 44,50 vinculada). Solo consta
+    explicitamente la parte de la pareja: 15. La parte del usuario NO se
+    declara, asi que el reparto es PARCIAL y NUNCA aparece 29,50 por resta. El
+    derecho de 15 frente a la pareja nace por decision explicita.
+
+    Lectura OP-20: derecho 15 - obligacion 15 = neto 0. Leer no extingue, no
+    compensa, no modifica hechos, atribuciones, aportaciones ni tesoreria, y no
+    crea GASTO ni INGRESO. La compensacion extintiva sigue fuera de alcance
+    (`F04-PEND-COMP-EXT`).
     """
-    peluqueria, alta_derecho = _posicion(
-        motor,
-        contexto,
-        tipo=TIPO_DERECHO,
-        contraparte=contraparte,
-        importe=PELUQUERIA,
-        concepto="peluqueria",
-    )
-    cena, alta_obligacion = _posicion(
-        motor,
-        contexto,
-        tipo=TIPO_OBLIGACION,
-        contraparte=contraparte,
-        importe=CENA,
-        concepto="cena",
-    )
+    pareja = contraparte
 
-    huella_antes = valor(
+    # ---------------- Hecho A: peluqueria pagada por la pareja ----------------
+    peluqueria = hecho(concepto="peluqueria", importe_total=PELUQUERIA)
+    alta_a = motor.compartidos.registrar_gasto_compartido(
+        contexto,
+        DatosGastoCompartido(
+            hecho=peluqueria,
+            efectos=[
+                efecto(
+                    "GASTO",
+                    PELUQUERIA,
+                    atribuciones=(atribucion(actor_a, PELUQUERIA),),
+                )
+            ],
+            aportaciones=[aportacion(PELUQUERIA, actor_id=pareja)],
+        ),
+    )
+    obligacion = DatosAltaPosicion(
+        entidad_id=uuid.uuid4(),
+        nombre="peluqueria",
+        tipo=TIPO_OBLIGACION,
+        contraparte_actor_id=pareja,
+        moneda="EUR",
+        justificacion="DECISION_EXPLICITA",
+        fecha_inicio_seguimiento=FECHA,
+        saldo_apertura=D("0"),
+        hecho_id=peluqueria.hecho_id,
+        fecha_hecho=FECHA,
+        concepto="peluqueria",
+        hecho_row_version_esperada=alta_a.row_version,
+        efecto_id=uuid.uuid4(),
+        vinculo_id=uuid.uuid4(),
+        importe_inicial=PELUQUERIA,
+    )
+    motor.posiciones.crear_posicion(contexto, obligacion)
+
+    # ---------------- Hecho B: cena pagada por el usuario ---------------------
+    cena = hecho(concepto="cena", importe_total=CENA, participantes_total=3)
+    pieza = movimiento(cuenta, -CENA, descripcion="cena")
+    puente = conciliacion(cena.hecho_id, pieza.movimiento_id, -CENA)
+    alta_b = motor.compartidos.registrar_gasto_compartido(
+        contexto,
+        DatosGastoCompartido(
+            hecho=cena,
+            efectos=[
+                efecto(
+                    "GASTO",
+                    CENA,
+                    estado="PARCIAL",
+                    atribuciones=(atribucion(pareja, PELUQUERIA),),
+                )
+            ],
+            participantes=[
+                DatosParticipante(participante_id=uuid.uuid4(), actor_id=actor_a),
+                DatosParticipante(participante_id=uuid.uuid4(), actor_id=pareja),
+            ],
+            tesoreria=[DatosTesoreria(movimiento=pieza, conciliacion=puente)],
+            aportaciones=[
+                aportacion(
+                    CENA, actor_id=actor_a, conciliacion_id=puente.conciliacion_id
+                )
+            ],
+        ),
+    )
+    derecho = DatosAltaPosicion(
+        entidad_id=uuid.uuid4(),
+        nombre="cena",
+        tipo=TIPO_DERECHO,
+        contraparte_actor_id=pareja,
+        moneda="EUR",
+        justificacion="DECISION_EXPLICITA",
+        fecha_inicio_seguimiento=FECHA,
+        saldo_apertura=D("0"),
+        hecho_id=cena.hecho_id,
+        fecha_hecho=FECHA,
+        concepto="cena",
+        hecho_row_version_esperada=alta_b.row_version,
+        efecto_id=uuid.uuid4(),
+        vinculo_id=uuid.uuid4(),
+        importe_inicial=PELUQUERIA,
+    )
+    motor.posiciones.crear_posicion(contexto, derecho)
+
+    # ---------------- Separacion de dimensiones, antes de leer ----------------
+    # Efecto economico: gasto real conservado al 100 % y posicion explicita.
+    assert efectos_de(admin, contexto.owner_user_id, peluqueria.hecho_id) == {
+        "GASTO": PELUQUERIA,
+        "DEUDA": PELUQUERIA,
+    }
+    assert efectos_de(admin, contexto.owner_user_id, cena.hecho_id) == {
+        "GASTO": CENA,
+        "DERECHO_COBRO": PELUQUERIA,
+    }
+    # Atribucion: A integra al usuario; B solo la parte explicita de la pareja.
+    assert valor(
         admin,
         contexto.owner_user_id,
+        "SELECT e.estado_atribucion, count(a.id), sum(a.importe_atribuido), "
+        "bool_or(a.actor_id = %s) "
+        "FROM gapto.hecho_efectos e JOIN gapto.efecto_atribuciones a "
+        "ON a.efecto_id = e.id WHERE e.hecho_id = %s AND e.tipo_efecto = 'GASTO' "
+        "GROUP BY e.estado_atribucion",
+        (actor_a, cena.hecho_id),
+    ) == ("PARCIAL", 1, PELUQUERIA, False)
+    # Nunca 29,50 por resta, en ninguna fila de ningun hecho.
+    assert contar(
+        admin,
+        contexto.owner_user_id,
+        "efecto_atribuciones a JOIN gapto.hecho_efectos e ON e.id = a.efecto_id",
+        "e.hecho_id = ANY(%s) AND abs(a.importe_atribuido) = %s",
+        ([peluqueria.hecho_id, cena.hecho_id], D("29.5000")),
+    ) == 0
+    # Pagador real: la pareja financio A sin caja del usuario; el usuario, B.
+    assert valor(
+        admin,
+        contexto.owner_user_id,
+        "SELECT actor_id, importe, hecho_movimiento_tesoreria_id IS NULL "
+        "FROM gapto.hecho_aportaciones_pago WHERE hecho_id = %s",
+        (peluqueria.hecho_id,),
+    ) == (pareja, PELUQUERIA, True)
+    assert valor(
+        admin,
+        contexto.owner_user_id,
+        "SELECT actor_id, importe, hecho_movimiento_tesoreria_id IS NOT NULL "
+        "FROM gapto.hecho_aportaciones_pago WHERE hecho_id = %s",
+        (cena.hecho_id,),
+    ) == (actor_a, CENA, True)
+    # Tesoreria: A no tiene caja; B, exactamente -44,50.
+    assert contar(
+        admin,
+        contexto.owner_user_id,
+        "hecho_movimientos_tesoreria",
+        "hecho_id = %s",
+        (peluqueria.hecho_id,),
+    ) == 0
+    assert liquidez(admin, contexto.owner_user_id, cuenta) == -CENA
+
+    huella = (
         "SELECT (SELECT count(*) FROM gapto.hechos_financieros), "
         "(SELECT count(*) FROM gapto.hecho_efectos), "
+        "(SELECT coalesce(sum(importe_delta), 0) FROM gapto.hecho_efectos), "
+        "(SELECT count(*) FROM gapto.efecto_atribuciones), "
+        "(SELECT count(*) FROM gapto.hecho_aportaciones_pago), "
+        "(SELECT count(*) FROM gapto.movimientos_tesoreria), "
+        "(SELECT coalesce(sum(importe), 0) FROM gapto.movimientos_tesoreria), "
         "(SELECT count(*) FROM gapto.derechos_obligaciones_financieras), "
         "(SELECT count(*) FROM gapto.hecho_relaciones), "
-        "(SELECT count(*) FROM gapto.auditoria)",
-        (),
+        "(SELECT max(row_version) FROM gapto.hechos_financieros), "
+        "(SELECT count(*) FROM gapto.auditoria)"
     )
+    huella_antes = valor(admin, contexto.owner_user_id, huella, ())
 
+    # ---------------- Lectura OP-20 -------------------------------------------
     segmento = motor.neto.posicion_neta(
-        contexto, contraparte_actor_id=contraparte
-    ).segmento(contraparte, "EUR")
+        contexto, contraparte_actor_id=pareja
+    ).segmento(pareja, "EUR")
     assert segmento is not None
     assert segmento.estado == DETERMINADO
-    assert segmento.neto == D("-29.5000")
-
-    # Los importes originales siguen intactos y las posiciones, ACTIVAS.
+    assert segmento.neto == D("0")
+    assert len(segmento.posiciones) == 2
     saldos = {d.nombre: d.saldo.importe for d in segmento.posiciones}
-    assert saldos == {"peluqueria": PELUQUERIA, "cena": CENA}
-    for datos in (peluqueria, cena):
+    assert saldos == {"peluqueria": PELUQUERIA, "cena": PELUQUERIA}
+    for alta in (obligacion, derecho):
         assert valor(
             admin,
             contexto.owner_user_id,
             "SELECT estado FROM gapto.derechos_obligaciones_financieras "
             "WHERE entidad_id = %s",
-            (datos.entidad_id,),
+            (alta.entidad_id,),
         ) == ("ACTIVA",)
 
-    # P-F08-14/24: leer no escribe. Ni una fila, ni una linea de auditoria.
-    assert valor(
-        admin,
-        contexto.owner_user_id,
-        "SELECT (SELECT count(*) FROM gapto.hechos_financieros), "
-        "(SELECT count(*) FROM gapto.hecho_efectos), "
-        "(SELECT count(*) FROM gapto.derechos_obligaciones_financieras), "
-        "(SELECT count(*) FROM gapto.hecho_relaciones), "
-        "(SELECT count(*) FROM gapto.auditoria)",
-        (),
-    ) == huella_antes
+    # Leer no escribe: ni hechos, ni efectos, ni atribuciones, ni aportaciones,
+    # ni tesoreria, ni posiciones, ni relaciones, ni versiones, ni auditoria.
+    assert valor(admin, contexto.owner_user_id, huella, ()) == huella_antes
+    # Ni INGRESO ni gasto adicional en los hechos del caso.
+    assert efectos_de(admin, contexto.owner_user_id, peluqueria.hecho_id) == {
+        "GASTO": PELUQUERIA,
+        "DEUDA": PELUQUERIA,
+    }
+    assert efectos_de(admin, contexto.owner_user_id, cena.hecho_id) == {
+        "GASTO": CENA,
+        "DERECHO_COBRO": PELUQUERIA,
+    }
     # Y no existe arquetipo de compensacion en ninguna forma.
     assert contar(
         admin,
@@ -429,7 +574,7 @@ def test_c13_cuenta_compartida_no_reparte_el_gasto(
         DatosGastoCompartido(
             hecho=datos,
             efectos=[
-                efecto("GASTO", -total, atribuciones=(atribucion(actor_a, -total),))
+                efecto("GASTO", total, atribuciones=(atribucion(actor_a, total),))
             ],
             tesoreria=[
                 DatosTesoreria(
@@ -452,7 +597,7 @@ def test_c13_cuenta_compartida_no_reparte_el_gasto(
         "SELECT count(*), sum(a.importe_atribuido) FROM gapto.efecto_atribuciones a "
         "JOIN gapto.hecho_efectos e ON e.id = a.efecto_id WHERE e.hecho_id = %s",
         (datos.hecho_id,),
-    ) == (1, -total)
+    ) == (1, total)
     assert valor(
         admin,
         contexto.owner_user_id,
@@ -495,7 +640,7 @@ def test_c21_aportaciones_multiactor_con_aportante_desconocido(
         contexto,
         DatosGastoCompartido(
             hecho=datos,
-            efectos=[efecto("GASTO", -total)],
+            efectos=[efecto("GASTO", total)],
             tesoreria=[
                 DatosTesoreria(
                     movimiento=pieza_mov,
@@ -547,7 +692,7 @@ def test_e01_correccion_conserva_identidad_y_no_crea_realidad(
         contexto,
         hecho_id=datos.hecho_id,
         row_version_esperada=creado.row_version,
-        efectos=[efecto("GASTO", -D("40.0000"))],
+        efectos=[efecto("GASTO", D("40.0000"))],
     ).row_version
     hechos_antes = contar(
         admin,

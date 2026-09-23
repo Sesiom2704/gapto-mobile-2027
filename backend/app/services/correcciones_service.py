@@ -33,6 +33,20 @@
 #   D-080 · ADVISORY PRIMERO. Si la correccion toca superficies de inversion,
 #   el advisory (INVERSIONES, owner) se toma ANTES de cualquier row lock. Los
 #   locks genericos no lo sustituyen.
+# Version: 0.6.0
+#   0.6.0 (F04-D046 R2 · A08-bis): `presupuestable` en la TRANSICION de
+#   naturalezas. Se compara el estado del hecho ANTES y DESPUES de la
+#   correccion, dentro del root lock:
+#   - sin GASTO/INGRESO -> con GASTO/INGRESO: la correccion DEBE aportar
+#     `presupuestable` explicito; el `false` derivado del estado anterior no se
+#     reutiliza. Sin decision -> ENTRADA_INVALIDA y rollback total.
+#   - con GASTO/INGRESO -> sin GASTO/INGRESO: se deriva `false` por contrato
+#     (declarar `true` se rechaza).
+#   - sin transicion: `presupuestable` no se acepta aqui; la correccion del
+#     escalar sigue siendo OP-02. Un hecho que ni antes ni despues tiene
+#     GASTO/INGRESO no se reescribe: OP-21 no toca lo que no se le pide.
+#   El cambio del escalar se audita con antes/despues y el motivo de la
+#   correccion, y consume una version adicional del hecho.
 # Version: 0.5.0
 #   0.5.0 (F04-D039): superficie de atribuciones. Un efecto con reparto
 #   COMPLETA tenia el importe inmutable: para cuadrar hacian falta dos
@@ -60,6 +74,7 @@
 from __future__ import annotations
 
 import decimal
+import json
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
@@ -76,6 +91,9 @@ TABLA_ATRIBUCIONES = repo_efectos.TABLA_ATRIBUCIONES
 from app.repositories import hechos_repository as repo_hechos
 from app.repositories import relaciones_repository as repo_rel
 from app.services import coherencia_posicion
+
+# F04-D046 R2 · A08-bis. Naturalezas elegibles para presupuesto (INV-11).
+NATURALEZAS_PRESUPUESTABLES = ("GASTO", "INGRESO")
 
 TIPO_TRANSFERENCIA = "TRANSFERENCIA"
 
@@ -153,6 +171,10 @@ class DatosCorreccion:
 
     toca_inversion: bool = False
 
+    # F04-D046 R2 · A08-bis. Decision explicita solo cuando la correccion
+    # introduce el primer GASTO/INGRESO en un hecho que no tenia ninguno.
+    presupuestable: bool | None = None
+
     # Solo para rechazar.
     eliminar_hecho: bool = False
     eliminar_movimiento: uuid.UUID | None = None
@@ -213,6 +235,9 @@ class CorreccionesService:
                     "llamante.",
                 )
 
+            # F04-D046 R2 · A08-bis. Estado de naturalezas ANTES de mutar.
+            elegible_antes = self._tiene_gasto_o_ingreso(sesion, datos.hecho_id)
+
             actualizados = self._actualizar_efectos(sesion, datos)
             # 3. Las aportaciones se retiran ANTES que su conciliacion: al
             #    reves quedarian apuntando al vacio (D-169).
@@ -254,6 +279,12 @@ class CorreccionesService:
             #     que nadie rechaza hoy.
             self._validar_estado_final_atribuciones(sesion, datos)
 
+            # 4quater. F04-D046 R2 · A08-bis. `presupuestable` sobre la
+            #     transicion de naturalezas, juzgada en el ESTADO FINAL.
+            nueva_version = self._resolver_presupuestable(
+                sesion, datos, elegible_antes, nueva_version
+            )
+
             # 5. Guarda de estado FINAL (D-187). Se evalua aqui, no paso a
             #    paso: quedarse en cero efectos a mitad de la transaccion es
             #    legitimo si antes del COMMIT se instala el reemplazo.
@@ -287,6 +318,75 @@ class CorreccionesService:
     # ==================================================================
     # Interno
     # ==================================================================
+    @staticmethod
+    def _tiene_gasto_o_ingreso(sesion: SesionMotor, hecho_id: uuid.UUID) -> bool:
+        """True si el hecho contiene algun efecto GASTO o INGRESO (INV-11)."""
+        return any(
+            repo_rel.capacidad_por_naturaleza(sesion, hecho_id, naturaleza)
+            is not None
+            for naturaleza in NATURALEZAS_PRESUPUESTABLES
+        )
+
+    def _resolver_presupuestable(
+        self,
+        sesion: SesionMotor,
+        datos: DatosCorreccion,
+        elegible_antes: bool,
+        version: int,
+    ) -> int:
+        """F04-D046 R2 · A08-bis. Devuelve la version final del hecho."""
+        elegible_despues = self._tiene_gasto_o_ingreso(sesion, datos.hecho_id)
+
+        if not elegible_antes and elegible_despues:
+            if datos.presupuestable is None:
+                raise ErrorMotor(
+                    CodigoError.ENTRADA_INVALIDA,
+                    "La correccion introduce el primer GASTO/INGRESO del hecho: "
+                    "exige decidir `presupuestable`. El false derivado del "
+                    "estado anterior no se reutiliza.",
+                )
+            objetivo = bool(datos.presupuestable)
+        elif elegible_antes and not elegible_despues:
+            if datos.presupuestable is True:
+                raise ErrorMotor(
+                    CodigoError.ENTRADA_INVALIDA,
+                    "Sin GASTO ni INGRESO el hecho no tiene efecto "
+                    "presupuestario: `presupuestable` se deriva false.",
+                )
+            objetivo = False
+        else:
+            if datos.presupuestable is not None:
+                raise ErrorMotor(
+                    CodigoError.ENTRADA_INVALIDA,
+                    "Esta correccion no cambia la elegibilidad presupuestaria "
+                    "del hecho: `presupuestable` se corrige con OP-02.",
+                )
+            return version
+
+        estado = repo_hechos.leer_estado(sesion, datos.hecho_id)
+        assert estado is not None
+        actual = json.loads(estado[2]).get("presupuestable")
+        if actual == objetivo:
+            return version
+        actualizado = repo_hechos.actualizar_campos(
+            sesion, datos.hecho_id, version, {"presupuestable": objetivo}
+        )
+        if actualizado is None:
+            raise ErrorMotor(
+                CodigoError.VERSION_DESFASADA,
+                "El hecho ha cambiado durante la correccion.",
+            )
+        auditoria.registrar(
+            sesion,
+            tabla=repo_hechos.TABLA,
+            registro_id=datos.hecho_id,
+            accion=auditoria.ACCION_ACTUALIZAR,
+            datos_antes_json=estado[2],
+            datos_despues_json=actualizado[2],
+            motivo=datos.motivo,
+        )
+        return actualizado[0]
+
     @staticmethod
     def _revalidar_devoluciones(
         sesion: SesionMotor, datos: DatosCorreccion

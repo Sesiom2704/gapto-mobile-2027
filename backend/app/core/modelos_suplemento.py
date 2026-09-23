@@ -18,6 +18,13 @@
 #   `fecha_demostrada` es esa declaracion. No es burocracia: sin ella, OP-18 se
 #   convierte en una puerta para retrodatar cualquier cosa, y el mandato
 #   prohibe expresamente inventar retroactividad.
+# Version: 0.2.0
+#   0.2.0 (F04-D046 R2 · A20/A08-bis): el suplemento recibe su propia decision
+#   historica `presupuestable` y su localizacion. OP-18 ya no fija `false` ni
+#   `NO_APLICA` ni hereda del hecho ajustado. Con GASTO o INGRESO
+#   `presupuestable` es obligatorio y sin default; con DEUDA o DERECHO_COBRO se
+#   deriva `false` (declarar `true` se rechaza). Localizacion aplicable sin
+#   dato -> DESCONOCIDA; NO_APLICA solo si el llamante lo declara.
 # Version: 0.1.0
 # ============================================================
 
@@ -78,6 +85,11 @@ class DatosSuplemento:
 
     # Solo para rechazar.
     editar_original: bool = False
+    # F04-D046 R2. Decision historica propia del suplemento. Sin default.
+    presupuestable: bool | None = None
+    # F04-D046 R2. Localizacion analitica. Sin dato -> DESCONOCIDA.
+    estado_localizacion: str | None = None
+    localidad_id: uuid.UUID | None = None
 
     @property
     def con_relacion(self) -> bool:

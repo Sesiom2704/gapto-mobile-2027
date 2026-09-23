@@ -18,6 +18,8 @@
 #     que queda de una fila que ya no existe.
 #   - D-187 se evalua sobre el estado FINAL: cero efectos a mitad de
 #     transaccion es legitimo si antes del COMMIT se instala el reemplazo.
+# Version: 0.2.0
+#   0.2.0 (F04-D046 R2): la devolucion de apoyo declara `presupuestable`, exigido ahora por OP-13.
 # Version: 0.1.0
 # ============================================================
 
@@ -249,6 +251,7 @@ def test_delete_de_puente_falso(
         hecho_original_id=hecho_id,
         tipo_efecto="GASTO",
         importe=D("30.0000"),
+        presupuestable=True,
         fecha_hecho=F("2027-07-10"),
         moneda="EUR",
         concepto="Devolucion mal atribuida",

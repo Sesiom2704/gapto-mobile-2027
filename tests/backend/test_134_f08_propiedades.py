@@ -13,6 +13,11 @@
 #   Ninguna de estas propiedades se demuestra con un escenario feliz. Todas
 #   exigen provocar deliberadamente lo que no debe ocurrir y comprobar que el
 #   estado final es indistinguible del inicial.
+# Version: 0.2.0
+#   0.2.0 (F04-D046 R1 · A19): signo canonico (GASTO +X, atribuciones +X,
+#   correccion +40/+25); tesoreria intacta. Se FIJA el codigo de fallo de
+#   A-F08-01, A-F08-02/03 y A-F08-04 para que el signo no pueda cambiar el
+#   motivo del fallo que cada test demuestra.
 # Version: 0.1.0
 # ============================================================
 
@@ -90,7 +95,7 @@ def test_a_f08_01_fallo_en_atribucion_no_deja_el_efecto(
     datos = hecho(concepto="cena con reparto invalido", importe_total=CENA)
     creado = motor.hechos.crear_hecho(contexto, datos)
 
-    with pytest.raises(ErrorMotor):
+    with pytest.raises(ErrorMotor) as excepcion:
         motor.efectos.registrar_efectos(
             contexto,
             hecho_id=datos.hecho_id,
@@ -98,16 +103,18 @@ def test_a_f08_01_fallo_en_atribucion_no_deja_el_efecto(
             efectos=[
                 efecto(
                     "GASTO",
-                    -CENA,
+                    CENA,
                     estado="COMPLETA",
                     atribuciones=(
-                        atribucion(actor_a, -MITAD),
-                        atribucion(actor_b, -D("10.0000")),
+                        atribucion(actor_a, MITAD),
+                        atribucion(actor_b, D("10.0000")),
                     ),
                 )
             ],
         )
 
+    # F04-D046 R1. El motivo del fallo queda fijado: no depende del signo.
+    assert excepcion.value.codigo is CodigoError.SUMA_NO_CUADRA
     assert efectos_de(admin, contexto.owner_user_id, datos.hecho_id) == {}
     assert contar(
         admin,
@@ -158,19 +165,21 @@ def test_a_f08_02_03_fallo_tardio_en_op19_no_deja_residuo(
         ),
     )
 
-    with pytest.raises(ErrorMotor):
+    with pytest.raises(ErrorMotor) as excepcion:
         motor.compartidos.registrar_gasto_compartido(
             contexto,
             DatosGastoCompartido(
                 hecho=datos,
                 efectos=[
-                    efecto("GASTO", -CENA, atribuciones=(atribucion(actor_a, -CENA),))
+                    efecto("GASTO", CENA, atribuciones=(atribucion(actor_a, CENA),))
                 ],
                 participantes=[participante],
                 tesoreria=[roto],
             ),
         )
 
+    # F04-D046 R1. El motivo del fallo queda fijado: no depende del signo.
+    assert excepcion.value.codigo is CodigoError.EXCEDE_IMPORTE_MOVIMIENTO
     assert _hechos_del_tenant(admin, contexto) == hechos_antes
     for tabla, donde, parametros in (
         ("hecho_efectos", "hecho_id = %s", (datos.hecho_id,)),
@@ -200,15 +209,15 @@ def test_a_f08_04_fallo_tardio_en_correccion_agregada(
     ya se aplico. Aqui se comprueba lo contrario: el efecto vuelve a su
     importe y las atribuciones a los suyos.
     """
-    a = atribucion(actor_a, -MITAD)
-    b = atribucion(actor_b, -MITAD)
-    efecto_cena = efecto("GASTO", -CENA, atribuciones=(a, b))
+    a = atribucion(actor_a, MITAD)
+    b = atribucion(actor_b, MITAD)
+    efecto_cena = efecto("GASTO", CENA, atribuciones=(a, b))
     datos = hecho(concepto="cena", importe_total=CENA)
     resultado = motor.compartidos.registrar_gasto_compartido(
         contexto, DatosGastoCompartido(hecho=datos, efectos=[efecto_cena])
     )
 
-    with pytest.raises(ErrorMotor):
+    with pytest.raises(ErrorMotor) as excepcion:
         motor.correcciones.corregir(
             contexto,
             DatosCorreccion(
@@ -216,16 +225,19 @@ def test_a_f08_04_fallo_tardio_en_correccion_agregada(
                 row_version_esperada=resultado.row_version,
                 motivo="solo se corrige una parte",
                 efectos_a_actualizar={
-                    efecto_cena.efecto_id: {"importe_delta": D("-40.0000")}
+                    efecto_cena.efecto_id: {"importe_delta": D("40.0000")}
                 },
                 atribuciones_a_actualizar={
-                    a.atribucion_id: {"importe_atribuido": D("-25.0000")}
+                    a.atribucion_id: {"importe_atribuido": D("25.0000")}
                 },
             ),
         )
 
+    # F04-D046 R1. El fallo debe ser el DESCUADRE del estado final, no un
+    # rechazo temprano: con el signo canonico ambos valores son positivos.
+    assert excepcion.value.codigo is CodigoError.SUMA_NO_CUADRA
     assert efectos_de(admin, contexto.owner_user_id, datos.hecho_id) == {
-        "GASTO": -CENA
+        "GASTO": CENA
     }
     assert valor(
         admin,
@@ -233,7 +245,7 @@ def test_a_f08_04_fallo_tardio_en_correccion_agregada(
         "SELECT count(*), sum(importe_atribuido) FROM gapto.efecto_atribuciones "
         "WHERE efecto_id = %s",
         (efecto_cena.efecto_id,),
-    ) == (2, -CENA)
+    ) == (2, CENA)
     assert valor(
         admin,
         contexto.owner_user_id,
@@ -282,7 +294,7 @@ def test_inv20_reintento_de_operacion_con_hijas(
     total = D("70.0000")
     datos = hecho(concepto="gasto con hijas", importe_total=total)
     creado = motor.hechos.crear_hecho(contexto, datos)
-    efectos = [efecto("GASTO", -total, atribuciones=(atribucion(actor_a, -total),))]
+    efectos = [efecto("GASTO", total, atribuciones=(atribucion(actor_a, total),))]
 
     primero = motor.efectos.registrar_efectos(
         contexto,
@@ -299,7 +311,7 @@ def test_inv20_reintento_de_operacion_con_hijas(
 
     assert segundo.row_version == primero.row_version
     assert efectos_de(admin, contexto.owner_user_id, datos.hecho_id) == {
-        "GASTO": -total
+        "GASTO": total
     }
     assert contar(
         admin,
@@ -328,7 +340,7 @@ def test_inv20_reintento_de_operacion_multisuperficie(
     pieza_mov = movimiento(cuenta, -CENA, descripcion="cargo cena")
     entrada = DatosGastoCompartido(
         hecho=datos,
-        efectos=[efecto("GASTO", -CENA, atribuciones=(atribucion(actor_a, -CENA),))],
+        efectos=[efecto("GASTO", CENA, atribuciones=(atribucion(actor_a, CENA),))],
         participantes=[participante],
         tesoreria=[
             DatosTesoreria(
@@ -355,7 +367,7 @@ def test_inv20_reintento_de_operacion_multisuperficie(
         )
 
     assert efectos_de(admin, contexto.owner_user_id, datos.hecho_id) == {
-        "GASTO": -CENA
+        "GASTO": CENA
     }
     for tabla, donde, parametros, esperado in (
         ("hechos_financieros", "id = %s", (datos.hecho_id,), 1),
@@ -474,7 +486,7 @@ def test_p_f08_23_tenant_ajeno_no_opera_sobre_el_agregado(
             ajeno,
             hecho_id=datos.hecho_id,
             row_version_esperada=creado.row_version,
-            efectos=[efecto("GASTO", D("-10.0000"))],
+            efectos=[efecto("GASTO", D("10.0000"))],
         )
     assert escritura.value.codigo is CodigoError.AGREGADO_NO_ENCONTRADO
 

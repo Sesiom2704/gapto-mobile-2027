@@ -32,6 +32,15 @@
 #   previsión sigue siendo cierto despues de la devolucion. Este servicio NO
 #   lee para escribir ni modifica `prevision_hechos`; solo informa de cuantos
 #   vinculos tiene el original.
+# Version: 0.3.0
+#   0.3.0 (F04-D046 R2 · A20/A08-bis): OP-13 deja de fijar
+#   `presupuestable=False` y `estado_localizacion="NO_APLICA"`. La devolucion
+#   es un hecho con su propia decision historica (INV-11): con GASTO/INGRESO
+#   el llamante DEBE declararla (sin default); con DEUDA/DERECHO_COBRO el hecho
+#   no contiene GASTO ni INGRESO y se deriva `false`. La localizacion aplicable
+#   sin dato es DESCONOCIDA (OP-01: NO_APLICA nunca es default de "no
+#   informado"). Nada se hereda del original. El replay compara ademas estos
+#   campos contra el alta auditada: otra decision es otra intencion.
 # Version: 0.2.0
 #   0.2.0 (F04-06, iteracion correctiva): se retira
 #   RELACION_DUPLICADA_CON_OTRA_INTENCION. La rama era inalcanzable y un error
@@ -49,11 +58,12 @@ from typing import Any
 
 from app.core.contexto import ContextoOperacion
 from app.core.errores import CodigoError, ErrorMotor
-from app.core.modelos import DatosCreacionHecho
+from app.core.modelos import DatosCreacionHecho, ESTADOS_LOCALIZACION
 from app.core.modelos_devolucion import (
     CERO,
     DatosDevolucion,
     NATURALEZAS_DEVOLUBLES,
+    NATURALEZAS_PRESUPUESTABLES,
     ResultadoDevolucion,
     TIPO_RELACION_DEVOLUCION,
 )
@@ -71,6 +81,57 @@ TIPO_HECHO_POR_NATURALEZA = {
     "DEUDA": "GASTO",
     "DERECHO_COBRO": "INGRESO",
 }
+
+
+def resolver_decision_historica(
+    tipo_efecto: str,
+    presupuestable: bool | None,
+    estado_localizacion: str | None,
+    localidad_id: uuid.UUID | None,
+) -> tuple[bool, str, uuid.UUID | None]:
+    """F04-D046 R2. `presupuestable` y localizacion del hecho de devolucion.
+
+    Funcion pura: no lee estado, de modo que un reintento con el mismo payload
+    resuelve exactamente lo mismo que el primer intento.
+
+    - GASTO / INGRESO: `presupuestable` es decision historica del hecho y NO
+      tiene default. Ausente -> ENTRADA_INVALIDA.
+    - DEUDA / DERECHO_COBRO: el hecho no contiene GASTO ni INGRESO; el atributo
+      carece de efecto presupuestario y se deriva `false`. Declarar `true` es
+      una contradiccion y se rechaza; declarar `false` es redundante y valido.
+    - Localizacion: sin estado ni localidad -> DESCONOCIDA (dimension aplicable
+      sin dato). Con localidad y sin estado -> CONOCIDA (es el dato aportado,
+      no una inferencia). Un estado explicito se respeta; la coherencia
+      estado/localidad la juzga el CHECK fisico de 0040.
+    """
+    if tipo_efecto in NATURALEZAS_PRESUPUESTABLES:
+        if presupuestable is None:
+            raise ErrorMotor(
+                CodigoError.ENTRADA_INVALIDA,
+                "Una devolucion de GASTO o INGRESO exige decidir "
+                "`presupuestable`: el motor no decide si reduce el consumo "
+                "presupuestario.",
+            )
+        decision = bool(presupuestable)
+    else:
+        if presupuestable is True:
+            raise ErrorMotor(
+                CodigoError.ENTRADA_INVALIDA,
+                "Sin GASTO ni INGRESO el hecho no tiene efecto presupuestario: "
+                "`presupuestable` se deriva false.",
+            )
+        decision = False
+    if estado_localizacion is None:
+        estado = "DESCONOCIDA" if localidad_id is None else "CONOCIDA"
+    else:
+        if estado_localizacion not in ESTADOS_LOCALIZACION:
+            raise ErrorMotor(
+                CodigoError.ENTRADA_INVALIDA,
+                "estado_localizacion debe ser CONOCIDA, DESCONOCIDA o "
+                "NO_APLICA. NO_APLICA no es el default de 'no informado'.",
+            )
+        estado = estado_localizacion
+    return decision, estado, localidad_id
 
 
 class DevolucionesService:
@@ -138,18 +199,7 @@ class DevolucionesService:
                 tipo_hecho_id=None,
             )
             creado = repo_hechos.insertar_si_no_existe(
-                sesion,
-                DatosCreacionHecho(
-                    hecho_id=datos.hecho_id,
-                    fecha_hecho=datos.fecha_hecho,
-                    moneda=datos.moneda,
-                    presupuestable=False,
-                    estado_localizacion="NO_APLICA",
-                    tipo_hecho_codigo=TIPO_HECHO_POR_NATURALEZA[datos.tipo_efecto],
-                    concepto=datos.concepto,
-                    importe_total=magnitud,
-                ),
-                tipo_hecho_id,
+                sesion, self._datos_hecho(datos), tipo_hecho_id
             )
             if creado is None:
                 raise self._conflicto_identidad()
@@ -372,6 +422,17 @@ class DevolucionesService:
             != decimal.Decimal(datos.importe)
         ):
             raise self._conflicto_identidad()
+        # F04-D046 R2. La decision historica forma parte de la intencion: el
+        # mismo UUID con otra `presupuestable` o localizacion es otra intencion.
+        tipo_hecho_id = repo_hechos.resolver_tipo_hecho(
+            sesion,
+            codigo=TIPO_HECHO_POR_NATURALEZA[datos.tipo_efecto],
+            tipo_hecho_id=None,
+        )
+        if not repo_hechos.creacion_previa_coincide(
+            sesion, self._datos_hecho(datos), tipo_hecho_id
+        ):
+            raise self._conflicto_identidad()
         estado = repo_hechos.leer_estado(sesion, datos.hecho_id)
         assert estado is not None
         capacidad, neto = self._capacidad(sesion, datos)
@@ -396,6 +457,27 @@ class DevolucionesService:
             ),
             movimiento_id=datos.movimiento_id,
             idempotente=True,
+        )
+
+    @staticmethod
+    def _datos_hecho(datos: DatosDevolucion) -> DatosCreacionHecho:
+        """Raiz del hecho de devolucion, identica en alta y en replay."""
+        decision, estado, localidad = resolver_decision_historica(
+            datos.tipo_efecto,
+            datos.presupuestable,
+            datos.estado_localizacion,
+            datos.localidad_id,
+        )
+        return DatosCreacionHecho(
+            hecho_id=datos.hecho_id,
+            fecha_hecho=datos.fecha_hecho,
+            moneda=datos.moneda,
+            presupuestable=decision,
+            estado_localizacion=estado,
+            localidad_id=localidad,
+            tipo_hecho_codigo=TIPO_HECHO_POR_NATURALEZA[datos.tipo_efecto],
+            concepto=datos.concepto,
+            importe_total=decimal.Decimal(datos.importe),
         )
 
     @staticmethod
@@ -454,6 +536,14 @@ class DevolucionesService:
                 "Con movimiento hacen falta tambien cuenta y conciliacion: "
                 "dinero sin conciliar dejaria el hecho sin su caja.",
             )
+        # F04-D046 R2. Validacion pura de la decision historica, antes de abrir
+        # transaccion: un payload invalido no llega a tocar la base.
+        resolver_decision_historica(
+            datos.tipo_efecto,
+            datos.presupuestable,
+            datos.estado_localizacion,
+            datos.localidad_id,
+        )
         identidades = [datos.hecho_id, datos.efecto_id, datos.relacion_id]
         if datos.con_caja:
             identidades += [datos.movimiento_id, datos.conciliacion_id]

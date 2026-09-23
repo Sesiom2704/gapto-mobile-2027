@@ -9,6 +9,11 @@
 #   saldos para que cuadren seria una compensacion extintiva disfrazada.
 #   Ademas A13 (dos monedas), A14 (segmento indeterminado) y A15 (dos legacy
 #   sin contraparte).
+# Version: 0.2.0
+#   0.2.0 (F04-D046 R1 · A19-bis): el test etiquetado C-12 modelaba otra cosa
+#   (derecho 15 por la peluqueria, obligacion 44,50 por la cena). Se conserva
+#   como aritmetica asimetrica de OP-20 con su nombre real y se anade el C-12
+#   canonico: obligacion 15 (peluqueria) y derecho 15 (cena), neto 0.
 # Version: 0.1.0
 # ============================================================
 
@@ -79,13 +84,68 @@ def _alta(
 
 
 # ==================================================================
-# C-12 — caso gate obligatorio
+# C-12 — caso gate obligatorio (F04-D046 R1 · A19-bis)
 # ==================================================================
 
 def test_c12_peluqueria_y_cena(
     servicio_posiciones, servicio_neto, contexto, contraparte, admin
 ) -> None:
-    """Derecho 15,00 y obligacion 44,50 frente a la misma persona."""
+    """C-12 canonico a nivel de posiciones (Project Memory, caso gate).
+
+    Peluqueria pagada por la pareja -> OBLIGACION del usuario de 15,00.
+    Cena pagada por el usuario -> DERECHO de 15,00 por la parte explicita de
+    la pareja (nunca el total del ticket). Neto 0, y ambas posiciones intactas.
+    El caso integral con hechos, atribuciones, aportaciones y tesoreria vive
+    en `test_132_f08_multiactor_y_excepciones.py::test_c12_gate_neteo_no_extingue_nada`.
+    """
+    peluqueria = _alta(
+        servicio_posiciones,
+        contexto,
+        tipo=TIPO_OBLIGACION,
+        contraparte=contraparte,
+        importe=D("15.0000"),
+        concepto="peluqueria",
+    )
+    cena = _alta(
+        servicio_posiciones,
+        contexto,
+        tipo=TIPO_DERECHO,
+        contraparte=contraparte,
+        importe=D("15.0000"),
+        concepto="cena",
+    )
+    segmento = servicio_neto.posicion_neta(
+        contexto, contraparte_actor_id=contraparte
+    ).segmento(contraparte, "EUR")
+    assert segmento is not None
+    assert segmento.estado == DETERMINADO
+    assert segmento.neto == D("0")
+    saldos = {d.nombre: d.saldo.importe for d in segmento.posiciones}
+    assert saldos == {"peluqueria": D("15.0000"), "cena": D("15.0000")}
+    for datos in (peluqueria, cena):
+        assert leer_fila(
+            admin,
+            contexto.owner_user_id,
+            "SELECT estado FROM gapto.derechos_obligaciones_financieras "
+            "WHERE entidad_id = %s",
+            (datos.entidad_id,),
+        ) == ("ACTIVA",)
+
+
+# ==================================================================
+# OP-20 — aritmetica asimetrica del neto (antes etiquetada como C-12)
+# ==================================================================
+
+def test_op20_neto_asimetrico_derecho_menos_obligacion(
+    servicio_posiciones, servicio_neto, contexto, contraparte, admin
+) -> None:
+    """Derecho 15,00 y obligacion 44,50 frente a la misma persona.
+
+    NO es el caso C-12 (F04-D046 R1 · A19-bis): es la prueba aritmetica de
+    OP-20 con importes asimetricos, que discrimina la direccion de cada
+    posicion (neto -29,50) y conserva los importes originales. Se mantiene
+    porque mata mutantes que el caso simetrico no puede distinguir.
+    """
     peluqueria = _alta(
         servicio_posiciones,
         contexto,

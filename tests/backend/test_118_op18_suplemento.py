@@ -19,6 +19,8 @@
 #            igual o posterior al hecho con el que se relaciona.
 #   INV-08 · Un efecto no tiene fecha propia: la toma de su hecho, de modo que
 #            varios periodos economicos exigen varios hechos.
+# Version: 0.3.0
+#   0.3.0 (F04-D046 R2): el helper declara `presupuestable` explicito (GASTO/INGRESO), exigido ahora por OP-18.
 # Version: 0.2.0
 #   0.2.0 (iteracion correctiva): se retiran los dos casos que exigian fecha
 #   posterior —regla inventada, contraria a F04-D002/INV-08— y se anaden los
@@ -81,6 +83,9 @@ def datos_suplemento(**extra) -> DatosSuplemento:
         "concepto": "Revision de alquiler",
     }
     base.update(extra)
+    # F04-D046 R2. El suplemento declara su propia decision historica.
+    if "presupuestable" not in extra and base["tipo_efecto"] in ("GASTO", "INGRESO"):
+        base["presupuestable"] = True
     return DatosSuplemento(**base)
 
 

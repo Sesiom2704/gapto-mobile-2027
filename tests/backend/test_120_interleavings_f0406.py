@@ -23,6 +23,8 @@
 #   Ese orden importa: la carrera no descubrio el defecto, lo descubrio
 #   preguntarse que pasaba en el caso secuencial. Un interleaving escrito antes
 #   habria pasado en verde sobre un motor incoherente.
+# Version: 0.2.0
+#   0.2.0 (F04-D046 R2): el helper de devolucion declara `presupuestable`, exigido ahora por OP-13.
 # Version: 0.1.0
 # ============================================================
 
@@ -104,6 +106,7 @@ def devolucion_de(original: uuid.UUID, importe: str) -> DatosDevolucion:
         relacion_id=uuid.uuid4(),
         hecho_original_id=original,
         tipo_efecto="GASTO",
+        presupuestable=True,
         importe=D(importe),
         fecha_hecho=F("2027-08-10"),
         moneda="EUR",

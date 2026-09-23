@@ -8,6 +8,10 @@
 #   transiciones inversas de `estado_atribucion` son legitimas: no son una
 #   perdida posterior de conocimiento, son la constatacion de que lo que se
 #   creia saber era falso. OP-05 conserva su progresion ordinaria.
+# Version: 0.2.0
+#   0.2.0 (F04-D046 R1 · A19): signo canonico. La cena de 44,50 es GASTO +44,50
+#   y todos los repartos, correcciones y oraculos (A18, R1..R11) son positivos
+#   (F04-D007). Este fichero no toca tesoreria. Mismas propiedades.
 # Version: 0.1.0
 # ============================================================
 
@@ -61,7 +65,7 @@ def _cena(servicio, servicio_efectos, contexto, atribuciones, estado, importe=TO
             DatosEfecto(
                 efecto_id=efecto_id,
                 tipo_efecto="GASTO",
-                importe_delta=-importe,
+                importe_delta=importe,  # F04-D046 R1: GASTO +X
                 estado_atribucion=estado,
                 atribuciones=tuple(atribuciones),
             )
@@ -74,7 +78,7 @@ def _atribucion(actor_id, importe, criterio="MANUAL"):
     return DatosAtribucion(
         atribucion_id=uuid.uuid4(),
         actor_id=actor_id,
-        importe_atribuido=-importe,
+        importe_atribuido=importe,  # F04-D007: hereda el signo
         criterio_atribucion=criterio,
     )
 
@@ -120,10 +124,10 @@ def test_a18_importe_y_reparto_falsos_se_corrigen_juntos(
             hecho_id=hecho_id,
             row_version_esperada=version,
             motivo="el ticket decia 40,00 y el reparto era 25/15",
-            efectos_a_actualizar={efecto_id: {"importe_delta": D("-40.0000")}},
+            efectos_a_actualizar={efecto_id: {"importe_delta": D("40.0000")}},
             atribuciones_a_actualizar={
-                a.atribucion_id: {"importe_atribuido": D("-25.0000")},
-                b.atribucion_id: {"importe_atribuido": D("-15.0000")},
+                a.atribucion_id: {"importe_atribuido": D("25.0000")},
+                b.atribucion_id: {"importe_atribuido": D("15.0000")},
             },
         ),
     )
@@ -134,8 +138,8 @@ def test_a18_importe_y_reparto_falsos_se_corrigen_juntos(
         "SELECT importe_delta, estado_atribucion FROM gapto.hecho_efectos "
         "WHERE id = %s",
         (efecto_id,),
-    ) == (D("-40.0000"), "COMPLETA")
-    assert _reparto(admin, contexto, efecto_id) == (2, D("-40.0000"))
+    ) == (D("40.0000"), "COMPLETA")
+    assert _reparto(admin, contexto, efecto_id) == (2, D("40.0000"))
     # Sin hecho nuevo y sin cambiar la identidad del efecto.
     assert leer_fila(
         admin,
@@ -160,10 +164,10 @@ def test_a18_auditoria_integra_bajo_el_mismo_motivo(
             hecho_id=hecho_id,
             row_version_esperada=version,
             motivo="reparto falso",
-            efectos_a_actualizar={efecto_id: {"importe_delta": D("-40.0000")}},
+            efectos_a_actualizar={efecto_id: {"importe_delta": D("40.0000")}},
             atribuciones_a_actualizar={
-                a.atribucion_id: {"importe_atribuido": D("-25.0000")},
-                b.atribucion_id: {"importe_atribuido": D("-15.0000")},
+                a.atribucion_id: {"importe_atribuido": D("25.0000")},
+                b.atribucion_id: {"importe_atribuido": D("15.0000")},
             },
         ),
     )
@@ -182,7 +186,7 @@ def test_a18_auditoria_integra_bajo_el_mismo_motivo(
         "SELECT datos_antes->>'importe_atribuido' FROM gapto.auditoria "
         "WHERE registro_id = %s AND accion = 'ACTUALIZAR'",
         (a.atribucion_id,),
-    ) == ("-22.2500",)
+    ) == ("22.2500",)
 
 
 # ==================================================================
@@ -204,12 +208,12 @@ def test_r1_importe_correcto_reparto_incorrecto(
             row_version_esperada=version,
             motivo="el reparto era 30/14,50",
             atribuciones_a_actualizar={
-                a.atribucion_id: {"importe_atribuido": D("-30.0000")},
-                b.atribucion_id: {"importe_atribuido": D("-14.5000")},
+                a.atribucion_id: {"importe_atribuido": D("30.0000")},
+                b.atribucion_id: {"importe_atribuido": D("14.5000")},
             },
         ),
     )
-    assert _reparto(admin, contexto, efecto_id) == (2, -TOTAL)
+    assert _reparto(admin, contexto, efecto_id) == (2, TOTAL)
 
 
 def test_r2_actor_falso_se_retira_y_se_redistribuye(
@@ -229,12 +233,12 @@ def test_r2_actor_falso_se_retira_y_se_redistribuye(
             motivo="B no participo en esa cena",
             atribuciones_a_eliminar=(b.atribucion_id,),
             atribuciones_a_actualizar={
-                a.atribucion_id: {"importe_atribuido": -TOTAL}
+                a.atribucion_id: {"importe_atribuido": TOTAL}
             },
         ),
     )
     assert resultado.atribuciones_eliminadas == 1
-    assert _reparto(admin, contexto, efecto_id) == (1, -TOTAL)
+    assert _reparto(admin, contexto, efecto_id) == (1, TOTAL)
     assert leer_fila(
         admin,
         contexto.owner_user_id,
@@ -258,21 +262,21 @@ def test_r3_actor_omitido_se_crea(
             row_version_esperada=version,
             motivo="faltaba la parte de B",
             atribuciones_a_actualizar={
-                a.atribucion_id: {"importe_atribuido": -MITAD}
+                a.atribucion_id: {"importe_atribuido": MITAD}
             },
             atribuciones_a_crear=(
                 DatosAtribucionNueva(
                     atribucion_id=uuid.uuid4(),
                     efecto_id=efecto_id,
                     actor_id=actor_b,
-                    importe_atribuido=-MITAD,
+                    importe_atribuido=MITAD,
                     criterio_atribucion="MANUAL",
                 ),
             ),
         ),
     )
     assert resultado.atribuciones_creadas == 1
-    assert _reparto(admin, contexto, efecto_id) == (2, -TOTAL)
+    assert _reparto(admin, contexto, efecto_id) == (2, TOTAL)
 
 
 def test_r4_completa_a_parcial(
@@ -300,7 +304,7 @@ def test_r4_completa_a_parcial(
         "SELECT estado_atribucion FROM gapto.hecho_efectos WHERE id = %s",
         (efecto_id,),
     ) == ("PARCIAL",)
-    assert _reparto(admin, contexto, efecto_id) == (1, -MITAD)
+    assert _reparto(admin, contexto, efecto_id) == (1, MITAD)
 
 
 def test_r5_completa_a_no_disponible(
@@ -352,7 +356,7 @@ def test_r6_parcial_a_completa(
                     atribucion_id=uuid.uuid4(),
                     efecto_id=efecto_id,
                     actor_id=actor_b,
-                    importe_atribuido=-MITAD,
+                    importe_atribuido=MITAD,
                     criterio_atribucion="MANUAL",
                 ),
             ),
@@ -364,7 +368,7 @@ def test_r6_parcial_a_completa(
         "SELECT estado_atribucion FROM gapto.hecho_efectos WHERE id = %s",
         (efecto_id,),
     ) == ("COMPLETA",)
-    assert _reparto(admin, contexto, efecto_id) == (2, -TOTAL)
+    assert _reparto(admin, contexto, efecto_id) == (2, TOTAL)
 
 
 # ==================================================================
@@ -393,7 +397,7 @@ def test_r7_no_disponible_con_filas_se_rechaza(
             ),
         )
     assert excepcion.value.codigo is CodigoError.NO_DISPONIBLE_CON_FILAS
-    assert _reparto(admin, contexto, efecto_id) == (2, -TOTAL)
+    assert _reparto(admin, contexto, efecto_id) == (2, TOTAL)
 
 
 def test_r8_parcial_que_cubre_el_efecto_se_rechaza(
@@ -434,11 +438,11 @@ def test_r9_completa_descuadrada_se_rechaza(
                 row_version_esperada=version,
                 motivo="solo se corrige una parte",
                 atribuciones_a_actualizar={
-                    a.atribucion_id: {"importe_atribuido": D("-25.0000")}
+                    a.atribucion_id: {"importe_atribuido": D("25.0000")}
                 },
             ),
         )
-    assert _reparto(admin, contexto, efecto_id) == (2, -TOTAL)
+    assert _reparto(admin, contexto, efecto_id) == (2, TOTAL)
 
 
 def test_r10_cambiar_de_actor_por_update_no_esta_soportado(
@@ -481,7 +485,7 @@ def test_r11_fallo_tardio_deshace_efecto_atribuciones_y_auditoria(
                 efectos_a_eliminar=(efecto_id,),
             ),
         )
-    assert _reparto(admin, contexto, efecto_id) == (2, -TOTAL)
+    assert _reparto(admin, contexto, efecto_id) == (2, TOTAL)
     assert leer_fila(
         admin,
         contexto.owner_user_id,

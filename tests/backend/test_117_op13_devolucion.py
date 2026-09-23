@@ -19,6 +19,8 @@
 #   acumulado NO tiene red fisica. No hay constraint sobre lo devuelto. Lo
 #   protege unicamente el lock del hecho original, igual que R-F04-017 protege
 #   la identidad de ocurrencia en F04-05.
+# Version: 0.2.0
+#   0.2.0 (F04-D046 R2): el helper declara `presupuestable` explicito (GASTO/INGRESO), exigido ahora por OP-13.
 # Version: 0.1.0
 # ============================================================
 
@@ -109,6 +111,11 @@ def datos_devolucion(original: uuid.UUID, **extra) -> DatosDevolucion:
         "concepto": "Devolucion",
     }
     base.update(extra)
+    # F04-D046 R2. La devolucion declara su propia decision historica. Con
+    # GASTO/INGRESO es obligatoria; con DEUDA/DERECHO_COBRO se deriva y no se
+    # declara. El helper la fija explicitamente para no depender de defaults.
+    if "presupuestable" not in extra and base["tipo_efecto"] in ("GASTO", "INGRESO"):
+        base["presupuestable"] = True
     return DatosDevolucion(**base)
 
 

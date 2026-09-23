@@ -31,6 +31,15 @@
 #   INV-08 · UN HECHO POR PERIODO. Un efecto no tiene fecha propia: la toma de
 #   su hecho. Una realidad que abarca varios periodos economicos exige un hecho
 #   por periodo, y este servicio crea exactamente uno.
+# Version: 0.3.0
+#   0.3.0 (F04-D046 R2 · A20/A08-bis): OP-18 deja de fijar
+#   `presupuestable=False` y `estado_localizacion="NO_APLICA"`. El suplemento
+#   recibe su propia decision historica, sin heredarla del hecho ajustado ni
+#   del original: con GASTO/INGRESO es obligatoria y sin default; con
+#   DEUDA/DERECHO_COBRO se deriva `false`. Localizacion aplicable sin dato ->
+#   DESCONOCIDA. La regla vive en una unica funcion pura compartida con OP-13
+#   (`resolver_decision_historica`), de modo que ambas operaciones no pueden
+#   divergir. Alta y replay construyen la raiz desde el mismo punto.
 # Version: 0.2.0
 #   0.2.0 (F04-06, iteracion correctiva): se ELIMINA la regla inventada que
 #   exigia fecha posterior a la del hecho ajustado. Contradecia F04-D002 e
@@ -61,6 +70,7 @@ from app.repositories import auditoria_repository as auditoria
 from app.repositories import efectos_repository as repo_efectos
 from app.repositories import hechos_repository as repo_hechos
 from app.repositories import relaciones_repository as repo_rel
+from app.services.devoluciones_service import resolver_decision_historica
 
 _MONEDA_VALIDA = re.compile(r"^[A-Z]{3}$")
 
@@ -102,18 +112,7 @@ class SuplementosService:
                 sesion, codigo=datos.tipo_hecho_codigo, tipo_hecho_id=None
             )
             creado = repo_hechos.insertar_si_no_existe(
-                sesion,
-                DatosCreacionHecho(
-                    hecho_id=datos.hecho_id,
-                    fecha_hecho=datos.fecha_hecho,
-                    moneda=datos.moneda,
-                    presupuestable=False,
-                    estado_localizacion="NO_APLICA",
-                    tipo_hecho_codigo=datos.tipo_hecho_codigo,
-                    concepto=datos.concepto,
-                    importe_total=abs(decimal.Decimal(datos.importe_delta)),
-                ),
-                tipo_hecho_id,
+                sesion, self._datos_hecho(datos), tipo_hecho_id
             )
             if creado is None:
                 raise self._conflicto_identidad()
@@ -201,18 +200,7 @@ class SuplementosService:
             sesion, codigo=datos.tipo_hecho_codigo, tipo_hecho_id=None
         )
         coincide = repo_hechos.creacion_previa_coincide(
-            sesion,
-            DatosCreacionHecho(
-                hecho_id=datos.hecho_id,
-                fecha_hecho=datos.fecha_hecho,
-                moneda=datos.moneda,
-                presupuestable=False,
-                estado_localizacion="NO_APLICA",
-                tipo_hecho_codigo=datos.tipo_hecho_codigo,
-                concepto=datos.concepto,
-                importe_total=abs(decimal.Decimal(datos.importe_delta)),
-            ),
-            tipo_hecho_id,
+            sesion, self._datos_hecho(datos), tipo_hecho_id
         )
         if not coincide:
             raise self._conflicto_identidad()
@@ -227,6 +215,27 @@ class SuplementosService:
             fecha_hecho=datos.fecha_hecho,
             relacion_id=datos.relacion_id if datos.con_relacion else None,
             idempotente=True,
+        )
+
+    @staticmethod
+    def _datos_hecho(datos: DatosSuplemento) -> DatosCreacionHecho:
+        """Raiz del suplemento, identica en alta y en replay (F04-D046 R2)."""
+        decision, estado, localidad = resolver_decision_historica(
+            datos.tipo_efecto,
+            datos.presupuestable,
+            datos.estado_localizacion,
+            datos.localidad_id,
+        )
+        return DatosCreacionHecho(
+            hecho_id=datos.hecho_id,
+            fecha_hecho=datos.fecha_hecho,
+            moneda=datos.moneda,
+            presupuestable=decision,
+            estado_localizacion=estado,
+            localidad_id=localidad,
+            tipo_hecho_codigo=datos.tipo_hecho_codigo,
+            concepto=datos.concepto,
+            importe_total=abs(decimal.Decimal(datos.importe_delta)),
         )
 
     @staticmethod
@@ -291,6 +300,14 @@ class SuplementosService:
                 CodigoError.ENTRADA_INVALIDA,
                 "Un hecho no se ajusta a si mismo.",
             )
+        # F04-D046 R2. Validacion pura de la decision historica, antes de abrir
+        # transaccion.
+        resolver_decision_historica(
+            datos.tipo_efecto,
+            datos.presupuestable,
+            datos.estado_localizacion,
+            datos.localidad_id,
+        )
 
     def _ejecutar(
         self, contexto: ContextoOperacion, operacion: Any, nombre: str

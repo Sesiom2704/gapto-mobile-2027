@@ -9,6 +9,10 @@
 #   o NADA, que no invente posiciones y que no duplique ninguna capacidad ya
 #   certificada. El caso C-11 completo y los adversariales A4, A5, A6 y A7
 #   viven aqui.
+# Version: 0.2.0
+#   0.2.0 (F04-D046 R1 · A19): GASTO de la cena con signo canonico +X (y sus
+#   atribuciones, F04-D007). La tesoreria no cambia: la salida sigue siendo
+#   -X. Las propiedades demostradas se conservan.
 # Version: 0.1.0
 # ============================================================
 
@@ -70,7 +74,8 @@ def _gasto(importe=TOTAL_CENA, atribuciones=()) -> DatosEfecto:
     return DatosEfecto(
         efecto_id=uuid.uuid4(),
         tipo_efecto="GASTO",
-        importe_delta=-importe,
+        # F04-D046 R1. GASTO +X aumenta el gasto (DB Schema §34).
+        importe_delta=importe,
         estado_atribucion="COMPLETA" if atribuciones else "NO_DISPONIBLE",
         atribuciones=tuple(atribuciones),
     )
@@ -80,7 +85,8 @@ def _atribucion(actor_id, importe) -> DatosAtribucion:
     return DatosAtribucion(
         atribucion_id=uuid.uuid4(),
         actor_id=actor_id,
-        importe_atribuido=-importe,
+        # F04-D007: la atribucion hereda el signo del efecto (GASTO +X).
+        importe_atribuido=importe,
         criterio_atribucion="PARTES_IGUALES",
     )
 
