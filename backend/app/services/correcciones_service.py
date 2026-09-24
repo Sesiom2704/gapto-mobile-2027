@@ -33,6 +33,20 @@
 #   D-080 · ADVISORY PRIMERO. Si la correccion toca superficies de inversion,
 #   el advisory (INVERSIONES, owner) se toma ANTES de cualquier row lock. Los
 #   locks genericos no lo sustituyen.
+# Version: 0.8.0
+#   0.8.0 (F04-D048 R3 · A18 §12 + pronunciamiento R3-01/02/04): OP-21 corrige
+#   tambien las cuatro dimensiones contextuales, SOLO con las operaciones
+#   contratadas por superficie: terceros crear/eliminar, entidades
+#   crear/eliminar, magnitudes actualizar/eliminar (y crear como reemplazo),
+#   etiquetas crear/eliminar. CORREGIR no es ENRIQUECER: un alta contextual
+#   aqui exige que la MISMA correccion retire o cambie un dato de esa
+#   dimension (reemplazo de algo que nunca fue cierto); un alta pura es
+#   enriquecimiento (contexto_service) y se rechaza. Cada baja conserva
+#   snapshot completo en auditoria con el motivo; cada alta usa el MISMO
+#   writer que OP-22 y el enriquecimiento (`escribir_contexto`). Las bajas de
+#   hecho_entidades solo alcanzan filas contextuales (AFECTA_A/RELACIONADO_CON);
+#   una fila que pueda contar para D-080 -> OWNERSHIP_F07. Si la correccion
+#   escribe hecho_entidades, el advisory D-080 se toma ANTES del root lock.
 # Version: 0.7.0
 #   0.7.0 (F04-D046 R2 · mandato R1+R2 v0.3 §7/§9 + E01): (a) guarda
 #   territorial: si la correccion ESCRIBE un GASTO/INGRESO (crea un efecto de
@@ -101,6 +115,13 @@ from app.services.efectos_service import EfectosService
 TABLA_ATRIBUCIONES = repo_efectos.TABLA_ATRIBUCIONES
 from app.repositories import hechos_repository as repo_hechos
 from app.repositories import relaciones_repository as repo_rel
+from app.repositories import contexto_repository as repo_ctx
+from app.core.modelos_compuesto import (
+    RELACIONES_CONTEXTUALES,
+    TIPO_ENTIDAD_INVERSION,
+    DatosContextoHecho,
+)
+from app.services import contexto_service as ctx
 from app.services import coherencia_posicion
 
 # F04-D046 R2 · A08-bis. Naturalezas elegibles para presupuesto (INV-11).
@@ -186,6 +207,32 @@ class DatosCorreccion:
     # introduce el primer GASTO/INGRESO en un hecho que no tenia ninguno.
     presupuestable: bool | None = None
 
+    # F04-D048 R3 · A18. Dimensiones contextuales (solo operaciones
+    # contratadas por superficie).
+    terceros_a_crear: tuple[Any, ...] = ()
+    terceros_a_eliminar: tuple[uuid.UUID, ...] = ()
+    entidades_a_crear: tuple[Any, ...] = ()
+    entidades_a_eliminar: tuple[uuid.UUID, ...] = ()
+    magnitudes_a_crear: tuple[Any, ...] = ()
+    magnitudes_a_actualizar: dict[uuid.UUID, dict[str, Any]] = field(
+        default_factory=dict
+    )
+    magnitudes_a_eliminar: tuple[uuid.UUID, ...] = ()
+    etiquetas_a_crear: tuple[Any, ...] = ()
+    etiquetas_a_eliminar: tuple[uuid.UUID, ...] = ()
+
+    @property
+    def toca_contexto(self) -> bool:
+        return any(
+            (
+                self.terceros_a_crear, self.terceros_a_eliminar,
+                self.entidades_a_crear, self.entidades_a_eliminar,
+                self.magnitudes_a_crear, self.magnitudes_a_actualizar,
+                self.magnitudes_a_eliminar, self.etiquetas_a_crear,
+                self.etiquetas_a_eliminar,
+            )
+        )
+
     # Solo para rechazar.
     eliminar_hecho: bool = False
     eliminar_movimiento: uuid.UUID | None = None
@@ -226,8 +273,13 @@ class CorreccionesService:
         def operacion(sesion: SesionMotor) -> ResultadoCorreccion:
             owner = repo_hechos.exigir_contexto(sesion)
 
-            # 1. Advisory ANTES de cualquier fila (D-080).
-            if datos.toca_inversion:
+            # 1. Advisory ANTES de cualquier fila (D-080). R3-02: tambien si
+            #    la correccion va a escribir hecho_entidades.
+            if (
+                datos.toca_inversion
+                or datos.entidades_a_crear
+                or datos.entidades_a_eliminar
+            ):
                 repo_corr.tomar_advisory_inversiones(sesion, owner)
 
             # 2. Root lock y control optimista.
@@ -272,6 +324,10 @@ class CorreccionesService:
             atribuciones_eliminadas = self._eliminar_atribuciones(sesion, datos)
             atribuciones_actualizadas = self._actualizar_atribuciones(sesion, datos)
             atribuciones_creadas = self._crear_atribuciones(sesion, datos)
+
+            # 3ter. F04-D048 R3 · A18. Dimensiones contextuales: bajas y
+            #     cambios primero, altas de reemplazo despues.
+            self._corregir_contexto(sesion, owner, datos)
 
             # 4. Revalidacion cruzada con OP-13: retirar o reducir un
             #    efecto puede dejar la capacidad reversible por debajo de lo
@@ -439,6 +495,100 @@ class CorreccionesService:
                 "estado_localizacion NO_APLICA. Si la localidad es aplicable "
                 "pero no se conoce, es DESCONOCIDA (corregible con OP-02).",
             )
+
+    def _corregir_contexto(
+        self, sesion: SesionMotor, owner: uuid.UUID, datos: DatosCorreccion
+    ) -> None:
+        if not datos.toca_contexto:
+            return
+
+        def _fila_propia(tabla: str, registro_id: uuid.UUID) -> tuple[dict[str, Any], str]:
+            leida = repo_ctx.leer_registro(sesion, tabla, registro_id)
+            if leida is None:
+                raise ErrorMotor(
+                    CodigoError.AGREGADO_NO_ENCONTRADO,
+                    "La fila contextual indicada no existe o no es accesible.",
+                )
+            if str(leida[0]["hecho_id"]) != str(datos.hecho_id):
+                raise ErrorMotor(
+                    CodigoError.ENTRADA_INVALIDA,
+                    "La fila contextual no pertenece a este hecho.",
+                )
+            return leida
+
+        def _baja(tabla: str, registro_id: uuid.UUID, borrar: Any) -> None:
+            snapshot = borrar(sesion, registro_id)
+            if snapshot is None:  # pragma: no cover - leida justo antes
+                raise ErrorMotor(
+                    CodigoError.AGREGADO_NO_ENCONTRADO,
+                    "La fila contextual ya no existe.",
+                )
+            auditoria.registrar(
+                sesion,
+                tabla=tabla,
+                registro_id=registro_id,
+                accion=auditoria.ACCION_ANULAR,
+                datos_antes_json=snapshot,
+                motivo=datos.motivo,
+            )
+
+        for registro_id in datos.terceros_a_eliminar:
+            _fila_propia(repo_ctx.TABLA_TERCEROS, registro_id)
+            _baja(repo_ctx.TABLA_TERCEROS, registro_id, repo_ctx.eliminar_tercero)
+        for registro_id in datos.entidades_a_eliminar:
+            fila, _ = _fila_propia(repo_ctx.TABLA_ENTIDADES, registro_id)
+            if fila["tipo_relacion"] not in RELACIONES_CONTEXTUALES:
+                raise ErrorMotor(
+                    CodigoError.ENTRADA_INVALIDA,
+                    "Solo se corrigen aqui vinculos contextuales: "
+                    f"{fila['tipo_relacion']} pertenece a su operacion propietaria.",
+                )
+            entidad = repo_ctx.leer_entidad(sesion, fila["entidad_id"])
+            if (
+                entidad is not None
+                and entidad["tipo_entidad"] == TIPO_ENTIDAD_INVERSION
+                and (fila["efecto_id"] is not None or fila["principal"])
+            ):
+                raise ErrorMotor(
+                    CodigoError.OWNERSHIP_F07,
+                    "Ese vinculo de inversion puede contar para D-080: su "
+                    "correccion pertenece a F07.",
+                )
+            _baja(repo_ctx.TABLA_ENTIDADES, registro_id, repo_ctx.eliminar_entidad)
+        for registro_id in datos.magnitudes_a_eliminar:
+            _fila_propia(repo_ctx.TABLA_MAGNITUDES, registro_id)
+            _baja(repo_ctx.TABLA_MAGNITUDES, registro_id, repo_ctx.eliminar_magnitud)
+        for registro_id, cambios in datos.magnitudes_a_actualizar.items():
+            fila, _ = _fila_propia(repo_ctx.TABLA_MAGNITUDES, registro_id)
+            valor = decimal.Decimal(cambios.get("valor", fila["valor"]))
+            unidad = cambios.get("unidad", fila["unidad"])
+            par = repo_ctx.actualizar_magnitud(sesion, registro_id, valor, unidad)
+            if par is None:  # pragma: no cover - leida justo antes
+                raise ErrorMotor(
+                    CodigoError.AGREGADO_NO_ENCONTRADO,
+                    "La magnitud ya no existe.",
+                )
+            auditoria.registrar(
+                sesion,
+                tabla=repo_ctx.TABLA_MAGNITUDES,
+                registro_id=registro_id,
+                accion=auditoria.ACCION_ACTUALIZAR,
+                datos_antes_json=par[0],
+                datos_despues_json=par[1],
+                motivo=datos.motivo,
+            )
+        for registro_id in datos.etiquetas_a_eliminar:
+            _fila_propia(repo_ctx.TABLA_ETIQUETAS, registro_id)
+            _baja(repo_ctx.TABLA_ETIQUETAS, registro_id, repo_ctx.eliminar_etiqueta)
+
+        altas = DatosContextoHecho(
+            terceros=datos.terceros_a_crear,
+            entidades=datos.entidades_a_crear,
+            magnitudes=datos.magnitudes_a_crear,
+            etiquetas=datos.etiquetas_a_crear,
+        )
+        if not altas.vacio:
+            ctx.escribir_contexto(sesion, owner, datos.hecho_id, altas, motivo=datos.motivo)
 
     @staticmethod
     def _revalidar_devoluciones(
@@ -796,8 +946,48 @@ class CorreccionesService:
                     CodigoError.ENTRADA_INVALIDA,
                     f"Campos no corregibles en un efecto: {sorted(desconocidos)}.",
                 )
+        # F04-D048 R3 · A18. Correccion contextual: solo operaciones
+        # contratadas; un alta pura es enriquecimiento, no correccion.
+        for dimension, altas, cambios in (
+            ("terceros", datos.terceros_a_crear, datos.terceros_a_eliminar),
+            ("entidades", datos.entidades_a_crear, datos.entidades_a_eliminar),
+            (
+                "magnitudes",
+                datos.magnitudes_a_crear,
+                tuple(datos.magnitudes_a_eliminar) + tuple(datos.magnitudes_a_actualizar),
+            ),
+            ("etiquetas", datos.etiquetas_a_crear, datos.etiquetas_a_eliminar),
+        ):
+            if altas and not cambios:
+                raise ErrorMotor(
+                    CodigoError.ENTRADA_INVALIDA,
+                    f"Añadir {dimension} que faltaban es ENRIQUECIMIENTO, no "
+                    "correccion: OP-21 solo da de alta como reemplazo de un dato "
+                    "de la misma dimension que nunca fue cierto.",
+                )
+        for cambios in datos.magnitudes_a_actualizar.values():
+            desconocidos = set(cambios) - {"valor", "unidad"}
+            if desconocidos or not cambios:
+                raise ErrorMotor(
+                    CodigoError.ENTRADA_INVALIDA,
+                    "En una magnitud solo se corrigen `valor` y `unidad`.",
+                )
+            if "valor" in cambios and cambios["valor"] is None:
+                raise ErrorMotor(
+                    CodigoError.ENTRADA_INVALIDA,
+                    "Una magnitud desconocida se ELIMINA; no se pone a cero ni a nulo.",
+                )
+        ctx.validar_estructura(
+            DatosContextoHecho(
+                terceros=datos.terceros_a_crear,
+                entidades=datos.entidades_a_crear,
+                magnitudes=datos.magnitudes_a_crear,
+                etiquetas=datos.etiquetas_a_crear,
+            )
+        )
         if not any(
             (
+                datos.toca_contexto,
                 datos.efectos_a_actualizar,
                 datos.efectos_a_eliminar,
                 datos.efectos_a_crear,

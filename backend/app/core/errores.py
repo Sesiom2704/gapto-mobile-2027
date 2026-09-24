@@ -15,6 +15,15 @@
 #   operacion y reintentar no la hara posible". Fusionarlos haria que la UX
 #   reintentase indefinidamente algo imposible, o que abandonase algo que solo
 #   necesitaba otro intento.
+# Version: 0.16.0
+#   0.16.0 (F04-D048 R3 · pronunciamiento R3-03): `OWNERSHIP_F07`. La
+#   intencion requiere mutar una superficie cuya propiedad funcional es de F07
+#   (financiacion, inversion: principal D-080, vinculos a nivel de efecto) y la
+#   operacion F04 actual no esta autorizada a hacerlo. NO reintentable: repetir
+#   el mismo comando sin cambiar la intencion nunca lo convierte en exito. No
+#   significa conflicto, version desfasada, fallo PostgreSQL, entidad
+#   inexistente ni relacion contextual genericamente invalida, y su existencia
+#   no abre F07.
 # Version: 0.15.0
 #   0.15.0 (F04-D038): participantes identificados. `ROL_PARTICIPANTE_INVALIDO`
 #   protege el vocabulario operativo, que es SRV porque DB Schema declara
@@ -276,6 +285,10 @@ class CodigoError(str, enum.Enum):
     # derivada: este SI hace rollback, y solo aplica a correcciones de
     # previsión, nunca a OP-02/OP-03.
     TRAMO_RODANTE_REQUIERE_REVISION = "TRAMO_RODANTE_REQUIERE_REVISION"
+    # ---- F04-D048 R3 ----
+    # Frontera F07: la intencion pertenece a financiacion/inversion
+    # especializadas. No reintentable (R3-03).
+    OWNERSHIP_F07 = "OWNERSHIP_F07"
     # OP-17. La misma porcion de realidad no puede materializarse dos veces.
     PREVISION_YA_MATERIALIZADA_POR_ESTA_REALIDAD = (
         "PREVISION_YA_MATERIALIZADA_POR_ESTA_REALIDAD"
