@@ -13,6 +13,11 @@
 #   Ninguna de estas propiedades se demuestra con un escenario feliz. Todas
 #   exigen provocar deliberadamente lo que no debe ocurrir y comprobar que el
 #   estado final es indistinguible del inicial.
+# Version: 0.3.0
+#   0.3.0 (mandato F04 R1+R2 v0.3 + E01): OP-04 aporta `presupuestable` en la
+#   transicion al primer GASTO/INGRESO (A08-bis generalizada); fixtures de
+#   GASTO con localizacion DESCONOCIDA en vez de NO_APLICA cuando aplica. Sin
+#   cambio de las propiedades probadas.
 # Version: 0.2.0
 #   0.2.0 (F04-D046 R1 · A19): signo canonico (GASTO +X, atribuciones +X,
 #   correccion +40/+25); tesoreria intacta. Se FIJA el codigo de fallo de
@@ -301,6 +306,7 @@ def test_inv20_reintento_de_operacion_con_hijas(
         hecho_id=datos.hecho_id,
         row_version_esperada=creado.row_version,
         efectos=efectos,
+        presupuestable=True,  # F04-D046 A08-bis: primer GASTO/INGRESO
     )
     segundo = motor.efectos.registrar_efectos(
         contexto,

@@ -44,6 +44,17 @@
 #   puntos que le pertenecen: el unico writer del vinculo (`_crear_delta`) y
 #   el calculo de saldo, que falla cerrado antes que devolver un numero
 #   derivado de un estado invalido.
+# Version: 0.3.0
+#   0.3.0 (mandato F04 R1+R2 v0.3 §8/§9 + E01, SOLO `condonar_derecho` y
+#   soporte privado inseparable): con GASTO declarado la condonacion exige
+#   `presupuestable` explicito y localizacion aplicable (sin dato ->
+#   DESCONOCIDA; NO_APLICA -> ENTRADA_INVALIDA); ya no hereda los valores
+#   fijos de posicion. `_aplicar_delta` y `_crear_hecho` reciben parametros
+#   opcionales cuyos defaults son EXACTAMENTE los anteriores
+#   (PRESUPUESTABLE_POSICION / LOCALIZACION_POSICION / sin localidad / sin
+#   comprobacion adicional de replay): el resto de operaciones de posiciones no
+#   los pasa y su comportamiento observable no cambia. El replay de la
+#   condonacion compara ademas la decision persistida del hecho.
 # Version: 0.2.0
 #   0.2.0 (F04-D036): coherencia monetaria del vinculo y saldo fail-closed.
 # Version: 0.1.0
@@ -53,13 +64,14 @@ from __future__ import annotations
 
 import datetime as dt
 import decimal
+import json
 import re
 import uuid
 from typing import Any, Callable, Sequence
 
 from app.core.contexto import ContextoOperacion
 from app.core.errores import CodigoError, ErrorMotor
-from app.core.modelos import DatosCreacionHecho, ESTADO_ACTIVO
+from app.core.modelos import DatosCreacionHecho, ESTADO_ACTIVO, ESTADOS_LOCALIZACION
 from app.core.modelos_posicion import (
     CERO,
     DatosAltaPosicion,
@@ -275,10 +287,13 @@ class PosicionesService:
         reconocido—. Si falta cualquiera, cero efecto GASTO.
         """
 
+        hecho_con_gasto = bool(
+            datos.declara_gasto_soportado and datos.declara_coste_no_reconocido
+        )
+        decision_hecho = self._decision_hecho_condonacion(datos, hecho_con_gasto)
+
         def extra(sesion: SesionMotor, contexto_delta: dict[str, Any]) -> None:
-            if not (
-                datos.declara_gasto_soportado and datos.declara_coste_no_reconocido
-            ):
+            if not hecho_con_gasto:
                 return
             if datos.efecto_gasto_id is None:
                 raise ErrorMotor(
@@ -327,11 +342,70 @@ class PosicionesService:
                 if datos.efecto_gasto_id is None
                 else [("hecho_efectos", datos.efecto_gasto_id)]
             ),
+            **decision_hecho,
             tipo_no_soportado=(
                 TIPO_OBLIGACION,
                 CodigoError.CONDONACION_OBLIGACION_NO_SOPORTADA,
             ),
         )
+
+    @staticmethod
+    def _decision_hecho_condonacion(
+        datos: DatosCondonacion, hecho_con_gasto: bool
+    ) -> dict[str, Any]:
+        """Mandato F04 R1+R2 v0.3 §8/§9 + E01. Raiz del hecho de condonacion.
+
+        Sin GASTO el hecho es puramente posicional y conserva EXACTAMENTE los
+        valores de siempre (defaults de `_aplicar_delta`); aportar decision o
+        localizacion en ese caso no tendria significado y se rechaza. Con
+        GASTO, `presupuestable` es decision explicita sin default y la
+        localizacion es aplicable: sin dato -> DESCONOCIDA, con localidad y sin
+        estado -> CONOCIDA, NO_APLICA -> ENTRADA_INVALIDA. La coherencia
+        estado/localidad la juzga el CHECK fisico de 0040.
+        """
+        declarados = (
+            datos.presupuestable is not None
+            or datos.estado_localizacion is not None
+            or datos.localidad_id is not None
+        )
+        if not hecho_con_gasto:
+            if declarados:
+                raise ErrorMotor(
+                    CodigoError.ENTRADA_INVALIDA,
+                    "Sin GASTO declarado el hecho de condonacion es puramente "
+                    "posicional: presupuestable y localizacion no se aportan.",
+                )
+            return {}
+        if datos.presupuestable is None or not isinstance(
+            datos.presupuestable, bool
+        ):
+            raise ErrorMotor(
+                CodigoError.ENTRADA_INVALIDA,
+                "Una condonacion que genera GASTO exige decidir "
+                "`presupuestable`: el motor no lo deriva.",
+            )
+        if datos.estado_localizacion is None:
+            estado = "DESCONOCIDA" if datos.localidad_id is None else "CONOCIDA"
+        else:
+            if datos.estado_localizacion not in ESTADOS_LOCALIZACION:
+                raise ErrorMotor(
+                    CodigoError.ENTRADA_INVALIDA,
+                    "estado_localizacion debe ser CONOCIDA, DESCONOCIDA o "
+                    "NO_APLICA.",
+                )
+            if datos.estado_localizacion == LOCALIZACION_POSICION:
+                raise ErrorMotor(
+                    CodigoError.ENTRADA_INVALIDA,
+                    "Con GASTO la localizacion es aplicable: NO_APLICA no es "
+                    "valido. Si no se conoce la localidad, es DESCONOCIDA.",
+                )
+            estado = datos.estado_localizacion
+        return {
+            "presupuestable_hecho": datos.presupuestable,
+            "estado_localizacion_hecho": estado,
+            "localidad_id_hecho": datos.localidad_id,
+            "verificar_hecho_en_replay": True,
+        }
 
     # ==================================================================
     # CIERRE EXPLICITO
@@ -400,7 +474,14 @@ class PosicionesService:
         extra: Callable[[SesionMotor, dict[str, Any]], None] | None = None,
         artefactos_extra: Sequence[tuple[str, uuid.UUID]] = (),
         tipo_no_soportado: tuple[str, CodigoError] | None = None,
+        presupuestable_hecho: bool = PRESUPUESTABLE_POSICION,
+        estado_localizacion_hecho: str = LOCALIZACION_POSICION,
+        localidad_id_hecho: uuid.UUID | None = None,
+        verificar_hecho_en_replay: bool = False,
     ) -> ResultadoPosicion:
+        # Los cuatro ultimos parametros solo los pasa `condonar_derecho`
+        # (mandato F04 R1+R2 v0.3 + E01); sus defaults reproducen el
+        # comportamiento previo del resto de operaciones.
         self._validar_delta(delta)
         if delta.cierre is not None:
             self._validar_cierre(delta.cierre)
@@ -416,6 +497,14 @@ class PosicionesService:
             # version, para no convertirlo en un falso conflicto.
             replay = self._clasificar_replay(sesion, artefactos)
             if replay == "REPLICA":
+                if verificar_hecho_en_replay:
+                    self._exigir_hecho_replay(
+                        sesion,
+                        delta.hecho_id,
+                        presupuestable_hecho,
+                        estado_localizacion_hecho,
+                        localidad_id_hecho,
+                    )
                 return self._resultado_actual(sesion, entidad_id, idempotente=True)
             if replay == "CONFLICTO":
                 raise self._conflicto_identidad()
@@ -475,6 +564,9 @@ class PosicionesService:
                 moneda=posicion["moneda"],
                 concepto=delta.concepto,
                 importe_total=importe,
+                presupuestable=presupuestable_hecho,
+                estado_localizacion=estado_localizacion_hecho,
+                localidad_id=localidad_id_hecho,
             )
             self._crear_delta(
                 sesion,
@@ -540,13 +632,17 @@ class PosicionesService:
         moneda: str,
         concepto: str | None,
         importe_total: decimal.Decimal | None,
+        presupuestable: bool = PRESUPUESTABLE_POSICION,
+        estado_localizacion: str = LOCALIZACION_POSICION,
+        localidad_id: uuid.UUID | None = None,
     ) -> uuid.UUID:
         datos = DatosCreacionHecho(
             hecho_id=hecho_id,
             fecha_hecho=fecha_hecho,
             moneda=moneda,
-            presupuestable=PRESUPUESTABLE_POSICION,
-            estado_localizacion=LOCALIZACION_POSICION,
+            presupuestable=presupuestable,
+            estado_localizacion=estado_localizacion,
+            localidad_id=localidad_id,
             tipo_hecho_codigo=tipo_hecho_codigo,
             concepto=concepto,
             importe_total=importe_total,
@@ -913,6 +1009,29 @@ class PosicionesService:
         if existentes == len(artefactos):
             return "REPLICA"
         return "CONFLICTO"
+
+    def _exigir_hecho_replay(
+        self,
+        sesion: SesionMotor,
+        hecho_id: uuid.UUID,
+        presupuestable: bool,
+        estado_localizacion: str,
+        localidad_id: uuid.UUID | None,
+    ) -> None:
+        """Replay de condonacion con GASTO: la decision persistida debe ser la
+        misma. Otra decision con los mismos UUID es otra intencion."""
+        estado = repo_hechos.leer_estado(sesion, hecho_id)
+        if estado is None:
+            raise self._conflicto_identidad()
+        snap = json.loads(estado[2])
+        localidad = snap.get("localidad_id")
+        if (
+            snap.get("presupuestable") != presupuestable
+            or snap.get("estado_localizacion") != estado_localizacion
+            or (str(localidad) if localidad else None)
+            != (str(localidad_id) if localidad_id else None)
+        ):
+            raise self._conflicto_identidad()
 
     @staticmethod
     def _conflicto_identidad() -> ErrorMotor:

@@ -25,6 +25,13 @@
 #   Todas las identidades llegan reservadas por el llamante, antes del primer
 #   intento: es lo que permite reintentar una operacion compuesta —hecho,
 #   efecto, vinculo, movimiento, conciliacion, relacion— sin duplicar realidad.
+# Version: 0.2.0
+#   0.2.0 (mandato F04 R1+R2 v0.3 §8 + E01, SOLO `DatosCondonacion`): cuando
+#   la condonacion declara el GASTO soportado, el hecho resultante contiene
+#   GASTO y deja de ser puramente posicional. Se anaden `presupuestable`,
+#   `estado_localizacion` y `localidad_id` para que el llamante exprese la
+#   decision historica y la localizacion, en vez de heredar los valores fijos
+#   de posicion (`false` / `NO_APLICA`). Ningun otro DTO cambia.
 # Version: 0.1.0
 # ============================================================
 
@@ -218,6 +225,12 @@ class DatosCondonacion:
     declara_gasto_soportado: bool = False
     declara_coste_no_reconocido: bool = False
     efecto_gasto_id: uuid.UUID | None = None
+    # Mandato F04 R1+R2 v0.3 §8 / E01. Solo con GASTO declarado: decision
+    # presupuestaria explicita (sin default) y localizacion (sin dato ->
+    # DESCONOCIDA; NO_APLICA invalido). Sin GASTO deben quedar vacios.
+    presupuestable: bool | None = None
+    estado_localizacion: str | None = None
+    localidad_id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -8,6 +8,11 @@
 #   transiciones inversas de `estado_atribucion` son legitimas: no son una
 #   perdida posterior de conocimiento, son la constatacion de que lo que se
 #   creia saber era falso. OP-05 conserva su progresion ordinaria.
+# Version: 0.3.0
+#   0.3.0 (mandato F04 R1+R2 v0.3 + E01): OP-04 aporta `presupuestable` en la
+#   transicion al primer GASTO/INGRESO (A08-bis generalizada); fixtures de
+#   GASTO con localizacion DESCONOCIDA en vez de NO_APLICA cuando aplica. Sin
+#   cambio de las propiedades probadas.
 # Version: 0.2.0
 #   0.2.0 (F04-D046 R1 · A19): signo canonico. La cena de 44,50 es GASTO +44,50
 #   y todos los repartos, correcciones y oraculos (A18, R1..R11) son positivos
@@ -51,7 +56,7 @@ def _cena(servicio, servicio_efectos, contexto, atribuciones, estado, importe=TO
             fecha_hecho=FECHA,
             moneda="EUR",
             presupuestable=True,
-            estado_localizacion="NO_APLICA",
+            estado_localizacion="DESCONOCIDA",  # F04-D046 R2: GASTO aplicable, localidad no conocida
             tipo_hecho_codigo="GASTO",
             concepto="cena compartida",
             importe_total=importe,
@@ -70,6 +75,7 @@ def _cena(servicio, servicio_efectos, contexto, atribuciones, estado, importe=TO
                 atribuciones=tuple(atribuciones),
             )
         ],
+        presupuestable=True,  # F04-D046 A08-bis: primer GASTO/INGRESO
     )
     return hecho_id, efecto_id, resultado.row_version
 

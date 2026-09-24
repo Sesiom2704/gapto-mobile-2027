@@ -37,6 +37,14 @@
 #   aportacion puede apuntar a su conciliacion (`hecho_movimiento_tesoreria_id`)
 #   y porque la prevalidacion acumulada D-169 de OP-06 compara contra la
 #   porcion ya conciliada: invertir el orden la dejaria comparando contra cero.
+# Version: 0.2.0
+#   0.2.0 (F04-D046 R2 · mandato R1+R2 v0.3 §6): solo PROPAGACION. OP-04 exige
+#   ahora la decision `presupuestable` cuando introduce el primer GASTO/INGRESO
+#   del hecho. En OP-19 el hecho nace en esta misma transaccion y la decision
+#   ya viene explicita en `datos.hecho.presupuestable`: se reenvia a OP-04 solo
+#   si los efectos contienen GASTO/INGRESO (sin ellos OP-04 la rechazaria por
+#   carecer de significado). No cambian posiciones, participantes, atomicidad,
+#   locks, atribuciones, efectos admitidos ni el contrato financiero de OP-19.
 # Version: 0.1.0
 # ============================================================
 
@@ -154,6 +162,14 @@ class GastosCompartidosService:
                 hecho_id=hecho_id,
                 row_version_esperada=version,
                 efectos=datos.efectos,
+                # F04-D046 A08-bis: propagacion de la decision ya explicita.
+                presupuestable=(
+                    datos.hecho.presupuestable
+                    if any(
+                        e.tipo_efecto in ("GASTO", "INGRESO") for e in datos.efectos
+                    )
+                    else None
+                ),
             )
             version = resultado_efectos.row_version
 

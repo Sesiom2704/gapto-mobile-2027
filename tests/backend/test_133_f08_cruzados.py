@@ -12,6 +12,11 @@
 #   El precedente es reciente y caro: F04-07 descubrio que un efecto con
 #   reparto COMPLETA tenia el importe inmutable. Ni F04-02 ni F04-06 fallaban
 #   por separado. El hueco vivia entre ambas.
+# Version: 0.3.0
+#   0.3.0 (mandato F04 R1+R2 v0.3 + E01): OP-04 aporta `presupuestable` en la
+#   transicion al primer GASTO/INGRESO (A08-bis generalizada); fixtures de
+#   GASTO con localizacion DESCONOCIDA en vez de NO_APLICA cuando aplica. Sin
+#   cambio de las propiedades probadas.
 # Version: 0.2.0
 #   0.2.0 (F04-D046 R1 · A19): signo canonico en X-01..X-12 (GASTO +X, atribuciones +X, correccion de
 #   reparto +40/+25/+15). X-08: la devolucion declara `presupuestable` (R2).
@@ -116,6 +121,7 @@ def _gasto_simple(motor: Motor, contexto, importe, concepto="gasto"):
         hecho_id=datos.hecho_id,
         row_version_esperada=creado.row_version,
         efectos=[efecto("GASTO", importe)],
+        presupuestable=True,  # F04-D046 A08-bis: primer GASTO/INGRESO
     ).row_version
     return datos, version
 
@@ -294,6 +300,7 @@ def test_x03_compra_financiada_y_pagos_sucesivos(
         hecho_id=datos.hecho_id,
         row_version_esperada=creado.row_version,
         efectos=[efecto("GASTO", total)],
+        presupuestable=True,  # F04-D046 A08-bis: primer GASTO/INGRESO
     )
     posicion, alta = _posicion(
         motor,

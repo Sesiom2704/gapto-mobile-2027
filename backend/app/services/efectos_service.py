@@ -29,6 +29,19 @@
 #   `hechos_financieros.row_version`; ni `hecho_efectos` ni
 #   `efecto_atribuciones` tienen el suyo. Toda operacion con exito incrementa
 #   esa version UNA sola vez, con la guarda en SQL.
+# Version: 0.4.0
+#   0.4.0 (F04-D046 R2 · mandato R1+R2 v0.3 §5/§9 + E01): frontera
+#   presupuestaria y territorial de OP-04. `presupuestable` esta INACTIVO
+#   mientras el hecho no contiene GASTO ni INGRESO; cuando OP-04 produce la
+#   transicion sin -> con GASTO/INGRESO la decision es OBLIGATORIA y explicita
+#   (el booleano fisico almacenado durante la etapa inactiva no cuenta como
+#   decision). Sin transicion, un `presupuestable` explicito carece de
+#   significado en OP-04 y se rechaza (la correccion del escalar es OP-02).
+#   Si OP-04 escribe algun efecto GASTO/INGRESO, `NO_APLICA` en el hecho es
+#   invalido. Ambas son guardas de frontera de escritura hacia adelante: no
+#   invalidan historico. Errores: ENTRADA_INVALIDA, rollback total. La version
+#   del hecho sigue incrementandose UNA sola vez: en la transicion, el propio
+#   UPDATE de la decision es el toque de raiz.
 # Version: 0.3.0
 #   0.3.0 (F04-02): F04-D007 valida el signo de CADA importe atribuido contra
 #   el delta del efecto. La comprobacion agregada no basta: un reparto de +120
@@ -69,8 +82,16 @@ from app.core.unidad_trabajo import SesionMotor, Traza, UnidadDeTrabajo
 from app.repositories import auditoria_repository as auditoria
 from app.repositories import efectos_repository as repo_efectos
 from app.repositories import hechos_repository as repo_hechos
+from app.repositories import relaciones_repository as repo_rel
 
 CERO = decimal.Decimal("0")
+
+# F04-D046 R2 · A08-bis (INV-11). Naturalezas con efecto presupuestario.
+NATURALEZAS_PRESUPUESTABLES = frozenset({"GASTO", "INGRESO"})
+LOCALIZACION_NO_APLICA = "NO_APLICA"
+MOTIVO_ACTIVACION_PRESUPUESTABLE = (
+    "F04-D046 A08-bis: primer GASTO/INGRESO del hecho; decision presupuestable"
+)
 
 
 def _a_dict(snapshot_json: str) -> dict[str, Any]:
@@ -114,8 +135,14 @@ class EfectosService:
         hecho_id: uuid.UUID,
         row_version_esperada: int,
         efectos: Sequence[DatosEfecto],
+        presupuestable: bool | None = None,
     ) -> ResultadoOperacionEfectos:
-        """Declara 1..N efectos, con su reparto inicial, en UNA transaccion."""
+        """Declara 1..N efectos, con su reparto inicial, en UNA transaccion.
+
+        `presupuestable` (F04-D046 A08-bis) solo se admite, y entonces es
+        obligatorio, cuando esta llamada introduce el primer GASTO/INGRESO del
+        hecho.
+        """
         if not efectos:
             raise ErrorMotor(
                 CodigoError.ENTRADA_INVALIDA,
@@ -124,6 +151,14 @@ class EfectosService:
         for efecto in efectos:
             self._validar_efecto(efecto)
         self._validar_identidades_unicas(efectos)
+        if presupuestable is not None and not isinstance(presupuestable, bool):
+            raise ErrorMotor(
+                CodigoError.ENTRADA_INVALIDA,
+                "`presupuestable` debe ser booleano.",
+            )
+        escribe_elegible = any(
+            e.tipo_efecto in NATURALEZAS_PRESUPUESTABLES for e in efectos
+        )
 
         def operacion(sesion: SesionMotor) -> ResultadoOperacionEfectos:
             repo_hechos.exigir_contexto(sesion)
@@ -138,6 +173,15 @@ class EfectosService:
             if clasificacion == "REPLICA":
                 # Un reintento demostrado NO vuelve a incrementar row_version:
                 # hacerlo invalidaria la version que el llamante ya conoce.
+                # F04-D046: si el reintento trae una decision presupuestaria,
+                # debe ser la que quedo persistida; otra es otra intencion.
+                if presupuestable is not None and (
+                    _a_dict(estado_hecho[2]).get("presupuestable") != presupuestable
+                ):
+                    raise ErrorMotor(
+                        CodigoError.IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION,
+                        "El reintento declara otra decision presupuestaria.",
+                    )
                 return ResultadoOperacionEfectos(
                     hecho_id=hecho_id,
                     row_version=estado_hecho[0],
@@ -151,7 +195,14 @@ class EfectosService:
                     "con otra intencion.",
                 )
 
-            nueva_version = self._tocar_raiz(sesion, hecho_id, row_version_esperada)
+            nueva_version = self._frontera_y_toque_raiz(
+                sesion,
+                hecho_id=hecho_id,
+                row_version_esperada=row_version_esperada,
+                estado_hecho=estado_hecho,
+                escribe_elegible=escribe_elegible,
+                presupuestable=presupuestable,
+            )
 
             resultados: list[ResultadoEfecto] = []
             atribuciones_creadas = 0
@@ -355,6 +406,76 @@ class EfectosService:
             accion=auditoria.ACCION_CREAR,
             datos_despues_json=snapshot,
         )
+
+    def _frontera_y_toque_raiz(
+        self,
+        sesion: SesionMotor,
+        *,
+        hecho_id: uuid.UUID,
+        row_version_esperada: int,
+        estado_hecho: tuple[int, str, str],
+        escribe_elegible: bool,
+        presupuestable: bool | None,
+    ) -> int:
+        """F04-D046 R2 (mandato v0.3 §5/§9). Guardas de frontera de OP-04.
+
+        Se evalua ANTES de insertar: el estado previo se lee dentro de la
+        transaccion y el UPDATE final de la raiz lleva la guarda de version en
+        SQL, de modo que una escritura concurrente que cambie el hecho entre la
+        lectura y el UPDATE hace fallar con VERSION_DESFASADA.
+        """
+        snapshot = _a_dict(estado_hecho[2])
+        if (
+            escribe_elegible
+            and snapshot.get("estado_localizacion") == LOCALIZACION_NO_APLICA
+        ):
+            raise ErrorMotor(
+                CodigoError.ENTRADA_INVALIDA,
+                "Un hecho con GASTO o INGRESO no admite estado_localizacion "
+                "NO_APLICA: si la localidad es aplicable pero no se conoce, es "
+                "DESCONOCIDA.",
+            )
+        elegible_antes = any(
+            repo_rel.capacidad_por_naturaleza(sesion, hecho_id, naturaleza)
+            is not None
+            for naturaleza in NATURALEZAS_PRESUPUESTABLES
+        )
+        transicion = escribe_elegible and not elegible_antes
+        if not transicion:
+            if presupuestable is not None:
+                raise ErrorMotor(
+                    CodigoError.ENTRADA_INVALIDA,
+                    "Esta llamada no introduce el primer GASTO/INGRESO del "
+                    "hecho: `presupuestable` no tiene significado en OP-04 "
+                    "(el escalar se corrige con OP-02).",
+                )
+            return self._tocar_raiz(sesion, hecho_id, row_version_esperada)
+
+        if presupuestable is None:
+            raise ErrorMotor(
+                CodigoError.ENTRADA_INVALIDA,
+                "OP-04 introduce el primer GASTO/INGRESO del hecho: exige "
+                "decidir `presupuestable`. El valor almacenado mientras el "
+                "hecho no tenia GASTO/INGRESO esta INACTIVO y no es decision.",
+            )
+        actualizado = repo_hechos.actualizar_campos(
+            sesion, hecho_id, row_version_esperada, {"presupuestable": presupuestable}
+        )
+        if actualizado is None:
+            raise ErrorMotor(
+                CodigoError.VERSION_DESFASADA,
+                "El hecho ha cambiado desde la version que conoce el llamante.",
+            )
+        auditoria.registrar(
+            sesion,
+            tabla=repo_hechos.TABLA,
+            registro_id=hecho_id,
+            accion=auditoria.ACCION_ACTUALIZAR,
+            datos_antes_json=estado_hecho[2],
+            datos_despues_json=actualizado[2],
+            motivo=MOTIVO_ACTIVACION_PRESUPUESTABLE,
+        )
+        return actualizado[0]
 
     def _tocar_raiz(
         self, sesion: SesionMotor, hecho_id: uuid.UUID, row_version_esperada: int

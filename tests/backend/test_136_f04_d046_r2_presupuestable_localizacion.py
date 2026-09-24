@@ -13,6 +13,16 @@
 #   (que no existe todavia): solo alimentan presupuesto los efectos GASTO /
 #   INGRESO de hechos ACTIVOS con `presupuestable=true` (DB Schema, INV-11).
 #   La consulta `consumo` es esa definicion, literal.
+# Version: 0.2.0
+#   0.2.0 (mandato F04 R1+R2 v0.3 + E01, auditoria de test_136): (a) OP-04
+#   exige ahora la decision `presupuestable` al nacer el primer GASTO/INGRESO,
+#   asi que los helpers `_gasto` y `_aportacion_con_comision` la aportan; (b)
+#   R2-10 se reformula de «false derivado» a «INACTIVO» (v0.3 §3) y su
+#   auditoria se filtra por el motivo de la correccion, porque la activacion
+#   en OP-04 deja otra; (c) R2-11b: la decision explicita se persiste y audita
+#   SIEMPRE en la transicion, tambien cuando coincide con el booleano
+#   inactivo previo (v0.3 §7: el valor almacenado no sustituye la decision).
+#   Las pruebas nuevas de v0.3/E01 viven en test_137.
 # Version: 0.1.0
 # ============================================================
 from __future__ import annotations
@@ -70,6 +80,7 @@ def _gasto(servicio, servicio_efectos, contexto, importe="100.0000") -> uuid.UUI
                 estado_atribucion="NO_DISPONIBLE",
             )
         ],
+        presupuestable=True,
     )
     return hecho_id
 
@@ -359,6 +370,7 @@ def _aportacion_con_comision(servicio, servicio_efectos, contexto):
                 estado_atribucion="NO_DISPONIBLE",
             ),
         ],
+        presupuestable=True,
     )
     return hecho_id, comision, resultado.row_version
 
@@ -367,7 +379,8 @@ def test_r2_10_solo_inversion_deriva_presupuestable_false(
     servicio, servicio_efectos, servicio_correcciones, contexto, admin
 ) -> None:
     """La comision nunca existio: OP-21 la retira y el hecho queda solo con
-    INVERSION. `presupuestable` pasa a false derivado, auditado."""
+    INVERSION. `presupuestable` queda INACTIVO (v0.3 §3); fisicamente se
+    persiste `false` y la transicion queda auditada (E01 §5)."""
     hecho_id, comision, version = _aportacion_con_comision(
         servicio, servicio_efectos, contexto
     )
@@ -387,7 +400,7 @@ def test_r2_10_solo_inversion_deriva_presupuestable_false(
         "SELECT motivo, datos_antes->>'presupuestable', "
         "datos_despues->>'presupuestable' FROM gapto.auditoria "
         "WHERE tabla = 'hechos_financieros' AND registro_id = %s "
-        "AND accion = 'ACTUALIZAR'",
+        "AND accion = 'ACTUALIZAR' AND motivo = 'la comision no existia'",
         (hecho_id,),
     ) == ("la comision no existia", "true", "false")
 
@@ -549,8 +562,9 @@ def test_r2_11b_primer_gasto_con_decision_explicita(
         "AND registro_id = %s AND accion = 'ACTUALIZAR'",
         (hecho_id,),
     )[0]
-    # true cambia el escalar (auditado); false coincide con el estado previo.
-    assert cambios == (1 if decision else 0)
+    # v0.3 §7: la decision se persiste y audita SIEMPRE en la transicion,
+    # tambien `false` sobre un `false` inactivo previo (R2-16).
+    assert cambios == 1
 
 
 def test_r2_11c_sin_transicion_presupuestable_va_por_op02(

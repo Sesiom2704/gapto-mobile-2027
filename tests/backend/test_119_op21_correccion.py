@@ -18,6 +18,11 @@
 #     que queda de una fila que ya no existe.
 #   - D-187 se evalua sobre el estado FINAL: cero efectos a mitad de
 #     transaccion es legitimo si antes del COMMIT se instala el reemplazo.
+# Version: 0.3.0
+#   0.3.0 (mandato F04 R1+R2 v0.3 + E01): OP-04 aporta `presupuestable` en la
+#   transicion al primer GASTO/INGRESO (A08-bis generalizada); fixtures de
+#   GASTO con localizacion DESCONOCIDA en vez de NO_APLICA cuando aplica. Sin
+#   cambio de las propiedades probadas.
 # Version: 0.2.0
 #   0.2.0 (F04-D046 R2): la devolucion de apoyo declara `presupuestable`, exigido ahora por OP-13.
 # Version: 0.1.0
@@ -61,7 +66,7 @@ def crear_hecho_con_efectos(
             fecha_hecho=F("2027-07-01"),
             moneda="EUR",
             presupuestable=True,
-            estado_localizacion="NO_APLICA",
+            estado_localizacion="DESCONOCIDA",  # F04-D046 R2: GASTO aplicable, localidad no conocida
             tipo_hecho_codigo="GASTO",
             importe_total=D("100.0000"),
             concepto="Compra con datos mal capturados",
@@ -85,7 +90,7 @@ def crear_hecho_con_efectos(
             )
         )
     servicio_efectos.registrar_efectos(
-        contexto, hecho_id=hecho_id, row_version_esperada=1, efectos=efectos
+        contexto, hecho_id=hecho_id, row_version_esperada=1, efectos=efectos, presupuestable=True
     )
     return hecho_id, [e.efecto_id for e in efectos]
 

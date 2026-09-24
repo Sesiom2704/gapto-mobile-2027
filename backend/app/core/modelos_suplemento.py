@@ -18,6 +18,11 @@
 #   `fecha_demostrada` es esa declaracion. No es burocracia: sin ella, OP-18 se
 #   convierte en una puerta para retrodatar cualquier cosa, y el mandato
 #   prohibe expresamente inventar retroactividad.
+# Version: 0.3.0
+#   0.3.0 (mandato F04 R1+R2 v0.3 §9/§11): con GASTO o INGRESO `NO_APLICA` es
+#   invalido aunque se declare (lo rechaza `resolver_decision_historica`);
+#   solo un suplemento puramente posicional puede declararlo. Con DEUDA o
+#   DERECHO_COBRO el `false` persistido es valor fisico INACTIVO, no decision.
 # Version: 0.2.0
 #   0.2.0 (F04-D046 R2 · A20/A08-bis): el suplemento recibe su propia decision
 #   historica `presupuestable` y su localizacion. OP-18 ya no fija `false` ni

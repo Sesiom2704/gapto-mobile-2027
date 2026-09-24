@@ -23,6 +23,11 @@
 #   Ese orden importa: la carrera no descubrio el defecto, lo descubrio
 #   preguntarse que pasaba en el caso secuencial. Un interleaving escrito antes
 #   habria pasado en verde sobre un motor incoherente.
+# Version: 0.3.0
+#   0.3.0 (mandato F04 R1+R2 v0.3 + E01): OP-04 aporta `presupuestable` en la
+#   transicion al primer GASTO/INGRESO (A08-bis generalizada); fixtures de
+#   GASTO con localizacion DESCONOCIDA en vez de NO_APLICA cuando aplica. Sin
+#   cambio de las propiedades probadas.
 # Version: 0.2.0
 #   0.2.0 (F04-D046 R2): el helper de devolucion declara `presupuestable`, exigido ahora por OP-13.
 # Version: 0.1.0
@@ -71,7 +76,7 @@ def gasto_con_dos_efectos(
             fecha_hecho=F("2027-08-01"),
             moneda="EUR",
             presupuestable=True,
-            estado_localizacion="NO_APLICA",
+            estado_localizacion="DESCONOCIDA",  # F04-D046 R2: GASTO aplicable, localidad no conocida
             tipo_hecho_codigo="GASTO",
             importe_total=D("120.0000"),
         ),
@@ -95,6 +100,7 @@ def gasto_con_dos_efectos(
                 estado_atribucion="NO_DISPONIBLE",
             ),
         ],
+        presupuestable=True,  # F04-D046 A08-bis: primer GASTO/INGRESO
     )
     return hecho_id, grande, pequeno
 

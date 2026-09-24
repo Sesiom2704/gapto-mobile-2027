@@ -7,6 +7,11 @@
 #   independencia frente a participacion de cuenta y pago (INV-03/INV-04),
 #   idempotencia de lote (F04-D006), carrera real sobre la version de la raiz
 #   (INV-20), auditoria y atomicidad.
+# Version: 0.4.0
+#   0.4.0 (mandato F04 R1+R2 v0.3 + E01): OP-04 aporta `presupuestable` en la
+#   transicion al primer GASTO/INGRESO (A08-bis generalizada); fixtures de
+#   GASTO con localizacion DESCONOCIDA en vez de NO_APLICA cuando aplica. Sin
+#   cambio de las propiedades probadas.
 # Version: 0.3.0
 #   0.3.0 (F04-04): el recuento de posiciones se acota al tenant. Contarlas
 #   globalmente era una expresion incorrecta de INV-04 y rompia en cuanto otra
@@ -49,6 +54,7 @@ def efecto_abierto(servicio, servicio_efectos: EfectosService, contexto):
         hecho_id=datos.hecho_id,
         row_version_esperada=creado.row_version,
         efectos=[uno],
+        presupuestable=True,  # F04-D046 A08-bis: primer GASTO/INGRESO
     )
     return datos.hecho_id, uno.efecto_id, resultado.row_version
 
@@ -63,6 +69,7 @@ def efecto_negativo(servicio, servicio_efectos: EfectosService, contexto):
         hecho_id=datos.hecho_id,
         row_version_esperada=creado.row_version,
         efectos=[uno],
+        presupuestable=True,  # F04-D046 A08-bis: primer GASTO/INGRESO
     )
     return datos.hecho_id, uno.efecto_id, resultado.row_version
 

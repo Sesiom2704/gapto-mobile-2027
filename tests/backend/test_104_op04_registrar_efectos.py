@@ -6,6 +6,10 @@
 #   firmado, reparto inicial atomico, estados de atribucion, INV-09
 #   (F04-D005), idempotencia de lote todo-o-nada (F04-D006), version de la raiz
 #   (INV-20), tenant, auditoria y atomicidad. Incluye F04-D004.
+# Version: 0.3.0
+#   0.3.0 (mandato F04 R1+R2 v0.3 + E01): OP-04 aporta `presupuestable` al
+#   introducir el primer GASTO/INGRESO; D004 mide que OP-02 rechazado no anade
+#   auditoria respecto de la activacion previa.
 # Version: 0.2.0
 #   0.2.0 (F04-02): cobertura de F04-D007, signo por fila en OP-04.
 # Version: 0.1.0
@@ -89,7 +93,7 @@ def test_alta_minima_de_efecto(
     hecho_id, version = hecho
     uno = efecto()
     resultado = servicio_efectos.registrar_efectos(
-        contexto, hecho_id=hecho_id, row_version_esperada=version, efectos=[uno]
+        contexto, hecho_id=hecho_id, row_version_esperada=version, efectos=[uno], presupuestable=True
     )
 
     assert resultado.row_version == version + 1
@@ -119,7 +123,7 @@ def test_batch_de_varios_efectos_en_una_transaccion(
         efecto(tipo_efecto="DERECHO_COBRO", importe_delta=D("25.0000")),
     ]
     resultado = servicio_efectos.registrar_efectos(
-        contexto, hecho_id=hecho_id, row_version_esperada=version, efectos=tres
+        contexto, hecho_id=hecho_id, row_version_esperada=version, efectos=tres, presupuestable=True
     )
 
     # INV-20: una sola operacion logica, un solo incremento.
@@ -152,7 +156,12 @@ def test_el_signo_no_se_deduce_de_la_naturaleza(
     hecho_id, version = hecho
     uno = efecto(tipo_efecto=tipo, importe_delta=D(delta))
     resultado = servicio_efectos.registrar_efectos(
-        contexto, hecho_id=hecho_id, row_version_esperada=version, efectos=[uno]
+        contexto,
+        hecho_id=hecho_id,
+        row_version_esperada=version,
+        efectos=[uno],
+        # F04-D046 A08-bis: la decision solo existe si nace GASTO/INGRESO.
+        presupuestable=True if tipo in ("GASTO", "INGRESO") else None,
     )
     assert resultado.efectos[0].tipo_efecto == tipo
 
@@ -166,7 +175,7 @@ def test_categoria_null_es_valida_y_no_se_inventa_default(
     hecho_id, version = hecho
     uno = efecto()
     servicio_efectos.registrar_efectos(
-        contexto, hecho_id=hecho_id, row_version_esperada=version, efectos=[uno]
+        contexto, hecho_id=hecho_id, row_version_esperada=version, efectos=[uno], presupuestable=True
     )
     fila = leer_fila(
         admin,
@@ -202,7 +211,7 @@ def test_no_disponible_exige_cero_filas(
     hecho_id, version = hecho
     uno = efecto(estado_atribucion="NO_DISPONIBLE")
     servicio_efectos.registrar_efectos(
-        contexto, hecho_id=hecho_id, row_version_esperada=version, efectos=[uno]
+        contexto, hecho_id=hecho_id, row_version_esperada=version, efectos=[uno], presupuestable=True
     )
     fila = leer_fila(
         admin,
@@ -264,7 +273,7 @@ def test_parcial_con_reparto_inicial(
         atribuciones=(atribucion(actor_a, "15.0000"),),
     )
     resultado = servicio_efectos.registrar_efectos(
-        contexto, hecho_id=hecho_id, row_version_esperada=version, efectos=[uno]
+        contexto, hecho_id=hecho_id, row_version_esperada=version, efectos=[uno], presupuestable=True
     )
     assert resultado.atribuciones_creadas == 1
     fila = leer_fila(
@@ -293,7 +302,7 @@ def test_completa_con_reparto_inicial_exacto(
         ),
     )
     resultado = servicio_efectos.registrar_efectos(
-        contexto, hecho_id=hecho_id, row_version_esperada=version, efectos=[uno]
+        contexto, hecho_id=hecho_id, row_version_esperada=version, efectos=[uno], presupuestable=True
     )
     assert resultado.atribuciones_creadas == 2
     assert resultado.efectos[0].estado_atribucion == "COMPLETA"
@@ -397,7 +406,7 @@ def test_version_desfasada(
 ) -> None:
     hecho_id, version = hecho
     servicio_efectos.registrar_efectos(
-        contexto, hecho_id=hecho_id, row_version_esperada=version, efectos=[efecto()]
+        contexto, hecho_id=hecho_id, row_version_esperada=version, efectos=[efecto()], presupuestable=True
     )
     with pytest.raises(ErrorMotor) as excinfo:
         servicio_efectos.registrar_efectos(
@@ -519,6 +528,7 @@ def test_d006_ninguno_existe_se_ejecuta(
         hecho_id=hecho_id,
         row_version_esperada=version,
         efectos=[efecto(), efecto(importe_delta=D("10.0000"))],
+        presupuestable=True,  # F04-D046 A08-bis: primer GASTO/INGRESO
     )
     assert resultado.idempotente is False
     assert resultado.row_version == version + 1
@@ -540,7 +550,7 @@ def test_d006_todos_existen_con_la_misma_intencion_es_idempotente(
         efecto(importe_delta=D("10.0000")),
     ]
     primero = servicio_efectos.registrar_efectos(
-        contexto, hecho_id=hecho_id, row_version_esperada=version, efectos=lote
+        contexto, hecho_id=hecho_id, row_version_esperada=version, efectos=lote, presupuestable=True
     )
     segundo = servicio_efectos.registrar_efectos(
         contexto, hecho_id=hecho_id, row_version_esperada=version, efectos=lote
@@ -567,7 +577,7 @@ def test_d006_todos_existen_pero_alguno_difiere_es_conflicto(
     a = efecto()
     b = efecto(importe_delta=D("10.0000"))
     servicio_efectos.registrar_efectos(
-        contexto, hecho_id=hecho_id, row_version_esperada=version, efectos=[a, b]
+        contexto, hecho_id=hecho_id, row_version_esperada=version, efectos=[a, b], presupuestable=True
     )
     distinto = DatosEfecto(
         efecto_id=b.efecto_id,
@@ -596,7 +606,7 @@ def test_d006_subconjunto_existente_es_conflicto_y_no_completa_las_ausentes(
     hecho_id, version = hecho
     a = efecto()
     servicio_efectos.registrar_efectos(
-        contexto, hecho_id=hecho_id, row_version_esperada=version, efectos=[a]
+        contexto, hecho_id=hecho_id, row_version_esperada=version, efectos=[a], presupuestable=True
     )
     version_tras_a = version + 1
     ausente = efecto(importe_delta=D("10.0000"))
@@ -699,7 +709,7 @@ def test_auditoria_de_cada_efecto_y_atribucion(
     fila_atrib = atribucion(actor_a, "44.5000")
     uno = efecto(estado_atribucion="COMPLETA", atribuciones=(fila_atrib,))
     servicio_efectos.registrar_efectos(
-        contexto, hecho_id=hecho_id, row_version_esperada=version, efectos=[uno]
+        contexto, hecho_id=hecho_id, row_version_esperada=version, efectos=[uno], presupuestable=True
     )
 
     fila = leer_fila(
@@ -806,9 +816,19 @@ def test_d004_tipo_no_corregible_con_efectos(
     hecho_id, version = hecho
     lote = [efecto(importe_delta=D(f"{10 + i}.0000")) for i in range(cuantos)]
     servicio_efectos.registrar_efectos(
-        contexto, hecho_id=hecho_id, row_version_esperada=version, efectos=lote
+        contexto, hecho_id=hecho_id, row_version_esperada=version, efectos=lote, presupuestable=True
     )
     nueva_version = version + 1
+    # F04-D046 A08-bis: la activacion de `presupuestable` en la transicion ya
+    # deja una auditoria ACTUALIZAR del hecho. Lo que se comprueba es que el
+    # intento rechazado de OP-02 no anade NINGUNA mas.
+    actualizaciones_previas = leer_fila(
+        admin,
+        contexto.owner_user_id,
+        "SELECT count(*) FROM gapto.auditoria "
+        "WHERE registro_id = %s AND accion = 'ACTUALIZAR'",
+        (hecho_id,),
+    )
 
     fila = leer_fila(
         admin,
@@ -848,7 +868,7 @@ def test_d004_tipo_no_corregible_con_efectos(
         "WHERE registro_id = %s AND accion = 'ACTUALIZAR'",
         (hecho_id,),
     )
-    assert fila == (0,)
+    assert fila == actualizaciones_previas == (1,)
 
 
 def test_d004_ya_no_existe_el_codigo_transitorio() -> None:
@@ -873,7 +893,7 @@ def test_d006_el_conflicto_de_identidad_se_detecta_antes_que_la_version(
     hecho_id, version = hecho
     a = efecto()
     servicio_efectos.registrar_efectos(
-        contexto, hecho_id=hecho_id, row_version_esperada=version, efectos=[a]
+        contexto, hecho_id=hecho_id, row_version_esperada=version, efectos=[a], presupuestable=True
     )
     version_actual = version + 1
     ausente = efecto(importe_delta=D("10.0000"))
@@ -984,7 +1004,7 @@ def test_d007_cero_es_valido_en_ambos_sentidos(
         atribuciones=(atribucion(actor_a, "0.0000"),),
     )
     servicio_efectos.registrar_efectos(
-        contexto, hecho_id=hecho_id, row_version_esperada=version, efectos=[uno]
+        contexto, hecho_id=hecho_id, row_version_esperada=version, efectos=[uno], presupuestable=True
     )
     fila = leer_fila(
         admin,

@@ -31,6 +31,10 @@
 #   INV-08 · UN HECHO POR PERIODO. Un efecto no tiene fecha propia: la toma de
 #   su hecho. Una realidad que abarca varios periodos economicos exige un hecho
 #   por periodo, y este servicio crea exactamente uno.
+# Version: 0.4.0
+#   0.4.0 (mandato F04 R1+R2 v0.3 §9): sin cambio de codigo propio; hereda de
+#   `resolver_decision_historica` el rechazo de `NO_APLICA` con GASTO/INGRESO.
+#   Se versiona para trazar el cambio de comportamiento observable de OP-18.
 # Version: 0.3.0
 #   0.3.0 (F04-D046 R2 · A20/A08-bis): OP-18 deja de fijar
 #   `presupuestable=False` y `estado_localizacion="NO_APLICA"`. El suplemento

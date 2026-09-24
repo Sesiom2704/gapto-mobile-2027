@@ -9,6 +9,10 @@
 #   prueba por el lado que rechaza acaba siendo demasiado ancha: `moneda` no
 #   pasa a ser inmutable, `tipo_efecto` sigue siendo corregible y un importe
 #   falso se sigue corrigiendo aunque mueva el saldo derivado.
+# Version: 0.2.0
+#   0.2.0 (mandato F04 R1+R2 v0.3 + E01): el caso que anade GASTO a un hecho
+#   de posicion lo crea DESCONOCIDA y aporta la decision; el resto conserva
+#   NO_APLICA.
 # Version: 0.1.0
 # ============================================================
 
@@ -58,7 +62,9 @@ def alta(contraparte: uuid.UUID, **extra) -> DatosAltaPosicion:
     return DatosAltaPosicion(**base)
 
 
-def _crear_hecho(servicio: HechosService, contexto, moneda: str):
+def _crear_hecho(
+    servicio: HechosService, contexto, moneda: str, estado_localizacion: str = "NO_APLICA"
+):
     hecho_id = uuid.uuid4()
     resultado = servicio.crear_hecho(
         contexto,
@@ -67,7 +73,7 @@ def _crear_hecho(servicio: HechosService, contexto, moneda: str):
             fecha_hecho=FECHA,
             moneda=moneda,
             presupuestable=True,
-            estado_localizacion="NO_APLICA",
+            estado_localizacion=estado_localizacion,
             tipo_hecho_codigo=TIPO_POSICION,
             concepto=f"hecho en {moneda}",
         ),
@@ -306,8 +312,15 @@ def test_op21_corrige_la_naturaleza_de_un_efecto_no_vinculado(
     contexto: ContextoOperacion,
     admin: psycopg.Connection,
 ) -> None:
-    """Sin posicion alcanzada, `tipo_efecto` sigue siendo corregible."""
-    hecho_id, version = _crear_hecho(servicio, contexto, "EUR")
+    """Sin posicion alcanzada, `tipo_efecto` sigue siendo corregible.
+
+    F04-D046 R2 (mandato v0.3 §9): el hecho recibe un GASTO, asi que su
+    localizacion es aplicable (DESCONOCIDA) y OP-04 exige la decision
+    `presupuestable` al nacer el primer GASTO.
+    """
+    hecho_id, version = _crear_hecho(
+        servicio, contexto, "EUR", estado_localizacion="DESCONOCIDA"
+    )
     efecto_id = uuid.uuid4()
     resultado = servicio_efectos.registrar_efectos(
         contexto,
@@ -321,6 +334,7 @@ def test_op21_corrige_la_naturaleza_de_un_efecto_no_vinculado(
                 estado_atribucion="NO_DISPONIBLE",
             )
         ],
+        presupuestable=True,
     )
 
     servicio_correcciones.corregir(

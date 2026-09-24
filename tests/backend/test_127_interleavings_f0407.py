@@ -19,6 +19,11 @@
 #   NINGUNA CARRERA SE SINCRONIZA CON SLEEPS. Se usa una barrera explicita: los
 #   dos hilos se sueltan a la vez y despues se mira el resultado, que solo
 #   admite dos formas y ninguna deja estado invalido.
+# Version: 0.3.0
+#   0.3.0 (mandato F04 R1+R2 v0.3 + E01): OP-04 aporta `presupuestable` en la
+#   transicion al primer GASTO/INGRESO (A08-bis generalizada); fixtures de
+#   GASTO con localizacion DESCONOCIDA en vez de NO_APLICA cuando aplica. Sin
+#   cambio de las propiedades probadas.
 # Version: 0.2.0
 #   0.2.0 (F04-D046 R1 · A19): la cena es GASTO +44,50 y la correccion lo
 #   lleva a +40,00 (signo canonico). Sin tesoreria. Mismos interleavings.
@@ -66,7 +71,7 @@ def _cena(servicio: HechosService, contexto, total):
             fecha_hecho=FECHA,
             moneda="EUR",
             presupuestable=True,
-            estado_localizacion="NO_APLICA",
+            estado_localizacion="DESCONOCIDA",  # F04-D046 R2: GASTO aplicable, localidad no conocida
             tipo_hecho_codigo="GASTO",
             concepto="cena compartida",
             importe_total=D("44.5000"),
@@ -325,6 +330,7 @@ def test_i3_oraculo_secuencial(
                 estado_atribucion="NO_DISPONIBLE",
             )
         ],
+        presupuestable=True,  # F04-D046 A08-bis: primer GASTO/INGRESO
     )
     tras_participante = servicio_participantes.registrar_participantes(
         contexto,
@@ -390,6 +396,7 @@ def test_i3_enriquecimiento_y_correccion_concurrentes(
                 estado_atribucion="NO_DISPONIBLE",
             )
         ],
+        presupuestable=True,  # F04-D046 A08-bis: primer GASTO/INGRESO
     )
     version_actual = tras_efectos.row_version
 

@@ -16,6 +16,11 @@
 #   deuda, cobrar un derecho, materializar una prevision y reconocer una
 #   compra financiada son las cuatro situaciones donde el motor podria contar
 #   dos veces la misma realidad. Cada oraculo lo comprueba explicitamente.
+# Version: 0.3.0
+#   0.3.0 (mandato F04 R1+R2 v0.3 + E01): OP-04 aporta `presupuestable` en la
+#   transicion al primer GASTO/INGRESO (A08-bis generalizada); fixtures de
+#   GASTO con localizacion DESCONOCIDA en vez de NO_APLICA cuando aplica. Sin
+#   cambio de las propiedades probadas.
 # Version: 0.2.0
 #   0.2.0 (F04-D046 R1 · A19): signo canonico. Compras, gasoil, luz, intereses,
 #   alquiler y revision IPC son GASTO +X; la devolucion de C-04 es GASTO -30.
@@ -161,6 +166,7 @@ def test_c02_luz_recurrente_prevision_y_realidad(
         hecho_id=datos.hecho_id,
         row_version_esperada=creado.row_version,
         efectos=[efecto("GASTO", real)],
+        presupuestable=True,  # F04-D046 A08-bis: primer GASTO/INGRESO
     ).row_version
     pieza = movimiento(cuenta, -real, descripcion="recibo luz")
     mov = motor.tesoreria.registrar_movimiento(contexto, pieza)
@@ -228,6 +234,7 @@ def test_c03_gasoil_reembolsable(
         hecho_id=datos.hecho_id,
         row_version_esperada=creado.row_version,
         efectos=[efecto("GASTO", total, atribuciones=(atribucion(actor_a, total),))],
+        presupuestable=True,  # F04-D046 A08-bis: primer GASTO/INGRESO
     ).row_version
     pieza = movimiento(cuenta, -total, descripcion="gasolinera")
     mov = motor.tesoreria.registrar_movimiento(contexto, pieza)
@@ -298,6 +305,7 @@ def test_c04_devolucion_parcial(
         hecho_id=datos.hecho_id,
         row_version_esperada=creado.row_version,
         efectos=[efecto("GASTO", total)],
+        presupuestable=True,  # F04-D046 A08-bis: primer GASTO/INGRESO
     ).row_version
     pieza = movimiento(cuenta, -total, descripcion="compra")
     mov = motor.tesoreria.registrar_movimiento(contexto, pieza)
@@ -396,6 +404,7 @@ def test_c06_hipoteca_cuota_separa_capital_e_intereses(
         hecho_id=datos.hecho_id,
         row_version_esperada=creado.row_version,
         efectos=[efecto("GASTO", intereses)],
+        presupuestable=True,  # F04-D046 A08-bis: primer GASTO/INGRESO
     ).row_version
     pieza = movimiento(cuenta, -(capital + intereses), descripcion="cuota hipoteca")
     mov = motor.tesoreria.registrar_movimiento(contexto, pieza)
@@ -442,6 +451,7 @@ def test_c08_compra_financiada_reconoce_el_gasto_una_sola_vez(
         hecho_id=datos.hecho_id,
         row_version_esperada=creado.row_version,
         efectos=[efecto("GASTO", total)],
+        presupuestable=True,  # F04-D046 A08-bis: primer GASTO/INGRESO
     )
     posicion, alta = _alta_posicion(
         motor,
@@ -504,6 +514,7 @@ def test_c09_alquiler_con_revision_es_realidad_nueva(
         hecho_id=datos.hecho_id,
         row_version_esperada=creado.row_version,
         efectos=[efecto("GASTO", renta)],
+        presupuestable=True,  # F04-D046 A08-bis: primer GASTO/INGRESO
     )
 
     suplemento_id = uuid.uuid4()

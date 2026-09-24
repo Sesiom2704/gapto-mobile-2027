@@ -17,6 +17,9 @@
 #
 #   E-01/E-02/E-03 cubren las tres operaciones que ningun caso canonico
 #   ejercita: OP-02, OP-03 y OP-11.
+# Version: 0.3.0
+#   0.3.0 (mandato F04 R1+R2 v0.3 + E01): E-01 excluye la auditoria de
+#   activacion A08-bis y aporta la decision en OP-04.
 # Version: 0.2.0
 #   0.2.0 (F04-D046 R1 · A19 + A19-bis): signo canonico en C-10/C-11/C-13/C-21
 #   y E-01 (GASTO +X, atribuciones +X; tesoreria intacta). C-12 se SUSTITUYE
@@ -693,6 +696,7 @@ def test_e01_correccion_conserva_identidad_y_no_crea_realidad(
         hecho_id=datos.hecho_id,
         row_version_esperada=creado.row_version,
         efectos=[efecto("GASTO", D("40.0000"))],
+        presupuestable=True,  # F04-D046 A08-bis: primer GASTO/INGRESO
     ).row_version
     hechos_antes = contar(
         admin,
@@ -732,7 +736,10 @@ def test_e01_correccion_conserva_identidad_y_no_crea_realidad(
         admin,
         contexto.owner_user_id,
         "SELECT datos_antes->>'importe_total', motivo FROM gapto.auditoria "
-        "WHERE registro_id = %s AND accion = 'ACTUALIZAR'",
+        "WHERE registro_id = %s AND accion = 'ACTUALIZAR' "
+        # F04-D046 A08-bis: se excluye la auditoria de activacion de
+        # `presupuestable` que deja OP-04 al nacer el primer GASTO.
+        "AND motivo NOT LIKE 'F04-D046 A08-bis:%%'",
         (datos.hecho_id,),
     ) == (
         "40.0000",

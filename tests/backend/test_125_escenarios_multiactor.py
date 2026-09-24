@@ -9,6 +9,11 @@
 #   sus suites— sino que la combinacion no produzca una conclusion que nadie
 #   decidio: una atribucion nacida de un porcentaje de cuenta, una deuda
 #   nacida de una diferencia, un residual completado para cuadrar.
+# Version: 0.3.0
+#   0.3.0 (mandato F04 R1+R2 v0.3 + E01): OP-04 aporta `presupuestable` en la
+#   transicion al primer GASTO/INGRESO (A08-bis generalizada); fixtures de
+#   GASTO con localizacion DESCONOCIDA en vez de NO_APLICA cuando aplica. Sin
+#   cambio de las propiedades probadas.
 # Version: 0.2.0
 #   0.2.0 (F04-D046 R1 · A19): signo canonico. La cena y el recargo son GASTO
 #   +X; sus atribuciones heredan el signo (F04-D007); la devolucion es GASTO
@@ -101,7 +106,7 @@ def _hecho(**extra) -> DatosCreacionHecho:
         fecha_hecho=FECHA,
         moneda="EUR",
         presupuestable=True,
-        estado_localizacion="NO_APLICA",
+        estado_localizacion="DESCONOCIDA",  # F04-D046 R2: GASTO aplicable, localidad no conocida
         tipo_hecho_codigo="GASTO",
         concepto="gasto compartido",
         importe_total=TOTAL,

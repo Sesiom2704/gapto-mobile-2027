@@ -32,6 +32,15 @@
 #   previsión sigue siendo cierto despues de la devolucion. Este servicio NO
 #   lee para escribir ni modifica `prevision_hechos`; solo informa de cuantos
 #   vinculos tiene el original.
+# Version: 0.4.0
+#   0.4.0 (F04-D046 R2 · mandato R1+R2 v0.3 §9/§10/§11): con GASTO o INGRESO
+#   en el hecho resultante `NO_APLICA` es INVALIDO aunque el llamante lo
+#   declare (ENTRADA_INVALIDA): la dimension territorial es aplicable y, si no
+#   se conoce, es DESCONOCIDA. En un hecho puramente posicional (DEUDA /
+#   DERECHO_COBRO) `NO_APLICA` sigue admitiendose SOLO por declaracion
+#   explicita del llamante; nunca como default. El `false` persistido en esos
+#   hechos es un valor fisico INACTIVO (NOT NULL de 0330), no una decision.
+#   `resolver_decision_historica` es compartida con OP-18 (suplementos).
 # Version: 0.3.0
 #   0.3.0 (F04-D046 R2 · A20/A08-bis): OP-13 deja de fijar
 #   `presupuestable=False` y `estado_localizacion="NO_APLICA"`. La devolucion
@@ -97,12 +106,14 @@ def resolver_decision_historica(
     - GASTO / INGRESO: `presupuestable` es decision historica del hecho y NO
       tiene default. Ausente -> ENTRADA_INVALIDA.
     - DEUDA / DERECHO_COBRO: el hecho no contiene GASTO ni INGRESO; el atributo
-      carece de efecto presupuestario y se deriva `false`. Declarar `true` es
+      esta INACTIVO y se persiste `false` como valor fisico (NOT NULL), que no
+      constituye decision presupuestaria. Declarar `true` es
       una contradiccion y se rechaza; declarar `false` es redundante y valido.
     - Localizacion: sin estado ni localidad -> DESCONOCIDA (dimension aplicable
       sin dato). Con localidad y sin estado -> CONOCIDA (es el dato aportado,
       no una inferencia). Un estado explicito se respeta; la coherencia
-      estado/localidad la juzga el CHECK fisico de 0040.
+      estado/localidad la juzga el CHECK fisico de 0040. Excepcion (v0.4.0):
+      con GASTO/INGRESO `NO_APLICA` se rechaza aunque se declare.
     """
     if tipo_efecto in NATURALEZAS_PRESUPUESTABLES:
         if presupuestable is None:
@@ -129,6 +140,15 @@ def resolver_decision_historica(
                 CodigoError.ENTRADA_INVALIDA,
                 "estado_localizacion debe ser CONOCIDA, DESCONOCIDA o "
                 "NO_APLICA. NO_APLICA no es el default de 'no informado'.",
+            )
+        if (
+            estado_localizacion == "NO_APLICA"
+            and tipo_efecto in NATURALEZAS_PRESUPUESTABLES
+        ):
+            raise ErrorMotor(
+                CodigoError.ENTRADA_INVALIDA,
+                "Con GASTO o INGRESO la localizacion es aplicable: NO_APLICA "
+                "no es valido. Si no se conoce la localidad, es DESCONOCIDA.",
             )
         estado = estado_localizacion
     return decision, estado, localidad_id

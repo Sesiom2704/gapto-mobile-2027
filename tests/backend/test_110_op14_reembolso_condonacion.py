@@ -9,6 +9,10 @@
 #   la misma contraparte conviven aunque su neto calculado sea cero. No se
 #   extinguen, no se reescriben importes y no nace ningun hecho de
 #   compensacion. El neteo es lectura, nunca realidad persistida.
+# Version: 0.2.0
+#   0.2.0 (mandato F04 R1+R2 v0.3 + E01): las condonaciones que declaran GASTO
+#   aportan `presupuestable` (E01), preservando el discriminante
+#   GASTO_DUPLICADO.
 # Version: 0.1.0
 # ============================================================
 
@@ -680,6 +684,7 @@ def test_gasto_explicito_permitido(
         delta=delta("30.0000"),
         declara_gasto_soportado=True,
         declara_coste_no_reconocido=True,
+        presupuestable=True,  # mandato v0.3 §8: GASTO declarado
         efecto_gasto_id=efecto_gasto_id,
     )
     servicio_posiciones.condonar_derecho(
@@ -710,6 +715,7 @@ def test_doble_gasto_rechazado(
             delta=delta("30.0000"),
             declara_gasto_soportado=True,
             declara_coste_no_reconocido=True,
+            presupuestable=True,  # mandato v0.3 §8: GASTO declarado
             efecto_gasto_id=uuid.uuid4(),
         ),
     )
@@ -722,6 +728,7 @@ def test_doble_gasto_rechazado(
                 delta=delta("20.0000"),
                 declara_gasto_soportado=True,
                 declara_coste_no_reconocido=True,
+                presupuestable=True,  # mandato v0.3 §8: GASTO declarado
                 efecto_gasto_id=uuid.uuid4(),
             ),
         )

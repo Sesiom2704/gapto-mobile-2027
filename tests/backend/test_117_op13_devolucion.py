@@ -19,6 +19,11 @@
 #   acumulado NO tiene red fisica. No hay constraint sobre lo devuelto. Lo
 #   protege unicamente el lock del hecho original, igual que R-F04-017 protege
 #   la identidad de ocurrencia en F04-05.
+# Version: 0.3.0
+#   0.3.0 (mandato F04 R1+R2 v0.3 + E01): OP-04 aporta `presupuestable` en la
+#   transicion al primer GASTO/INGRESO (A08-bis generalizada); fixtures de
+#   GASTO con localizacion DESCONOCIDA en vez de NO_APLICA cuando aplica. Sin
+#   cambio de las propiedades probadas.
 # Version: 0.2.0
 #   0.2.0 (F04-D046 R2): el helper declara `presupuestable` explicito (GASTO/INGRESO), exigido ahora por OP-13.
 # Version: 0.1.0
@@ -70,7 +75,7 @@ def crear_origen(
             fecha_hecho=F("2027-05-01"),
             moneda=moneda,
             presupuestable=True,
-            estado_localizacion="NO_APLICA",
+            estado_localizacion="DESCONOCIDA",  # F04-D046 R2: GASTO aplicable, localidad no conocida
             tipo_hecho_codigo=tipo_hecho,
             importe_total=importe,
         ),
@@ -93,7 +98,7 @@ def crear_origen(
             )
         )
     servicio_efectos.registrar_efectos(
-        contexto, hecho_id=hecho_id, row_version_esperada=1, efectos=efectos
+        contexto, hecho_id=hecho_id, row_version_esperada=1, efectos=efectos, presupuestable=True
     )
     return hecho_id
 

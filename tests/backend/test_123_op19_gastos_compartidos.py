@@ -9,6 +9,11 @@
 #   o NADA, que no invente posiciones y que no duplique ninguna capacidad ya
 #   certificada. El caso C-11 completo y los adversariales A4, A5, A6 y A7
 #   viven aqui.
+# Version: 0.3.0
+#   0.3.0 (mandato F04 R1+R2 v0.3 + E01): OP-04 aporta `presupuestable` en la
+#   transicion al primer GASTO/INGRESO (A08-bis generalizada); fixtures de
+#   GASTO con localizacion DESCONOCIDA en vez de NO_APLICA cuando aplica. Sin
+#   cambio de las propiedades probadas.
 # Version: 0.2.0
 #   0.2.0 (F04-D046 R1 · A19): GASTO de la cena con signo canonico +X (y sus
 #   atribuciones, F04-D007). La tesoreria no cambia: la salida sigue siendo
@@ -62,7 +67,7 @@ def _hecho(total_participantes=None, hecho_id=None) -> DatosCreacionHecho:
         fecha_hecho=FECHA,
         moneda="EUR",
         presupuestable=True,
-        estado_localizacion="NO_APLICA",
+        estado_localizacion="DESCONOCIDA",  # F04-D046 R2: GASTO aplicable, localidad no conocida
         tipo_hecho_codigo="GASTO",
         concepto="cena compartida",
         importe_total=TOTAL_CENA,

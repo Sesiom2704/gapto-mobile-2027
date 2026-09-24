@@ -13,6 +13,11 @@
 #
 #   Cada escenario declara su cobertura con `@cubre` y su oraculo incluye
 #   AUSENCIAS: lo que no debe haberse creado vale tanto como lo que si.
+# Version: 0.3.0
+#   0.3.0 (mandato F04 R1+R2 v0.3 + E01): OP-04 aporta `presupuestable` en la
+#   transicion al primer GASTO/INGRESO (A08-bis generalizada); fixtures de
+#   GASTO con localizacion DESCONOCIDA en vez de NO_APLICA cuando aplica. Sin
+#   cambio de las propiedades probadas.
 # Version: 0.2.0
 #   0.2.0 (F04-D046 R1 · A19): signo canonico: supermercado, intereses, conciliaciones parciales/multiples,
 #   aportacion tardia y multidivisa son GASTO +X con atribuciones +X. Tesoreria
@@ -87,6 +92,7 @@ def test_c01_supermercado(
         hecho_id=datos.hecho_id,
         row_version_esperada=creado.row_version,
         efectos=[efecto("GASTO", total, atribuciones=(atribucion(actor_a, total),))],
+        presupuestable=True,  # F04-D046 A08-bis: primer GASTO/INGRESO
     )
 
     pieza = movimiento(cuenta, -total, descripcion="cargo supermercado")
@@ -187,6 +193,7 @@ def test_c07_intereses_de_poliza(
         hecho_id=datos.hecho_id,
         row_version_esperada=creado.row_version,
         efectos=[efecto("GASTO", intereses)],
+        presupuestable=True,  # F04-D046 A08-bis: primer GASTO/INGRESO
     )
     pieza = movimiento(cuenta, -intereses, descripcion="intereses")
     mov = motor.tesoreria.registrar_movimiento(contexto, pieza)
@@ -220,6 +227,7 @@ def test_c14_nomina(
         hecho_id=datos.hecho_id,
         row_version_esperada=creado.row_version,
         efectos=[efecto("INGRESO", neto, atribuciones=(atribucion(actor_a, neto),))],
+        presupuestable=True,  # F04-D046 A08-bis: primer GASTO/INGRESO
     )
     pieza = movimiento(cuenta, neto, descripcion="abono nomina")
     mov = motor.tesoreria.registrar_movimiento(contexto, pieza)
@@ -265,6 +273,7 @@ def test_c17_conciliacion_parcial(
         hecho_id=datos.hecho_id,
         row_version_esperada=creado.row_version,
         efectos=[efecto("GASTO", total)],
+        presupuestable=True,  # F04-D046 A08-bis: primer GASTO/INGRESO
     )
     pieza = movimiento(cuenta, -parcial, descripcion="cargo parcial")
     mov = motor.tesoreria.registrar_movimiento(contexto, pieza)
@@ -310,6 +319,7 @@ def test_c19_conciliaciones_multiples(
         hecho_id=datos.hecho_id,
         row_version_esperada=creado.row_version,
         efectos=[efecto("GASTO", total)],
+        presupuestable=True,  # F04-D046 A08-bis: primer GASTO/INGRESO
     ).row_version
 
     conciliaciones = []
@@ -379,6 +389,7 @@ def test_c18_aportacion_no_vinculada_y_vinculacion_posterior(
         hecho_id=datos.hecho_id,
         row_version_esperada=creado.row_version,
         efectos=[efecto("GASTO", total)],
+        presupuestable=True,  # F04-D046 A08-bis: primer GASTO/INGRESO
     ).row_version
 
     datos_aportacion = aportacion(total, actor_id=actor_a)
@@ -450,6 +461,7 @@ def test_c20_multidivisa_no_introduce_fx(
         hecho_id=datos.hecho_id,
         row_version_esperada=creado.row_version,
         efectos=[efecto("GASTO", total)],
+        presupuestable=True,  # F04-D046 A08-bis: primer GASTO/INGRESO
     ).row_version
 
     # El hecho USD se concilia contra la cuenta USD. La cuenta EUR no se toca:

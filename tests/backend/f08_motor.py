@@ -22,6 +22,10 @@
 #   de mas. Un reembolso que ademas crea un INGRESO, un pago de deuda que
 #   vuelve a contar el gasto, una diferencia entre atribucion y aportacion que
 #   se convierte en deuda. Ninguna de esas cosas lanza excepcion.
+# Version: 0.2.0
+#   0.2.0 (mandato F04 R1+R2 v0.3 + E01): `hecho()` usa estado_localizacion
+#   DESCONOCIDA por defecto (parametro): el NO_APLICA fijo ocultaba la
+#   diferencia NO_APLICA/DESCONOCIDA y hoy OP-04 lo rechaza con GASTO/INGRESO.
 # Version: 0.1.0
 # ============================================================
 
@@ -122,6 +126,7 @@ def hecho(
     moneda: str = "EUR",
     presupuestable: bool = True,
     participantes_total: int | None = None,
+    estado_localizacion: str = "DESCONOCIDA",
     hecho_id: uuid.UUID | None = None,
 ) -> DatosCreacionHecho:
     return DatosCreacionHecho(
@@ -129,7 +134,9 @@ def hecho(
         fecha_hecho=fecha,
         moneda=moneda,
         presupuestable=presupuestable,
-        estado_localizacion="NO_APLICA",
+        # F04-D046 R2 / mandato v0.3 E01: aplicable pero no conocida. El
+        # NO_APLICA fijo ocultaba la diferencia NO_APLICA / DESCONOCIDA.
+        estado_localizacion=estado_localizacion,
         tipo_hecho_codigo=tipo,
         concepto=concepto,
         importe_total=importe_total,

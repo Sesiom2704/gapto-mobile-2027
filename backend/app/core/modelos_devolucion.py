@@ -22,6 +22,11 @@
 #   conserva la naturaleza del original (INV-05): devolver un GASTO produce un
 #   GASTO negativo, jamas un INGRESO. El campo permite devolver un error de
 #   dominio legible a quien lo intente, en vez de ignorarlo en silencio.
+# Version: 0.3.0
+#   0.3.0 (mandato F04 R1+R2 v0.3 §9/§11): con GASTO o INGRESO `NO_APLICA` es
+#   invalido aunque se declare; solo una devolucion puramente posicional
+#   (DEUDA / DERECHO_COBRO) puede declararlo. En ese caso el `false`
+#   persistido es valor fisico INACTIVO, no decision presupuestaria.
 # Version: 0.2.0
 #   0.2.0 (F04-D046 R2 · A20/A08-bis): la devolucion recibe su propia decision
 #   historica `presupuestable` y su localizacion. OP-13 ya no fija `false` ni

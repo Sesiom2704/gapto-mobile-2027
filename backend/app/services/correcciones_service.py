@@ -33,6 +33,17 @@
 #   D-080 · ADVISORY PRIMERO. Si la correccion toca superficies de inversion,
 #   el advisory (INVERSIONES, owner) se toma ANTES de cualquier row lock. Los
 #   locks genericos no lo sustituyen.
+# Version: 0.7.0
+#   0.7.0 (F04-D046 R2 · mandato R1+R2 v0.3 §7/§9 + E01): (a) guarda
+#   territorial: si la correccion ESCRIBE un GASTO/INGRESO (crea un efecto de
+#   esa naturaleza o reclasifica uno a ella) y el estado final contiene
+#   GASTO/INGRESO, el hecho no puede estar en NO_APLICA -> ENTRADA_INVALIDA y
+#   rollback total. Corregir importes de un GASTO ya existente no escribe la
+#   dimension y no activa la guarda (frontera hacia adelante, no historico).
+#   (b) el valor fisico almacenado durante la etapa INACTIVA nunca sustituye a
+#   la decision: en la transicion se exige y persiste la decision explicita
+#   aunque coincida con el booleano previo (se audita como activacion).
+#   (c) `assert` productivo sustituido por error de dominio.
 # Version: 0.6.0
 #   0.6.0 (F04-D046 R2 · A08-bis): `presupuestable` en la TRANSICION de
 #   naturalezas. Se compara el estado del hecho ANTES y DESPUES de la
@@ -237,6 +248,12 @@ class CorreccionesService:
 
             # F04-D046 R2 · A08-bis. Estado de naturalezas ANTES de mutar.
             elegible_antes = self._tiene_gasto_o_ingreso(sesion, datos.hecho_id)
+            estado_previo = repo_hechos.leer_estado(sesion, datos.hecho_id)
+            if estado_previo is None:
+                raise ErrorMotor(
+                    CodigoError.AGREGADO_NO_ENCONTRADO,
+                    "El hecho indicado no existe o no es accesible.",
+                )
 
             actualizados = self._actualizar_efectos(sesion, datos)
             # 3. Las aportaciones se retiran ANTES que su conciliacion: al
@@ -284,6 +301,10 @@ class CorreccionesService:
             nueva_version = self._resolver_presupuestable(
                 sesion, datos, elegible_antes, nueva_version
             )
+
+            # 4quinquies. F04-D046 R2 (mandato v0.3 §9). Guarda territorial
+            #     de frontera sobre el ESTADO FINAL.
+            self._exigir_localizacion_aplicable(sesion, datos, estado_previo)
 
             # 5. Guarda de estado FINAL (D-187). Se evalua aqui, no paso a
             #    paso: quedarse en cero efectos a mitad de la transaccion es
@@ -364,9 +385,15 @@ class CorreccionesService:
             return version
 
         estado = repo_hechos.leer_estado(sesion, datos.hecho_id)
-        assert estado is not None
+        if estado is None:
+            raise ErrorMotor(
+                CodigoError.AGREGADO_NO_ENCONTRADO,
+                "El hecho indicado no existe o no es accesible.",
+            )
         actual = json.loads(estado[2]).get("presupuestable")
-        if actual == objetivo:
+        if actual == objetivo and elegible_antes:
+            # Retirada del ultimo GASTO/INGRESO con el escalar ya en false: el
+            # valor queda INACTIVO sin necesidad de reescribirlo.
             return version
         actualizado = repo_hechos.actualizar_campos(
             sesion, datos.hecho_id, version, {"presupuestable": objetivo}
@@ -386,6 +413,32 @@ class CorreccionesService:
             motivo=datos.motivo,
         )
         return actualizado[0]
+
+    def _exigir_localizacion_aplicable(
+        self,
+        sesion: SesionMotor,
+        datos: DatosCorreccion,
+        estado_previo: tuple[int, str, str],
+    ) -> None:
+        """Con GASTO/INGRESO escrito por esta correccion, NO_APLICA es invalido."""
+        escribe_elegible = any(
+            e.tipo_efecto in NATURALEZAS_PRESUPUESTABLES
+            for e in datos.efectos_a_crear
+        ) or any(
+            cambios.get("tipo_efecto") in NATURALEZAS_PRESUPUESTABLES
+            for cambios in datos.efectos_a_actualizar.values()
+        )
+        if not escribe_elegible:
+            return
+        if not self._tiene_gasto_o_ingreso(sesion, datos.hecho_id):
+            return
+        if json.loads(estado_previo[2]).get("estado_localizacion") == "NO_APLICA":
+            raise ErrorMotor(
+                CodigoError.ENTRADA_INVALIDA,
+                "La correccion deja GASTO o INGRESO en un hecho con "
+                "estado_localizacion NO_APLICA. Si la localidad es aplicable "
+                "pero no se conoce, es DESCONOCIDA (corregible con OP-02).",
+            )
 
     @staticmethod
     def _revalidar_devoluciones(
