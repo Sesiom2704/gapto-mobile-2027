@@ -1,0 +1,18 @@
+# ============================================================
+# GAPTO MOBILE 2027
+# Fichero: requirements-api.txt
+# Ruta: backend/requirements-api.txt
+# Descripcion: Dependencias FIJADAS del adaptador HTTP de integracion
+#   F05-00-B (FastAPI + Uvicorn + Pydantic) y del motor (psycopg). Versiones
+#   estables comprobadas en PyPI el 2026-09-24; sin rangos flotantes.
+#   Pendiente de consolidacion en F10-00 (arquitectura backend).
+# Version: 0.1.0
+# ============================================================
+fastapi==0.141.1
+starlette==1.7.0
+pydantic==2.13.5
+uvicorn==0.53.0
+psycopg[binary]==3.3.6
+# Solo tests de la API (cliente HTTP en proceso):
+httpx==0.28.1
+pytest==9.1.1
