@@ -9,7 +9,9 @@
 #   en el reconocimiento de identidad y atomicidad bajo el lock de cuenta con
 #   interleaving controlado (WM 12C.1: barrera SET CONSTRAINTS ALL IMMEDIATE).
 #   Base local desechable 0001..0330 (estos tests confirman filas).
-# Version: 0.1.0
+#   v0.2.0 (F05 §18): el caso de financiacion reducida se apoya en OP-22
+#   recertificado, sin guarda propia en la capa F05.
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -150,9 +152,9 @@ def test_reintento_tras_commit_real_es_idempotente_aunque_cambie_la_participacio
 
 
 def test_misma_identidad_con_financiacion_reducida_no_es_idempotente(tenant):
-    """OP-22 compara lo declarado; la capa F05 exige ademas que no haya filas
-    de mas. Mismo UUID con NO_DETERMINADA frente a una aportacion ya
-    materializada -> IDENTIDAD_REUTILIZADA, no exito."""
+    """Mismo UUID con NO_DETERMINADA frente a una aportacion ya materializada
+    -> IDENTIDAD_REUTILIZADA, no exito. La igualdad exacta la impone OP-22
+    (F04-D050/F04-D051); este test la comprueba extremo a extremo por HTTP."""
     owner, _, _, cuenta = tenant
     cli = h.cliente(owner)
     cuerpo = h.intencion(cuenta)

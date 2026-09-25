@@ -37,7 +37,11 @@
 #   PROPUESTA_FINANCIACION_OBSOLETA es un codigo de la capa F05 (§16.5), no de
 #   la taxonomia F04. Se devuelve como valor (no excepcion) porque en ese punto
 #   la transaccion no ha escrito nada: el COMMIT vacio solo libera el lock.
-# Version: 0.1.0
+#
+#   v0.2.0 (F05 §18, tras F04-D051): se retira la guarda transitoria
+#   `_agregado_sin_extras`; la igualdad exacta del agregado en el
+#   reconocimiento de identidad la impone OP-22 recertificado.
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -97,38 +101,6 @@ def _validar_cuenta_nueva(sesion: SesionMotor, intencion: IntencionGastoPagado) 
         )
 
 
-_TABLAS_AGREGADO = (
-    ("hecho_efectos", "hecho_id = %s"),
-    ("efecto_atribuciones", "efecto_id IN (SELECT id FROM gapto.hecho_efectos WHERE hecho_id = %s)"),
-    ("hecho_movimientos_tesoreria", "hecho_id = %s"),
-    ("hecho_aportaciones_pago", "hecho_id = %s"),
-)
-
-
-def _agregado_sin_extras(sesion: SesionMotor, datos: DatosHechoCompuesto) -> bool:
-    """Guarda de la capa F05 para el reconocimiento de identidad (§16.5).
-
-    La comparacion de OP-22 comprueba que lo DECLARADO existe e es igual,
-    pero no que lo persistido no tenga filas de mas. Para VS-01, que conoce la
-    forma completa de su agregado, se exige ademas igualdad de cardinalidad
-    por tabla: junto con los UUID deterministas y la comparacion de OP-22, eso
-    equivale a igualdad exacta. Asi un reintento del mismo UUID con otra
-    financiacion (p. ej. NO_DETERMINADA frente a una aportacion ya
-    materializada) es IDENTIDAD_REUTILIZADA, no exito idempotente.
-    """
-    esperado = {
-        "hecho_efectos": len(datos.efectos),
-        "efecto_atribuciones": sum(len(e.atribuciones) for e in datos.efectos),
-        "hecho_movimientos_tesoreria": len(datos.pagos),
-        "hecho_aportaciones_pago": len(datos.aportaciones),
-    }
-    for tabla, filtro in _TABLAS_AGREGADO:
-        n = sesion.uno(f"SELECT count(*) FROM gapto.{tabla} WHERE {filtro}", (datos.hecho_id,))[0]
-        if n != esperado[tabla]:
-            return False
-    return True
-
-
 def registrar_gasto_pagado(
     unidad: UnidadDeTrabajo, contexto: ContextoOperacion, intencion: IntencionGastoPagado
 ) -> Registrado | RechazoIntegracion:
@@ -150,14 +122,9 @@ def registrar_gasto_pagado(
                 return RechazoIntegracion(CODIGO_PROPUESTA_OBSOLETA)
 
         # 5. OP-22 adscrito a esta transaccion. La composicion sale SOLO del
-        #    payload sellado; si la raiz existe, OP-22 compara la intencion y
-        #    la capa F05 exige ademas que no haya filas de mas.
+        #    payload sellado; si la raiz existe, OP-22 exige igualdad EXACTA
+        #    del agregado (F04-D050/F04-D051): la capa F05 no la duplica.
         datos = componer(intencion, actor)
-        if ya_materializada and not _agregado_sin_extras(sesion, datos):
-            raise ErrorMotor(
-                CodigoError.IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION,
-                "La intencion ya existe con otro agregado: no se completa ni se da por aplicada.",
-            )
         op22 = HechosCompuestosService(
             UnidadDeTrabajoAdscrita(sesion), impacto_ancla=impacto_correccion_ancla
         )

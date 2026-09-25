@@ -19,7 +19,10 @@
 #   reintento, revalidacion antes de identidad, agregado exacto, fecha,
 #   vigencia en la fecha del pago, importe de la propuesta, propuesta de
 #   cuentas-pago, fail-closed de identidad) y M09..M12 (cliente).
-# Version: 0.2.0
+#   v0.3.0 (F05 §18, tras F04-D051): se retira A15 junto con la guarda
+#   `_agregado_sin_extras`; la propiedad la impone OP-22 y la discrimina
+#   D050-M1 en scripts/mutantes/f04_d050.py.
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
@@ -53,7 +56,6 @@ MUTANTES = [
     ('A12', 'backend/app/api/ejecucion_gasto_pagado.py', '        # 1. Lock contractual de la cuenta.\n        bloquear_cuenta(sesion, intencion.cuenta_id)\n        actor = leer_actor_self(sesion)\n\n        # 2. Identidad antes que cualquier revalidacion contextual.\n        ya_materializada = repo_hechos.leer_estado(sesion, intencion.intencion_id) is not None\n\n        if not ya_materializada:\n            # 3. Intencion nueva: relectura bajo el lock.\n            _validar_cuenta_nueva(sesion, intencion)\n            # 4. Revalidacion de la propuesta sellada, en la fecha del pago.\n            if intencion.financiacion.estado == "PROPUESTA_ACEPTADA" and not participacion_self_100(\n                sesion, intencion.cuenta_id, actor, intencion.fecha_hecho\n            ):\n                return RechazoIntegracion(CODIGO_PROPUESTA_OBSOLETA)\n', '        # 1. Lock contractual de la cuenta.\n        actor = leer_actor_self(sesion)\n        _previa = participacion_self_100(sesion, intencion.cuenta_id, actor, intencion.fecha_hecho)\n        bloquear_cuenta(sesion, intencion.cuenta_id)\n\n        # 2. Identidad antes que cualquier revalidacion contextual.\n        ya_materializada = repo_hechos.leer_estado(sesion, intencion.intencion_id) is not None\n\n        if not ya_materializada:\n            # 3. Intencion nueva: relectura bajo el lock.\n            _validar_cuenta_nueva(sesion, intencion)\n            # 4. Revalidacion de la propuesta sellada, en la fecha del pago.\n            if intencion.financiacion.estado == "PROPUESTA_ACEPTADA" and not _previa:\n                return RechazoIntegracion(CODIGO_PROPUESTA_OBSOLETA)\n', 'py'),
     ('A13', 'backend/app/api/ejecucion_gasto_pagado.py', '        datos = componer(intencion, actor)\n', "        _int = intencion\n        if not participacion_self_100(sesion, intencion.cuenta_id, actor, intencion.fecha_hecho):\n            _int = intencion.model_copy(update={'financiacion': __import__('app.api.dto_vs01', fromlist=['x']).FinanciacionNoDeterminada(estado='NO_DETERMINADA')})\n        datos = componer(_int, actor)\n", 'py'),
     ('A14', 'backend/app/api/ejecucion_gasto_pagado.py', '        if not ya_materializada:\n', '        if True:\n', 'py'),
-    ('A15', 'backend/app/api/ejecucion_gasto_pagado.py', '        if ya_materializada and not _agregado_sin_extras(sesion, datos):\n', '        if False:\n', 'py'),
     ('A16', 'backend/app/api/dto_vs01.py', '        if valor > hoy_referencia():\n', '        if False:\n', 'py'),
     ('A17', 'backend/app/api/ejecucion_gasto_pagado.py', '                sesion, intencion.cuenta_id, actor, intencion.fecha_hecho\n            ):\n                return RechazoIntegracion', "                sesion, intencion.cuenta_id, actor, __import__('datetime').date.today()\n            ):\n                return RechazoIntegracion", 'py'),
     ('A18', 'backend/app/api/dto_vs01.py', '            and self.financiacion.importe != self.importe\n', '            and False\n', 'py'),
