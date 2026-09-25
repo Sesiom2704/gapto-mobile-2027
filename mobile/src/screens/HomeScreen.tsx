@@ -3,7 +3,8 @@
 // Fichero: HomeScreen.tsx
 // Ruta: mobile/src/screens/HomeScreen.tsx
 // Descripción: HOME-01 (F09 §4) — esqueleto estructural completo en el orden aprobado: Cabecera, Liquidez, Acciones rápidas, Mes actual, [Requiere atención solo cuando exista], Próximos movimientos, Patrimonio total. Único dato real en VS-01: «Gastos» del mes vía lectura estrecha provisional (candidata F08). Los bloques sin read model autorizado muestran estado «No disponible» (DS-RULE-40) y NUNCA 0 € ni datos mock. Marcados internamente PENDIENTE_READ_MODEL.
-// Versión: 0.1.0
+// v0.2.0 (F05-D003 §16.6): el bloque canónico «Este mes» ya no muestra cifras (Ingresos, Gastos, Resultado y presupuesto «No disponible»); la única lectura real va en una tarjeta SEPARADA «Gasto atribuible registrado este mes · parcial», que no es gasto total, resultado, presupuesto ni liquidez.
+// Versión: 0.2.0
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -19,7 +20,7 @@ import { useTema } from '../theme/tema';
 import { espacio, FUENTE_MARCA, importe, radio, TACTIL_MIN, tipo } from '../theme/tokens';
 
 /** Bloques de HOME-01 cuyo read model no está autorizado en VS-01 (mandato §11). */
-export const PENDIENTE_READ_MODEL = ['LIQUIDEZ', 'MES_INGRESOS', 'MES_RESULTADO', 'MES_PRESUPUESTO', 'ATENCION', 'PROXIMOS', 'PATRIMONIO'] as const;
+export const PENDIENTE_READ_MODEL = ['LIQUIDEZ', 'MES_INGRESOS', 'MES_GASTOS', 'MES_RESULTADO', 'MES_PRESUPUESTO', 'ATENCION', 'PROXIMOS', 'PATRIMONIO'] as const;
 
 type Lectura = { fase: 'CARGANDO' } | { fase: 'OK'; datos: GastoMes } | { fase: 'ERROR' };
 
@@ -97,7 +98,7 @@ export function HomeScreen(p: { cliente: ClienteApi; ahora: () => Date; refresco
           </Columna>
           <View style={[s.divisor, { backgroundColor: c.borderDefault }]} />
           <Columna etiqueta="Gastos">
-            <CeldaGastos lectura={gasto} onReintentar={cargar} />
+            <EstadoDato estado="NO_DISPONIBLE" />
           </Columna>
           <View style={[s.divisor, { backgroundColor: c.borderDefault }]} />
           <Columna etiqueta="Resultado">
@@ -109,6 +110,19 @@ export function HomeScreen(p: { cliente: ClienteApi; ahora: () => Date; refresco
           <Text style={[tipo.footnote, { color: c.textPrimary }]}>Presupuesto de gasto</Text>
           <EstadoDato estado="NO_DISPONIBLE" />
         </View>
+      </Seccion>
+
+      {/* Lectura PARCIAL de VS-01 (F05-D003 §16.6): tarjeta separada, fuera del
+             bloque «Este mes». Solo gasto atribuible a ti ya registrado. */}
+      <Seccion
+        testID="bloque-gasto-parcial"
+        titulo="Gasto atribuible registrado"
+        derecha={<Text style={[tipo.subheadline, { color: c.textSecondary }]}>{nombreMes(hoy)}</Text>}
+      >
+        <CeldaGastos lectura={gasto} onReintentar={cargar} />
+        <Text testID="gasto-parcial-aviso" style={[tipo.footnote, { color: c.textSecondary }]}>
+          Lectura parcial: solo lo registrado y atribuible a ti. No es tu gasto total, ni el resultado del mes, ni el presupuesto.
+        </Text>
       </Seccion>
 
       {/* 5. Requiere atención: solo aparece si existen asuntos; VS-01 no puede
@@ -154,9 +168,12 @@ function CeldaGastos({ lectura, onReintentar }: { lectura: Lectura; onReintentar
       <Text testID="gastos-valor" style={[importe.secondary, { color: c.textPrimary }]} adjustsFontSizeToFit numberOfLines={1}>
         {formatearEur(d.gasto_atribuible)}
       </Text>
-      {d.estado === 'PARCIAL' ? (
-        <EstadoDato testID="gastos-parcial" estado="PARCIAL" detalle={`${pendientes} sin reparto conocido`} />
-      ) : null}
+      {/* La tarjeta es SIEMPRE parcial; si además hay gastos sin reparto u otra moneda, se cuenta cuántos. */}
+      <EstadoDato
+        testID="gastos-parcial"
+        estado="PARCIAL"
+        detalle={pendientes > 0 ? `${pendientes} sin reparto conocido` : 'Lectura provisional de esta versión'}
+      />
     </View>
   );
 }

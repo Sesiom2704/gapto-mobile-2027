@@ -17,7 +17,9 @@
 #     - efectos con reparto no COMPLETO: su parte self es desconocida; se
 #       cuentan aparte y el estado pasa a PARCIAL (nunca se suman como 0).
 #   Todas las lecturas corren como gapto_runtime bajo RLS del tenant.
-# Version: 0.1.0
+#   v0.2.0 (F05-D003): cuentas_pago recibe la fecha del pago y devuelve una
+#   propuesta de financiacion explicita en vez de un booleano derivable.
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ from __future__ import annotations
 import datetime as dt
 import decimal
 
-from app.api.traductor_gasto_pagado import financiacion_derivable, leer_actor_self
+from app.api.traductor_gasto_pagado import leer_actor_self, participacion_self_100
 from app.core.unidad_trabajo import SesionMotor
 
 CONTRATO_GASTO_MES = "PROVISIONAL_VS01_CANDIDATO_F08"
@@ -75,21 +77,18 @@ def gasto_mes(sesion: SesionMotor, mes: str) -> dict:
     }
 
 
-def cuentas_pago(sesion: SesionMotor, hoy: dt.date) -> list[dict]:
-    """Cuentas habilitadas del tenant que pueden registrar un pago real.
-
-    Excluye cuentas cerradas. `financiacion_derivable` indica si, HOY, quien
-    financia un pago desde esa cuenta es derivable de forma autorizada (unica
-    participacion vigente, self, 100 %). La derivacion efectiva se recalcula
-    en la fecha del hecho al registrar.
-    """
+def cuentas_pago(sesion: SesionMotor, fecha: dt.date) -> list[dict]:
+    """Cuentas habilitadas, ACTIVO y abiertas en `fecha` (fecha comun de gasto
+    y pago, §16.3), con la PROPUESTA de financiacion para esa fecha (§16.4):
+    SELF_100 solo si hay una unica participacion vigente, del self, al 100 %.
+    Es una propuesta para mostrar; la ejecucion la revalida bajo lock."""
     actor = leer_actor_self(sesion)
     with sesion.conexion.cursor() as cur:
         cur.execute(
             "SELECT id, nombre, moneda FROM gapto.cuentas "
             "WHERE enabled AND (fecha_cierre IS NULL OR fecha_cierre > %s) "
             "AND naturaleza = 'ACTIVO' ORDER BY orden, nombre, id",
-            (hoy,),
+            (fecha,),
         )
         filas = cur.fetchall()
     return [
@@ -97,7 +96,9 @@ def cuentas_pago(sesion: SesionMotor, hoy: dt.date) -> list[dict]:
             "cuenta_id": f[0],
             "nombre": f[1],
             "moneda": f[2],
-            "financiacion_derivable": financiacion_derivable(sesion, f[0], actor, hoy),
+            "propuesta_financiacion": (
+                "SELF_100" if participacion_self_100(sesion, f[0], actor, fecha) else "NO_DETERMINADA"
+            ),
         }
         for f in filas
     ]

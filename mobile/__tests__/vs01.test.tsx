@@ -3,7 +3,8 @@
 // Fichero: vs01.test.tsx
 // Ruta: mobile/__tests__/vs01.test.tsx
 // Descripción: Tests de cliente VS-01 (mandato §22): Home, acción rápida, validación, «Solo mío» explícito, presupuestable no inventado, intención correcta, doble tap, timeout conserva identidad, error no muestra éxito, éxito refresca Home desde backend.
-// Versión: 0.1.0
+// v0.2.0 (F05-D003): tarjeta parcial de Home fuera de «Este mes», fecha editable ≤ hoy, financiación visible y sellada, rechazo por propuesta obsoleta.
+// Versión: 0.2.0
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
@@ -23,11 +24,20 @@ function gasto(valor: string, estado: 'CONFIRMADO' | 'PARCIAL' = 'CONFIRMADO', s
 }
 
 function ok(p: PayloadGastoPagado): Respuesta<ResultadoRegistro> {
-  return { tipo: 'OK', datos: { hecho_id: p.intencion_id, idempotente: false, importe: p.importe, estado_atribucion: p.atribucion === 'SOLO_MIO' ? 'COMPLETA' : 'NO_DISPONIBLE', aportacion_criterio: 'PARTICIPACION_CUENTA' } };
+  return { tipo: 'OK', datos: { hecho_id: p.intencion_id, idempotente: false, importe: p.importe, estado_atribucion: p.atribucion === 'SOLO_MIO' ? 'COMPLETA' : 'NO_DISPONIBLE', aportacion_criterio: p.financiacion.estado === 'PROPUESTA_ACEPTADA' ? 'PARTICIPACION_CUENTA' : null, financiacion: p.financiacion.estado } };
 }
 
-function crearFake(opciones: { registrar?: (p: PayloadGastoPagado) => Promise<Respuesta<ResultadoRegistro>>; gastos?: Respuesta<GastoMes>[] } = {}) {
+type Propuesta = CuentaPago['propuesta_financiacion'];
+
+function crearFake(
+  opciones: {
+    registrar?: (p: PayloadGastoPagado) => Promise<Respuesta<ResultadoRegistro>>;
+    gastos?: Respuesta<GastoMes>[];
+    propuesta?: (fecha: string) => Propuesta;
+  } = {},
+) {
   const enviados: PayloadGastoPagado[] = [];
+  const fechasConsultadas: string[] = [];
   const colaGastos = [...(opciones.gastos ?? [gasto('0.00'), gasto('3.50')])];
   let lecturasHome = 0;
   const cliente: ClienteApi = {
@@ -35,13 +45,17 @@ function crearFake(opciones: { registrar?: (p: PayloadGastoPagado) => Promise<Re
       enviados.push(p);
       return (opciones.registrar ?? (async (x) => ok(x)))(p);
     }),
-    cuentasPago: jest.fn(async () => ({ tipo: 'OK', datos: { cuentas: [{ cuenta_id: CUENTA, nombre: 'Cuenta corriente (sintética)', moneda: 'EUR', financiacion_derivable: true }] } }) as Respuesta<{ cuentas: CuentaPago[] }>),
+    cuentasPago: jest.fn(async (fecha: string) => {
+      fechasConsultadas.push(fecha);
+      const propuesta = (opciones.propuesta ?? (() => 'SELF_100' as Propuesta))(fecha);
+      return { tipo: 'OK', datos: { cuentas: [{ cuenta_id: CUENTA, nombre: 'Cuenta corriente (sintética)', moneda: 'EUR', propuesta_financiacion: propuesta }] } } as Respuesta<{ cuentas: CuentaPago[] }>;
+    }),
     gastoMes: jest.fn(async () => {
       lecturasHome += 1;
       return colaGastos.length > 1 ? colaGastos.shift()! : colaGastos[0];
     }),
   };
-  return { cliente, enviados, lecturas: () => lecturasHome };
+  return { cliente, enviados, fechasConsultadas, lecturas: () => lecturasHome };
 }
 
 let contadorIds = 0;
@@ -61,6 +75,7 @@ async function abrirFormulario() {
   fireEvent.press(await screen.findByTestId('accion-gasto'));
   await screen.findByTestId('registro-form');
   await screen.findByTestId('origen-cuenta'); // cuentas cargadas (única -> inferida visible)
+  await screen.findByTestId('financiacion'); // propuesta conocida para la fecha
 }
 
 function rellenar({ importe = '3,50', concepto = 'Café', presupuestable = true as boolean | null, soloMio = true } = {}) {
@@ -78,12 +93,25 @@ test('Home renderiza el esqueleto HOME-01 sin cifras inventadas', async () => {
   const f = crearFake({ gastos: [gasto('12.40')] });
   montar(f.cliente);
   expect(await screen.findByText('12,40 €')).toBeTruthy();
-  for (const id of ['bloque-liquidez', 'accion-gasto', 'bloque-mes', 'bloque-proximos', 'bloque-patrimonio', 'tab-INICIO', 'tab-MAS']) {
+  for (const id of ['bloque-liquidez', 'accion-gasto', 'bloque-mes', 'bloque-gasto-parcial', 'bloque-proximos', 'bloque-patrimonio', 'tab-INICIO', 'tab-MAS']) {
     expect(screen.getByTestId(id)).toBeTruthy();
   }
   // Ningún bloque sin read model muestra un importe
   expect(screen.queryAllByText(/€$/).length).toBe(1);
-  expect(screen.getAllByText('No disponible').length).toBeGreaterThanOrEqual(5);
+  expect(screen.getAllByText('No disponible').length).toBeGreaterThanOrEqual(6);
+});
+
+test('Home (F05-D003 §16.6): la cifra real va en tarjeta PARCIAL separada, nunca en «Este mes»', async () => {
+  const f = crearFake({ gastos: [gasto('12.40')] });
+  montar(f.cliente);
+  await screen.findByText('12,40 €');
+  const { within } = require('@testing-library/react-native');
+  expect(within(screen.getByTestId('bloque-mes')).queryAllByText(/€/)).toHaveLength(0);
+  expect(within(screen.getByTestId('bloque-mes')).getAllByText('No disponible').length).toBe(4);
+  const tarjeta = within(screen.getByTestId('bloque-gasto-parcial'));
+  expect(tarjeta.getByText('12,40 €')).toBeTruthy();
+  expect(tarjeta.getByTestId('gastos-parcial')).toBeTruthy(); // siempre marcada como parcial
+  expect(tarjeta.getByTestId('gasto-parcial-aviso').props.children).toMatch(/No es tu gasto total/);
 });
 
 test('Home: gasto PARCIAL se marca y no se presenta como total confirmado', async () => {
@@ -152,7 +180,10 @@ test('submit construye la intención correcta (magnitud positiva, decisiones exp
   await act(async () => fireEvent.press(screen.getByTestId('registrar')));
   await screen.findByTestId('registro-exito');
   expect(f.enviados).toEqual([
-    { intencion_id: '00000000-0000-4000-8000-000000000001', concepto: 'Café', importe: '3.50', moneda: 'EUR', fecha_hecho: '2026-09-24', cuenta_id: CUENTA, presupuestable: false, atribucion: 'SOLO_MIO' },
+    {
+      intencion_id: '00000000-0000-4000-8000-000000000001', concepto: 'Café', importe: '3.50', moneda: 'EUR', fecha_hecho: '2026-09-24', cuenta_id: CUENTA, presupuestable: false, atribucion: 'SOLO_MIO',
+      financiacion: { estado: 'PROPUESTA_ACEPTADA', actor: 'SELF', criterio: 'PARTICIPACION_CUENTA', porcentaje: '100', importe: '3.50' },
+    },
   ]);
 });
 
@@ -229,4 +260,100 @@ test('cancelar con datos pide confirmación; sin datos sale directamente', async
   fireEvent.changeText(screen.getByTestId('campo-concepto'), 'x');
   fireEvent.press(screen.getByTestId('cancelar'));
   expect(screen.getByTestId('confirmar-salida')).toBeTruthy();
+});
+
+// ------------------------------------------------ F05-D003 REG-01 / §16.4
+test('financiación: cuenta 100 % propia se propone visible y se sella sin toque adicional', async () => {
+  const f = crearFake();
+  montar(f.cliente);
+  await abrirFormulario();
+  expect(screen.getByTestId('financiacion-texto').props.children).toBe('Financiado por ti · cuenta 100 % tuya');
+  rellenar();
+  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
+  await screen.findByTestId('registro-exito');
+  expect(f.enviados[0].financiacion.estado).toBe('PROPUESTA_ACEPTADA');
+  expect(screen.getByTestId('exito-financiacion').props.children).toBe('Financiado por ti.');
+});
+
+test('financiación: «No es así» sella NO_DETERMINADA y cuenta como modificación', async () => {
+  const f = crearFake();
+  montar(f.cliente);
+  await abrirFormulario();
+  fireEvent.press(screen.getByTestId('financiacion-no-es-asi'));
+  expect(screen.getByTestId('financiacion-texto').props.children).toBe('Financiación no determinada');
+  fireEvent.press(screen.getByTestId('cancelar'));
+  expect(screen.getByTestId('confirmar-salida')).toBeTruthy();
+  fireEvent.press(screen.getByTestId('seguir'));
+  rellenar();
+  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
+  await screen.findByTestId('registro-exito');
+  expect(f.enviados[0].financiacion).toEqual({ estado: 'NO_DETERMINADA' });
+});
+
+test('financiación: cuenta sin propuesta muestra «no determinada», sin opción de aceptar nada', async () => {
+  const f = crearFake({ propuesta: () => 'NO_DETERMINADA' });
+  montar(f.cliente);
+  await abrirFormulario();
+  expect(screen.getByTestId('financiacion-texto').props.children).toBe('Financiación no determinada');
+  expect(screen.queryByTestId('financiacion-no-es-asi')).toBeNull();
+  rellenar();
+  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
+  await screen.findByTestId('registro-exito');
+  expect(f.enviados[0].financiacion).toEqual({ estado: 'NO_DETERMINADA' });
+});
+
+test('fecha: «Ayer» recarga la propuesta de ESA fecha y se sella como fecha del gasto y del pago', async () => {
+  // La cuenta pasa a compartida desde hoy: ayer era 100 % propia.
+  const f = crearFake({ propuesta: (fecha) => (fecha < '2026-09-24' ? 'SELF_100' : 'NO_DETERMINADA') });
+  montar(f.cliente);
+  await abrirFormulario();
+  expect(screen.getByTestId('financiacion-texto').props.children).toBe('Financiación no determinada');
+  fireEvent.press(screen.getByTestId('fecha-ayer'));
+  await waitFor(() => expect(f.fechasConsultadas).toContain('2026-09-23'));
+  await waitFor(() => expect(screen.getByTestId('financiacion-texto').props.children).toBe('Financiado por ti · cuenta 100 % tuya'));
+  rellenar();
+  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
+  await screen.findByTestId('registro-exito');
+  expect(f.enviados[0].fecha_hecho).toBe('2026-09-23');
+  expect(f.enviados[0].financiacion.estado).toBe('PROPUESTA_ACEPTADA');
+});
+
+test('fecha: otra fecha futura o inválida no se envía', async () => {
+  const f = crearFake();
+  montar(f.cliente);
+  await abrirFormulario();
+  rellenar();
+  fireEvent.press(screen.getByTestId('fecha-otra'));
+  fireEvent.changeText(screen.getByTestId('campo-fecha'), '25/09/2026');
+  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
+  expect(screen.getByText('Solo gastos ya ocurridos: la fecha no puede ser futura.')).toBeTruthy();
+  fireEvent.changeText(screen.getByTestId('campo-fecha'), '31/02/2026');
+  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
+  expect(screen.getByText('Fecha no válida (dd/mm/aaaa).')).toBeTruthy();
+  expect(f.enviados).toHaveLength(0);
+});
+
+test('propuesta obsoleta: rechazo definitivo, se recarga la propuesta y el siguiente envío usa identidad nueva', async () => {
+  let n = 0;
+  let compartida = false;
+  const f = crearFake({
+    propuesta: () => (compartida ? 'NO_DETERMINADA' : 'SELF_100'),
+    registrar: async (p) => {
+      if (++n === 1) {
+        compartida = true; // la cuenta cambió entre abrir el formulario y confirmar
+        return { tipo: 'RECHAZADO', codigo: 'PROPUESTA_FINANCIACION_OBSOLETA', mensaje: 'La cuenta ha cambiado de titularidad desde que abriste el formulario. Revisa la financiación: no se ha guardado nada.' };
+      }
+      return ok(p);
+    },
+  });
+  montar(f.cliente);
+  await abrirFormulario();
+  rellenar();
+  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
+  expect(await screen.findByTestId('error-dominio')).toBeTruthy();
+  await waitFor(() => expect(screen.getByTestId('financiacion-texto').props.children).toBe('Financiación no determinada'));
+  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
+  await screen.findByTestId('registro-exito');
+  expect(f.enviados[1].intencion_id).not.toBe(f.enviados[0].intencion_id);
+  expect(f.enviados[1].financiacion).toEqual({ estado: 'NO_DETERMINADA' });
 });

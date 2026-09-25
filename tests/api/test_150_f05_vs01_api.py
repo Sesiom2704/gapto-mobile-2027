@@ -10,7 +10,10 @@
 #   misma identidad; misma identidad con otro payload -> conflicto; una sola
 #   realidad persistida; SIN_INDICAR -> NO_DISPONIBLE y Home PARCIAL; cuenta
 #   compartida sin aportacion inventada; otra moneda no se suma; fail-closed.
-# Version: 0.1.0
+#   v0.2.0 (F05-D003): financiacion sellada en la intencion y cuentas-pago
+#   por fecha del pago. Las pruebas nuevas de §16.4/§16.5 viven en
+#   test_151_f05_vs01_financiacion_atomicidad.py.
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -84,7 +87,9 @@ def test_retry_misma_identidad_es_idempotente_y_una_sola_realidad(tenant):
         "hecho": 1, "efectos": 1, "conciliaciones": 1, "aportaciones": 1, "movimientos": 1}
 
 
-@pytest.mark.parametrize("cambio", [{"importe": "4.00"}, {"concepto": "Otra cosa"}, {"presupuestable": False}])
+@pytest.mark.parametrize("cambio", [{"importe": "4.00", "financiacion": h.propuesta_self_100("4.00")},
+                                    {"concepto": "Otra cosa"}, {"presupuestable": False},
+                                    {"financiacion": h.NO_DETERMINADA}])
 def test_misma_identidad_otro_payload_es_conflicto(tenant, cambio):
     owner, _, cuenta = tenant
     cli = h.cliente(owner)
@@ -119,7 +124,7 @@ def test_cuenta_de_otro_tenant_es_invisible_y_nada_persiste(tenant):
     assert _conteos(owner, hid)["hecho"] == 0 and _conteos(otro, hid)["hecho"] == 0
 
 
-@pytest.mark.parametrize("campo", ["presupuestable", "atribucion", "cuenta_id", "fecha_hecho", "intencion_id"])
+@pytest.mark.parametrize("campo", ["presupuestable", "atribucion", "cuenta_id", "fecha_hecho", "intencion_id", "financiacion"])
 def test_campos_de_decision_obligatorios_sin_default(tenant, campo):
     owner, _, cuenta = tenant
     cuerpo = h.intencion(cuenta)
@@ -202,12 +207,13 @@ def test_cuenta_compartida_no_inventa_aportacion(tenant):
     otro = h.crear_actor_tercero(owner)
     compartida = h.crear_cuenta(owner, [(actor, 50), (otro, 50)])
     cli = h.cliente(owner)
-    cuerpo = h.intencion(compartida)
+    cuentas = cli.get("/v1/vs01/cuentas-pago", params={"fecha": "2026-09-24"}, headers=h.AUTH).json()["cuentas"]
+    assert {c["cuenta_id"]: c["propuesta_financiacion"] for c in cuentas}[str(compartida)] == "NO_DETERMINADA"
+    cuerpo = h.intencion(compartida, financiacion=h.NO_DETERMINADA)
     r = cli.post("/v1/intenciones/gasto-pagado", json=cuerpo, headers=h.AUTH)
     assert r.status_code == 200 and r.json()["aportacion_criterio"] is None
+    assert r.json()["financiacion"] == "NO_DETERMINADA"
     assert _conteos(owner, uuid.UUID(cuerpo["intencion_id"]))["aportaciones"] == 0
-    cuentas = cli.get("/v1/vs01/cuentas-pago", params={"hoy": "2026-09-24"}, headers=h.AUTH).json()["cuentas"]
-    assert {c["cuenta_id"]: c["financiacion_derivable"] for c in cuentas}[str(compartida)] is False
 
 
 def test_sin_token_o_token_erroneo_no_escribe(tenant):

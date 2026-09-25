@@ -3,7 +3,8 @@
 // Fichero: fechas.ts
 // Ruta: mobile/src/domain/fechas.ts
 // Descripción: Fechas locales del dispositivo (la fecha del hecho es la fecha LOCAL del usuario, no UTC).
-// Versión: 0.1.0
+// v0.2.0 (F05-D003): utilidades para la fecha editable (ayer, dd/mm/aaaa ↔ ISO).
+// Versión: 0.2.0
 // ============================================================
 
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
@@ -25,4 +26,22 @@ export function nombreMes(d: Date): string {
 export function fechaCorta(d: Date): string {
   const dia = DIAS[d.getDay()];
   return `${dia[0].toUpperCase()}${dia.slice(1)}, ${d.getDate()} ${MESES_CORTOS[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+export function ayer(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1);
+}
+/** «25/09/2026» → «2026-09-25»; null si el texto no tiene esa forma. */
+export function ddmmaaaaAIso(t: string): string | null {
+  const m = /^\s*(\d{1,2})\/(\d{1,2})\/(\d{4})\s*$/.exec(t);
+  if (!m) return null;
+  return `${m[3]}-${dos(Number(m[2]))}-${dos(Number(m[1]))}`;
+}
+export function isoADdmmaaaa(iso: string): string {
+  const [a, m, d] = iso.split('-');
+  return `${d}/${m}/${a}`;
+}
+export function fechaCortaIso(iso: string): string {
+  const [a, m, d] = iso.split('-').map(Number);
+  return fechaCorta(new Date(a, m - 1, d));
 }

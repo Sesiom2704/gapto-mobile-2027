@@ -11,7 +11,11 @@
 #     - `reintentable` solo es true cuando repetir la MISMA intencion es seguro
 #       y puede tener exito (concurrencia agotada, backend caido).
 #   API DE INTEGRACION F05-00-B, PENDIENTE DE CONSOLIDACION F10 (F10-05).
-# Version: 0.1.0
+#
+#   v0.2.0 (F05-D003): codigo propio de la capa F05
+#   PROPUESTA_FINANCIACION_OBSOLETA (409, definitivo): no forma parte de la
+#   taxonomia F04.
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -74,3 +78,19 @@ def no_autorizado() -> tuple[int, dict]:
 
 def interno() -> tuple[int, dict]:
     return 500, {"codigo": "INTERNO", "mensaje": "Error interno. No se ha confirmado el registro.", "reintentable": False}
+
+
+_RECHAZOS_INTEGRACION: dict[str, tuple[int, str]] = {
+    "PROPUESTA_FINANCIACION_OBSOLETA": (
+        409,
+        "La cuenta ha cambiado de titularidad desde que abriste el formulario. "
+        "Revisa la financiación: no se ha guardado nada.",
+    ),
+}
+
+
+def rechazo_integracion(codigo: str) -> tuple[int, dict]:
+    """Rechazo DEFINITIVO de la capa F05: repetir la misma intencion no puede
+    tener exito; el cliente libera la edicion y usara identidad nueva."""
+    status, mensaje = _RECHAZOS_INTEGRACION[codigo]
+    return status, {"codigo": codigo, "mensaje": mensaje, "reintentable": False}

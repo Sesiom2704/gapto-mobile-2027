@@ -13,13 +13,18 @@
 #   Reglas (mandato F05-00-B v0.2 §4):
 #     - el cliente NUNCA envia tenant, owner ni actor autoritativos: el owner
 #       sale de GAPTO_DEV_OWNER_USER_ID y el actor self se resuelve en BD;
-#     - fail-closed fuera de GAPTO_ENV=development;
+#     - fail-closed del MECANISMO de identidad de desarrollo: si se habilita
+#       con GAPTO_ENV distinto de development, el arranque falla (F05-D003
+#       §16.2). Hoy es el unico mecanismo del adaptador; F10-01 lo sustituira
+#       y esta regla no prohibe que el backend arranque fuera de desarrollo;
 #     - token estatico solo por entorno (nunca versionado), longitud minima;
 #     - la base conectada debe figurar en una lista blanca de bases de
 #       desarrollo (por defecto solo `gapto2027_dev`), para impedir apuntar
 #       por error a una base de referencia (Neon gapto2027_test) o a Supabase;
 #     - datos exclusivamente sinteticos (los crea scripts/dev).
-# Version: 0.1.0
+#   v0.2.0 (F05-D003): la regla de entorno se acota al mecanismo de identidad
+#   de desarrollo (antes redactada como regla del adaptador entero).
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -30,6 +35,7 @@ from dataclasses import dataclass
 
 AVISO_IDENTIDAD = "NO ES AUTENTICACION DE PRODUCCION"
 ENTORNO_UNICO_PERMITIDO = "development"
+MECANISMO_IDENTIDAD_DESARROLLO = "DESARROLLO"
 LONGITUD_MINIMA_TOKEN = 24
 BASES_DEV_POR_DEFECTO = ("gapto2027_dev",)
 
@@ -54,15 +60,27 @@ class ConfiguracionApi:
         )
 
 
+def _exigir_entorno_identidad_desarrollo(entorno: str) -> None:
+    """Fail-closed del mecanismo de identidad de desarrollo (§16.2).
+
+    El adaptador VS-01 solo dispone de este mecanismo; por eso, fuera de
+    development, no hay identidad valida con la que arrancar. Cuando F10-01
+    aporte autenticacion real, esta comprobacion seguira aplicando solo a la
+    identidad de desarrollo.
+    """
+    if entorno != ENTORNO_UNICO_PERMITIDO:
+        raise ConfiguracionInvalida(
+            "El mecanismo de identidad de desarrollo solo se habilita con "
+            f"GAPTO_ENV=development ({AVISO_IDENTIDAD}); no hay otro mecanismo "
+            "de identidad disponible (F10-01)."
+        )
+
+
 def cargar_desde_entorno(env: dict[str, str] | None = None) -> ConfiguracionApi:
     e = dict(os.environ if env is None else env)
 
     entorno = e.get("GAPTO_ENV", "")
-    if entorno != ENTORNO_UNICO_PERMITIDO:
-        raise ConfiguracionInvalida(
-            "El adaptador F05-00-B solo arranca con GAPTO_ENV=development "
-            f"({AVISO_IDENTIDAD})."
-        )
+    _exigir_entorno_identidad_desarrollo(entorno)
 
     dsn = e.get("GAPTO_DATABASE_URL", "")
     if not dsn:

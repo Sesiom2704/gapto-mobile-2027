@@ -13,7 +13,11 @@
 #   Requiere (ya levantados): cliente web en --web, API en --api y
 #   GAPTO_DATABASE_URL (solo lectura de verificacion) + GAPTO_DEV_OWNER_USER_ID.
 #   Escribe las capturas y un manifest JSON en --salida (fuera del repo).
-# Version: 0.1.0
+#   v0.2.0 (F05-D003): espera y registra la linea de financiacion visible,
+#   comprueba que el bloque «Este mes» no muestra importes (la cifra real va
+#   en la tarjeta parcial separada) y anade al manifest la financiacion y la
+#   fecha comun gasto/pago persistidas.
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -37,7 +41,7 @@ def leer_bd(dsn: str, owner: str, concepto: str) -> dict:
         cur = c.cursor()
         cur.execute("SET LOCAL ROLE gapto_runtime")
         cur.execute("SELECT set_config('gapto.owner_user_id', %s, true)", (owner,))
-        cur.execute("SELECT id, importe_total, presupuestable, estado_localizacion FROM gapto.hechos_financieros WHERE concepto=%s", (concepto,))
+        cur.execute("SELECT id, importe_total, presupuestable, estado_localizacion, fecha_hecho FROM gapto.hechos_financieros WHERE concepto=%s", (concepto,))
         hechos = cur.fetchall()
         hid = hechos[0][0]
         def uno(sql):
@@ -47,7 +51,7 @@ def leer_bd(dsn: str, owner: str, concepto: str) -> dict:
             "hecho": [str(x) for x in hechos[0]],
             "efectos": [list(map(str, r)) for r in uno("SELECT tipo_efecto, importe_delta, estado_atribucion FROM gapto.hecho_efectos WHERE hecho_id=%s")],
             "atribuciones": [list(map(str, r)) for r in uno("SELECT a.importe_atribuido, a.criterio_atribucion FROM gapto.efecto_atribuciones a JOIN gapto.hecho_efectos e ON e.id=a.efecto_id WHERE e.hecho_id=%s")],
-            "movimientos": [list(map(str, r)) for r in uno("SELECT m.importe, c.importe_asignado FROM gapto.movimientos_tesoreria m JOIN gapto.hecho_movimientos_tesoreria c ON c.movimiento_tesoreria_id=m.id WHERE c.hecho_id=%s")],
+            "movimientos": [list(map(str, r)) for r in uno("SELECT m.importe, c.importe_asignado, m.fecha_movimiento FROM gapto.movimientos_tesoreria m JOIN gapto.hecho_movimientos_tesoreria c ON c.movimiento_tesoreria_id=m.id WHERE c.hecho_id=%s")],
             "aportaciones": [list(map(str, r)) for r in uno("SELECT importe, criterio_aportacion FROM gapto.hecho_aportaciones_pago WHERE hecho_id=%s")],
         }
 
@@ -84,6 +88,8 @@ def main() -> None:
         page.get_by_test_id("accion-gasto").click(); metricas["taps"] += 1
         metricas["taps_home_a_formulario"] = 1
         page.get_by_test_id("origen-cuenta").wait_for()
+        page.get_by_test_id("financiacion").wait_for()
+        financiacion_visible = page.get_by_test_id("financiacion-texto").inner_text()
         page.wait_for_timeout(500)
         desbordes = page.evaluate("[...document.querySelectorAll('*')].filter(e => e.scrollLeft > 0 || e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflowX !== 'visible').map(e => e.getAttribute('data-testid') || e.tagName)")
         metricas["desbordes_horizontales_formulario"] = desbordes
@@ -104,12 +110,16 @@ def main() -> None:
         page.get_by_test_id("volver-inicio").click(); metricas["taps"] += 1
         page.wait_for_function("(a) => { const e=document.querySelector('[data-testid=gastos-valor]'); return e && e.innerText !== a; }", arg=antes, timeout=15000)
         despues = page.get_by_test_id("gastos-valor").inner_text()
+        importes_en_mes = page.get_by_test_id("bloque-mes").inner_text().count("€")
+        if importes_en_mes:
+            raise SystemExit("FALLO F05-D003 §16.6: el bloque «Este mes» muestra importes")
         page.wait_for_timeout(300)
         shot(page, "04_home_refrescada")
         nav.close()
 
     bd = leer_bd(os.environ["GAPTO_DATABASE_URL"], os.environ["GAPTO_DEV_OWNER_USER_ID"], a.concepto)
     manifest = {"etiqueta": ETIQUETA, "run_id": run, "gastos_home_antes": antes, "gastos_home_despues": despues,
+                "financiacion_visible": financiacion_visible, "importes_en_bloque_mes": importes_en_mes,
                 "bd": bd, "metricas": metricas, "errores_consola": len(consola), "capturas": capturas}
     (salida / f"VS01_{run}_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(manifest, ensure_ascii=False, indent=2))

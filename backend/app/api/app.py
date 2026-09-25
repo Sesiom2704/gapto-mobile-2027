@@ -8,7 +8,7 @@
 #
 #   Rutas:
 #     POST /v1/intenciones/gasto-pagado  -> OP-22 (unica escritura)
-#     GET  /v1/vs01/cuentas-pago?hoy=     -> lectura estrecha VS-01
+#     GET  /v1/vs01/cuentas-pago?fecha=   -> cuentas elegibles + propuesta de financiacion
 #     GET  /v1/vs01/gasto-mes?mes=        -> lectura estrecha VS-01 (candidata F08)
 #     GET  /v1/salud                      -> diagnostico de desarrollo
 #   Todas exigen `Authorization: Bearer <GAPTO_DEV_TOKEN>`.
@@ -16,7 +16,11 @@
 #   Arranque: `create_app()` falla (fail-closed) si la configuracion no es de
 #   desarrollo o si la base conectada no esta en la lista blanca.
 #   Ejecucion: uvicorn "app.api.app:create_app_desde_entorno" --factory --host 127.0.0.1
-# Version: 0.1.0
+#
+#   v0.2.0 (F05-D003): la escritura se ejecuta en UNA transaccion del
+#   adaptador (lock de cuenta -> identidad -> revalidacion -> OP-22 adscrito,
+#   ejecucion_gasto_pagado.py); cuentas-pago recibe la fecha del pago.
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -49,12 +53,10 @@ from app.api.dto_vs01 import (
     ListaCuentasPago,
     ResultadoGastoPagado,
 )
-from app.api.traductor_gasto_pagado import componer, leer_derivacion
+from app.api.ejecucion_gasto_pagado import RechazoIntegracion, registrar_gasto_pagado
 from app.core.contexto import ContextoOperacion
 from app.core.errores import ErrorMotor
 from app.core.unidad_trabajo import UnidadDeTrabajo
-from app.services.compuesto_service import HechosCompuestosService
-from app.services.previsiones_service import impacto_correccion_ancla
 
 _LOG = logging.getLogger("gapto.api.f05_00_b")
 import decimal
@@ -153,8 +155,10 @@ def create_app(
         return {"estado": "OK", "entorno": cfg.entorno, "aviso": AVISO_IDENTIDAD, "base": nombre}
 
     @app.get("/v1/vs01/cuentas-pago", response_model=ListaCuentasPago, dependencies=[Depends(autorizar)])
-    def cuentas_pago(hoy: dt.date = Query(...)) -> dict:
-        filas = unidad.ejecutar(contexto(), lambda s: lect.cuentas_pago(s, hoy), nombre="VS01 cuentas_pago")
+    def cuentas_pago(fecha: dt.date = Query(...)) -> dict:
+        # `fecha` es la fecha comun de gasto y pago elegida en el formulario:
+        # la propuesta de financiacion se evalua en esa fecha (§16.4).
+        filas = unidad.ejecutar(contexto(), lambda s: lect.cuentas_pago(s, fecha), nombre="VS01 cuentas_pago")
         return {"cuentas": filas}
 
     @app.get("/v1/vs01/gasto-mes", response_model=GastoMesVs01, dependencies=[Depends(autorizar)])
@@ -172,11 +176,11 @@ def create_app(
         dependencies=[Depends(autorizar)],
     )
     def gasto_pagado(intencion: IntencionGastoPagado) -> dict:
-        ctx = contexto()
-        deriv = unidad.ejecutar(ctx, lambda s: leer_derivacion(s, intencion), nombre="VS01 derivacion")
-        datos = componer(intencion, deriv)
-        op22 = HechosCompuestosService(unidad, impacto_ancla=impacto_correccion_ancla)
-        r = op22.registrar_hecho_compuesto(ctx, datos)
+        salida = registrar_gasto_pagado(unidad, contexto(), intencion)
+        if isinstance(salida, RechazoIntegracion):
+            status, cuerpo = eh.rechazo_integracion(salida.codigo)
+            return JSONResponse(cuerpo, status_code=status)
+        r, datos = salida.resultado, salida.datos
         return {
             "intencion_id": intencion.intencion_id,
             "hecho_id": r.hecho_id,
@@ -185,6 +189,7 @@ def create_app(
             "moneda": intencion.moneda,
             "estado_atribucion": datos.efectos[0].estado_atribucion,
             "aportacion_criterio": datos.aportaciones[0].criterio_aportacion if datos.aportaciones else None,
+            "financiacion": intencion.financiacion.estado,
             "aviso": "API de integracion F05-00-B, pendiente de consolidacion F10",
         }
 

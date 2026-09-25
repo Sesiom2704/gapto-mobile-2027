@@ -3,7 +3,8 @@
 // Fichero: useEnvioGasto.ts
 // Ruta: mobile/src/state/useEnvioGasto.ts
 // Descripción: Máquina de estados del envío VS-01. Separa edición, envío, resultado confirmado por servidor e indeterminado. Reglas: (1) la identidad se genera ANTES de enviar y se sella con el payload; (2) doble tap no duplica (guarda síncrona); (3) ante timeout/red/5xx la intención queda INDETERMINADA: payload sellado inmutable y reintento con la MISMA identidad (UUID quemado, F05-00-A); (4) un RECHAZO definitivo (4xx) libera la edición y el siguiente envío usa identidad nueva; (5) no hay optimistic update: el éxito solo existe tras respuesta del servidor.
-// Versión: 0.1.0
+// v0.2.0 (F05-D003): la validación local recibe la fecha de hoy (fecha no futura) y un rechazo PROPUESTA_FINANCIACION_OBSOLETA se expone para recargar la propuesta.
+// Versión: 0.2.0
 // ============================================================
 
 import { useCallback, useRef, useState } from 'react';
@@ -47,14 +48,14 @@ export function useEnvioGasto(cliente: ClienteApi, nuevoId: () => string) {
 
   /** Primer envío desde el borrador. Devuelve errores de validación local si los hay. */
   const enviar = useCallback(
-    async (b: Borrador) => {
+    async (b: Borrador, hoyIso: string) => {
       if (enVuelo.current) return {};
       if (selladaRef.current) {
         // Intención ya sellada e indeterminada: solo se puede reintentar tal cual.
         await enviarSellada(selladaRef.current);
         return {};
       }
-      const errores = validar(b);
+      const errores = validar(b, hoyIso);
       if (Object.keys(errores).length > 0) return errores;
       const sellada = sellar(b, nuevoId());
       selladaRef.current = sellada;

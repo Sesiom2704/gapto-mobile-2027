@@ -3,7 +3,8 @@
 // Fichero: cliente.ts
 // Ruta: mobile/src/api/cliente.ts
 // Descripción: Cliente HTTP del adaptador F05-00-B. Clasifica cada respuesta en resultados de dominio del cliente: OK, RECHAZADO (definitivo, no persistido) o INDETERMINADO (timeout, red, 5xx: puede haberse confirmado; se reintenta la MISMA intención). Nunca expone texto técnico.
-// Versión: 0.1.0
+// v0.2.0 (F05-D003): cuentas-pago por fecha del pago con propuesta de financiación; resultado con la financiación sellada.
+// Versión: 0.2.0
 // ============================================================
 
 import type { PayloadGastoPagado } from '../domain/intencion';
@@ -20,13 +21,14 @@ export interface ResultadoRegistro {
   importe: string;
   estado_atribucion: 'COMPLETA' | 'NO_DISPONIBLE';
   aportacion_criterio: string | null;
+  financiacion: 'PROPUESTA_ACEPTADA' | 'NO_DETERMINADA';
 }
 
 export interface CuentaPago {
   cuenta_id: string;
   nombre: string;
   moneda: string;
-  financiacion_derivable: boolean;
+  propuesta_financiacion: 'SELF_100' | 'NO_DETERMINADA';
 }
 
 export interface GastoMes {
@@ -49,7 +51,7 @@ const MSG_SIN_CONEXION = 'No hay conexión con el servidor.';
 
 export interface ClienteApi {
   registrarGastoPagado(p: PayloadGastoPagado): Promise<Respuesta<ResultadoRegistro>>;
-  cuentasPago(hoy: string): Promise<Respuesta<{ cuentas: CuentaPago[] }>>;
+  cuentasPago(fecha: string): Promise<Respuesta<{ cuentas: CuentaPago[] }>>;
   gastoMes(mes: string): Promise<Respuesta<GastoMes>>;
 }
 
@@ -84,7 +86,7 @@ export function crearCliente(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): C
   return {
     registrarGastoPagado: (p) =>
       llamar('/v1/intenciones/gasto-pagado', { method: 'POST', body: JSON.stringify(p) }, true),
-    cuentasPago: (hoy) => llamar(`/v1/vs01/cuentas-pago?hoy=${encodeURIComponent(hoy)}`, { method: 'GET' }, false),
+    cuentasPago: (fecha) => llamar(`/v1/vs01/cuentas-pago?fecha=${encodeURIComponent(fecha)}`, { method: 'GET' }, false),
     gastoMes: (mes) => llamar(`/v1/vs01/gasto-mes?mes=${encodeURIComponent(mes)}`, { method: 'GET' }, false),
   };
 }

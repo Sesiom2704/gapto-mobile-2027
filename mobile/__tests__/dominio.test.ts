@@ -3,11 +3,14 @@
 // Fichero: dominio.test.ts
 // Ruta: mobile/__tests__/dominio.test.ts
 // Descripción: Tests de dominio del cliente: importe, contraste de tokens DS-01 y clasificación de respuestas HTTP.
-// Versión: 0.1.0
+// v0.2.0 (F05-D003): payload con financiación; conversión de fechas dd/mm/aaaa.
+// Versión: 0.2.0
 // ============================================================
 
 import { crearCliente } from '../src/api/cliente';
+import { ddmmaaaaAIso, isoADdmmaaaa } from '../src/domain/fechas';
 import { formatearEur, parsearImporte } from '../src/domain/importe';
+import { esFechaIso } from '../src/domain/intencion';
 import { contraste } from '../src/theme/contraste';
 import { colores } from '../src/theme/tokens';
 
@@ -45,7 +48,7 @@ test('warning claro NO es apto para texto (3,19:1): solo iconografía/superficie
   expect(contraste(colores.light.warning, colores.light.surfacePrimary)).toBeGreaterThanOrEqual(3);
 });
 
-const P = { intencion_id: 'x', concepto: 'c', importe: '1.00', moneda: 'EUR' as const, fecha_hecho: '2026-09-24', cuenta_id: 'k', presupuestable: true, atribucion: 'SOLO_MIO' as const };
+const P = { intencion_id: 'x', concepto: 'c', importe: '1.00', moneda: 'EUR' as const, fecha_hecho: '2026-09-24', cuenta_id: 'k', presupuestable: true, atribucion: 'SOLO_MIO' as const, financiacion: { estado: 'NO_DETERMINADA' as const } };
 const resp = (status: number, body: unknown) => ({ ok: status < 300, status, json: async () => body }) as unknown as Response;
 
 test('clasificación: 2xx OK, 4xx RECHAZADO, 5xx/red/timeout INDETERMINADO', async () => {
@@ -59,4 +62,13 @@ test('clasificación: 2xx OK, 4xx RECHAZADO, 5xx/red/timeout INDETERMINADO', asy
     new Promise((_r, rej) => init.signal!.addEventListener('abort', () => rej(new Error('abort'))))) as any;
   const r = await crearCliente(cfg, colgado).registrarGastoPagado(P);
   expect(r).toEqual({ tipo: 'INDETERMINADO', mensaje: 'No se ha podido confirmar el registro. Puedes reintentar: no se duplicará.' });
+});
+
+test('fechas: dd/mm/aaaa ↔ ISO y fechas de calendario válidas', () => {
+  expect(ddmmaaaaAIso('3/9/2026')).toBe('2026-09-03');
+  expect(ddmmaaaaAIso('2026-09-03')).toBeNull();
+  expect(isoADdmmaaaa('2026-09-03')).toBe('03/09/2026');
+  expect(esFechaIso('2026-02-28')).toBe(true);
+  expect(esFechaIso('2026-02-30')).toBe(false);
+  expect(esFechaIso('26/09/2026')).toBe(false);
 });

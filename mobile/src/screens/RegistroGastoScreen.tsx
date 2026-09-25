@@ -3,7 +3,8 @@
 // Fichero: RegistroGastoScreen.tsx
 // Ruta: mobile/src/screens/RegistroGastoScreen.tsx
 // Descripción: FORM-VS01 — implementación funcional PROVISIONAL sobre Design System F09 (no es mockup aprobado). Tarea inmersiva CREATE: cabecera de tarea, sin barra inferior (F09 BLOQUE A). Pantalla corta: importe, concepto, ¿cuenta para presupuesto? (Sí/No sin preselección), «Solo mío» explícito, cuenta de pago, fecha visible. Cada valor muestra su origen: decisión, inferido visible o pendiente (mandato §8).
-// Versión: 0.1.0
+// v0.2.0 (F05-D003 REG-01): fecha común gasto/pago editable (Hoy · Ayer · Otra, ≤ hoy) con propuesta recargada por fecha; financiación visible y sellada: «Financiado por ti · cuenta 100 % tuya» (aceptación implícita, con vía «No es así») o «Financiación no determinada»; un rechazo por propuesta obsoleta recarga la propuesta.
+// Versión: 0.2.0
 // ============================================================
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -12,9 +13,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ClienteApi, CuentaPago } from '../api/cliente';
 import { BotonPrimario, BotonTexto, Chip, EstadoDato, Segmentado } from '../components/Basicos';
-import { fechaCorta, isoLocal } from '../domain/fechas';
+import { ayer, ddmmaaaaAIso, fechaCortaIso, isoADdmmaaaa, isoLocal } from '../domain/fechas';
 import { formatearEur, parsearImporte } from '../domain/importe';
-import { Borrador, borradorInicial, Errores } from '../domain/intencion';
+import { Borrador, borradorInicial, Errores, esFechaIso } from '../domain/intencion';
 import { useEnvioGasto } from '../state/useEnvioGasto';
 import { useTema } from '../theme/tema';
 import { espacio, importe, radio, TACTIL_MIN, tipo } from '../theme/tokens';
@@ -30,30 +31,51 @@ export function RegistroGastoScreen(p: {
   const { c } = useTema();
   const inset = useSafeAreaInsets();
   const hoy = useMemo(() => p.ahora(), [p.ahora]);
-  const [b, setB] = useState<Borrador>(() => borradorInicial(isoLocal(hoy)));
+  const hoyIso = isoLocal(hoy);
+  const ayerIso = isoLocal(ayer(hoy));
+  const [b, setB] = useState<Borrador>(() => borradorInicial(hoyIso));
   const [errores, setErrores] = useState<Errores>({});
   const [cuentas, setCuentas] = useState<Cuentas>({ fase: 'CARGANDO' });
   const [confirmarSalida, setConfirmarSalida] = useState(false);
+  const [otraFecha, setOtraFecha] = useState<string | null>(null); // texto dd/mm/aaaa en edición
   const { estado, enviar, reintentar, volverAEditar } = useEnvioGasto(p.cliente, p.nuevoId);
   const conceptoRef = useRef<TextInput>(null);
+  const peticion = useRef(0);
 
-  const cargarCuentas = async () => {
+  // Cuentas y propuesta de financiación SIEMPRE para la fecha elegida (§16.4):
+  // la propuesta se evalúa en la fecha del pago.
+  const cargarCuentas = async (fecha: string) => {
+    const n = ++peticion.current;
     setCuentas({ fase: 'CARGANDO' });
-    const r = await p.cliente.cuentasPago(isoLocal(hoy));
+    setB((x) => ({ ...x, propuesta: null }));
+    const r = await p.cliente.cuentasPago(fecha);
+    if (n !== peticion.current) return; // respuesta de una fecha anterior: se ignora
     if (r.tipo !== 'OK') return setCuentas({ fase: 'ERROR' });
-    setCuentas({ fase: 'OK', lista: r.datos.cuentas });
-    // Única cuenta: se preselecciona como valor INFERIDO y visible (no oculto).
-    if (r.datos.cuentas.length === 1) {
-      setB((x) => (x.cuentaId ? x : { ...x, cuentaId: r.datos.cuentas[0].cuenta_id, cuentaOrigen: 'INFERIDO' }));
-    }
+    const lista = r.datos.cuentas;
+    setCuentas({ fase: 'OK', lista });
+    setB((x) => {
+      const sel = lista.find((c2) => c2.cuenta_id === x.cuentaId);
+      if (sel) return { ...x, propuesta: sel.propuesta_financiacion };
+      // Única cuenta: se preselecciona como valor INFERIDO y visible (no oculto).
+      if (lista.length === 1) {
+        return { ...x, cuentaId: lista[0].cuenta_id, cuentaOrigen: 'INFERIDO', propuesta: lista[0].propuesta_financiacion, propuestaRechazada: false };
+      }
+      return { ...x, cuentaId: null, cuentaOrigen: 'PENDIENTE', propuesta: null, propuestaRechazada: false };
+    });
   };
   useEffect(() => {
-    void cargarCuentas();
-  }, []);
+    if (esFechaIso(b.fechaHecho) && b.fechaHecho <= hoyIso) void cargarCuentas(b.fechaHecho);
+  }, [b.fechaHecho]);
+
+  // Propuesta obsoleta: la cuenta cambió; se recarga para mostrar la realidad actual.
+  useEffect(() => {
+    if (estado.fase === 'RECHAZADO' && estado.codigo === 'PROPUESTA_FINANCIACION_OBSOLETA') void cargarCuentas(b.fechaHecho);
+  }, [estado]);
 
   const bloqueado = estado.fase === 'ENVIANDO' || estado.fase === 'INDETERMINADO' || estado.fase === 'CONFIRMADO';
   // Defaults inferidos (fecha, cuenta única) no cuentan como modificación (F09 BLOQUE A).
-  const modificado = b.importeTexto.trim() !== '' || b.concepto.trim() !== '' || b.presupuestable !== null || b.soloMio || b.cuentaOrigen === 'USUARIO';
+  const modificado =
+    b.importeTexto.trim() !== '' || b.concepto.trim() !== '' || b.presupuestable !== null || b.soloMio || b.cuentaOrigen === 'USUARIO' || b.fechaOrigen === 'USUARIO' || b.propuestaRechazada;
   const cuentaSel = cuentas.fase === 'OK' ? cuentas.lista.find((x) => x.cuenta_id === b.cuentaId) : undefined;
 
   const cambiar = (parche: Partial<Borrador>) => {
@@ -65,6 +87,7 @@ export function RegistroGastoScreen(p: {
       for (const k of Object.keys(parche)) {
         if (k === 'importeTexto') delete n.importe;
         if (k === 'cuentaId') delete n.cuenta;
+        if (k === 'fechaHecho') delete n.fecha;
         if (k in n) delete (n as any)[k];
       }
       return n;
@@ -72,7 +95,7 @@ export function RegistroGastoScreen(p: {
   };
 
   const onRegistrar = async () => {
-    const e = await enviar(b);
+    const e = await enviar(b, hoyIso);
     setErrores(e);
   };
 
@@ -93,6 +116,9 @@ export function RegistroGastoScreen(p: {
           <Text style={[tipo.body, { color: c.textSecondary }]}>{estado.sellada.payload.concepto}</Text>
           <Text style={[tipo.footnote, { color: c.textSecondary, textAlign: 'center' }]}>
             {r.estado_atribucion === 'COMPLETA' ? 'Atribuido: solo tuyo.' : 'Reparto sin indicar: no cuenta en tu gasto atribuible.'}
+          </Text>
+          <Text testID="exito-financiacion" style={[tipo.footnote, { color: c.textSecondary, textAlign: 'center' }]}>
+            {r.financiacion === 'PROPUESTA_ACEPTADA' ? 'Financiado por ti.' : 'Financiación no determinada.'}
           </Text>
         </View>
         <BotonPrimario testID="volver-inicio" titulo="Volver a Inicio" onPress={() => p.onCerrar(true)} />
@@ -186,7 +212,7 @@ export function RegistroGastoScreen(p: {
         <Campo etiqueta="Pagado con" error={errores.cuenta}>
           {cuentas.fase === 'CARGANDO' ? <EstadoDato estado="CARGANDO" /> : null}
           {cuentas.fase === 'ERROR' ? (
-            <Pressable testID="cuentas-error" accessibilityRole="button" onPress={cargarCuentas} style={{ minHeight: TACTIL_MIN }}>
+            <Pressable testID="cuentas-error" accessibilityRole="button" onPress={() => cargarCuentas(b.fechaHecho)} style={{ minHeight: TACTIL_MIN }}>
               <EstadoDato estado="ERROR_CARGA" detalle="Tocar para reintentar" />
             </Pressable>
           ) : null}
@@ -201,21 +227,64 @@ export function RegistroGastoScreen(p: {
                   testID={`cuenta-${x.cuenta_id}`}
                   etiqueta={x.nombre}
                   seleccionado={b.cuentaId === x.cuenta_id}
-                  onPress={() => cambiar({ cuentaId: x.cuenta_id, cuentaOrigen: 'USUARIO' })}
+                  onPress={() => cambiar({ cuentaId: x.cuenta_id, cuentaOrigen: 'USUARIO', propuesta: x.propuesta_financiacion, propuestaRechazada: false })}
                 />
               ))}
             </View>
           ) : null}
-          {cuentaSel ? (
-            <Text testID="origen-cuenta" style={[tipo.footnote, { color: c.textSecondary }]}>
-              {b.cuentaOrigen === 'INFERIDO' ? 'Propuesta: es tu única cuenta disponible. ' : ''}
-              {cuentaSel.financiacion_derivable ? 'Pagado por ti (cuenta 100 % tuya).' : 'Quién financia el pago queda sin determinar.'}
-            </Text>
+          {cuentaSel && b.cuentaOrigen === 'INFERIDO' ? (
+            <Text testID="origen-cuenta" style={[tipo.footnote, { color: c.textSecondary }]}>Propuesta: es tu única cuenta disponible.</Text>
+          ) : null}
+          {cuentaSel && b.propuesta ? (
+            <View testID="financiacion" style={s.filaFinanciacion}>
+              <Text testID="financiacion-texto" style={[tipo.footnote, { color: c.textSecondary, flexShrink: 1 }]}>
+                {b.propuesta === 'SELF_100' && !b.propuestaRechazada
+                  ? 'Financiado por ti · cuenta 100 % tuya'
+                  : 'Financiación no determinada'}
+              </Text>
+              {b.propuesta === 'SELF_100' ? (
+                <BotonTexto
+                  testID={b.propuestaRechazada ? 'financiacion-usar-propuesta' : 'financiacion-no-es-asi'}
+                  titulo={b.propuestaRechazada ? 'Usar propuesta' : 'No es así'}
+                  onPress={() => cambiar({ propuestaRechazada: !b.propuestaRechazada })}
+                />
+              ) : null}
+            </View>
           ) : null}
         </Campo>
 
-        <Campo etiqueta="Fecha">
-          <Text testID="fecha" style={[tipo.body, { color: c.textPrimary }]}>Hoy · {fechaCorta(hoy)}</Text>
+        {/* Fecha común del gasto y del pago (REG-01): propuesta «Hoy», editable, nunca futura. */}
+        <Campo etiqueta="Fecha" error={errores.fecha}>
+          <View style={s.chips}>
+            <Chip testID="fecha-hoy" etiqueta="Hoy" seleccionado={otraFecha === null && b.fechaHecho === hoyIso}
+              onPress={() => { if (bloqueado) return; setOtraFecha(null); cambiar({ fechaHecho: hoyIso, fechaOrigen: 'INFERIDO' }); }} />
+            <Chip testID="fecha-ayer" etiqueta="Ayer" seleccionado={otraFecha === null && b.fechaHecho === ayerIso}
+              onPress={() => { if (bloqueado) return; setOtraFecha(null); cambiar({ fechaHecho: ayerIso, fechaOrigen: 'USUARIO' }); }} />
+            <Chip testID="fecha-otra" etiqueta="Otra fecha" seleccionado={otraFecha !== null}
+              onPress={() => { if (!bloqueado) setOtraFecha(isoADdmmaaaa(b.fechaHecho)); }} />
+          </View>
+          {otraFecha !== null ? (
+            <TextInput
+              testID="campo-fecha"
+              accessibilityLabel="Fecha del gasto, día barra mes barra año"
+              value={otraFecha}
+              editable={!bloqueado}
+              onChangeText={(texto) => {
+                setOtraFecha(texto);
+                cambiar({ fechaHecho: ddmmaaaaAIso(texto) ?? texto, fechaOrigen: 'USUARIO' });
+              }}
+              placeholder="dd/mm/aaaa"
+              placeholderTextColor={c.textSecondary}
+              inputMode="numeric"
+              maxLength={10}
+              style={[tipo.body, s.input, { color: c.textPrimary, backgroundColor: c.surfacePrimary, borderColor: errores.fecha ? c.critical : c.borderStandard }]}
+            />
+          ) : null}
+          <Text testID="fecha" style={[tipo.footnote, { color: c.textSecondary }]}>
+            {esFechaIso(b.fechaHecho)
+              ? `${b.fechaOrigen === 'INFERIDO' ? 'Propuesta: hoy · ' : ''}${fechaCortaIso(b.fechaHecho)} · fecha del gasto y del pago`
+              : 'Escribe la fecha como dd/mm/aaaa.'}
+          </Text>
         </Campo>
 
         {estado.fase === 'RECHAZADO' ? (
@@ -271,4 +340,5 @@ const s = StyleSheet.create({
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: espacio.s },
   aviso: { borderRadius: radio.m, padding: espacio.m, gap: espacio.s },
   filaBotones: { flexDirection: 'row', justifyContent: 'flex-end', gap: espacio.l },
+  filaFinanciacion: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: espacio.s, flexWrap: 'wrap' },
 });

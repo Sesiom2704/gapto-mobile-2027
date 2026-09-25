@@ -9,7 +9,9 @@
 #   Los datos se crean como gapto_owner con la GUC del tenant (WM 12C.7) y son
 #   sinteticos. Exigen GAPTO_TEST_DATABASE_URL apuntando a una base
 #   DESECHABLE local con la cadena 0001..0330 (estos tests confirman filas).
-# Version: 0.1.0
+#   v0.2.0 (F05-D003): la intencion incluye la financiacion sellada; por
+#   defecto PROPUESTA_ACEPTADA self 100 % por el importe del gasto.
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -122,7 +124,22 @@ def cliente(owner: uuid.UUID, **kw):
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
 
 
+def propuesta_self_100(importe: str) -> dict:
+    return {
+        "estado": "PROPUESTA_ACEPTADA",
+        "actor": "SELF",
+        "criterio": "PARTICIPACION_CUENTA",
+        "porcentaje": "100",
+        "importe": importe,
+    }
+
+
+NO_DETERMINADA = {"estado": "NO_DETERMINADA"}
+
+
 def intencion(cuenta: uuid.UUID, **cambios) -> dict:
+    """Intencion VS-01. Si no se indica `financiacion`, se sella la propuesta
+    self 100 % por el importe final (caso frecuente de cuenta propia)."""
     base = {
         "intencion_id": str(uuid.uuid4()),
         "concepto": "Café",
@@ -134,4 +151,5 @@ def intencion(cuenta: uuid.UUID, **cambios) -> dict:
         "atribucion": "SOLO_MIO",
     }
     base.update(cambios)
+    base.setdefault("financiacion", propuesta_self_100(base["importe"]))
     return base
