@@ -46,7 +46,18 @@
 #   F07 (§21): OP-22 no crea financiaciones, cuotas, calendarios, asignaciones
 #   de inversion ni valoraciones. Solo puede VINCULAR contexto a entidades ya
 #   existentes segun la matriz R3-01 (el resto -> OWNERSHIP_F07).
-# Version: 0.1.0
+#
+#   v0.2.0 (F04-D050): el reconocimiento de identidad exige IGUALDAD EXACTA del
+#   agregado (contrato A-E). A la comprobacion existente -lo declarado existe e
+#   es igual (B, D, E)- se anade que el agregado persistido no contenga
+#   elementos no declarados (C): por cada tabla del agregado, el conjunto de
+#   identidades persistidas debe coincidir con el conjunto declarado. Antes se
+#   reconocia por inclusion y un reintento con intencion reducida (p. ej. sin
+#   la aportacion ya materializada) se devolvia como exito idempotente.
+#   Tambien (contrato A): el vinculo de una posicion solo se exige cuando la
+#   posicion declara importe inicial; antes el reintento identico de una
+#   posicion sin importe se rechazaba como conflicto.
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -343,12 +354,17 @@ class HechosCompuestosService:
                     },
                 )
             )
-            comprobaciones.append(
-                self._campos(
-                    leer("hecho_entidades", alta.vinculo_id),
-                    {"hecho_id": raiz, "entidad_id": alta.entidad_id, "efecto_id": alta.efecto_id},
+            # El vinculo (y su efecto causal) solo existe si la posicion trae
+            # importe inicial (OP-12A `_crear_delta`). Exigirlo siempre hacia
+            # que el reintento IDENTICO de una posicion sin importe fuese
+            # conflicto (F04-D050, contrato A).
+            if alta.importe_inicial is not None:
+                comprobaciones.append(
+                    self._campos(
+                        leer("hecho_entidades", alta.vinculo_id),
+                        {"hecho_id": raiz, "entidad_id": alta.entidad_id, "efecto_id": alta.efecto_id},
+                    )
                 )
-            )
         for pago in d.pagos:
             m = pago.movimiento
             comprobaciones.append(
@@ -403,7 +419,43 @@ class HechosCompuestosService:
             if p.marcar_realizada:
                 prevision = leer("previsiones", p.prevision_id)
                 comprobaciones.append(prevision is not None and prevision["estado"] == "REALIZADA")
+        # F04-D050 (C): sin elementos persistidos no declarados.
+        comprobaciones.append(
+            repo_comp.identidades_del_agregado(sesion, raiz) == self._identidades_declaradas(d)
+        )
         return all(comprobaciones)
+
+    @staticmethod
+    def _identidades_declaradas(d: DatosHechoCompuesto) -> dict[str, set[uuid.UUID]]:
+        """Conjunto exacto de identidades que la intencion materializa, por tabla
+        del agregado (mismo conjunto cerrado que `FILTROS_AGREGADO`).
+
+        Una posicion declarada crea efecto causal y vinculo solo cuando trae
+        `importe_inicial` (OP-12A, `_crear_delta`); sin importe, solo existen la
+        entidad y la posicion, que no cuelgan de la raiz."""
+        con_delta = [a for a in d.posiciones if a.importe_inicial is not None]
+        efectos = {e.efecto_id for e in d.efectos} | {a.efecto_id for a in con_delta}
+        if d.suplemento is not None:
+            efectos.add(d.suplemento.efecto_id)
+        relaciones: set[uuid.UUID] = set()
+        if d.suplemento is not None and d.suplemento.con_relacion:
+            relaciones.add(d.suplemento.relacion_id)
+        return {
+            "hecho_efectos": efectos,
+            "efecto_atribuciones": {a.atribucion_id for e in d.efectos for a in e.atribuciones},
+            "hecho_participantes": {p.participante_id for p in d.participantes},
+            "hecho_movimientos_tesoreria": {p.conciliacion.conciliacion_id for p in d.pagos},
+            "hecho_aportaciones_pago": {a.aportacion_id for a in d.aportaciones},
+            "hecho_entidades": {a.vinculo_id for a in con_delta}
+            | {x.registro_id for x in d.contexto.entidades},
+            "hecho_terceros": {x.registro_id for x in d.contexto.terceros},
+            "hecho_magnitudes": {x.registro_id for x in d.contexto.magnitudes},
+            "hecho_etiquetas": {x.registro_id for x in d.contexto.etiquetas},
+            "prevision_hechos": set() if d.prevision is None else {d.prevision.vinculo_id},
+            "hecho_relaciones": relaciones,
+            "efecto_cuentas": set(),
+            "inversion_asignaciones_efecto": set(),
+        }
 
     @staticmethod
     def _resultado_existente(
