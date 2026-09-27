@@ -56,6 +56,25 @@
 # ROLE DRIFT, que es correcto y deliberado. En ese caso se usa --desde 0002
 # y el clean-room demuestra reproducibilidad DE LA BASE, no de la instancia.
 # Reproducir tambien la instancia exige un proyecto nuevo.
+# Versión: 0.14.0 -- F03 REABIERTA / D-197. Se DECLARA el head 0340
+#                    (categorias_financieras.icon_key). 0340 no mueve ninguna
+#                    magnitud contada por CONTRATO: la columna y su CHECK los
+#                    cubren h1 y h2, asi que CONTRATO_0340 es identico a 0330.
+#                    El PASS de 0340 exige de forma FAIL-CLOSED que test_041,
+#                    test_042 y test_043 hayan corrido y esten verdes, y que
+#                    las ocho huellas D-111 coincidan con la referencia
+#                    aprobada de 0340. Esa referencia se declara PENDIENTE
+#                    (None): mientras no se mida en la replica local y en Neon
+#                    gapto2027_test y se declare en una edicion posterior y
+#                    separada, el runner NO puede emitir PASS para 0340
+#                    (mismo procedimiento que 0330, D-187 DEC-8).
+#                    Sin --head el contrato por defecto pasa a ser el de 0340,
+#                    que tiene los mismos valores que el de 0330.
+#                    Revision P0 (H-01): el manifest escribia "version": "0.11.0"
+#                    fijo, de modo que la evidencia de 0.12.0..0.14.0 se
+#                    autoidentificaba como 0.11.0. Se centraliza en la constante
+#                    VERSION_RUNNER, que test_040 obliga a coincidir con esta
+#                    cabecera. Los manifests historicos NO se reescriben.
 # Versión: 0.13.0 -- P5-bis. Se DECLARA la referencia aprobada de huellas D-111
 #                    del head 0330, medida de forma independiente en la replica
 #                    local (17.10) y en Neon gapto2027_test (17.11), con
@@ -204,6 +223,10 @@ import os
 import sys
 from pathlib import Path
 
+# Version del runner que se materializa en el manifest. Debe coincidir con la
+# primera linea "Versión:" de la cabecera; test_040 lo comprueba.
+VERSION_RUNNER = "0.14.0"
+
 try:
     import psycopg
 except ImportError:  # pragma: no cover
@@ -268,15 +291,23 @@ CONTRATO_0320 = {**CONTRATO_0310, "runtime_delete": 48}
 # la aportan TESTS_EXIGIDOS_POR_HEAD y HUELLAS_D111_POR_HEAD.
 CONTRATO_0330 = {**CONTRATO_0320}
 
+# 0340 (D-197) anade una columna nullable y un CHECK en categorias_financieras.
+# Ninguna de las dos cosas figura en este CONTRATO (las cubren h1 y h2), de modo
+# que es identico al de 0330. Se declara expresamente por el mismo motivo que
+# 0330: aceptar el head sin ambiguedad y delegar la discriminacion en
+# TESTS_EXIGIDOS_POR_HEAD y HUELLAS_D111_POR_HEAD.
+CONTRATO_0340 = {**CONTRATO_0330}
+
 CONTRATOS_POR_HEAD = {
     "0300": CONTRATO_0300,
     "0310": CONTRATO_0310,
     "0320": CONTRATO_0320,
     "0330": CONTRATO_0330,
+    "0340": CONTRATO_0340,
 }
 
 # Head vigente de la cadena cuando no se declara --head.
-CONTRATO_POR_DEFECTO = CONTRATO_0330
+CONTRATO_POR_DEFECTO = CONTRATO_0340
 
 
 # ------------------------------------------------------------
@@ -289,11 +320,14 @@ TESTS_EXIGIDOS_POR_HEAD = {
     "0320": ("test_041_f03_04_0320_delete_correccion_agregada",),
     "0330": ("test_041_f03_04_0320_delete_correccion_agregada",
              "test_042_f03_04_0330_geolocalizacion_y_presentacion"),
+    "0340": ("test_041_f03_04_0320_delete_correccion_agregada",
+             "test_042_f03_04_0330_geolocalizacion_y_presentacion",
+             "test_043_f03_05_0340_categoria_icon_key"),
 }
 
 # Heads cuya certificacion exige comparar las ocho huellas D-111 contra una
 # REFERENCIA aprobada. Sin referencia declarada NO hay PASS: fail-closed.
-HEADS_QUE_EXIGEN_REFERENCIA_D111 = ("0330",)
+HEADS_QUE_EXIGEN_REFERENCIA_D111 = ("0330", "0340")
 
 # Referencia aprobada de las ocho huellas D-111 por head (D-187 DEC-8).
 #
@@ -326,6 +360,11 @@ HUELLAS_D111_POR_HEAD = {
         "h8_vistas":      "bc29f409364899f99402b8ed06f77149",
         "recuentos":      "777/644/287/82/58/28/1031/3",
     },
+    # PENDIENTE (D-197): se mide con huellas_d111.sql en la replica local y en
+    # Neon gapto2027_test tras aplicar 0340, y se declara en una edicion
+    # posterior y separada. Hipotesis a confirmar: cambian solo h1 y h2
+    # (778/645/...); h3..h8 iguales a 0330.
+    "0340": None,
 }
 
 
@@ -857,7 +896,7 @@ def escribir_manifiesto(ruta: Path, observado: dict, declarado: dict,
                         resultado: str, razones: list[str], scope: str) -> None:
     contenido = {
         "artefacto": "run_clean_room.py",
-        "version": "0.11.0",
+        "version": VERSION_RUNNER,
         "decision": "D-131 refinada por D-136, D-172, D-177, D-180",
         "run_id": RUN_ID,
         "generado_utc": AHORA_UTC,

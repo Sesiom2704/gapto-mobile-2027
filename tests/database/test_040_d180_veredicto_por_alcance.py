@@ -25,6 +25,11 @@
 #   Es un test de unidad puro: no toca base de datos. Vive en tests/database
 #   por coherencia con la organizacion actual del runner, conforme a la
 #   autorizacion expresa del mandato F04-03.
+# Version: 0.1.1  -- F03-05 / revision P0 de 0340 (H-01). El manifest ya no
+#                   escribe una version fija: se exige que "version" sea
+#                   runner.VERSION_RUNNER y que esta coincida con la primera
+#                   linea "Versión:" de la cabecera del runner, para que la
+#                   evidencia no pueda autoidentificarse con otra version.
 # Version: 0.1.0
 # ============================================================
 
@@ -205,7 +210,11 @@ def test_el_manifest_registra_el_alcance(tmp_path: pathlib.Path) -> None:
     )
     contenido = json.loads(destino.read_text(encoding="utf-8"))
     assert contenido["scope"] == runner.SCOPE_BASE
-    assert contenido["version"] == "0.11.0"
+    assert contenido["version"] == runner.VERSION_RUNNER
+    cabecera = next(linea for linea in _RUNNER.read_text(encoding="utf-8").splitlines()
+                    if linea.startswith("# Versión:"))
+    assert cabecera.split()[2] == runner.VERSION_RUNNER, (
+        "la version del manifest no coincide con la cabecera del runner")
     assert "D-180" in contenido["decision"]
     # observado y declarado siguen separados: es el requisito de D-136.
     assert contenido["observado"]["base"] == "gapto2027_cleanroom"
