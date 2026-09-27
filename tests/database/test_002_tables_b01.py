@@ -4,6 +4,13 @@
 # Ruta: tests/database/test_002_tables_b01.py
 # Descripción: Verifica el contrato físico F03-01-B01 de las tablas 1..16:
 #              existencia, ownership, PK, columnas, defaults y CHECK locales.
+# Versión: 0.1.1  -- F03-05 / D-197 / 0340. El contrato de columnas de B01 era
+#                   igualdad exacta y 0340 anade categorias_financieras.icon_key.
+#                   Se aceptan EXACTAMENTE dos estados nombrados para esa tabla
+#                   (D-073 refinado por D-187 / Working Method §12C.12): baseline
+#                   0010..0330, o baseline + icon_key de 0340. Cualquier otra
+#                   columna o tipo sigue siendo drift. Las otras quince tablas
+#                   conservan la igualdad exacta.
 # Versión: 0.1.0
 # ============================================================
 
@@ -243,6 +250,14 @@ def test_b01_tables_exist_and_are_owned_by_gapto_owner(db: psycopg.Connection) -
 
 
 
+# Estados autorizados de columnas por tabla que una migration POSTERIOR a B01
+# amplia. Conjunto EXPLICITO y FINITO: cada estado esta nombrado.
+#   categorias_financieras: baseline 0010..0330 / + icon_key (0340, D-197)
+COLUMNAS_POSTERIORES_AUTORIZADAS = {
+    "categorias_financieras": {"icon_key": ("character varying(80)", False)},
+}
+
+
 def test_b01_column_contract_is_exact(db: psycopg.Connection) -> None:
     for table, expected in EXPECTED_COLUMNS.items():
         with db.cursor() as cursor:
@@ -267,7 +282,11 @@ def test_b01_column_contract_is_exact(db: psycopg.Connection) -> None:
             )
             actual = {row[0]: (row[1], row[2]) for row in cursor.fetchall()}
 
-        assert actual == expected
+        extra = COLUMNAS_POSTERIORES_AUTORIZADAS.get(table)
+        if extra is None:
+            assert actual == expected
+        else:
+            assert actual in (expected, {**expected, **extra}), table
 
 def test_b01_primary_keys_and_uuid_defaults(db: psycopg.Connection) -> None:
     for table, expected_columns in PK_COLUMNS.items():

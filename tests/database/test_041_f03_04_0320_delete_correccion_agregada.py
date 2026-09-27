@@ -31,6 +31,9 @@
 #              y bajo FORCE ROW LEVEL SECURITY. Si el rol de conexión del arnés
 #              no puede asumir gapto_runtime, esos tests SE SALTAN con mensaje
 #              explícito, nunca en silencio (mismo criterio que test_038).
+# Versión: 0.1.3  -- F03-05 / D-197 / 0340: el conjunto finito de columnas
+#                   autorizadas incorpora el estado 778 (icon_key de 0340). La
+#                   afirmacion de 0320 sigue siendo que ELLA no crea columnas.
 # Versión: 0.1.2  -- P3 en replica local descubre dos defectos del propio test:
 #                   (a) los recuentos GLOBALES de columnas e indices eran igualdad
 #                       exacta y 0330 los mueve; pasan a conjunto finito y nombrado
@@ -348,9 +351,9 @@ def test_0320_matriz_efectiva_de_runtime(db: psycopg.Connection) -> None:
 # POSTERIOR a 0320 mueve. Conjuntos EXPLICITOS y FINITOS, con cada estado
 # nombrado (D-073 refinado por D-187 DEC-9.3). La afirmacion de 0320 es que
 # ELLA no crea columnas ni indices, no que el schema se congele en 772/285.
-#   columnas 772 estado de 0320 / 777 con las cinco de 0330
+#   columnas 772 estado de 0320 / 777 con las cinco de 0330 / 778 con icon_key de 0340
 #   indices  285 estado de 0320 / 287 con los dos parciales de 0330
-COLUMNAS_AUTORIZADAS = (772, 777)
+COLUMNAS_AUTORIZADAS = (772, 777, 778)
 INDICES_AUTORIZADOS = (285, 287)
 
 
