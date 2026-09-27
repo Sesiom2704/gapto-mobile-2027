@@ -56,6 +56,16 @@
 # ROLE DRIFT, que es correcto y deliberado. En ese caso se usa --desde 0002
 # y el clean-room demuestra reproducibilidad DE LA BASE, no de la instancia.
 # Reproducir tambien la instancia exige un proyecto nuevo.
+# Versión: 0.15.0 -- F03 REABIERTA / D-197. Se DECLARA la referencia de las
+#                    ocho huellas D-111 del head 0340, medida con
+#                    huellas_d111.sql de forma independiente en la replica
+#                    local (17.10, cadena 0002..0340 bajo rol no superusuario
+#                    D-189) y en Neon gapto2027_test (17.11, 0340 aplicada
+#                    sobre 0330), con coincidencia byte a byte. Solo cambian
+#                    h1 y h2 respecto de 0330; h3..h8 son identicas. El
+#                    runner deja de estar fail-closed para 0340 y puede
+#                    emitir PASS si ademas corren verdes test_041, test_042 y
+#                    test_043 sin saltos.
 # Versión: 0.14.0 -- F03 REABIERTA / D-197. Se DECLARA el head 0340
 #                    (categorias_financieras.icon_key). 0340 no mueve ninguna
 #                    magnitud contada por CONTRATO: la columna y su CHECK los
@@ -225,7 +235,7 @@ from pathlib import Path
 
 # Version del runner que se materializa en el manifest. Debe coincidir con la
 # primera linea "Versión:" de la cabecera; test_040 lo comprueba.
-VERSION_RUNNER = "0.14.0"
+VERSION_RUNNER = "0.15.0"
 
 try:
     import psycopg
@@ -360,11 +370,21 @@ HUELLAS_D111_POR_HEAD = {
         "h8_vistas":      "bc29f409364899f99402b8ed06f77149",
         "recuentos":      "777/644/287/82/58/28/1031/3",
     },
-    # PENDIENTE (D-197): se mide con huellas_d111.sql en la replica local y en
-    # Neon gapto2027_test tras aplicar 0340, y se declara en una edicion
-    # posterior y separada. Hipotesis a confirmar: cambian solo h1 y h2
-    # (778/645/...); h3..h8 iguales a 0330.
-    "0340": None,
+    # D-197. Medida en replica local 17.10 y Neon gapto2027_test 17.11, iguales
+    # byte a byte. Cambian h1 (+ icon_key) y h2 (+ un CHECK); h3..h8 identicas
+    # a 0330, comprobacion positiva de que 0340 no toca indices, policies,
+    # triggers, funciones, ACL ni vistas.
+    "0340": {
+        "h1_columnas":    "3ee95739144438489da541401f2bda54",
+        "h2_constraints": "88c1fd66129a21c490e0235b58670cf4",
+        "h3_indices":     "aceb34183f2156348a3c58ff033c1d53",
+        "h4_policies":    "e1b1dd81a40b8e10c7f1744b25611fb1",
+        "h5_triggers":    "db650e488abe0226eb33cbd1e0f63c33",
+        "h6_funciones":   "84f053df8ccca616b88bdd9ff8ceb532",
+        "h7_grants":      "ea77c87e385e3d6ce567ea46220f63d9",
+        "h8_vistas":      "bc29f409364899f99402b8ed06f77149",
+        "recuentos":      "778/645/287/82/58/28/1031/3",
+    },
 }
 
 
