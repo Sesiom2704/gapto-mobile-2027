@@ -3,7 +3,8 @@
 # Fichero: bootstrap_dev_db.py
 # Ruta: scripts/dev/bootstrap_dev_db.py
 # Descripcion: Crea/recrea la base LOCAL de desarrollo de F05-00-B
-#   (`gapto2027_dev`) aplicando la cadena 0001..0330 del repositorio y
+#   (`gapto2027_dev`) aplicando la cadena 0001..HEAD_AUTORIZADO_ENVDEV del
+#   repositorio y
 #   carga FIXTURES SINTETICOS minimos para VS-01 (sin PII, sin datos V3):
 #     - usuario sintetico (email @example.invalid);
 #     - actor self;
@@ -15,9 +16,22 @@
 #   Nunca usar contra Neon ni Supabase (D-179; Neon dev no autorizado).
 #   No es un runner de certificacion (no sustituye a run_clean_room.py).
 #
+#   HEAD AUTORIZADO (revision del P0 de 0340, D-197). Publicar una migration en
+#   main NO la autoriza en ENV-DEV. La cadena se corta SIEMPRE en
+#   HEAD_AUTORIZADO_ENVDEV; las migrations posteriores presentes en el
+#   repositorio no se aplican y se listan en la salida. Subir el head de
+#   ENV-DEV exige cambiar esa constante en un commit revisado: no hay opcion de
+#   linea de comandos para superarlo. La cadena se valida ANTES de crear o
+#   destruir la base, de modo que un repositorio incoherente (head ausente o
+#   duplicado, nombre de migration fuera de patron) aborta sin tocar nada.
+#
 #   Uso:
 #     python scripts/dev/bootstrap_dev_db.py --admin-dsn "host=/tmp port=5433 user=postgres" [--recrear]
 #   Imprime GAPTO_DEV_OWNER_USER_ID para configurar el adaptador.
+# Version: 0.2.0  -- D-197 / revision P0 0340 (hallazgo 1): techo de head
+#                   fail-closed HEAD_AUTORIZADO_ENVDEV = "0330"; validacion de la
+#                   cadena antes de CREATE/DROP DATABASE; la salida lista las
+#                   migrations omitidas y el head aplicado.
 # Version: 0.1.0
 # ============================================================
 
@@ -25,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import pathlib
+import re
 import sys
 import uuid
 
@@ -39,6 +54,33 @@ ACTOR_SELF = uuid.uuid5(NS, "vs01.actor.self")
 CUENTA = uuid.uuid5(NS, "vs01.cuenta.corriente")
 PARTICIPACION = uuid.uuid5(NS, "vs01.cuenta.corriente.participacion")
 HOSTS_LOCALES = {"localhost", "127.0.0.1", "::1"}
+
+# Head maximo que ENV-DEV puede materializar. Cambiarlo es una decision
+# revisada (commit propio), nunca un efecto lateral de publicar migrations.
+HEAD_AUTORIZADO_ENVDEV = "0330"
+PATRON_MIGRATION = re.compile(r"^(\d{4})_[a-z0-9_]+\.sql$")
+
+
+def seleccionar_cadena(ficheros: list[pathlib.Path], head: str = HEAD_AUTORIZADO_ENVDEV
+                       ) -> tuple[list[pathlib.Path], list[pathlib.Path]]:
+    """Devuelve (a_aplicar, omitidas). Fail-closed: aborta si algun nombre no
+    sigue el patron NNNN_nombre.sql, si un numero se repite o si el head
+    autorizado no existe exactamente una vez."""
+    numeros: dict[str, pathlib.Path] = {}
+    for f in ficheros:
+        m = PATRON_MIGRATION.match(f.name)
+        if not m:
+            sys.exit(f"RECHAZADO: migration con nombre fuera de patron: {f.name}")
+        if m.group(1) in numeros:
+            sys.exit(f"RECHAZADO: numero de migration duplicado {m.group(1)}: "
+                     f"{numeros[m.group(1)].name} y {f.name}")
+        numeros[m.group(1)] = f
+    if head not in numeros:
+        sys.exit(f"RECHAZADO: el head autorizado {head} no esta en migrations/.")
+    ordenadas = [numeros[n] for n in sorted(numeros)]
+    a_aplicar = [f for f in ordenadas if PATRON_MIGRATION.match(f.name).group(1) <= head]
+    omitidas = [f for f in ordenadas if PATRON_MIGRATION.match(f.name).group(1) > head]
+    return a_aplicar, omitidas
 
 
 def _exigir_local(dsn: str) -> dict:
@@ -63,8 +105,7 @@ def _crear_base(admin_dsn: str, recrear: bool) -> None:
     return roles
 
 
-def _aplicar_cadena(dsn_dev: str, roles_existentes: int) -> str:
-    ficheros = sorted((RAIZ / "migrations").glob("0*.sql"))
+def _aplicar_cadena(dsn_dev: str, roles_existentes: int, ficheros: list[pathlib.Path]) -> str:
     with psycopg.connect(dsn_dev, autocommit=True) as c:
         for f in ficheros:
             if f.name.startswith("0001_") and roles_existentes:
@@ -107,13 +148,17 @@ def main() -> None:
     ap.add_argument("--admin-dsn", required=True, help="DSN administrativo LOCAL (sin dbname o con postgres)")
     ap.add_argument("--recrear", action="store_true")
     a = ap.parse_args()
+    # Validacion de la cadena ANTES de tocar ninguna base.
+    a_aplicar, omitidas = seleccionar_cadena(sorted((RAIZ / "migrations").glob("0*.sql")))
     roles = _crear_base(a.admin_dsn, a.recrear)
     partes = _exigir_local(a.admin_dsn)
     partes["dbname"] = BASE_DEV
     dsn_dev = make_conninfo(**partes)
-    head = _aplicar_cadena(dsn_dev, roles)
+    head = _aplicar_cadena(dsn_dev, roles, a_aplicar)
     _fixtures(dsn_dev)
-    print(f"OK {BASE_DEV} head={head}")
+    print(f"OK {BASE_DEV} head={head} (autorizado {HEAD_AUTORIZADO_ENVDEV})")
+    for f in omitidas:
+        print(f"OMITIDA por encima del head autorizado: {f.name}")
     print(f"GAPTO_DEV_OWNER_USER_ID={OWNER}")
     print(f"CUENTA_SINTETICA={CUENTA}")
 
