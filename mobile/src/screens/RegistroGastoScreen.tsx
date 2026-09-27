@@ -4,7 +4,8 @@
 // Ruta: mobile/src/screens/RegistroGastoScreen.tsx
 // Descripción: FORM-VS01 — implementación funcional PROVISIONAL sobre Design System F09 (no es mockup aprobado). Tarea inmersiva CREATE: cabecera de tarea, sin barra inferior (F09 BLOQUE A). Pantalla corta: importe, concepto, ¿cuenta para presupuesto? (Sí/No sin preselección), «Solo mío» explícito, cuenta de pago, fecha visible. Cada valor muestra su origen: decisión, inferido visible o pendiente (mandato §8).
 // v0.2.0 (F05-D003 REG-01): fecha común gasto/pago editable (Hoy · Ayer · Otra, ≤ hoy) con propuesta recargada por fecha; financiación visible y sellada: «Financiado por ti · cuenta 100 % tuya» (aceptación implícita, con vía «No es así») o «Financiación no determinada»; un rechazo por propuesta obsoleta recarga la propuesta.
-// Versión: 0.2.0
+// v0.3.0 (F05 — VS-01 · Alineación visual, A2 — aplicación prospectiva de REG-SPEC-01 SPEC-08, no corrección retrospectiva de VS-01): «Registrar gasto» permanece desactivado mientras falte una decisión bloqueante de REG-01 (importe válido, concepto, presupuestable, cuenta de pago —incluido «Cargando…»— o fecha válida ≤ hoy) y la pantalla indica, de forma visible y accesible, qué falta sin necesidad de pulsar. Los errores de formato de importe y fecha se muestran al escribir. La atribución sin respuesta no bloquea. Payload, API y validación del servidor sin cambios.
+// Versión: 0.3.0
 // ============================================================
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -15,7 +16,7 @@ import type { ClienteApi, CuentaPago } from '../api/cliente';
 import { BotonPrimario, BotonTexto, Chip, EstadoDato, Segmentado } from '../components/Basicos';
 import { ayer, ddmmaaaaAIso, fechaCortaIso, isoADdmmaaaa, isoLocal } from '../domain/fechas';
 import { formatearEur, parsearImporte } from '../domain/importe';
-import { Borrador, borradorInicial, Errores, esFechaIso } from '../domain/intencion';
+import { Borrador, borradorInicial, Errores, esFechaIso, validar } from '../domain/intencion';
 import { useEnvioGasto } from '../state/useEnvioGasto';
 import { useTema } from '../theme/tema';
 import { espacio, importe, radio, TACTIL_MIN, tipo } from '../theme/tokens';
@@ -77,6 +78,17 @@ export function RegistroGastoScreen(p: {
   const modificado =
     b.importeTexto.trim() !== '' || b.concepto.trim() !== '' || b.presupuestable !== null || b.soloMio || b.cuentaOrigen === 'USUARIO' || b.fechaOrigen === 'USUARIO' || b.propuestaRechazada;
   const cuentaSel = cuentas.fase === 'OK' ? cuentas.lista.find((x) => x.cuenta_id === b.cuentaId) : undefined;
+
+  // SPEC-08: decisiones bloqueantes de REG-01 que faltan, calculadas en cada render
+  // con la MISMA validación que protege el sellado (sin duplicar reglas).
+  const pendientes = validar(b, hoyIso);
+  const listo = Object.keys(pendientes).length === 0;
+  const faltan = textoFaltan(pendientes, b.importeTexto);
+  // Errores de formato visibles al escribir (no requieren pulsar un botón desactivado).
+  const vivos: Errores = {};
+  if (b.importeTexto.trim() !== '' && pendientes.importe) vivos.importe = pendientes.importe;
+  if (pendientes.fecha && (otraFecha === null || otraFecha.length >= 10)) vivos.fecha = pendientes.fecha;
+  const visibles: Errores = { ...errores, ...vivos };
 
   const cambiar = (parche: Partial<Borrador>) => {
     if (bloqueado) return;
@@ -151,8 +163,8 @@ export function RegistroGastoScreen(p: {
         ) : null}
 
         {/* Importe — DS-05 «Campo con icono €» */}
-        <Campo etiqueta="Importe" error={errores.importe}>
-          <View style={[s.importeCaja, { backgroundColor: c.surfacePrimary, borderColor: errores.importe ? c.critical : c.borderStandard }]}>
+        <Campo etiqueta="Importe" error={visibles.importe}>
+          <View style={[s.importeCaja, { backgroundColor: c.surfacePrimary, borderColor: visibles.importe ? c.critical : c.borderStandard }]}>
             <Text style={[importe.primary, { color: c.textSecondary }]}>€</Text>
             <TextInput
               testID="campo-importe"
@@ -172,7 +184,7 @@ export function RegistroGastoScreen(p: {
           </View>
         </Campo>
 
-        <Campo etiqueta="Concepto" error={errores.concepto}>
+        <Campo etiqueta="Concepto" error={visibles.concepto}>
           <TextInput
             ref={conceptoRef}
             testID="campo-concepto"
@@ -183,11 +195,11 @@ export function RegistroGastoScreen(p: {
             placeholder="Ej. Café"
             placeholderTextColor={c.textSecondary}
             maxLength={200}
-            style={[tipo.body, s.input, { color: c.textPrimary, backgroundColor: c.surfacePrimary, borderColor: errores.concepto ? c.critical : c.borderStandard }]}
+            style={[tipo.body, s.input, { color: c.textPrimary, backgroundColor: c.surfacePrimary, borderColor: visibles.concepto ? c.critical : c.borderStandard }]}
           />
         </Campo>
 
-        <Campo etiqueta="¿Cuenta para el presupuesto?" error={errores.presupuestable}>
+        <Campo etiqueta="¿Cuenta para el presupuesto?" error={visibles.presupuestable}>
           <Segmentado<boolean>
             testIDBase="presupuestable"
             etiquetaGrupo="¿Cuenta para el presupuesto?"
@@ -209,7 +221,7 @@ export function RegistroGastoScreen(p: {
           </Text>
         </Campo>
 
-        <Campo etiqueta="Pagado con" error={errores.cuenta}>
+        <Campo etiqueta="Pagado con" error={visibles.cuenta}>
           {cuentas.fase === 'CARGANDO' ? <EstadoDato estado="CARGANDO" /> : null}
           {cuentas.fase === 'ERROR' ? (
             <Pressable testID="cuentas-error" accessibilityRole="button" onPress={() => cargarCuentas(b.fechaHecho)} style={{ minHeight: TACTIL_MIN }}>
@@ -254,7 +266,7 @@ export function RegistroGastoScreen(p: {
         </Campo>
 
         {/* Fecha común del gasto y del pago (REG-01): propuesta «Hoy», editable, nunca futura. */}
-        <Campo etiqueta="Fecha" error={errores.fecha}>
+        <Campo etiqueta="Fecha" error={visibles.fecha}>
           <View style={s.chips}>
             <Chip testID="fecha-hoy" etiqueta="Hoy" seleccionado={otraFecha === null && b.fechaHecho === hoyIso}
               onPress={() => { if (bloqueado) return; setOtraFecha(null); cambiar({ fechaHecho: hoyIso, fechaOrigen: 'INFERIDO' }); }} />
@@ -277,7 +289,7 @@ export function RegistroGastoScreen(p: {
               placeholderTextColor={c.textSecondary}
               inputMode="numeric"
               maxLength={10}
-              style={[tipo.body, s.input, { color: c.textPrimary, backgroundColor: c.surfacePrimary, borderColor: errores.fecha ? c.critical : c.borderStandard }]}
+              style={[tipo.body, s.input, { color: c.textPrimary, backgroundColor: c.surfacePrimary, borderColor: visibles.fecha ? c.critical : c.borderStandard }]}
             />
           ) : null}
           <Text testID="fecha" style={[tipo.footnote, { color: c.textSecondary }]}>
@@ -298,6 +310,11 @@ export function RegistroGastoScreen(p: {
           </View>
         ) : null}
 
+        {!listo && estado.fase !== 'INDETERMINADO' && estado.fase !== 'ENVIANDO' ? (
+          <Text testID="faltan" accessibilityLiveRegion="polite" style={[tipo.footnote, { color: c.textSecondary }]}>
+            {faltan}
+          </Text>
+        ) : null}
         {estado.fase === 'INDETERMINADO' ? (
           <BotonPrimario testID="reintentar" titulo="Reintentar" onPress={reintentar} />
         ) : (
@@ -305,12 +322,33 @@ export function RegistroGastoScreen(p: {
             testID="registrar"
             titulo={estado.fase === 'ENVIANDO' ? 'Guardando…' : 'Registrar gasto'}
             cargando={estado.fase === 'ENVIANDO'}
+            deshabilitado={!listo}
+            ayuda={listo ? undefined : faltan}
             onPress={onRegistrar}
           />
         )}
       </ScrollView>
     </KeyboardAvoidingView>
   );
+}
+
+const NOMBRE_FALTA: Record<keyof Errores, string> = {
+  importe: 'importe',
+  concepto: 'concepto',
+  presupuestable: 'si cuenta para el presupuesto',
+  cuenta: 'cuenta de pago',
+  fecha: 'fecha válida',
+};
+
+/** «Para registrar falta: importe, concepto y cuenta de pago.» (orden del formulario). */
+export function textoFaltan(e: Errores, importeTexto: string): string {
+  const orden: (keyof Errores)[] = ['importe', 'concepto', 'presupuestable', 'cuenta', 'fecha'];
+  const partes = orden
+    .filter((k) => e[k])
+    .map((k) => (k === 'importe' && importeTexto.trim() !== '' ? 'importe válido' : NOMBRE_FALTA[k]));
+  if (partes.length === 0) return '';
+  const lista = partes.length === 1 ? partes[0] : `${partes.slice(0, -1).join(', ')} y ${partes[partes.length - 1]}`;
+  return `Para registrar falta: ${lista}.`;
 }
 
 function Campo({ etiqueta, error, children }: { etiqueta: string; error?: string; children: React.ReactNode }) {

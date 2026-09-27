@@ -4,7 +4,8 @@
 // Ruta: mobile/src/screens/HomeScreen.tsx
 // Descripción: HOME-01 (F09 §4) — esqueleto estructural completo en el orden aprobado: Cabecera, Liquidez, Acciones rápidas, Mes actual, [Requiere atención solo cuando exista], Próximos movimientos, Patrimonio total. Único dato real en VS-01: «Gastos» del mes vía lectura estrecha provisional (candidata F08). Los bloques sin read model autorizado muestran estado «No disponible» (DS-RULE-40) y NUNCA 0 € ni datos mock. Marcados internamente PENDIENTE_READ_MODEL.
 // v0.2.0 (F05-D003 §16.6): el bloque canónico «Este mes» ya no muestra cifras (Ingresos, Gastos, Resultado y presupuesto «No disponible»); la única lectura real va en una tarjeta SEPARADA «Gasto atribuible registrado este mes · parcial», que no es gasto total, resultado, presupuesto ni liquidez.
-// Versión: 0.2.0
+// v0.3.0 (F05 — VS-01 · Alineación visual, A1): los bloques dejan de ser tarjetas blancas (F09 §6 «pocas tarjetas y pocos bordes», HOME-01): se asientan sobre el fondo y se separan con una línea estructural; «Acciones rápidas» usa el mismo bloque sin línea porque el hero ya delimita. El hero conserva su contrato (accentSurface, sin degradado ni ilustración: C3b fuera de alcance). La lectura parcial sigue en un bloque SEPARADO de «Este mes» (F05-D003 §16.6). Sin HEX ni tokens nuevos.
+// Versión: 0.3.0
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -71,8 +72,7 @@ export function HomeScreen(p: { cliente: ClienteApi; ahora: () => Date; refresco
       </View>
 
       {/* 3. Acciones rápidas (§4.4): máx. 4, una fila. VS-01 implementa solo «Gasto». */}
-      <View style={{ gap: espacio.m }}>
-        <Text style={[tipo.titleSmall, { color: c.textPrimary, fontSize: 19 }]}>Acciones rápidas</Text>
+      <Seccion testID="bloque-acciones" titulo="Acciones rápidas" separada={false}>
         <View style={s.fila}>
           <Pressable
             testID="accion-gasto"
@@ -88,7 +88,7 @@ export function HomeScreen(p: { cliente: ClienteApi; ahora: () => Date; refresco
             <Text style={[tipo.caption, { color: c.textSecondary }]}>Registrar</Text>
           </Pressable>
         </View>
-      </View>
+      </Seccion>
 
       {/* 4. Mes actual (§4.5): Ingresos · Gastos · Resultado + presupuesto */}
       <Seccion testID="bloque-mes" titulo="Este mes" derecha={<Text style={[tipo.subheadline, { color: c.textSecondary }]}>{nombreMes(hoy)}</Text>}>
@@ -112,7 +112,7 @@ export function HomeScreen(p: { cliente: ClienteApi; ahora: () => Date; refresco
         </View>
       </Seccion>
 
-      {/* Lectura PARCIAL de VS-01 (F05-D003 §16.6): tarjeta separada, fuera del
+      {/* Lectura PARCIAL de VS-01 (F05-D003 §16.6): bloque separado, fuera del
              bloque «Este mes». Solo gasto atribuible a ti ya registrado. */}
       <Seccion
         testID="bloque-gasto-parcial"

@@ -2,8 +2,9 @@
 // GAPTO MOBILE 2027
 // Fichero: tokens.ts
 // Ruta: mobile/src/theme/tokens.ts
-// Descripción: Tokens del Design System F09 (DS-01 color, DS-02 tipografía, DS-03 geometría). Capa física -> semántica; los componentes consumen solo semántica (DS-RULE-12). HEX extraídos de la lámina DS-01 v1.0 y verificados por contraste en __tests__/contraste.test.ts antes de usarse (F09 §12.92.8). 'accentSurface' es DERIVADO (tinte del hero HOME-01), no figura en DS-01.
-// Versión: 0.1.0
+// Descripción: Tokens del Design System F09 (DS-01 color, DS-02 tipografía, DS-03 geometría). Capa física -> semántica; los componentes consumen solo semántica (DS-RULE-12). HEX extraídos de la lámina DS-01 v1.0 y verificados por contraste en __tests__/dominio.test.ts antes de usarse (F09 §12.92.8). 'accentSurface' es DERIVADO (tinte del hero HOME-01), no figura en DS-01.
+// v0.1.1: corrección editorial de la referencia al test de contraste (dominio.test.ts); sin cambio de valores.
+// Versión: 0.1.1
 // ============================================================
 
 import { TextStyle } from 'react-native';

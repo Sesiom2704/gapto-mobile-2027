@@ -4,10 +4,12 @@
 // Ruta: mobile/__tests__/vs01.test.tsx
 // Descripción: Tests de cliente VS-01 (mandato §22): Home, acción rápida, validación, «Solo mío» explícito, presupuestable no inventado, intención correcta, doble tap, timeout conserva identidad, error no muestra éxito, éxito refresca Home desde backend.
 // v0.2.0 (F05-D003): tarjeta parcial de Home fuera de «Este mes», fecha editable ≤ hoy, financiación visible y sellada, rechazo por propuesta obsoleta.
-// Versión: 0.2.0
+// v0.3.0 (F05 — VS-01 · Alineación visual): A1 — los bloques de Home no son tarjetas; A2 — SPEC-08: «Registrar gasto» desactivado mientras falte una decisión bloqueante, con indicación visible de lo que falta. Los tests de validación (antes: pulsar y leer errores) comprueban ahora el estado disabled de forma discriminante y conservan la propiedad «ante cualquier condición bloqueante no se produce ninguna petición ni mutación».
+// Versión: 0.3.0
 // ============================================================
 
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -58,6 +60,19 @@ function crearFake(
   return { cliente, enviados, fechasConsultadas, lecturas: () => lecturasHome };
 }
 
+/** Ninguna petición de escritura ni mutación: ni llamadas al cliente ni payloads. */
+function sinEscritura(f: ReturnType<typeof crearFake>) {
+  expect(f.cliente.registrarGastoPagado).not.toHaveBeenCalled();
+  expect(f.enviados).toHaveLength(0);
+}
+
+/** Pulsa «Registrar gasto» estando desactivado y comprueba que no escribe nada. */
+async function pulsarBloqueado(f: ReturnType<typeof crearFake>) {
+  expect(screen.getByTestId('registrar')).toBeDisabled();
+  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
+  sinEscritura(f);
+}
+
 let contadorIds = 0;
 const nuevoId = () => `00000000-0000-4000-8000-${String(++contadorIds).padStart(12, '0')}`;
 
@@ -105,7 +120,6 @@ test('Home (F05-D003 §16.6): la cifra real va en tarjeta PARCIAL separada, nunc
   const f = crearFake({ gastos: [gasto('12.40')] });
   montar(f.cliente);
   await screen.findByText('12,40 €');
-  const { within } = require('@testing-library/react-native');
   expect(within(screen.getByTestId('bloque-mes')).queryAllByText(/€/)).toHaveLength(0);
   expect(within(screen.getByTestId('bloque-mes')).getAllByText('No disponible').length).toBe(4);
   const tarjeta = within(screen.getByTestId('bloque-gasto-parcial'));
@@ -136,29 +150,37 @@ test('la acción rápida abre el registro y oculta la barra inferior (tarea CREA
   expect(screen.queryByTestId('tab-INICIO')).toBeNull();
 });
 
-test('validación local de importe y concepto; nada se envía', async () => {
+test('validación local de importe y concepto: botón desactivado, errores al escribir, nada se envía', async () => {
   const f = crearFake();
   montar(f.cliente);
   await abrirFormulario();
   fireEvent.changeText(screen.getByTestId('campo-importe'), '3,505');
   fireEvent.press(screen.getByTestId('presupuestable-true'));
-  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
+  // El error de formato se ve sin pulsar nada (SPEC-08: no depende del botón desactivado).
   expect(screen.getByText('Máximo dos decimales.')).toBeTruthy();
-  expect(screen.getByText('Indica el concepto.')).toBeTruthy();
+  expect(screen.getByTestId('faltan').props.children).toBe('Para registrar falta: importe válido y concepto.');
+  await pulsarBloqueado(f);
   fireEvent.changeText(screen.getByTestId('campo-importe'), '0');
-  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
   expect(screen.getByText('El importe debe ser mayor que 0.')).toBeTruthy();
-  expect(f.enviados).toHaveLength(0);
+  await pulsarBloqueado(f);
+  // Discriminante inverso: completar lo que falta habilita el botón.
+  fireEvent.changeText(screen.getByTestId('campo-importe'), '3,50');
+  fireEvent.changeText(screen.getByTestId('campo-concepto'), 'Café');
+  expect(screen.getByTestId('registrar')).toBeEnabled();
+  expect(screen.queryByTestId('faltan')).toBeNull();
+  sinEscritura(f);
 });
 
-test('presupuestable no se inventa: sin elección no hay envío', async () => {
+test('presupuestable no se inventa: sin elección el botón está desactivado y no hay envío', async () => {
   const f = crearFake();
   montar(f.cliente);
   await abrirFormulario();
   rellenar({ presupuestable: null });
-  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
-  expect(screen.getByText('Elige si cuenta para el presupuesto.')).toBeTruthy();
-  expect(f.enviados).toHaveLength(0);
+  expect(screen.getByTestId('faltan').props.children).toBe('Para registrar falta: si cuenta para el presupuesto.');
+  await pulsarBloqueado(f);
+  fireEvent.press(screen.getByTestId('presupuestable-false'));
+  expect(screen.getByTestId('registrar')).toBeEnabled();
+  sinEscritura(f);
 });
 
 test('«Solo mío» exige acción explícita: sin tocarlo se envía SIN_INDICAR', async () => {
@@ -318,19 +340,21 @@ test('fecha: «Ayer» recarga la propuesta de ESA fecha y se sella como fecha de
   expect(f.enviados[0].financiacion.estado).toBe('PROPUESTA_ACEPTADA');
 });
 
-test('fecha: otra fecha futura o inválida no se envía', async () => {
+test('fecha: otra fecha futura o inválida desactiva el botón y no se envía', async () => {
   const f = crearFake();
   montar(f.cliente);
   await abrirFormulario();
   rellenar();
+  expect(screen.getByTestId('registrar')).toBeEnabled();
   fireEvent.press(screen.getByTestId('fecha-otra'));
   fireEvent.changeText(screen.getByTestId('campo-fecha'), '25/09/2026');
-  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
   expect(screen.getByText('Solo gastos ya ocurridos: la fecha no puede ser futura.')).toBeTruthy();
+  expect(screen.getByTestId('faltan').props.children).toBe('Para registrar falta: fecha válida.');
+  await pulsarBloqueado(f);
   fireEvent.changeText(screen.getByTestId('campo-fecha'), '31/02/2026');
-  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
   expect(screen.getByText('Fecha no válida (dd/mm/aaaa).')).toBeTruthy();
-  expect(f.enviados).toHaveLength(0);
+  await pulsarBloqueado(f);
+  expect(f.fechasConsultadas).not.toContain('2026-09-25'); // una fecha futura ni siquiera pide propuesta
 });
 
 test('propuesta obsoleta: rechazo definitivo, se recarga la propuesta y el siguiente envío usa identidad nueva', async () => {
@@ -356,4 +380,59 @@ test('propuesta obsoleta: rechazo definitivo, se recarga la propuesta y el sigui
   await screen.findByTestId('registro-exito');
   expect(f.enviados[1].intencion_id).not.toBe(f.enviados[0].intencion_id);
   expect(f.enviados[1].financiacion).toEqual({ estado: 'NO_DETERMINADA' });
+});
+
+// ------------------------------------------------ SPEC-08 (REG-SPEC-01), aplicación prospectiva
+test('SPEC-08: al abrir, todo lo bloqueante pendiente se indica y el botón está desactivado', async () => {
+  const f = crearFake();
+  montar(f.cliente);
+  await abrirFormulario();
+  expect(screen.getByTestId('registrar')).toBeDisabled();
+  expect(screen.getByTestId('faltan').props.children).toBe('Para registrar falta: importe, concepto y si cuenta para el presupuesto.');
+  expect(screen.getByTestId('registrar').props.accessibilityHint).toBe('Para registrar falta: importe, concepto y si cuenta para el presupuesto.');
+  await pulsarBloqueado(f);
+});
+
+test('SPEC-08: «Pagado con» cargando bloquea aunque el resto esté completo', async () => {
+  let liberar: () => void = () => {};
+  const f = crearFake();
+  const original = f.cliente.cuentasPago as jest.Mock;
+  const impl = original.getMockImplementation()!;
+  original.mockImplementation((fecha: string) => new Promise((res) => { liberar = () => res(impl(fecha)); }));
+  montar(f.cliente);
+  fireEvent.press(await screen.findByTestId('accion-gasto'));
+  await screen.findByTestId('registro-form');
+  rellenar();
+  expect(screen.getByText('Cargando…')).toBeTruthy();
+  expect(screen.getByTestId('faltan').props.children).toBe('Para registrar falta: cuenta de pago.');
+  await pulsarBloqueado(f);
+  await act(async () => liberar());
+  await screen.findByTestId('financiacion');
+  expect(screen.getByTestId('registrar')).toBeEnabled();
+  sinEscritura(f);
+});
+
+test('SPEC-08: la atribución sin respuesta NO bloquea', async () => {
+  const f = crearFake();
+  montar(f.cliente);
+  await abrirFormulario();
+  rellenar({ soloMio: false });
+  expect(screen.getByTestId('registrar')).toBeEnabled();
+  expect(screen.queryByTestId('faltan')).toBeNull();
+});
+
+// ------------------------------------------------ A1 (F09 §6): bloques sin tarjeta
+test('A1: los bloques de Home no son tarjetas (sin superficie propia ni radio) y se separan con línea estructural', async () => {
+  const f = crearFake({ gastos: [gasto('12.40')] });
+  montar(f.cliente);
+  await screen.findByText('12,40 €');
+  for (const id of ['bloque-acciones', 'bloque-mes', 'bloque-gasto-parcial', 'bloque-proximos', 'bloque-patrimonio']) {
+    const st = StyleSheet.flatten(screen.getByTestId(id).props.style);
+    expect(st.backgroundColor).toBeUndefined();
+    expect(st.borderRadius).toBeUndefined();
+  }
+  expect(StyleSheet.flatten(screen.getByTestId('bloque-acciones').props.style).borderTopWidth).toBeUndefined(); // el hero ya delimita
+  expect(StyleSheet.flatten(screen.getByTestId('bloque-mes').props.style).borderTopWidth).toBe(1);
+  // La lectura parcial sigue siendo un bloque DISTINTO de «Este mes» (F05-D003 §16.6).
+  expect(within(screen.getByTestId('bloque-mes')).queryByTestId('bloque-gasto-parcial')).toBeNull();
 });

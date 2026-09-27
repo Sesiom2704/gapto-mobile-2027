@@ -3,7 +3,8 @@
 // Fichero: Basicos.tsx
 // Ruta: mobile/src/components/Basicos.tsx
 // Descripción: Componentes básicos derivados de DS-05 (botón primario/texto, sección, chip, control segmentado) y DS-06 §9 (estado del dato). Consumen solo tokens semánticos.
-// Versión: 0.1.0
+// v0.2.0 (F05 — VS-01 · Alineación visual, A1/A2): «Seccion» deja de ser tarjeta (sin superficie propia ni radio): se asienta sobre el fondo y se separa con una única línea estructural `separator` (F09 §6 «pocas tarjetas y pocos bordes»; sin HEX ni tokens nuevos). «BotonPrimario» declara `disabled` nativo y acepta `ayuda` (accessibilityHint) para decir qué falta (REG-SPEC-01 SPEC-08).
+// Versión: 0.2.0
 // ============================================================
 
 import React from 'react';
@@ -12,7 +13,7 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View, ViewStyle } from 
 import { useTema } from '../theme/tema';
 import { espacio, radio, TACTIL_MIN, tipo } from '../theme/tokens';
 
-export function BotonPrimario(p: { titulo: string; onPress: () => void; cargando?: boolean; deshabilitado?: boolean; testID?: string }) {
+export function BotonPrimario(p: { titulo: string; onPress: () => void; cargando?: boolean; deshabilitado?: boolean; ayuda?: string; testID?: string }) {
   const { c } = useTema();
   const off = p.deshabilitado || p.cargando;
   return (
@@ -21,6 +22,8 @@ export function BotonPrimario(p: { titulo: string; onPress: () => void; cargando
       accessibilityRole="button"
       accessibilityState={{ disabled: !!off, busy: !!p.cargando }}
       accessibilityLabel={p.titulo}
+      accessibilityHint={p.ayuda}
+      disabled={!!off}
       onPress={off ? undefined : p.onPress}
       style={({ pressed }) => [s.primario, { backgroundColor: off ? c.surfaceSecondary : c.accent, opacity: pressed ? 0.85 : 1 }]}
     >
@@ -39,10 +42,16 @@ export function BotonTexto(p: { titulo: string; onPress: () => void; testID?: st
   );
 }
 
-export function Seccion(p: { titulo: string; derecha?: React.ReactNode; children: React.ReactNode; testID?: string; estilo?: ViewStyle }) {
+/**
+ * Bloque de pantalla (F09 §6): sin tarjeta. Se asienta sobre el fondo y, cuando
+ * sigue a otro bloque, se separa con una sola línea estructural `separator`.
+ * `separada=false` cuando el bloque anterior ya delimita (p. ej. el hero).
+ */
+export function Seccion(p: { titulo: string; derecha?: React.ReactNode; children: React.ReactNode; testID?: string; estilo?: ViewStyle; separada?: boolean }) {
   const { c } = useTema();
+  const separada = p.separada ?? true;
   return (
-    <View testID={p.testID} style={[s.seccion, { backgroundColor: c.surfacePrimary }, p.estilo]}>
+    <View testID={p.testID} style={[s.seccion, separada && [s.seccionSeparada, { borderTopColor: c.separator }], p.estilo]}>
       <View style={s.cabSeccion}>
         <Text accessibilityRole="header" style={[tipo.titleSmall, { color: c.textPrimary, fontSize: 19 }]}>{p.titulo}</Text>
         {p.derecha}
@@ -122,7 +131,8 @@ export function Segmentado<T extends string | boolean>(p: {
 const s = StyleSheet.create({
   primario: { minHeight: 52, borderRadius: radio.m, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', paddingHorizontal: espacio.l },
   texto: { minHeight: TACTIL_MIN, justifyContent: 'center', paddingHorizontal: espacio.xs },
-  seccion: { borderRadius: radio.l, padding: espacio.l, gap: espacio.m },
+  seccion: { gap: espacio.m },
+  seccionSeparada: { borderTopWidth: 1, paddingTop: espacio.l },
   cabSeccion: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   estadoFila: { flexDirection: 'row', alignItems: 'center', gap: espacio.s, flexWrap: 'wrap' },
   chipEstado: { borderRadius: radio.pill, paddingHorizontal: espacio.s, paddingVertical: 2 },

@@ -17,7 +17,12 @@
 #   comprueba que el bloque «Este mes» no muestra importes (la cifra real va
 #   en la tarjeta parcial separada) y anade al manifest la financiacion y la
 #   fecha comun gasto/pago persistidas.
-# Version: 0.2.0
+#   v0.3.0 (F05 — VS-01 · Alineacion visual, A2/SPEC-08): comprueba que
+#   «Registrar gasto» esta DESACTIVADO (aria-disabled) al abrir el formulario y
+#   la indicacion visible de lo que falta, que pulsarlo no crea ningun hecho y
+#   que se habilita al completar las decisiones bloqueantes; captura Home y
+#   formulario tambien en esquema oscuro (emulacion prefers-color-scheme).
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
@@ -34,6 +39,15 @@ import psycopg
 from playwright.sync_api import sync_playwright
 
 ETIQUETA = "EVIDENCIA WEB/VIEWPORT — NO EVIDENCIA iOS"
+
+
+def contar_hechos(dsn: str, owner: str, concepto: str) -> int:
+    with psycopg.connect(dsn) as c, c.transaction():
+        cur = c.cursor()
+        cur.execute("SET LOCAL ROLE gapto_runtime")
+        cur.execute("SELECT set_config('gapto.owner_user_id', %s, true)", (owner,))
+        cur.execute("SELECT count(*) FROM gapto.hechos_financieros WHERE concepto=%s", (concepto,))
+        return cur.fetchone()[0]
 
 
 def leer_bd(dsn: str, owner: str, concepto: str) -> dict:
@@ -95,12 +109,28 @@ def main() -> None:
         metricas["desbordes_horizontales_formulario"] = desbordes
         if desbordes:
             raise SystemExit(f"FALLO LAYOUT: desbordamiento horizontal en {desbordes}")
+        # SPEC-08: desactivado al abrir, con indicacion visible; pulsarlo no escribe.
+        boton = page.get_by_test_id("registrar")
+        spec08 = {"disabled_al_abrir": boton.get_attribute("aria-disabled"),
+                  "faltan_al_abrir": page.get_by_test_id("faltan").inner_text()}
+        if spec08["disabled_al_abrir"] != "true":
+            raise SystemExit("FALLO SPEC-08: «Registrar gasto» no esta desactivado con decisiones pendientes")
+        boton.click(force=True)
+        page.wait_for_timeout(800)
+        spec08["hechos_tras_pulsar_desactivado"] = contar_hechos(os.environ["GAPTO_DATABASE_URL"], os.environ["GAPTO_DEV_OWNER_USER_ID"], a.concepto)
+        if spec08["hechos_tras_pulsar_desactivado"] != 0 or page.get_by_test_id("registro-exito").count():
+            raise SystemExit("FALLO SPEC-08: pulsar el boton desactivado ha producido un registro")
+        shot(page, "02a_formulario_vacio")
         page.get_by_test_id("campo-importe").fill(a.importe); metricas["campos_escritos"] += 1
         page.get_by_test_id("campo-concepto").click(); metricas["taps"] += 1
         page.get_by_test_id("campo-concepto").fill(a.concepto); metricas["campos_escritos"] += 1
         page.get_by_test_id("presupuestable-true").click(); metricas["taps"] += 1; metricas["decisiones_explicitas"] += 1
         page.get_by_test_id("solo-mio").click(); metricas["taps"] += 1; metricas["decisiones_explicitas"] += 1
         page.wait_for_timeout(300)
+        spec08["disabled_completo"] = boton.get_attribute("aria-disabled")
+        spec08["faltan_completo"] = page.get_by_test_id("faltan").count()
+        if spec08["disabled_completo"] == "true" or spec08["faltan_completo"]:
+            raise SystemExit("FALLO SPEC-08: el boton sigue desactivado con el formulario completo")
         shot(page, "02_formulario")
         page.get_by_test_id("registrar").click(); metricas["taps"] += 1
         page.get_by_test_id("registro-exito").wait_for(timeout=15000)
@@ -115,11 +145,19 @@ def main() -> None:
             raise SystemExit("FALLO F05-D003 §16.6: el bloque «Este mes» muestra importes")
         page.wait_for_timeout(300)
         shot(page, "04_home_refrescada")
+        # Esquema oscuro (mismos tokens DS-01 Dark): solo capturas de revision visual.
+        page.emulate_media(color_scheme="dark")
+        page.wait_for_timeout(500)
+        shot(page, "05_home_dark")
+        page.get_by_test_id("accion-gasto").click()
+        page.get_by_test_id("financiacion").wait_for()
+        page.wait_for_timeout(500)
+        shot(page, "06_formulario_dark")
         nav.close()
 
     bd = leer_bd(os.environ["GAPTO_DATABASE_URL"], os.environ["GAPTO_DEV_OWNER_USER_ID"], a.concepto)
     manifest = {"etiqueta": ETIQUETA, "run_id": run, "gastos_home_antes": antes, "gastos_home_despues": despues,
-                "financiacion_visible": financiacion_visible, "importes_en_bloque_mes": importes_en_mes,
+                "financiacion_visible": financiacion_visible, "importes_en_bloque_mes": importes_en_mes, "spec08": spec08,
                 "bd": bd, "metricas": metricas, "errores_consola": len(consola), "capturas": capturas}
     (salida / f"VS01_{run}_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
