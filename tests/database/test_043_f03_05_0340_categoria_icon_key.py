@@ -7,8 +7,13 @@
 #              sin UNIQUE, sin FK y con CHECK de no vacío y sin espacios
 #              exteriores (btrim).
 #
-#              DISCRIMINACIÓN. Contra 0330 falla todo el módulo: la columna no
-#              existe. Catálogo de mutantes y discriminante de cada uno:
+#              DISCRIMINACIÓN. Contra 0330 fallan 22 de los 24 casos: la columna
+#              no existe. Los otros dos, test_0340_triggers_de_la_tabla_intactos
+#              y test_0340_force_rls_intacto, son GUARDAS DE REGRESIÓN: afirman
+#              propiedades que 0330 ya cumple y que 0340 no debe romper, y
+#              discriminan M10 y cualquier trigger nuevo, no la ausencia de
+#              0340. El gate de mutación ejecutable es
+#              scripts/mutantes/f03_05_0340.py. Catálogo y discriminantes:
 #                M1 sin CHECK ................. test_0340_rechaza (todos)
 #                M2 CHECK solo <> '' .......... test_0340_rechaza[...espacio...]
 #                M3 ltrim en vez de btrim ..... test_0340_rechaza[espacio_final]
@@ -34,6 +39,10 @@
 #              El CHECK aprobado recorta solo U+0020: tabuladores o U+00A0
 #              exteriores no se prueban en ningún sentido, para no congelar
 #              como contrato ni la aceptación ni el rechazo.
+# Versión: 0.1.1  -- P1 de 0340 en réplica local: la cabecera afirmaba que
+#                   contra 0330 fallaba todo el módulo y dos casos son guardas
+#                   de regresión que 0330 ya cumple. Corrección SOLO de
+#                   comentario; ningún caso ni aserción cambia.
 # Versión: 0.1.0
 # ============================================================
 
