@@ -11,6 +11,11 @@
 #              P7-C huerfanos (FK + referencias uuid sin FK); P7-D destinos polimorficos; P7-E trazabilidad de
 #              importacion. Fail-closed: cualquier violacion o deriva -> veredicto NO_SUPERADO. Parametrizable por
 #              esquema para poder discriminarse con esquemas sinteticos en tests.
+# Versión: 0.2.0  -- F03-05 / D-197 (condicional a Q-2). main() admite --head para
+#                   comparar R25 contra la referencia D-111 de otro head declarado en
+#                   run_clean_room.py (p. ej. 0340). Por defecto "0330": el
+#                   comportamiento historico de RV3-GATE no cambia. Una referencia
+#                   pendiente (None) aborta: fail-closed.
 # Versión: 0.1.0
 # ============================================================
 from __future__ import annotations
@@ -432,10 +437,15 @@ def main(argv=None) -> int:
     ap.add_argument("--hechos", required=True, type=int)
     ap.add_argument("--registros-origen", required=True, type=int)
     ap.add_argument("--salida", required=True, type=Path)
+    ap.add_argument("--head", default="0330", help="head cuya referencia D-111 certifica R25")
     a = ap.parse_args(argv)
+    referencia = huellas_referencia(a.head)
+    if referencia is None:
+        print(f"ERROR: la referencia D-111 del head {a.head} esta pendiente", file=sys.stderr)
+        return 2
     res = auditar(a.dsn_auditoria, a.esquema, a.xid_carga,
                   {"mapeos": a.mapeos, "hechos": a.hechos, "registros_origen": a.registros_origen},
-                  huellas_referencia("0330"))
+                  referencia)
     a.salida.mkdir(parents=True, exist_ok=True)
     (a.salida / "rv3_p7_integridad.json").write_text(json.dumps(res, ensure_ascii=False, indent=1, default=str),
                                                      encoding="utf-8")
