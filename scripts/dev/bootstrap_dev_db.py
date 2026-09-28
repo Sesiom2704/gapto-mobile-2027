@@ -28,6 +28,10 @@
 #   Uso:
 #     python scripts/dev/bootstrap_dev_db.py --admin-dsn "host=/tmp port=5433 user=postgres" [--recrear]
 #   Imprime GAPTO_DEV_OWNER_USER_ID para configurar el adaptador.
+# Version: 0.3.0  -- D-197: HEAD_AUTORIZADO_ENVDEV pasa de "0330" a "0340"
+#                   tras la evidencia de 0340 (replica local D-189, Neon test,
+#                   PASS_BASE_CLEANROOM_F03_0002_0340, mutation gate 10/10 y
+#                   recertificacion RV3 diferencial). ENV-DEV no certifica.
 # Version: 0.2.0  -- D-197 / revision P0 0340 (hallazgo 1): techo de head
 #                   fail-closed HEAD_AUTORIZADO_ENVDEV = "0330"; validacion de la
 #                   cadena antes de CREATE/DROP DATABASE; la salida lista las
@@ -57,7 +61,7 @@ HOSTS_LOCALES = {"localhost", "127.0.0.1", "::1"}
 
 # Head maximo que ENV-DEV puede materializar. Cambiarlo es una decision
 # revisada (commit propio), nunca un efecto lateral de publicar migrations.
-HEAD_AUTORIZADO_ENVDEV = "0330"
+HEAD_AUTORIZADO_ENVDEV = "0340"
 PATRON_MIGRATION = re.compile(r"^(\d{4})_[a-z0-9_]+\.sql$")
 
 
