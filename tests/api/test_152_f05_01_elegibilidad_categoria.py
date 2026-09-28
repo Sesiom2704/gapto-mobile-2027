@@ -15,7 +15,11 @@
 #     - concurrencia en AMBOS ordenes con barrera explicita (WM 12C.1): registro
 #       con FOR SHARE frente a desactivacion y frente a cambio de ambito.
 #   Base local desechable 0001..0340 (estos tests confirman filas).
-# Version: 0.1.0
+#
+#   v0.1.1: los PID de las sesiones de barrera se leen con pg_backend_pid()
+#   (fh.pid_servidor); `info.backend_pid` no es el PID real tras el proxy de
+#   Neon. No cambia ninguna asercion ni el mecanismo observado.
+# Version: 0.1.1
 # ============================================================
 
 from __future__ import annotations
@@ -236,7 +240,7 @@ def test_orden_1_catalogo_primero_registro_espera_y_relee(tenant, mutacion, dese
     b = fh.sesion_owner(owner)
     try:
         b.execute(_MUTACIONES[mutacion], (cat,))
-        pid_b = b.info.backend_pid
+        pid_b = fh.pid_servidor(b)
         hilo = threading.Thread(target=lambda: salida.update(r=cli.post(URL, json=cuerpo, headers=h.AUTH)))
         hilo.start()
         assert fh.esperar_bloqueo((pid_b,)), "el registro no espero el lock de la categoria"
@@ -273,13 +277,13 @@ def test_orden_2_registro_primero_catalogo_espera(tenant, mutacion):
     hilo_b = None
     try:
         c.execute("SELECT id FROM gapto.usuarios WHERE id=%s FOR UPDATE", (owner,))
-        pid_c = c.info.backend_pid
+        pid_c = fh.pid_servidor(c)
         hilo_a = threading.Thread(target=lambda: salida.update(r=cli.post(URL, json=cuerpo, headers=h.AUTH)))
         hilo_a.start()
         assert fh.esperar_bloqueo((pid_c,)), "el registro no llego a retenerse tras la guarda"
 
         b = fh.sesion_owner(owner)
-        pid_b = b.info.backend_pid
+        pid_b = fh.pid_servidor(b)
 
         def _mutar():
             try:

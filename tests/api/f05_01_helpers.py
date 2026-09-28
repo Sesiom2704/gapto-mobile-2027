@@ -8,7 +8,13 @@
 #   de fixture son sinteticos y se crean como gapto_owner con la GUC del
 #   tenant (WM 12C.7). Exigen GAPTO_TEST_DATABASE_URL apuntando a una base
 #   DESECHABLE con la cadena 0001..0340 (estos tests confirman filas).
-# Version: 0.1.0
+#
+#   v0.1.1: `pid_servidor` obtiene el PID con `pg_backend_pid()`. El
+#   `info.backend_pid` del cliente es el que anuncia el protocolo
+#   (BackendKeyData); detras del proxy de Neon NO coincide con el PID real del
+#   servidor y el test no podia localizar su propia sesion en
+#   pg_stat_activity (fallo de test observado en gapto2027_cleanroom).
+# Version: 0.1.1
 # ============================================================
 
 from __future__ import annotations
@@ -104,6 +110,11 @@ def sesion_owner(owner: uuid.UUID) -> psycopg.Connection:
     cur.execute("SET LOCAL ROLE gapto_owner")
     cur.execute("SELECT set_config('gapto.owner_user_id', %s, true)", (str(owner),))
     return c
+
+
+def pid_servidor(conexion: psycopg.Connection) -> int:
+    """PID REAL del backend, valido para cruzar con pg_stat_activity."""
+    return conexion.execute("SELECT pg_backend_pid()").fetchone()[0]
 
 
 def esperar_bloqueo(pids_excluidos: tuple[int, ...], limite_s: float = 8.0, minimo: int = 1) -> bool:
