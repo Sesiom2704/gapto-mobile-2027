@@ -10,7 +10,12 @@
 #   v0.2.0 (F05-01, S4; diseno S4 v0.2): DTO de los comandos de gestion del
 #   arbol (C06). Sin icon_key (Q4) ni presupuestable_default editable (Q6).
 #   `presupuestable_default` es obligatorio en el alta y sin default.
-# Version: 0.2.0
+#
+#   v0.3.0 (F05-01, S6-C07; AJ-C07-08): el arbol (GET /v1/categorias) usa
+#   `CategoriaNodoArbol`, que amplia el nodo con sus magnitudes, `capturable`
+#   y `motivo_no_capturable`. Los comandos C06 siguen devolviendo
+#   `CategoriaNodo` sin cambios. Lectura: nunca autoridad de persistencia.
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
@@ -38,8 +43,25 @@ class CategoriaNodo(_Estricto):
     row_version: int
 
 
+class MagnitudCategoria(_Estricto):
+    magnitud_id: uuid.UUID
+    nombre: str
+    obligatoria: bool
+    orden: int
+    enabled: bool
+    unidad_default: str
+    precision_decimales: int
+    row_version: int
+
+
+class CategoriaNodoArbol(CategoriaNodo):
+    magnitudes: list[MagnitudCategoria]
+    capturable: bool
+    motivo_no_capturable: Literal["MAGNITUD_OBLIGATORIA_NO_DISPONIBLE"] | None
+
+
 class ArbolCategorias(_Estricto):
-    categorias: list[CategoriaNodo]
+    categorias: list[CategoriaNodoArbol]
 
 
 class UsoCategoria(_Estricto):

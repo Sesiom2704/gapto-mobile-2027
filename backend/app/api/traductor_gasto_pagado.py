@@ -40,7 +40,21 @@
 #   guarda C-a la ejecuta `ejecucion_gasto_pagado.registrar_gasto_pagado`
 #   antes de llamar aqui, y el inventario C-b exige que ese sea el unico
 #   llamador productivo.
-# Version: 0.3.0
+#
+#   v0.4.0 (F05-01, S6-C07; F05-D014 §28.2): las magnitudes selladas (solo
+#   con estado CATEGORIA, ya validadas por C07 en la ejecucion) se componen
+#   como contexto del hecho en OP-22:
+#     - identidad de cada fila hecho_magnitudes = uuid5(intencion_id,
+#       "magnitud:<magnitud_id>") (AJ-C07-03): el cliente no envia UUID de
+#       fila y el orden del array no afecta a la identidad;
+#     - `unidad` = None: el writer F04 toma `magnitudes.unidad_default` como
+#       SNAPSHOT al crear la fila y un replay no la compara con la
+#       configuracion actual (AJ-C07-05, F05-01-R17);
+#     - `valor` = Decimal del texto sellado, sin redondeo (C07 ya rechazo el
+#       exceso de precision).
+#   Sin categoria o sin magnitudes el contexto queda vacio: las intenciones
+#   anteriores reproducen exactamente el mismo agregado.
+# Version: 0.4.0
 # ============================================================
 
 from __future__ import annotations
@@ -51,7 +65,12 @@ import uuid
 from app.api.dto_vs01 import IntencionGastoPagado
 from app.core.errores import CodigoError, ErrorMotor
 from app.core.modelos import DatosCreacionHecho
-from app.core.modelos_compuesto import DatosHechoCompuesto, DatosPagoCompuesto
+from app.core.modelos_compuesto import (
+    DatosContextoHecho,
+    DatosHechoCompuesto,
+    DatosMagnitudHecho,
+    DatosPagoCompuesto,
+)
 from app.core.modelos_efectos import DatosAtribucion, DatosEfecto
 from app.core.modelos_tesoreria import DatosAportacion, DatosConciliacion, DatosMovimiento
 from app.core.unidad_trabajo import SesionMotor
@@ -62,6 +81,11 @@ ESCALA = decimal.Decimal("0.0001")
 
 def _id(intencion: uuid.UUID, rol: str) -> uuid.UUID:
     return uuid.uuid5(intencion, f"gapto.vs01.gasto_pagado.{rol}")
+
+
+def id_magnitud_hecho(intencion_id: uuid.UUID, magnitud_id: uuid.UUID) -> uuid.UUID:
+    """Identidad de la fila hecho_magnitudes de una intencion (AJ-C07-03)."""
+    return uuid.uuid5(intencion_id, f"magnitud:{magnitud_id}")
 
 
 def leer_actor_self(sesion: SesionMotor) -> uuid.UUID:
@@ -163,9 +187,20 @@ def componer(intencion: IntencionGastoPagado, actor_self_id: uuid.UUID) -> Datos
             ),
         )
 
+    magnitudes = tuple(
+        DatosMagnitudHecho(
+            registro_id=id_magnitud_hecho(iid, m.magnitud_id),
+            magnitud_id=m.magnitud_id,
+            valor=decimal.Decimal(m.valor),
+            unidad=None,
+        )
+        for m in sorted(intencion.magnitudes, key=lambda m: m.magnitud_id)
+    )
+
     return DatosHechoCompuesto(
         hecho=hecho,
         efectos=[efecto],
         pagos=[DatosPagoCompuesto(movimiento=movimiento, conciliacion=conciliacion)],
         aportaciones=list(aportaciones),
+        contexto=DatosContextoHecho(magnitudes=magnitudes),
     )

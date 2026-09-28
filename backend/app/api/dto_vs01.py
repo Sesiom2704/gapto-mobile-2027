@@ -29,18 +29,36 @@
 #                            un valor que el cliente pueda enviar, no significa
 #                            "Sin categoria" y no invoca la guarda. F05-01 no es
 #                            cerrable mientras el registro ordinario la necesite.
-# Version: 0.3.0
+#
+#   v0.4.0 (F05-01, S6-C07; F05-D014 §28.2, AJ-C07-02): solo la variante
+#   CATEGORIA admite `magnitudes: [{magnitud_id, valor}]`. Reglas ESTRUCTURALES
+#   (422, sin tocar la base):
+#     - lista ausente = lista vacia; `magnitudes: null` -> 422;
+#     - `magnitud_id` repetida -> 422 (el orden del array no es identidad);
+#     - campo `unidad` -> 422 (la unidad nunca viaja en el wire, AJ-C07-05;
+#       lo garantiza `extra="forbid"`);
+#     - cualquier magnitud dentro de SIN_CATEGORIA -> 422 (idem);
+#     - `valor` es TEXTO decimal canonico con punto: sin exponente, coma,
+#       signo `+`, NaN, infinitos, ceros a la izquierda ni forma negativa del
+#       cero; nunca un numero JSON (StrictStr). Longitud maxima estructural
+#       VALOR_MAX_CARACTERES.
+#   La admisibilidad de cada magnitud (asociacion, `enabled`, precision,
+#   capacidad numeric(18,6)) la decide el servidor dentro de la transaccion
+#   (captura_magnitudes.py), nunca este DTO. Ausencia de una magnitud =
+#   desconocido, nunca cero.
+# Version: 0.4.0
 # ============================================================
 
 from __future__ import annotations
 
 import datetime as dt
 import decimal
+import re
 import uuid
 from typing import Annotated, Literal, Union
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator, model_validator
 
 AtribucionVs01 = Literal["SOLO_MIO", "SIN_INDICAR"]
 
@@ -83,12 +101,50 @@ FinanciacionVs01 = Annotated[
 ]
 
 
+#: Sintaxis canonica del valor de una magnitud (AJ-C07-02): entero sin ceros
+#: a la izquierda, signo menos opcional y parte decimal opcional con punto.
+VALOR_CANONICO = re.compile(r"-?(0|[1-9][0-9]*)(\.[0-9]+)?")
+#: Limite estructural del texto. numeric(18,6) admite 12 digitos enteros; el
+#: margen deja pasar ceros decimales a la derecha (p. ej. "1.230") y el
+#: servidor decide precision y capacidad (409).
+VALOR_MAX_CARACTERES = 40
+
+
+class MagnitudCapturada(_Estricto):
+    """Valor CONOCIDO de una magnitud de la categoria elegida. Desconocido =
+    no enviar la magnitud. Sin `unidad` (la toma el writer F04 como snapshot
+    de `magnitudes.unidad_default`) y sin UUID de fila (lo deriva el
+    adaptador, AJ-C07-03)."""
+
+    magnitud_id: uuid.UUID
+    valor: StrictStr = Field(min_length=1, max_length=VALOR_MAX_CARACTERES)
+
+    @field_validator("valor")
+    @classmethod
+    def _valor_canonico(cls, valor: str) -> str:
+        if VALOR_CANONICO.fullmatch(valor) is None:
+            raise ValueError("valor debe ser texto decimal canonico con punto (p. ej. 12.5)")
+        if valor.startswith("-") and decimal.Decimal(valor) == 0:
+            raise ValueError("valor: el cero no lleva signo")
+        return valor
+
+
 class CategoriaSeleccionada(_Estricto):
     """Seleccion explicita de una categoria (C01). Su elegibilidad la decide
-    la guarda C-a dentro de la transaccion, nunca este DTO."""
+    la guarda C-a dentro de la transaccion, nunca este DTO. Solo esta variante
+    admite magnitudes (C07, AJ-C07-02)."""
 
     estado: Literal["CATEGORIA"]
     categoria_id: uuid.UUID
+    # Lista ausente = lista vacia. `null` no es una tupla: 422 por tipo.
+    magnitudes: tuple[MagnitudCapturada, ...] = ()
+
+    @model_validator(mode="after")
+    def _sin_magnitud_repetida(self) -> "CategoriaSeleccionada":
+        ids = [m.magnitud_id for m in self.magnitudes]
+        if len(ids) != len(set(ids)):
+            raise ValueError("magnitud_id repetida en la peticion")
+        return self
 
 
 class SinCategoria(_Estricto):
@@ -143,6 +199,13 @@ class IntencionGastoPagado(_Estricto):
         if isinstance(self.categoria, CategoriaSeleccionada):
             return self.categoria.categoria_id
         return None
+
+    @property
+    def magnitudes(self) -> tuple[MagnitudCapturada, ...]:
+        """Magnitudes selladas; solo existen con estado CATEGORIA."""
+        if isinstance(self.categoria, CategoriaSeleccionada):
+            return self.categoria.magnitudes
+        return ()
 
     @field_validator("fecha_hecho")
     @classmethod

@@ -9,7 +9,8 @@
 #     - owner, enabled y ambito releidos dentro de la transaccion;
 #     - tres estados categoriales (CATEGORIA / SIN_CATEGORIA /
 #       NO_CAPTURADA_LEGACY derivado solo de la ausencia);
-#     - bloqueo transitorio CATEGORIA_REQUIERE_MAGNITUDES sin mutacion parcial;
+#     - magnitud obligatoria sin informar bloquea sin mutacion parcial (C07;
+#       desde v0.2.0 con el codigo definitivo MAGNITUD_OBLIGATORIA_AUSENTE);
 #     - identidad antes que guarda (reintento idempotente con la categoria ya
 #       deshabilitada);
 #     - concurrencia en AMBOS ordenes con barrera explicita (WM 12C.1): registro
@@ -19,7 +20,12 @@
 #   v0.1.1: los PID de las sesiones de barrera se leen con pg_backend_pid()
 #   (fh.pid_servidor); `info.backend_pid` no es el PID real tras el proxy de
 #   Neon. No cambia ninguna asercion ni el mecanismo observado.
-# Version: 0.1.1
+#
+#   v0.2.0 (F05-01, S6-C07; F05-D014 §28.2): se retira el bloqueo transitorio
+#   CATEGORIA_REQUIERE_MAGNITUDES. La propiedad que protegia el test se
+#   conserva (obligatoria sin informar -> 409 sin escritura) con el codigo
+#   definitivo de C07. La bateria completa de C07 esta en test_158.
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -171,14 +177,14 @@ def test_legacy_no_es_un_valor_enviable(tenant, valor):
     _cero(owner, _hid(cuerpo))
 
 
-# ------------------------------------------------------------ AJ-02 (C07)
+# ------------------------------------------------------------ C07 (S6-C07)
 def test_magnitud_obligatoria_bloquea_sin_mutacion_parcial(tenant):
     owner, _, cuenta = tenant
     cat = fh.crear_categoria(owner, "Combustible", "GASTO")
     fh.crear_magnitud_categoria(owner, cat, obligatoria=True)
     cuerpo = _con_categoria(cuenta, cat)
     r = h.cliente(owner).post(URL, json=cuerpo, headers=h.AUTH)
-    assert r.status_code == 409 and r.json()["codigo"] == "CATEGORIA_REQUIERE_MAGNITUDES"
+    assert r.status_code == 409 and r.json()["codigo"] == "MAGNITUD_OBLIGATORIA_AUSENTE"
     _cero(owner, _hid(cuerpo))
 
 

@@ -25,7 +25,14 @@
 #   gestion del arbol (codigos F05 y F04 reutilizados). Mensajes fijos; el
 #   detalle solo se devuelve para CAMBIO_AMBITO_REQUIERE_CONFIRMACION (el
 #   recuento vigente que el usuario debe confirmar).
-# Version: 0.4.0
+#
+#   v0.5.0 (F05-01, S6-C07; F05-D014 §28.2): se retira el bloqueo transitorio
+#   CATEGORIA_REQUIERE_MAGNITUDES y se anaden los cuatro codigos F05 de C07
+#   (409, definitivos, sin escritura previa): CATEGORIA_MAGNITUD_NO_DISPONIBLE,
+#   MAGNITUD_NO_ADMITIDA, MAGNITUD_OBLIGATORIA_AUSENTE y
+#   MAGNITUD_VALOR_NO_VALIDO. Los errores de forma del wire (null, repetida,
+#   `unidad`, sintaxis) son 422 ENTRADA_INVALIDA del DTO.
+# Version: 0.5.0
 # ============================================================
 
 from __future__ import annotations
@@ -104,10 +111,25 @@ _RECHAZOS_INTEGRACION: dict[str, tuple[int, str]] = {
         "Esa categoría ya no se puede elegir para este registro. "
         "Elige otra o «Sin categoría»: no se ha guardado nada.",
     ),
-    "CATEGORIA_REQUIERE_MAGNITUDES": (
+    "CATEGORIA_MAGNITUD_NO_DISPONIBLE": (
         409,
-        "Esa categoría pide datos adicionales que esta pantalla todavía no "
-        "recoge. Elige otra o «Sin categoría»: no se ha guardado nada.",
+        "Esa categoría pide un dato que ya no está disponible. "
+        "Elige otra o «Sin categoría»: no se ha guardado nada.",
+    ),
+    "MAGNITUD_NO_ADMITIDA": (
+        409,
+        "Uno de los datos adicionales no corresponde a esta categoría. "
+        "Revísalos: no se ha guardado nada.",
+    ),
+    "MAGNITUD_OBLIGATORIA_AUSENTE": (
+        409,
+        "Falta un dato obligatorio de esta categoría. Complétalo, elige otra "
+        "o «Sin categoría»: no se ha guardado nada.",
+    ),
+    "MAGNITUD_VALOR_NO_VALIDO": (
+        409,
+        "Un dato adicional tiene más decimales o es mayor de lo permitido. "
+        "Revísalo: no se ha guardado nada.",
     ),
 }
 

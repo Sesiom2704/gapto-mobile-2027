@@ -24,7 +24,17 @@
 #   todo el subarbol, row_version, confirmacion de ambito, cadena de
 #   ancestros, idempotencia del alta, traduccion fisica por identidad y
 #   matriz de auditoria), mas los discriminantes test_155..157.
-# Version: 0.2.0
+#
+#   v0.3.0 (F05-01, S6-C07; F05-D014 §28.4): se RETIRA C07 (bloqueo
+#   transitorio CATEGORIA_REQUIERE_MAGNITUDES, retirado del codigo) y se
+#   anaden M01..M22: locks FOR SHARE y su orden, invocacion y posicion de C07,
+#   regla de valor sin redondeo, orden de los codigos, identidad derivada,
+#   unidad snapshot, wire estructural, lectura de capturabilidad e inventario
+#   de escritores de magnitudes. Discriminantes nuevos: test_158 y test_154.
+#   Equivalente documentado: E02 (C07 sin comprobacion explicita de owner de
+#   la magnitud: no existe; la RLS bajo gapto_runtime la oculta y el WITH
+#   CHECK de categoria_magnitudes impide asociarla).
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
@@ -45,6 +55,8 @@ T154 = "tests/api/test_154_f05_01_inventario_categorias.py"
 T155 = "tests/api/test_155_f05_01_gestion_categorias.py"
 T156 = "tests/api/test_156_f05_01_concurrencia_catalogo.py"
 T157 = "tests/api/test_157_f05_01_bolsa_intensional.py"
+T158 = "tests/api/test_158_f05_01_c07_magnitudes.py"
+CAP = "backend/app/api/captura_magnitudes.py"
 SERV = "backend/app/categorias/servicio.py"
 REPO = "backend/app/categorias/repositorio.py"
 NORM = "backend/app/categorias/normalizacion.py"
@@ -83,9 +95,10 @@ MUTANTES = [
      [(EJEC, GUARDA_EN_RAMA, ""),
       (EJEC, "        if not ya_materializada:\n", GUARDA_ANTES_IDENTIDAD + "        if not ya_materializada:\n")],
      [T152, T154]),
-    ("C06", "guarda no invocada", [(EJEC, "                if rechazo is not None:\n                    return RechazoIntegracion(rechazo)\n", "")], [T152]),
-    ("C07", "sin bloqueo transitorio de magnitudes obligatorias",
-     [(ELEG, "    if requiere is not None and requiere[0]:\n", "    if False:\n")], [T152]),
+    ("C06", "guarda no invocada",
+     [(EJEC, "                rechazo = validar_seleccion_categoria(sesion, intencion.categoria_id, \"GASTO\")\n"
+             "                if rechazo is not None:\n                    return RechazoIntegracion(rechazo)\n",
+       "                rechazo = validar_seleccion_categoria(sesion, intencion.categoria_id, \"GASTO\")\n")], [T152]),
     ("C08", "null explicito aceptado como legacy",
      [(DTO, '        if isinstance(datos, dict) and "categoria" in datos and datos["categoria"] is None:\n',
        "        if False:\n")], [T152]),
@@ -154,6 +167,63 @@ MUTANTES = [
     ("S21", "reactivacion en cascada",
      [(SERV, '    rechazo = _escribir(sesion, lambda: repo.actualizar(sesion, categoria_id, {"enabled": True}))\n',
        '    rechazo = _escribir(sesion, lambda: [repo.actualizar(sesion, i, {"enabled": True}) for i in [categoria_id] + repo.subarbol(sesion, categoria_id)])\n')], [T155]),
+    # ---------------------------------------------------------------- S6-C07
+    ("M01", "asociaciones sin FOR SHARE",
+     [(CAP, '"WHERE categoria_id = %s ORDER BY id FOR SHARE",', '"WHERE categoria_id = %s ORDER BY id",')], [T158]),
+    ("M02", "magnitudes sin FOR SHARE",
+     [(CAP, '"WHERE id = ANY(%s) ORDER BY id FOR SHARE",', '"WHERE id = ANY(%s) ORDER BY id",')], [T158]),
+    ("M03", "orden de locks invertido (magnitudes antes que asociaciones)",
+     [(CAP, "    asociaciones = _asociaciones(sesion, categoria_id)\n    fichas = _magnitudes(sesion, sorted({a.magnitud_id for a in asociaciones}))\n", "    previas = sesion.conexion.execute(\"SELECT magnitud_id FROM gapto.categoria_magnitudes WHERE categoria_id = %s\", (categoria_id,)).fetchall()\n    fichas = _magnitudes(sesion, sorted({f[0] for f in previas}))\n    asociaciones = _asociaciones(sesion, categoria_id)\n")], [T158]),
+    ("M04", "C07 no invocada", [(EJEC, "                # 3c. C07: magnitudes de la categoria elegida (servidor autoridad).\n                rechazo = validar_magnitudes(sesion, intencion.categoria_id, intencion.magnitudes)\n                if rechazo is not None:\n                    return RechazoIntegracion(rechazo)\n", "")], [T158, T154]),
+    ("M05", "C07 antes del reconocimiento de identidad",
+     [(EJEC, "                # 3c. C07: magnitudes de la categoria elegida (servidor autoridad).\n                rechazo = validar_magnitudes(sesion, intencion.categoria_id, intencion.magnitudes)\n                if rechazo is not None:\n                    return RechazoIntegracion(rechazo)\n", ""),
+      (EJEC, "        if not ya_materializada:\n", "        if intencion.categoria_id is not None:\n            rechazo = validar_magnitudes(sesion, intencion.categoria_id, intencion.magnitudes)\n            if rechazo is not None:\n                return RechazoIntegracion(rechazo)\n" + "        if not ya_materializada:\n")],
+     [T158, T154]),
+    ("M06", "precision ignorada (PostgreSQL redondearia)",
+     [(CAP, "    return decimales <= precision_decimales and enteros <= DIGITOS_ENTEROS_MAX",
+       "    return enteros <= DIGITOS_ENTEROS_MAX")], [T158]),
+    ("M07", "capacidad numeric(18,6) no comprobada",
+     [(CAP, "    return decimales <= precision_decimales and enteros <= DIGITOS_ENTEROS_MAX",
+       "    return decimales <= precision_decimales")], [T158]),
+    ("M08", "los ceros a la derecha cuentan como precision",
+     [(CAP, "d.normalize().as_tuple()", "d.as_tuple()")], [T158]),
+    ("M09", "obligatoria ausente no comprobada", [(CAP, "    if any(a.obligatoria and a.magnitud_id not in enviadas for a in asociaciones):\n        return CODIGO_MAGNITUD_OBLIGATORIA_AUSENTE\n", "")], [T158]),
+    ("M10", "obligatoria deshabilitada no comprobada", [(CAP, "    if any(a.obligatoria and not disponible(a.magnitud_id) for a in asociaciones):\n        return CODIGO_CATEGORIA_MAGNITUD_NO_DISPONIBLE\n", "")], [T158]),
+    ("M11", "opcional deshabilitada admitida",
+     [(CAP, "    if any(m not in por_id or not disponible(m) for m in enviadas):\n",
+       "    if any(m not in por_id for m in enviadas):\n")], [T158]),
+    ("M12", "magnitud no asociada admitida",
+     [(CAP, "    if any(m not in por_id or not disponible(m) for m in enviadas):\n",
+       "    if any(m in por_id and not disponible(m) for m in enviadas):\n")], [T158]),
+    ("M13", "orden de codigos 2 <-> 3",
+     [(CAP, "        return CODIGO_MAGNITUD_NO_ADMITIDA\n", "        return CODIGO_INTERCAMBIO\n"),
+      (CAP, "        return CODIGO_MAGNITUD_OBLIGATORIA_AUSENTE\n", "        return CODIGO_MAGNITUD_NO_ADMITIDA\n"),
+      (CAP, "        return CODIGO_INTERCAMBIO\n", "        return CODIGO_MAGNITUD_OBLIGATORIA_AUSENTE\n")], [T158]),
+    ("M14", "identidad de fila aleatoria (reintento no idempotente)",
+     [(TRAD, 'return uuid.uuid5(intencion_id, f"magnitud:{magnitud_id}")', "return uuid.uuid4()")], [T158]),
+    ("M15", "identidad de fila con otra derivacion",
+     [(TRAD, 'return uuid.uuid5(intencion_id, f"magnitud:{magnitud_id}")',
+       "return uuid.uuid5(magnitud_id, str(intencion_id))")], [T158]),
+    ("M16", "unidad fijada por el adaptador en vez de snapshot F04",
+     [(TRAD, "            unidad=None,\n", '            unidad="u",\n')], [T158]),
+    ("M17", "duplicadas no rechazadas en el DTO",
+     [(DTO, '        if len(ids) != len(set(ids)):\n            raise ValueError("magnitud_id repetida en la peticion")\n', "")],
+     [T158]),
+    ("M18", "cero con signo aceptado",
+     [(DTO, '        if valor.startswith("-") and decimal.Decimal(valor) == 0:\n', "        if False:\n")], [T158]),
+    ("M19", "sintaxis admite signo +",
+     [(DTO, 'VALOR_CANONICO = re.compile(r"-?(0|', 'VALOR_CANONICO = re.compile(r"[-+]?(0|')], [T158]),
+    ("M20", "lectura: capturable ignora enabled",
+     [(LECT, "        if mid is None or not enabled:\n", "        if mid is None:\n")], [T158]),
+    ("M21", "lectura: opcional deshabilitada bloquea",
+     [(LECT, '            if obligatoria:\n                nodo["capturable"] = False\n',
+       '            if True:\n                nodo["capturable"] = False\n')], [T158]),
+    ("M22", "writer runtime de asociaciones (F05-01-R16)",
+     [(LECT, ANCLA_LECT, ANCLA_LECT + "\n\ndef _asociar(sesion, c, m):\n    sesion.uno(\"INSERT INTO gapto.categoria_magnitudes (categoria_id, magnitud_id) VALUES (%s, %s)\", (c, m))\n")],
+     [T154]),
+    ("M23", "la frontera escribe hecho_magnitudes sin OP-22",
+     [(LECT, ANCLA_LECT, ANCLA_LECT + "\n\ndef _atajo(sesion, h, m):\n    sesion.uno(\"INSERT INTO gapto.hecho_magnitudes (hecho_id, magnitud_id, valor, unidad) VALUES (%s, %s, 1, 'u')\", (h, m))\n")],
+     [T154]),
 ]
 
 
@@ -184,7 +254,7 @@ def main() -> None:
         sys.exit("Falta GAPTO_TEST_DATABASE_URL (base local desechable).")
     if recuperar_si_pendiente():
         sys.exit("Habia un mutante pendiente: restaurado y verificado. Resultado NO-PASS; relanzar.")
-    if correr([T152, T153, T154, T155, T156, T157]) != 0:
+    if correr([T152, T153, T154, T155, T156, T157, T158]) != 0:
         sys.exit("PREFLIGHT ROJO: no se muta nada.")
     veredictos = []
     for mid, desc, cambios, tests in MUTANTES:

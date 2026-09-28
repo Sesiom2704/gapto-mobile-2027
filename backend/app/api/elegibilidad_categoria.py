@@ -29,15 +29,15 @@
 #     DEUDA, DERECHO_COBRO, INVERSION, VALOR_ACTIVO -> solo categoria NULL
 #   AMBOS significa GASTO e INGRESO, nunca "cualquier naturaleza".
 #
-#   Bloqueo TRANSITORIO de magnitudes (mandato F05-01 backend v0.2, AJ-02):
-#   si la categoria tiene alguna `categoria_magnitudes.obligatoria = true`, el
-#   wire actual no puede materializarlas y la seleccion falla cerrado con
-#   CATEGORIA_REQUIERE_MAGNITUDES. NO es la implementacion de C07; F05-01 no
-#   es cerrable mientras este bloqueo sustituya a la captura de C07.
-#
 #   Los codigos son de la capa F05 y NO forman parte de la taxonomia F04
 #   (core/errores.py no se modifica).
-# Version: 0.1.0
+#
+#   v0.2.0 (F05-01, S6-C07; F05-D014 §28.2): se RETIRA el bloqueo transitorio
+#   CATEGORIA_REQUIERE_MAGNITUDES. La guarda vuelve a decidir solo la
+#   elegibilidad C02 (owner, `enabled`, `ambito`); las magnitudes las decide
+#   C07 (captura_magnitudes.py), que se ejecuta despues de esta guarda y bajo
+#   el mismo FOR SHARE de la categoria.
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -47,7 +47,6 @@ import uuid
 from app.core.unidad_trabajo import SesionMotor
 
 CODIGO_CATEGORIA_NO_ELEGIBLE = "CATEGORIA_NO_ELEGIBLE"
-CODIGO_CATEGORIA_REQUIERE_MAGNITUDES = "CATEGORIA_REQUIERE_MAGNITUDES"
 
 #: Matriz C02 (F05-D009 §23.2). Naturaleza -> ambitos admitidos. Una
 #: naturaleza con conjunto vacio solo admite categoria NULL.
@@ -92,12 +91,4 @@ def validar_seleccion_categoria(
         return CODIGO_CATEGORIA_NO_ELEGIBLE
     if not ambito_compatible(tipo_efecto, fila[2]):
         return CODIGO_CATEGORIA_NO_ELEGIBLE
-
-    requiere = sesion.uno(
-        "SELECT EXISTS (SELECT 1 FROM gapto.categoria_magnitudes "
-        "WHERE categoria_id = %s AND obligatoria)",
-        (categoria_id,),
-    )
-    if requiere is not None and requiere[0]:
-        return CODIGO_CATEGORIA_REQUIERE_MAGNITUDES
     return None

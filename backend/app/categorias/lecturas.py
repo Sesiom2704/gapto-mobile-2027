@@ -15,7 +15,18 @@
 #     categoria, por naturaleza. Es la informacion que C06 exige mostrar antes
 #     de confirmar un cambio de `ambito`.
 #   Orden estable: `orden`, `nombre`, `id`. El orden no es identidad.
-# Version: 0.1.0
+#
+#   v0.2.0 (F05-01, S6-C07; F05-D014 §28.2 AJ-C07-08): cada nodo de `arbol`
+#   incluye sus magnitudes (magnitud_id, nombre, obligatoria, orden, enabled,
+#   unidad_default, precision_decimales, row_version de la magnitud),
+#   ordenadas por orden de la asociacion -> nombre -> id, mas `capturable`
+#   (false si alguna asociacion OBLIGATORIA apunta a una magnitud
+#   deshabilitada o no visible) y `motivo_no_capturable` (None o
+#   MAGNITUD_OBLIGATORIA_NO_DISPONIBLE). Una opcional deshabilitada NO hace la
+#   categoria no capturable. `capturable` no sustituye a `enabled` ni a
+#   `ambito`, y esta lectura nunca es autoridad de persistencia: decide C07
+#   dentro de la transaccion del registro (captura_magnitudes.py). Sin locks.
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -40,6 +51,49 @@ _COLUMNAS = (
 )
 
 
+MOTIVO_OBLIGATORIA_NO_DISPONIBLE = "MAGNITUD_OBLIGATORIA_NO_DISPONIBLE"
+
+_COLUMNAS_MAGNITUD = (
+    "magnitud_id",
+    "nombre",
+    "obligatoria",
+    "orden",
+    "enabled",
+    "unidad_default",
+    "precision_decimales",
+    "row_version",
+)
+
+
+def _magnitudes_por_categoria(sesion: SesionMotor) -> dict[uuid.UUID, dict[str, Any]]:
+    """Asociaciones de las categorias del owner. LEFT JOIN: una obligatoria
+    hacia una magnitud no visible no se lista, pero hace la categoria no
+    capturable (mismo criterio fail-closed que C07)."""
+    with sesion.conexion.cursor() as cur:
+        cur.execute(
+            "SELECT cm.categoria_id, cm.obligatoria, cm.orden, m.id, m.nombre, m.enabled, "
+            "m.unidad_default, m.precision_decimales, m.row_version "
+            "FROM gapto.categoria_magnitudes cm "
+            "JOIN gapto.categorias_financieras c ON c.id = cm.categoria_id "
+            "LEFT JOIN gapto.magnitudes m ON m.id = cm.magnitud_id "
+            "WHERE c.owner_user_id = current_setting('gapto.owner_user_id')::uuid "
+            "ORDER BY cm.categoria_id, cm.orden, m.nombre, m.id"
+        )
+        filas = cur.fetchall()
+    salida: dict[uuid.UUID, dict[str, Any]] = {}
+    for cat, obligatoria, orden, mid, nombre, enabled, unidad, precision, version in filas:
+        nodo = salida.setdefault(cat, {"magnitudes": [], "capturable": True})
+        if mid is None or not enabled:
+            if obligatoria:
+                nodo["capturable"] = False
+            if mid is None:
+                continue
+        nodo["magnitudes"].append(
+            dict(zip(_COLUMNAS_MAGNITUD, (mid, nombre, obligatoria, orden, enabled, unidad, precision, version)))
+        )
+    return salida
+
+
 def arbol(sesion: SesionMotor) -> list[dict[str, Any]]:
     with sesion.conexion.cursor() as cur:
         cur.execute(
@@ -50,7 +104,16 @@ def arbol(sesion: SesionMotor) -> list[dict[str, Any]]:
             "ORDER BY orden, nombre, id"
         )
         filas = cur.fetchall()
-    return [dict(zip(_COLUMNAS, f)) for f in filas]
+    magnitudes = _magnitudes_por_categoria(sesion)
+    nodos = []
+    for f in filas:
+        nodo = dict(zip(_COLUMNAS, f))
+        extra = magnitudes.get(nodo["id"], {"magnitudes": [], "capturable": True})
+        nodo["magnitudes"] = extra["magnitudes"]
+        nodo["capturable"] = extra["capturable"]
+        nodo["motivo_no_capturable"] = None if extra["capturable"] else MOTIVO_OBLIGATORIA_NO_DISPONIBLE
+        nodos.append(nodo)
+    return nodos
 
 
 def uso_por_naturaleza(sesion: SesionMotor, categoria_id: uuid.UUID) -> dict[str, Any]:

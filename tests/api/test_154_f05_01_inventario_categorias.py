@@ -48,7 +48,19 @@
 #   UPDATE; DELETE = 0). I8: toda funcion publica de servicio.py toma el
 #   advisory como PRIMERA llamada, y las primitivas de escritura del
 #   repositorio solo se invocan desde servicio.py.
-# Version: 0.2.0
+#
+#   v0.3.0 (F05-01, S6-C07; F05-D014 §28.2 "Inventario C-b"): se amplia a
+#   las magnitudes.
+#   I4  ademas: C07 (`validar_magnitudes`) se invoca UNA vez, dentro de
+#       `not ya_materializada`, DESPUES de la guarda C-a y ANTES de `componer`.
+#   I9  Escritores de `magnitudes` y `categoria_magnitudes`: CERO en runtime
+#       (gate F05-01-R16: todo writer futuro de asociaciones exige decision y
+#       lock de la categoria padre). Escritores de `hecho_magnitudes`:
+#       exactamente las primitivas certificadas de F04 en
+#       contexto_repository.py (alta OP-22, correccion OP-21); la frontera F05
+#       no escribe `hecho_magnitudes` directamente (solo via OP-22). Se
+#       congela la propiedad (conjunto de escritores), no una cardinalidad.
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
@@ -88,6 +100,12 @@ REGISTRO: dict[tuple[str, str], tuple[str, str, str]] = {
         "R", "GET /v1/categorias/{id}/uso", "parametro de ruta de una lectura"),
     ("backend/app/categorias/lecturas.py", "uso_por_naturaleza"): (
         "R", "lectura S3", "recuento de uso historico (C06)"),
+    ("backend/app/categorias/lecturas.py", "_magnitudes_por_categoria"): (
+        "R", "lectura S6-C07", "magnitudes y capturabilidad por categoria (AJ-C07-08); no es autoridad"),
+    ("backend/app/api/captura_magnitudes.py", "validar_magnitudes"): (
+        "GUARDA", "F05-01 C07", "C07 servidor autoridad; invocada tras C-a y antes de componer (I4)"),
+    ("backend/app/api/captura_magnitudes.py", "_asociaciones"): (
+        "GUARDA", "F05-01 C07", "lectura FOR SHARE de las asociaciones de la categoria (AJ-C07-07)"),
     # --- catalogo S4 (escritor/lector de categorias_financieras)
     **{("backend/app/api/app.py", f"create_app.{n}"): ("CATALOGO", "ruta S4", "parametro de ruta del comando")
        for n in ("alta_categoria", "renombrar_categoria", "mover_categoria", "desactivar_categoria",
@@ -336,6 +354,34 @@ def _llamadas_directas(fn: ast.AST, nombre: str):
         pila.extend(ast.iter_child_nodes(n))
 
 
+def test_i4_c07_tras_la_guarda_y_antes_de_componer():
+    fn = _nodo("backend/app/api/ejecucion_gasto_pagado.py", "registrar_gasto_pagado.operacion")
+    guardas = _llamadas(fn, "validar_seleccion_categoria")
+    c07 = _llamadas(fn, "validar_magnitudes")
+    composiciones = _llamadas(fn, "componer")
+    assert len(c07) == 1, "C07 debe invocarse exactamente una vez"
+    assert guardas[0].lineno < c07[0].lineno < composiciones[0].lineno, "orden guarda -> C07 -> componer"
+    padres = [
+        n for n in ast.walk(fn)
+        if isinstance(n, ast.If) and any(g is c07[0] for g in ast.walk(n))
+    ]
+    assert any(
+        isinstance(i.test, ast.UnaryOp) and isinstance(i.test.op, ast.Not)
+        and isinstance(i.test.operand, ast.Name) and i.test.operand.id == "ya_materializada"
+        for i in padres
+    ), "C07 no esta subordinada al reconocimiento de identidad (AJ-C07-04)"
+
+
+def test_i4_c07_solo_se_invoca_desde_la_ejecucion():
+    llamadores = []
+    for p in _productivos_py():
+        arbol = ast.parse(p.read_bytes().decode("utf-8"))
+        for q, n in _funciones(arbol):
+            if any(True for _ in _llamadas_directas(n, "validar_magnitudes")):
+                llamadores.append((_rel(p), q))
+    assert llamadores == [("backend/app/api/ejecucion_gasto_pagado.py", "registrar_gasto_pagado.operacion")]
+
+
 # ------------------------------------------------------------------ I5
 _ESCRITURA = re.compile(
     r"\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM|MERGE\s+INTO|TRUNCATE(\s+TABLE)?)\s+(ONLY\s+)?(gapto\s*\.\s*)?\"?categorias_financieras\b",
@@ -377,6 +423,48 @@ def test_i5_escrituras_solo_en_las_funciones_autorizadas():
         if re.search(r"\b(INSERT\s+INTO|UPDATE)\s+gapto\.categorias_financieras", cuerpo):
             con_escritura.add((ruta, q))
     assert con_escritura == set(ESCRITORES_CATALOGO)
+
+
+# ------------------------------------------------------------------ I9
+def _escritura_de(tabla: str) -> re.Pattern:
+    return re.compile(
+        r"\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM|MERGE\s+INTO|TRUNCATE(\s+TABLE)?)\s+(ONLY\s+)?(gapto\s*\.\s*)?\"?"
+        + tabla + r"\b",
+        re.IGNORECASE,
+    )
+
+
+#: Escritores autorizados de hecho_magnitudes: primitivas certificadas F04.
+ESCRITORES_HECHO_MAGNITUDES = {
+    ("backend/app/repositories/contexto_repository.py", "insertar_magnitud"),
+    ("backend/app/repositories/contexto_repository.py", "eliminar_magnitud"),
+    ("backend/app/repositories/contexto_repository.py", "actualizar_magnitud"),
+}
+
+
+def test_i9_sin_escritores_runtime_de_magnitudes_ni_asociaciones():
+    for tabla in ("magnitudes", "categoria_magnitudes"):
+        patron = _escritura_de(tabla)
+        encontrados = sorted(_rel(p) for p, texto in _textos_productivos() if patron.search(texto))
+        assert encontrados == [], f"escritor runtime de {tabla} no autorizado (F05-01-R16): {encontrados}"
+
+
+def test_i9_escritores_de_hecho_magnitudes_solo_f04():
+    patron = _escritura_de("hecho_magnitudes")
+    hallados = set()
+    for p in _productivos_py():
+        texto = p.read_bytes().decode("utf-8")
+        if not patron.search(texto):
+            continue
+        lineas = texto.splitlines()
+        for q, n in _funciones(ast.parse(texto)):
+            if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if patron.search("\n".join(lineas[n.lineno - 1:n.end_lineno])):
+                hallados.add((_rel(p), q))
+    assert hallados == ESCRITORES_HECHO_MAGNITUDES, sorted(hallados ^ ESCRITORES_HECHO_MAGNITUDES)
+    for ruta, _ in hallados:
+        assert not ruta.startswith(FRONTERA), ruta
 
 
 # ------------------------------------------------------------------ I8

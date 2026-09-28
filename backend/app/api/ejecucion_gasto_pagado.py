@@ -55,13 +55,26 @@
 #   no escribe hecho_entidades, de modo que el advisory INVERSIONES no entra
 #   (F05-01-R11: cualquier slice que lo haga exige auditar antes el grafo).
 #   Los rechazos son valores de capa F05 (sin escritura previa).
-# Version: 0.3.0
+#
+#   v0.4.0 (F05-01, S6-C07; F05-D014 §28.2): C07 con el servidor como
+#   autoridad. Solo para intencion NUEVA con {estado: CATEGORIA}, DESPUES de
+#   la guarda C-a y ANTES de componer (paso 3c):
+#     cuenta -> identidad -> categoria (FOR SHARE) -> categoria_magnitudes
+#     (FOR SHARE, por id) -> magnitudes (FOR SHARE, por id) -> OP-22.
+#   Un reintento de una intencion ya materializada no revalida magnitudes
+#   (AJ-C07-04): OP-22 decide idempotencia o IDENTIDAD_REUTILIZADA por
+#   igualdad exacta del agregado, incluidas las filas de hecho_magnitudes.
+#   Orden de locks resultante: cuenta -> categoria -> categoria_magnitudes ->
+#   magnitudes -> raiz -> movimiento. Hoy no existe writer runtime de
+#   magnitudes ni de categoria_magnitudes (gate F05-01-R16).
+# Version: 0.4.0
 # ============================================================
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.api.captura_magnitudes import validar_magnitudes
 from app.api.dto_vs01 import IntencionGastoPagado
 from app.api.elegibilidad_categoria import validar_seleccion_categoria
 from app.api.traductor_gasto_pagado import componer, leer_actor_self, participacion_self_100
@@ -138,6 +151,10 @@ def registrar_gasto_pagado(
             # 3b. Guarda categorial C-a, solo para seleccion nueva explicita.
             if intencion.categoria_id is not None:
                 rechazo = validar_seleccion_categoria(sesion, intencion.categoria_id, "GASTO")
+                if rechazo is not None:
+                    return RechazoIntegracion(rechazo)
+                # 3c. C07: magnitudes de la categoria elegida (servidor autoridad).
+                rechazo = validar_magnitudes(sesion, intencion.categoria_id, intencion.magnitudes)
                 if rechazo is not None:
                     return RechazoIntegracion(rechazo)
 
