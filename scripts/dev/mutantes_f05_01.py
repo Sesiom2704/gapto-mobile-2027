@@ -18,7 +18,13 @@
 #         la RLS ya oculta la fila ajena; es defensa en profundidad.
 #   Requiere GAPTO_TEST_DATABASE_URL (base local desechable 0001..0340).
 #   No es evidencia de proveedor.
-# Version: 0.1.0
+#
+#   v0.2.0 (F05-01, S4/S5): mutantes S01..S18 de la gestion del arbol
+#   (advisory global y por comando, normalizacion, NULL-safe, RAMA sobre
+#   todo el subarbol, row_version, confirmacion de ambito, cadena de
+#   ancestros, idempotencia del alta, traduccion fisica por identidad y
+#   matriz de auditoria), mas los discriminantes test_155..157.
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -36,6 +42,12 @@ JOURNAL = RAIZ / ".mutantes_f05_01.journal.json"
 T152 = "tests/api/test_152_f05_01_elegibilidad_categoria.py"
 T153 = "tests/api/test_153_f05_01_lecturas_categorias.py"
 T154 = "tests/api/test_154_f05_01_inventario_categorias.py"
+T155 = "tests/api/test_155_f05_01_gestion_categorias.py"
+T156 = "tests/api/test_156_f05_01_concurrencia_catalogo.py"
+T157 = "tests/api/test_157_f05_01_bolsa_intensional.py"
+SERV = "backend/app/categorias/servicio.py"
+REPO = "backend/app/categorias/repositorio.py"
+NORM = "backend/app/categorias/normalizacion.py"
 ELEG = "backend/app/api/elegibilidad_categoria.py"
 EJEC = "backend/app/api/ejecucion_gasto_pagado.py"
 DTO = "backend/app/api/dto_vs01.py"
@@ -103,6 +115,45 @@ MUTANTES = [
      [T153]),
     ("C17", "el uso cuenta hechos anulados",
      [(LECT, "WHERE e.categoria_id = %s AND h.estado = 'ACTIVO' ", "WHERE e.categoria_id = %s ")], [T153]),
+    # ---------------------------------------------------------------- S4 / S5
+    ("S01", "advisory vaciado (ningun comando serializa)",
+     [(REPO, '    sesion.uno(\n        "SELECT pg_advisory_xact_lock(', '    return None\n    sesion.uno(\n        "SELECT pg_advisory_xact_lock(')],
+     [T156]),
+    ("S02", "mover sin advisory", [(SERV, "def mover(sesion: SesionMotor, *, categoria_id, parent_id, row_version: int) -> Resultado | Rechazo:\n    repo.tomar_advisory(sesion)\n",
+                                    "def mover(sesion: SesionMotor, *, categoria_id, parent_id, row_version: int) -> Resultado | Rechazo:\n")], [T154, T156]),
+    ("S03", "desactivar sin advisory", [(SERV, "def desactivar(sesion: SesionMotor, *, categoria_id, modo: str, row_version: int) -> Resultado | Rechazo:\n    repo.tomar_advisory(sesion)\n",
+                                         "def desactivar(sesion: SesionMotor, *, categoria_id, modo: str, row_version: int) -> Resultado | Rechazo:\n")], [T154, T156]),
+    ("S04", "orden sin advisory", [(SERV, "def ordenar(sesion: SesionMotor, *, categoria_id, orden: int, row_version: int) -> Resultado | Rechazo:\n    repo.tomar_advisory(sesion)\n",
+                                    "def ordenar(sesion: SesionMotor, *, categoria_id, orden: int, row_version: int) -> Resultado | Rechazo:\n")], [T154, T156]),
+    ("S05", "ambito sin advisory", [(SERV, "                   row_version: int) -> Resultado | Rechazo:\n    repo.tomar_advisory(sesion)\n",
+                                     "                   row_version: int) -> Resultado | Rechazo:\n")], [T154, T156]),
+    ("S06", "normalizacion sin casefold", [(NORM, "    texto = nombre_visible(nombre).casefold()\n", "    texto = nombre_visible(nombre)\n")], [T155]),
+    ("S07", "normalizacion sin quitar diacriticos", [(NORM, 'if unicodedata.category(c) != "Mn"', "if True")], [T155]),
+    ("S08", "hermanos con = en vez de IS NOT DISTINCT FROM", [(REPO, "AND parent_id IS NOT DISTINCT FROM %s AND enabled ", "AND parent_id = %s AND enabled ")], [T155]),
+    ("S09", "UNIQUE fisica como unica defensa", [(SERV, "    return any(normalizar(n) == clave for _, n in repo.hermanos_activos(sesion, parent_id, excluir))", "    return False")], [T155]),
+    ("S10", "RAMA recorre solo nodos habilitados (no atraviesa intermedios deshabilitados)",
+     [(REPO, '" SELECT id FROM gapto.categorias_financieras WHERE parent_id = %s"',
+       '" SELECT id FROM gapto.categorias_financieras WHERE parent_id = %s AND enabled"'),
+      (REPO, '" SELECT c.id FROM d JOIN gapto.categorias_financieras c ON c.parent_id = d.id"',
+       '" SELECT c.id FROM d JOIN gapto.categorias_financieras c ON c.parent_id = d.id AND c.enabled"')], [T155]),
+    ("S10b", "RAMA no atraviesa intermedios deshabilitados de nivel >= 2",
+     [(REPO, '" SELECT c.id FROM d JOIN gapto.categorias_financieras c ON c.parent_id = d.id"',
+       '" SELECT c.id FROM d JOIN gapto.categorias_financieras c ON c.parent_id = d.id AND c.enabled"')], [T155]),
+    ("S11", "sin control de row_version", [(SERV, '    if fila["row_version"] != row_version:\n', "    if False:\n")], [T155]),
+    ("S12", "ambito sin confirmacion del uso", [(SERV, "    if dict(confirmacion_uso) != vigente:\n", "    if False:\n")], [T155]),
+    ("S13", "solo el padre inmediato, no la cadena de ancestros",
+     [(SERV, "    return all(enabled for _, enabled in repo.cadena_ancestros(sesion, parent_id))", "    return repo.cadena_ancestros(sesion, parent_id)[0][1]")], [T155]),
+    ("S14", "alta idempotente aunque haya evolucionado", [(SERV, '            existente["row_version"] == 1 and existente["nombre"] == visible', '            existente["nombre"] == visible')], [T155]),
+    ("S15", "traduccion por texto libre del error", [(SERV, "            if funcion in diag.context:\n                return codigo\n", "            if funcion in diag.context:\n                return diag.message_primary\n")], [T155]),
+    ("S16", "DESACTIVAR auditado con otro motivo valido", [(SERV, 'operacion = "DESACTIVAR_RAMA" if modo == "RAMA" else "DESACTIVAR"', 'operacion = "DESACTIVAR_RAMA" if modo == "RAMA" else "REACTIVAR"')], [T155]),
+    ("S17", "DESACTIVAR_RAMA auditado como DESACTIVAR", [(SERV, 'operacion = "DESACTIVAR_RAMA" if modo == "RAMA" else "DESACTIVAR"', 'operacion = "DESACTIVAR"')], [T155]),
+    ("S18", "RAMA sin auditar descendientes", [(SERV, "        _auditar(sesion, cid, operacion, antes)\n", "        if cid == categoria_id:\n            _auditar(sesion, cid, operacion, antes)\n")], [T155]),
+    ("S19", "request_id distinto por nodo en RAMA",
+     [(SERV, "        _auditar(sesion, cid, operacion, antes)\n", "        sesion.uno(\"SELECT set_config('gapto.request_id', gen_random_uuid()::text, true)\")\n        _auditar(sesion, cid, operacion, antes)\n")], [T155]),
+    ("S20", "accion fisica incorrecta", [(SERV, "auditoria.ACCION_CREAR if operacion == \"ALTA\" else auditoria.ACCION_ACTUALIZAR", "auditoria.ACCION_CREAR if operacion == \"ALTA\" else \"ANULAR\"")], [T155]),
+    ("S21", "reactivacion en cascada",
+     [(SERV, '    rechazo = _escribir(sesion, lambda: repo.actualizar(sesion, categoria_id, {"enabled": True}))\n',
+       '    rechazo = _escribir(sesion, lambda: [repo.actualizar(sesion, i, {"enabled": True}) for i in [categoria_id] + repo.subarbol(sesion, categoria_id)])\n')], [T155]),
 ]
 
 
@@ -133,7 +184,7 @@ def main() -> None:
         sys.exit("Falta GAPTO_TEST_DATABASE_URL (base local desechable).")
     if recuperar_si_pendiente():
         sys.exit("Habia un mutante pendiente: restaurado y verificado. Resultado NO-PASS; relanzar.")
-    if correr([T152, T153, T154]) != 0:
+    if correr([T152, T153, T154, T155, T156, T157]) != 0:
         sys.exit("PREFLIGHT ROJO: no se muta nada.")
     veredictos = []
     for mid, desc, cambios, tests in MUTANTES:

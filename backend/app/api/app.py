@@ -26,7 +26,11 @@
 #   v0.3.0 (F05-01, F05-D009): la intencion admite la dimension categorial
 #   (CATEGORIA / SIN_CATEGORIA; ausencia = NO_CAPTURADA_LEGACY) y la respuesta
 #   informa `estado_categorial`. Lecturas del arbol de categorias.
-# Version: 0.3.0
+#
+#   v0.4.0 (F05-01, S4): comandos de gestion del arbol (C06), uno por ruta,
+#   cada uno en una transaccion de la unidad de trabajo. Sin DELETE ni
+#   escritura de icon_key.
+# Version: 0.4.0
 # ============================================================
 
 from __future__ import annotations
@@ -53,7 +57,19 @@ from app.api.configuracion import (
     cargar_desde_entorno,
     verificar_base_permitida,
 )
-from app.api.dto_categorias import ArbolCategorias, UsoCategoria
+from app.api.dto_categorias import (
+    AltaCategoria,
+    AmbitoCambio,
+    ArbolCategorias,
+    CategoriaNodo,
+    DesactivarCategoria,
+    MoverCategoria,
+    OrdenCategoria,
+    ReactivarCategoria,
+    RenombrarCategoria,
+    ResultadoComandoCategoria,
+    UsoCategoria,
+)
 from app.api.dto_vs01 import (
     GastoMesVs01,
     IntencionGastoPagado,
@@ -62,6 +78,7 @@ from app.api.dto_vs01 import (
 )
 from app.api.ejecucion_gasto_pagado import RechazoIntegracion, registrar_gasto_pagado
 from app.categorias import lecturas as lect_cat
+from app.categorias import servicio as serv_cat
 from app.core.contexto import ContextoOperacion
 from app.core.errores import ErrorMotor
 from app.core.unidad_trabajo import UnidadDeTrabajo
@@ -192,6 +209,57 @@ def create_app(
         return unidad.ejecutar(
             contexto(), lambda s: lect_cat.uso_por_naturaleza(s, categoria_id), nombre="F05-01 uso_categoria"
         )
+
+    def _comando(nombre_op: str, operacion) -> dict | JSONResponse:
+        salida = unidad.ejecutar(contexto(), operacion, nombre=f"F05-01 {nombre_op}")
+        if isinstance(salida, serv_cat.Rechazo):
+            status, cuerpo = eh.rechazo_categoria(salida.codigo, salida.detalle)
+            return JSONResponse(cuerpo, status_code=status)
+        campos = CategoriaNodo.model_fields
+        return {
+            "categoria": {k: v for k, v in salida.categoria.items() if k in campos},
+            "idempotente": salida.idempotente,
+            "modificadas": list(salida.modificadas),
+        }
+
+    _R = {"response_model": ResultadoComandoCategoria, "dependencies": [Depends(autorizar)]}
+
+    @app.post("/v1/categorias", **_R)
+    def alta_categoria(c: AltaCategoria):
+        return _comando("alta", lambda s: serv_cat.alta(
+            s, categoria_id=c.id, nombre=c.nombre, parent_id=c.parent_id, ambito=c.ambito,
+            presupuestable_default=c.presupuestable_default))
+
+    @app.post("/v1/categorias/{categoria_id}/renombrar", **_R)
+    def renombrar_categoria(categoria_id: uuid.UUID, c: RenombrarCategoria):
+        return _comando("renombrar", lambda s: serv_cat.renombrar(
+            s, categoria_id=categoria_id, nombre=c.nombre, row_version=c.row_version))
+
+    @app.post("/v1/categorias/{categoria_id}/mover", **_R)
+    def mover_categoria(categoria_id: uuid.UUID, c: MoverCategoria):
+        return _comando("mover", lambda s: serv_cat.mover(
+            s, categoria_id=categoria_id, parent_id=c.parent_id, row_version=c.row_version))
+
+    @app.post("/v1/categorias/{categoria_id}/desactivar", **_R)
+    def desactivar_categoria(categoria_id: uuid.UUID, c: DesactivarCategoria):
+        return _comando("desactivar", lambda s: serv_cat.desactivar(
+            s, categoria_id=categoria_id, modo=c.modo, row_version=c.row_version))
+
+    @app.post("/v1/categorias/{categoria_id}/reactivar", **_R)
+    def reactivar_categoria(categoria_id: uuid.UUID, c: ReactivarCategoria):
+        return _comando("reactivar", lambda s: serv_cat.reactivar(
+            s, categoria_id=categoria_id, row_version=c.row_version))
+
+    @app.post("/v1/categorias/{categoria_id}/orden", **_R)
+    def ordenar_categoria(categoria_id: uuid.UUID, c: OrdenCategoria):
+        return _comando("orden", lambda s: serv_cat.ordenar(
+            s, categoria_id=categoria_id, orden=c.orden, row_version=c.row_version))
+
+    @app.post("/v1/categorias/{categoria_id}/ambito", **_R)
+    def ambito_categoria(categoria_id: uuid.UUID, c: AmbitoCambio):
+        return _comando("ambito", lambda s: serv_cat.cambiar_ambito(
+            s, categoria_id=categoria_id, ambito=c.ambito, confirmacion_uso=c.confirmacion_uso,
+            row_version=c.row_version))
 
     @app.post(
         "/v1/intenciones/gasto-pagado",

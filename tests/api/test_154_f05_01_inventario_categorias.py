@@ -40,7 +40,15 @@
 #       literales `categoria_id` / `categorias_financieras`.
 #   I7  Cliente movil y scripts/dev: ninguna mencion sin registrar. Unica
 #       exclusion cerrada: el arnes de mutacion (texto de mutantes).
-# Version: 0.1.0
+#
+#   v0.2.0 (F05-01, S4; AJ-S4-01): clase CATALOGO para el paquete de gestion
+#   del arbol (escribe/lee categorias_financieras; NO consume
+#   hecho_efectos.categoria_id). I5 autoriza exactamente
+#   backend/app/categorias/repositorio.py como escritor del catalogo (INSERT y
+#   UPDATE; DELETE = 0). I8: toda funcion publica de servicio.py toma el
+#   advisory como PRIMERA llamada, y las primitivas de escritura del
+#   repositorio solo se invocan desde servicio.py.
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -80,6 +88,15 @@ REGISTRO: dict[tuple[str, str], tuple[str, str, str]] = {
         "R", "GET /v1/categorias/{id}/uso", "parametro de ruta de una lectura"),
     ("backend/app/categorias/lecturas.py", "uso_por_naturaleza"): (
         "R", "lectura S3", "recuento de uso historico (C06)"),
+    # --- catalogo S4 (escritor/lector de categorias_financieras)
+    **{("backend/app/api/app.py", f"create_app.{n}"): ("CATALOGO", "ruta S4", "parametro de ruta del comando")
+       for n in ("alta_categoria", "renombrar_categoria", "mover_categoria", "desactivar_categoria",
+                 "reactivar_categoria", "ordenar_categoria", "ambito_categoria")},
+    **{("backend/app/categorias/servicio.py", n): ("CATALOGO", f"C06 {n}", "comando del arbol bajo advisory (I8)")
+       for n in ("alta", "renombrar", "mover", "ordenar", "cambiar_ambito", "desactivar", "reactivar",
+                 "_auditar", "_nodo", "_resultado")},
+    **{("backend/app/categorias/repositorio.py", n): ("CATALOGO", f"repositorio {n}", "unico escritor del catalogo (I5)")
+       for n in ("leer", "snapshot", "insertar", "actualizar")},
     # --- motor F04 (certificado, no se modifica)
     ("backend/app/core/modelos_efectos.py", "DatosEfecto"): ("R", "modelo", "campo del DTO interno"),
     ("backend/app/core/modelos_devolucion.py", "DatosDevolucion"): ("R", "modelo", "campo del DTO interno"),
@@ -127,7 +144,7 @@ REGISTRO: dict[tuple[str, str], tuple[str, str, str]] = {
     ("backend/app/repositories/previsiones_repository.py", "<modulo>"): ("R", "tipos SQL", "mapa de columnas"),
 }
 
-CLASES = {"A_FRONTERA", "GUARDA", "A_MOTOR", "B", "P", "R"}
+CLASES = {"A_FRONTERA", "GUARDA", "A_MOTOR", "B", "P", "R", "CATALOGO"}
 
 #: Servicios del motor que la frontera NO puede referenciar (I3): tienen
 #: caminos A_MOTOR, B o P con categoria. OP-22 es la unica puerta.
@@ -149,8 +166,15 @@ DINAMICAS_AUTORIZADAS: dict[tuple[str, str], tuple[str, str, str]] = {
         "app.repositories.compuesto_repository", "FILTROS_AGREGADO", "SELECT de ids del agregado OP-22"),
 }
 
-#: Escritores autorizados de categorias_financieras (I5). Vacio hasta S4.
-ESCRITORES_CATALOGO: dict[tuple[str, str], str] = {}
+#: Escritores autorizados de categorias_financieras (I5): exactamente el
+#: repositorio del paquete S4.
+ESCRITORES_CATALOGO: dict[tuple[str, str], str] = {
+    ("backend/app/categorias/repositorio.py", "insertar"): "INSERT del alta",
+    ("backend/app/categorias/repositorio.py", "actualizar"): "UPDATE de columnas editables",
+}
+SERVICIO = "backend/app/categorias/servicio.py"
+PRIMITIVAS_ESCRITURA = {"insertar", "actualizar"}
+COMANDOS = ("alta", "renombrar", "mover", "ordenar", "cambiar_ambito", "desactivar", "reactivar")
 
 
 # ------------------------------------------------------------------ utilidades
@@ -245,7 +269,7 @@ def test_i2_clases_validas_y_justificadas():
 def test_i3_frontera_solo_r_guarda_o_a_frontera():
     for (ruta, qual), (clase, _, _) in REGISTRO.items():
         if ruta.startswith(FRONTERA):
-            assert clase in {"R", "GUARDA", "A_FRONTERA"}, (ruta, qual, clase)
+            assert clase in {"R", "GUARDA", "A_FRONTERA", "CATALOGO"}, (ruta, qual, clase)
 
 
 def test_i3_frontera_no_referencia_servicios_con_caminos_a_b_o_p():
@@ -340,6 +364,60 @@ def test_i5_escritores_de_categorias_financieras():
 def test_i5_delete_writers_cero():
     for p, texto in _textos_productivos():
         assert not _BORRADO.search(texto), f"DELETE/TRUNCATE de categorias_financieras en {_rel(p)}"
+
+
+def test_i5_escrituras_solo_en_las_funciones_autorizadas():
+    ruta = "backend/app/categorias/repositorio.py"
+    texto = (RAIZ / ruta).read_bytes().decode("utf-8")
+    arbol = ast.parse(texto)
+    lineas = texto.splitlines()
+    con_escritura = set()
+    for q, n in _funciones(arbol):
+        cuerpo = "\n".join(lineas[n.lineno - 1:n.end_lineno])
+        if re.search(r"\b(INSERT\s+INTO|UPDATE)\s+gapto\.categorias_financieras", cuerpo):
+            con_escritura.add((ruta, q))
+    assert con_escritura == set(ESCRITORES_CATALOGO)
+
+
+# ------------------------------------------------------------------ I8
+def _nombre_llamada(c: ast.Call) -> str | None:
+    if isinstance(c.func, ast.Attribute):
+        return c.func.attr
+    if isinstance(c.func, ast.Name):
+        return c.func.id
+    return None
+
+
+def test_i8_todo_comando_toma_el_advisory_primero():
+    for qual in COMANDOS:
+        fn = _nodo(SERVICIO, qual)
+        primera = fn.body[0]
+        assert (isinstance(primera, ast.Expr) and isinstance(primera.value, ast.Call)
+                and _nombre_llamada(primera.value) == "tomar_advisory"), f"{qual} no toma el advisory primero"
+
+
+def test_i8_toda_funcion_que_escribe_es_un_comando_con_advisory():
+    arbol = ast.parse((RAIZ / SERVICIO).read_bytes().decode("utf-8"))
+    for q, n in _funciones(arbol):
+        if not isinstance(n, ast.FunctionDef):
+            continue
+        llamadas = {_nombre_llamada(c) for c in ast.walk(n) if isinstance(c, ast.Call)}
+        if llamadas & (PRIMITIVAS_ESCRITURA | {"_escribir"}) and q not in ("_escribir",):
+            assert q in COMANDOS, f"{q} escribe el catalogo sin ser un comando con advisory"
+
+
+def test_i8_primitivas_de_escritura_solo_desde_el_servicio():
+    for p in _productivos_py():
+        ruta = _rel(p)
+        if ruta in (SERVICIO, "backend/app/categorias/repositorio.py"):
+            continue
+        arbol = ast.parse(p.read_bytes().decode("utf-8"))
+        for c in ast.walk(arbol):
+            if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute) and c.func.attr in PRIMITIVAS_ESCRITURA:
+                if isinstance(c.func.value, ast.Name) and c.func.value.id in ("repo", "repositorio"):
+                    raise AssertionError(f"{ruta} invoca una primitiva de escritura del catalogo")
+        texto = p.read_bytes().decode("utf-8")
+        assert "categorias.repositorio" not in texto and "categorias import repositorio" not in texto, ruta
 
 
 # ------------------------------------------------------------------ I6

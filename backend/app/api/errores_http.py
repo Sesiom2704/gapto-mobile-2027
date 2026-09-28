@@ -20,7 +20,12 @@
 #   CATEGORIA_REQUIERE_MAGNITUDES (409, definitivos, sin escritura previa).
 #   El segundo es un bloqueo TRANSITORIO hasta implementar C07.
 #   AGREGADO_NO_ENCONTRADO -> 404 para las lecturas de categorias.
-# Version: 0.3.0
+#
+#   v0.4.0 (F05-01, S4): `rechazo_categoria` traduce los rechazos de la
+#   gestion del arbol (codigos F05 y F04 reutilizados). Mensajes fijos; el
+#   detalle solo se devuelve para CAMBIO_AMBITO_REQUIERE_CONFIRMACION (el
+#   recuento vigente que el usuario debe confirmar).
+# Version: 0.4.0
 # ============================================================
 
 from __future__ import annotations
@@ -112,3 +117,25 @@ def rechazo_integracion(codigo: str) -> tuple[int, dict]:
     tener exito; el cliente libera la edicion y usara identidad nueva."""
     status, mensaje = _RECHAZOS_INTEGRACION[codigo]
     return status, {"codigo": codigo, "mensaje": mensaje, "reintentable": False}
+
+
+_RECHAZOS_CATEGORIA: dict[str, tuple[int, str]] = {
+    "CATEGORIA_NOMBRE_DUPLICADO": (409, "Ya hay una categoría activa con ese nombre en el mismo nivel."),
+    "CATEGORIA_PADRE_NO_VALIDO": (422, "La categoría superior elegida no es válida."),
+    "CATEGORIA_PADRE_DESHABILITADO": (409, "La categoría superior (o alguna por encima) está desactivada."),
+    "CATEGORIA_TIENE_HIJOS_ACTIVOS": (409, "Tiene subcategorías activas: desactiva la rama completa o desactívalas antes."),
+    "CATEGORIA_MOVIMIENTO_BLOQUEADO_POR_PRESUPUESTO": (409, "No se puede mover: afecta a un presupuesto que ya no está en borrador."),
+    "CAMBIO_AMBITO_REQUIERE_CONFIRMACION": (409, "El uso de la categoría ha cambiado. Revísalo y confirma de nuevo."),
+    "AGREGADO_NO_ENCONTRADO": (404, "No encontrado."),
+    "VERSION_DESFASADA": (409, "La categoría ha cambiado desde que la abriste. Vuelve a cargarla."),
+    "IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION": (409, "Este registro ya existe con otros datos. No se ha guardado nada nuevo."),
+    "ENTRADA_INVALIDA": (422, "Revisa los datos."),
+}
+
+
+def rechazo_categoria(codigo: str, detalle: dict | None = None) -> tuple[int, dict]:
+    status, mensaje = _RECHAZOS_CATEGORIA[codigo]
+    cuerpo = {"codigo": codigo, "mensaje": mensaje, "reintentable": False}
+    if codigo == "CAMBIO_AMBITO_REQUIERE_CONFIRMACION" and detalle is not None:
+        cuerpo["detalle"] = detalle
+    return status, cuerpo

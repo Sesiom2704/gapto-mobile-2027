@@ -14,7 +14,11 @@
 #   (BackendKeyData); detras del proxy de Neon NO coincide con el PID real del
 #   servidor y el test no podia localizar su propia sesion en
 #   pg_stat_activity (fallo de test observado en gapto2027_cleanroom).
-# Version: 0.1.1
+#
+#   v0.2.0 (F05-01, S4/S5): helpers de comandos HTTP de categorias,
+#   presupuestos sinteticos (BOLSA con alcances) y barrera por advisory
+#   (CATEGORIAS, owner).
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -141,3 +145,65 @@ def pids_esperando(pids: tuple[int, ...]) -> set[int]:
             (list(pids),),
         ).fetchall()
     return {f[0] for f in filas}
+
+
+# ------------------------------------------------------------------ S4 / S5
+BASE = "/v1/categorias"
+
+
+def cmd(cli, ruta: str, cuerpo: dict):
+    return cli.post(ruta, json=cuerpo, headers=h.AUTH)
+
+
+def alta(cli, nombre: str, parent_id=None, ambito: str = "GASTO", cid: uuid.UUID | None = None):
+    cid = cid or uuid.uuid4()
+    r = cmd(cli, BASE, {"id": str(cid), "nombre": nombre, "parent_id": None if parent_id is None else str(parent_id),
+                        "ambito": ambito, "presupuestable_default": True})
+    return cid, r
+
+
+def rv(owner: uuid.UUID, cid: uuid.UUID) -> int:
+    return h.leer(owner, "SELECT row_version FROM gapto.categorias_financieras WHERE id=%s", (cid,))[0][0]
+
+
+def estado(owner: uuid.UUID, cid: uuid.UUID) -> tuple:
+    return h.leer(owner, "SELECT enabled, parent_id, nombre, ambito, orden FROM gapto.categorias_financieras WHERE id=%s",
+                  (cid,))[0]
+
+
+def auditorias(owner: uuid.UUID, cid: uuid.UUID) -> list[tuple]:
+    return h.leer(owner, "SELECT accion, motivo, request_id FROM gapto.auditoria "
+                         "WHERE tabla='categorias_financieras' AND registro_id=%s ORDER BY created_at, id", (cid,))
+
+
+def crear_presupuesto(owner: uuid.UUID, lineas: list[tuple], estado_final: str = "BORRADOR") -> uuid.UUID:
+    """lineas: (prioridad|None, [(categoria_id, incluir_descendientes), ...]).
+    Todo en una transaccion como gapto_owner; el estado se fija al final."""
+    pid = uuid.uuid4()
+    with psycopg.connect(h.dsn()) as c:
+        with c.transaction():
+            cur = c.cursor()
+            cur.execute("SET LOCAL ROLE gapto_owner")
+            cur.execute("SELECT set_config('gapto.owner_user_id', %s, true)", (str(owner),))
+            cur.execute("INSERT INTO gapto.presupuestos (id, owner_user_id, periodo_desde, periodo_hasta, moneda, "
+                        "perspectiva, version_presupuesto, estado) VALUES (%s, %s, DATE '2026-01-01', "
+                        "DATE '2026-12-31', 'EUR', 'TOTAL', 1, 'BORRADOR')", (pid, owner))
+            for prioridad, alcances in lineas:
+                lid = uuid.uuid4()
+                cur.execute("INSERT INTO gapto.presupuesto_lineas (id, presupuesto_id, tipo_linea, naturaleza_economica, "
+                            "prioridad_consumo, importe_objetivo, metodo_estimacion) VALUES "
+                            "(%s, %s, 'BOLSA', 'GASTO', %s, 100, 'MANUAL')", (lid, pid, prioridad))
+                for cat, desc in alcances:
+                    cur.execute("INSERT INTO gapto.presupuesto_linea_alcances (presupuesto_linea_id, categoria_id, "
+                                "incluir_descendientes) VALUES (%s, %s, %s)", (lid, cat, desc))
+            if estado_final != "BORRADOR":
+                cur.execute("UPDATE gapto.presupuestos SET estado=%s WHERE id=%s", (estado_final, pid))
+    return pid
+
+
+def retener_advisory(owner: uuid.UUID) -> psycopg.Connection:
+    """Sesion que retiene el advisory (CATEGORIAS, owner): barrera explicita
+    para ordenar escritores del catalogo (WM 12C.1)."""
+    c = sesion_owner(owner)
+    c.execute("SELECT pg_advisory_xact_lock(hashtext('gapto:CATEGORIAS'), hashtext(%s::uuid::text))", (str(owner),))
+    return c
