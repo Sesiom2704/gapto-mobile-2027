@@ -19,7 +19,17 @@
 #   v0.2.0 (F05-D003): la financiacion es una dimension EXPLICITA de la
 #   intencion sellada (PROPUESTA_ACEPTADA self 100 % / NO_DETERMINADA, §16.4);
 #   la fecha es la fecha COMUN de gasto y pago y no puede ser futura (§16.3).
-# Version: 0.2.0
+#
+#   v0.3.0 (F05-01, mandato backend v0.2, F05-D009): dimension CATEGORIAL de la
+#   intencion sellada, con tres estados que NO se confunden (C01, AJ-01):
+#     CATEGORIA(id)       -> seleccion explicita; pasa por la guarda C-a;
+#     SIN_CATEGORIA       -> decision explicita del usuario; persiste NULL;
+#     NO_CAPTURADA_LEGACY -> solo compatibilidad del wire VS-01 actual: se
+#                            DERIVA de la ausencia del campo `categoria`. No es
+#                            un valor que el cliente pueda enviar, no significa
+#                            "Sin categoria" y no invoca la guarda. F05-01 no es
+#                            cerrable mientras el registro ordinario la necesite.
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
@@ -73,6 +83,30 @@ FinanciacionVs01 = Annotated[
 ]
 
 
+class CategoriaSeleccionada(_Estricto):
+    """Seleccion explicita de una categoria (C01). Su elegibilidad la decide
+    la guarda C-a dentro de la transaccion, nunca este DTO."""
+
+    estado: Literal["CATEGORIA"]
+    categoria_id: uuid.UUID
+
+
+class SinCategoria(_Estricto):
+    """Decision explicita del usuario: «Sin categoría». Persiste NULL."""
+
+    estado: Literal["SIN_CATEGORIA"]
+
+
+CategoriaVs01 = Annotated[
+    Union[CategoriaSeleccionada, SinCategoria],
+    Field(discriminator="estado"),
+]
+
+#: Estado interno derivado de la AUSENCIA del campo en el wire VS-01. No es
+#: un literal aceptado en la entrada (AJ-01).
+ESTADO_NO_CAPTURADA_LEGACY = "NO_CAPTURADA_LEGACY"
+
+
 class IntencionGastoPagado(_Estricto):
     intencion_id: uuid.UUID
     concepto: str = Field(min_length=1, max_length=200)
@@ -86,6 +120,29 @@ class IntencionGastoPagado(_Estricto):
     presupuestable: bool
     atribucion: AtribucionVs01
     financiacion: FinanciacionVs01
+    # Compatibilidad acotada VS-01 (AJ-01): ausente -> NO_CAPTURADA_LEGACY.
+    categoria: CategoriaVs01 | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _categoria_null_explicito(cls, datos):
+        # NO_CAPTURADA_LEGACY solo se deriva de la AUSENCIA del campo. Un
+        # `null` explicito no es ni una decision ni una ausencia: se rechaza.
+        if isinstance(datos, dict) and "categoria" in datos and datos["categoria"] is None:
+            raise ValueError("categoria: null no admitido; omitir el campo o enviar un estado")
+        return datos
+
+    @property
+    def estado_categorial(self) -> str:
+        if self.categoria is None:
+            return ESTADO_NO_CAPTURADA_LEGACY
+        return self.categoria.estado
+
+    @property
+    def categoria_id(self) -> uuid.UUID | None:
+        if isinstance(self.categoria, CategoriaSeleccionada):
+            return self.categoria.categoria_id
+        return None
 
     @field_validator("fecha_hecho")
     @classmethod
@@ -121,6 +178,7 @@ class ResultadoGastoPagado(_Estricto):
     estado_atribucion: str
     aportacion_criterio: str | None
     financiacion: Literal["PROPUESTA_ACEPTADA", "NO_DETERMINADA"]
+    estado_categorial: Literal["CATEGORIA", "SIN_CATEGORIA", "NO_CAPTURADA_LEGACY"]
     aviso: str
 
 

@@ -41,7 +41,21 @@
 #   v0.2.0 (F05 §18, tras F04-D051): se retira la guarda transitoria
 #   `_agregado_sin_extras`; la igualdad exacta del agregado en el
 #   reconocimiento de identidad la impone OP-22 recertificado.
-# Version: 0.2.0
+#
+#   v0.3.0 (F05-01, F05-D009 §23.3 C-a): guarda de elegibilidad categorial.
+#   Solo para intencion NUEVA con {estado: CATEGORIA}, despues de reconocer la
+#   identidad y ANTES de componer OP-22 (paso 3b):
+#     cuenta (FOR NO KEY UPDATE) -> identidad -> categoria (FOR SHARE) ->
+#     relectura owner/enabled/ambito -> OP-22.
+#   Un reintento de una intencion ya materializada NO revalida la categoria
+#   (un hecho valido no se rechaza porque su categoria se desactivara
+#   despues). SIN_CATEGORIA y NO_CAPTURADA_LEGACY no invocan la guarda.
+#   Orden de locks resultante: cuenta -> categoria -> raiz -> movimiento. La
+#   gestion del catalogo no bloquea cuentas, asi que no se crea un ciclo; VS-01
+#   no escribe hecho_entidades, de modo que el advisory INVERSIONES no entra
+#   (F05-01-R11: cualquier slice que lo haga exige auditar antes el grafo).
+#   Los rechazos son valores de capa F05 (sin escritura previa).
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
@@ -49,6 +63,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.api.dto_vs01 import IntencionGastoPagado
+from app.api.elegibilidad_categoria import validar_seleccion_categoria
 from app.api.traductor_gasto_pagado import componer, leer_actor_self, participacion_self_100
 from app.core.contexto import ContextoOperacion
 from app.core.errores import CodigoError, ErrorMotor
@@ -120,6 +135,11 @@ def registrar_gasto_pagado(
                 sesion, intencion.cuenta_id, actor, intencion.fecha_hecho
             ):
                 return RechazoIntegracion(CODIGO_PROPUESTA_OBSOLETA)
+            # 3b. Guarda categorial C-a, solo para seleccion nueva explicita.
+            if intencion.categoria_id is not None:
+                rechazo = validar_seleccion_categoria(sesion, intencion.categoria_id, "GASTO")
+                if rechazo is not None:
+                    return RechazoIntegracion(rechazo)
 
         # 5. OP-22 adscrito a esta transaccion. La composicion sale SOLO del
         #    payload sellado; si la raiz existe, OP-22 exige igualdad EXACTA

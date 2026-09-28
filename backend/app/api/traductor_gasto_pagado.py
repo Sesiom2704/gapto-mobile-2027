@@ -33,7 +33,14 @@
 #
 #   v0.2.0: se elimina la derivacion en transaccion previa (TOCTOU, N1) y la
 #   aportacion deja de deducirse del estado de la cuenta.
-# Version: 0.2.0
+#
+#   v0.3.0 (F05-01, F05-D009): el efecto GASTO lleva `categoria_id` SOLO si la
+#   intencion sellada trae {estado: CATEGORIA}. SIN_CATEGORIA y
+#   NO_CAPTURADA_LEGACY persisten NULL. `componer` NO valida elegibilidad: la
+#   guarda C-a la ejecuta `ejecucion_gasto_pagado.registrar_gasto_pagado`
+#   antes de llamar aqui, y el inventario C-b exige que ese sea el unico
+#   llamador productivo.
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
@@ -107,6 +114,7 @@ def componer(intencion: IntencionGastoPagado, actor_self_id: uuid.UUID) -> Datos
             tipo_efecto="GASTO",
             importe_delta=x,
             estado_atribucion="COMPLETA",
+            categoria_id=intencion.categoria_id,
             atribuciones=(
                 DatosAtribucion(
                     atribucion_id=_id(iid, "atribucion.self"),
@@ -123,6 +131,7 @@ def componer(intencion: IntencionGastoPagado, actor_self_id: uuid.UUID) -> Datos
             tipo_efecto="GASTO",
             importe_delta=x,
             estado_atribucion="NO_DISPONIBLE",
+            categoria_id=intencion.categoria_id,
         )
 
     movimiento = DatosMovimiento(

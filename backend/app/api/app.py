@@ -10,6 +10,8 @@
 #     POST /v1/intenciones/gasto-pagado  -> OP-22 (unica escritura)
 #     GET  /v1/vs01/cuentas-pago?fecha=   -> cuentas elegibles + propuesta de financiacion
 #     GET  /v1/vs01/gasto-mes?mes=        -> lectura estrecha VS-01 (candidata F08)
+#     GET  /v1/categorias                 -> arbol del owner (F05-01, S3)
+#     GET  /v1/categorias/{id}/uso        -> uso historico por naturaleza (C06)
 #     GET  /v1/salud                      -> diagnostico de desarrollo
 #   Todas exigen `Authorization: Bearer <GAPTO_DEV_TOKEN>`.
 #
@@ -20,7 +22,11 @@
 #   v0.2.0 (F05-D003): la escritura se ejecuta en UNA transaccion del
 #   adaptador (lock de cuenta -> identidad -> revalidacion -> OP-22 adscrito,
 #   ejecucion_gasto_pagado.py); cuentas-pago recibe la fecha del pago.
-# Version: 0.2.0
+#
+#   v0.3.0 (F05-01, F05-D009): la intencion admite la dimension categorial
+#   (CATEGORIA / SIN_CATEGORIA; ausencia = NO_CAPTURADA_LEGACY) y la respuesta
+#   informa `estado_categorial`. Lecturas del arbol de categorias.
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
@@ -47,6 +53,7 @@ from app.api.configuracion import (
     cargar_desde_entorno,
     verificar_base_permitida,
 )
+from app.api.dto_categorias import ArbolCategorias, UsoCategoria
 from app.api.dto_vs01 import (
     GastoMesVs01,
     IntencionGastoPagado,
@@ -54,6 +61,7 @@ from app.api.dto_vs01 import (
     ResultadoGastoPagado,
 )
 from app.api.ejecucion_gasto_pagado import RechazoIntegracion, registrar_gasto_pagado
+from app.categorias import lecturas as lect_cat
 from app.core.contexto import ContextoOperacion
 from app.core.errores import ErrorMotor
 from app.core.unidad_trabajo import UnidadDeTrabajo
@@ -170,6 +178,21 @@ def create_app(
             )
         return unidad.ejecutar(contexto(), lambda s: lect.gasto_mes(s, mes), nombre="VS01 gasto_mes")
 
+    @app.get("/v1/categorias", response_model=ArbolCategorias, dependencies=[Depends(autorizar)])
+    def categorias() -> dict:
+        filas = unidad.ejecutar(contexto(), lect_cat.arbol, nombre="F05-01 arbol_categorias")
+        return {"categorias": filas}
+
+    @app.get(
+        "/v1/categorias/{categoria_id}/uso",
+        response_model=UsoCategoria,
+        dependencies=[Depends(autorizar)],
+    )
+    def uso_categoria(categoria_id: uuid.UUID) -> dict:
+        return unidad.ejecutar(
+            contexto(), lambda s: lect_cat.uso_por_naturaleza(s, categoria_id), nombre="F05-01 uso_categoria"
+        )
+
     @app.post(
         "/v1/intenciones/gasto-pagado",
         response_model=ResultadoGastoPagado,
@@ -190,6 +213,7 @@ def create_app(
             "estado_atribucion": datos.efectos[0].estado_atribucion,
             "aportacion_criterio": datos.aportaciones[0].criterio_aportacion if datos.aportaciones else None,
             "financiacion": intencion.financiacion.estado,
+            "estado_categorial": intencion.estado_categorial,
             "aviso": "API de integracion F05-00-B, pendiente de consolidacion F10",
         }
 

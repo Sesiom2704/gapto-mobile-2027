@@ -15,7 +15,12 @@
 #   v0.2.0 (F05-D003): codigo propio de la capa F05
 #   PROPUESTA_FINANCIACION_OBSOLETA (409, definitivo): no forma parte de la
 #   taxonomia F04.
-# Version: 0.2.0
+#
+#   v0.3.0 (F05-01, F05-D009): codigos de capa F05 CATEGORIA_NO_ELEGIBLE y
+#   CATEGORIA_REQUIERE_MAGNITUDES (409, definitivos, sin escritura previa).
+#   El segundo es un bloqueo TRANSITORIO hasta implementar C07.
+#   AGREGADO_NO_ENCONTRADO -> 404 para las lecturas de categorias.
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
@@ -48,6 +53,9 @@ _MAPA: dict[CodigoError, tuple[int, str, bool]] = {
         "No se ha podido confirmar el registro. Puedes reintentar: no se duplicará.",
         True,
     ),
+    # F05-01 (lecturas de categorias): el recurso no existe o es de otro
+    # tenant; no se distingue para no revelar existencia ajena.
+    CodigoError.AGREGADO_NO_ENCONTRADO: (404, "No encontrado.", False),
     CodigoError.TENANT_AUSENTE: (500, "Error interno de configuración.", False),
     CodigoError.ACTOR_DESCONOCIDO: (500, "Error interno de configuración.", False),
 }
@@ -85,6 +93,16 @@ _RECHAZOS_INTEGRACION: dict[str, tuple[int, str]] = {
         409,
         "La cuenta ha cambiado de titularidad desde que abriste el formulario. "
         "Revisa la financiación: no se ha guardado nada.",
+    ),
+    "CATEGORIA_NO_ELEGIBLE": (
+        409,
+        "Esa categoría ya no se puede elegir para este registro. "
+        "Elige otra o «Sin categoría»: no se ha guardado nada.",
+    ),
+    "CATEGORIA_REQUIERE_MAGNITUDES": (
+        409,
+        "Esa categoría pide datos adicionales que esta pantalla todavía no "
+        "recoge. Elige otra o «Sin categoría»: no se ha guardado nada.",
     ),
 }
 
