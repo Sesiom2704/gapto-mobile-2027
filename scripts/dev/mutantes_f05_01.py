@@ -38,7 +38,17 @@
 #   v0.3.1 (auditoria S6-C07, AJ-S6C07-02, solo documental): el censo
 #   vigente es C01..C17 sin C07 (retirado), S01..S21 con S10b y M01..M23:
 #   61 mutantes. Ninguna transformacion ni discriminante cambia.
-# Version: 0.3.1
+#
+#   v0.4.0 (F05-01 S6-ICONO (F05-D013)): mutantes I01..I21 del comando de
+#   icono y del alta con icono (advisory, row_version y su orden frente a la
+#   validacion y a la comparacion, validacion exacta sin recorte ni
+#   mayusculas, pertenencia a CLAVES_PUBLICADAS, null, misma clave sin
+#   escritura, auditoria y motivo, categoria deshabilitada, persistencia e
+#   idempotencia del alta, COLUMNAS_EDITABLES, DTO y status HTTP).
+#   Discriminante nuevo: test_159 (preflight incluido). Censo vigente:
+#   C01..C17 sin C07, S01..S21 con S10b, M01..M23 e I01..I21: 82 mutantes.
+#   Equivalentes documentados sin cambios: E01 y E02.
+# Version: 0.4.0
 # ============================================================
 
 from __future__ import annotations
@@ -60,6 +70,10 @@ T155 = "tests/api/test_155_f05_01_gestion_categorias.py"
 T156 = "tests/api/test_156_f05_01_concurrencia_catalogo.py"
 T157 = "tests/api/test_157_f05_01_bolsa_intensional.py"
 T158 = "tests/api/test_158_f05_01_c07_magnitudes.py"
+T159 = "tests/api/test_159_f05_01_icono_categoria.py"
+ICON = "backend/app/categorias/iconos.py"
+DTOC = "backend/app/api/dto_categorias.py"
+ERRH = "backend/app/api/errores_http.py"
 CAP = "backend/app/api/captura_magnitudes.py"
 SERV = "backend/app/categorias/servicio.py"
 REPO = "backend/app/categorias/repositorio.py"
@@ -70,6 +84,11 @@ DTO = "backend/app/api/dto_vs01.py"
 TRAD = "backend/app/api/traductor_gasto_pagado.py"
 LECT = "backend/app/categorias/lecturas.py"
 ANCLA_LECT = "from app.core.unidad_trabajo import SesionMotor\n"
+
+ICONO_FIRMA = (
+    "def cambiar_icono(sesion: SesionMotor, *, categoria_id, icon_key: str | None, row_version: int) -> Resultado | Rechazo:\n"
+    "    repo.tomar_advisory(sesion)\n"
+)
 
 GUARDA_EN_RAMA = (
     "            # 3b. Guarda categorial C-a, solo para seleccion nueva explicita.\n"
@@ -228,6 +247,63 @@ MUTANTES = [
     ("M23", "la frontera escribe hecho_magnitudes sin OP-22",
      [(LECT, ANCLA_LECT, ANCLA_LECT + "\n\ndef _atajo(sesion, h, m):\n    sesion.uno(\"INSERT INTO gapto.hecho_magnitudes (hecho_id, magnitud_id, valor, unidad) VALUES (%s, %s, 1, 'u')\", (h, m))\n")],
      [T154]),
+    # ---------------------------------------------------------------- S6-ICONO
+    ("I01", "cambiar_icono sin advisory",
+     [(SERV, ICONO_FIRMA, ICONO_FIRMA.replace("    repo.tomar_advisory(sesion)\n", ""))], [T154, T156]),
+    ("I02", "cambiar_icono sin control de row_version",
+     [(SERV, ICONO_FIRMA + "    nodo = _nodo(sesion, categoria_id, row_version)\n",
+       ICONO_FIRMA + "    nodo = repo.leer(sesion, categoria_id, bloquear=True) or Rechazo(NO_ENCONTRADO)\n")], [T159]),
+    ("I03", "validacion sin distinguir mayusculas",
+     [(ICON, "    return icon_key in CLAVES_PUBLICADAS", "    return icon_key.lower() in CLAVES_PUBLICADAS")], [T159]),
+    ("I04", "validacion con recorte",
+     [(ICON, "    return icon_key in CLAVES_PUBLICADAS", "    return icon_key.strip() in CLAVES_PUBLICADAS")], [T159]),
+    ("I05", "el servicio recorta la clave antes de validarla y la persiste recortada",
+     [(SERV, "    # AJ-ICON-03/05: pertenencia exacta a la biblioteca publicada; None = sin icono.\n",
+       "    icon_key = icon_key.strip() if icon_key is not None else None\n")], [T159]),
+    ("I06", "pertenencia a CLAVES_PUBLICADAS retirada (solo formato)",
+     [(ICON, "    return icon_key in CLAVES_PUBLICADAS",
+       '    return __import__("re").fullmatch(PATRON, icon_key) is not None and len(icon_key) <= LONGITUD_MAXIMA')],
+     [T159]),
+    ("I07", "UPDATE y auditoria aunque la clave no cambie",
+     [(SERV, '    if icon_key == nodo["icon_key"]:\n        return Resultado(categoria=nodo, idempotente=True)\n', "")],
+     [T159]),
+    ("I08", "cambio de icono sin auditoria",
+     [(SERV, '    _auditar(sesion, categoria_id, "ICONO", antes)\n', "")], [T159]),
+    ("I09", "cambio de icono auditado con otro motivo",
+     [(SERV, '    "ICONO": "F05-01 ICONO",\n', '    "ICONO": "F05-01 RENOMBRAR",\n')], [T159]),
+    ("I10", "el alta no persiste icon_key",
+     [(SERV, "presupuestable_default=presupuestable_default, icon_key=icon_key))",
+       "presupuestable_default=presupuestable_default, icon_key=None))")], [T159, T155]),
+    ("I11", "idempotencia del alta ignora icon_key",
+     [(SERV, '            and existente["enabled"] and existente["icon_key"] == icon_key\n',
+       '            and existente["enabled"]\n')], [T155]),
+    ("I12", "categoria deshabilitada rechazada",
+     [(SERV, "    # Q7: tambien en deshabilitadas; solo cambia icon_key (no reactiva).\n",
+       '    if not nodo["enabled"]:\n        return Rechazo(PADRE_DESHABILITADO)\n')], [T159]),
+    ("I13", "null rechazado",
+     [(ICON, "    if icon_key is None:\n        return True\n", "    if icon_key is None:\n        return False\n")], [T159]),
+    ("I14", "el alta no valida icon_key",
+     [(SERV, "    if not icono_valido(icon_key):\n        return Rechazo(ICONO_NO_VALIDO)\n    visible = nombre_visible(nombre)\n",
+       "    visible = nombre_visible(nombre)\n")], [T159, T154]),
+    ("I15", "cambiar_icono reactiva la categoria",
+     [(SERV, '{"icon_key": icon_key}))', '{"icon_key": icon_key, "enabled": True}))')], [T159]),
+    ("I16", "icon_key fuera de COLUMNAS_EDITABLES",
+     [(REPO, '"ambito", "icon_key"})', '"ambito"})')], [T154, T159]),
+    ("I17", "ICONO_CATEGORIA_NO_VALIDO como 409",
+     [(ERRH, '"ICONO_CATEGORIA_NO_VALIDO": (422,', '"ICONO_CATEGORIA_NO_VALIDO": (409,')], [T159]),
+    ("I18", "comparacion con la clave persistida antes del row_version",
+     [(SERV, ICONO_FIRMA, ICONO_FIRMA + "    previa = repo.leer(sesion, categoria_id, bloquear=True)\n"
+       '    if previa is not None and previa["icon_key"] == icon_key:\n'
+       "        return Resultado(categoria=previa, idempotente=True)\n")], [T159]),
+    ("I19", "validacion del icono antes del nodo y del row_version",
+     [(SERV, ICONO_FIRMA, ICONO_FIRMA + "    if not icono_valido(icon_key):\n        return Rechazo(ICONO_NO_VALIDO)\n")],
+     [T159]),
+    ("I20", "icon_key ausente aceptado en el comando",
+     [(DTOC, "    # Sin default: la clave debe venir; null es un valor valido (sin icono).\n    icon_key: str | None\n",
+       "    icon_key: str | None = None\n")], [T159]),
+    ("I21", "el INSERT del alta descarta icon_key",
+     [(REPO, "(categoria_id, parent_id, nombre, ambito, presupuestable_default, icon_key),",
+       "(categoria_id, parent_id, nombre, ambito, presupuestable_default, None),")], [T159]),
 ]
 
 
@@ -258,7 +334,7 @@ def main() -> None:
         sys.exit("Falta GAPTO_TEST_DATABASE_URL (base local desechable).")
     if recuperar_si_pendiente():
         sys.exit("Habia un mutante pendiente: restaurado y verificado. Resultado NO-PASS; relanzar.")
-    if correr([T152, T153, T154, T155, T156, T157, T158]) != 0:
+    if correr([T152, T153, T154, T155, T156, T157, T158, T159]) != 0:
         sys.exit("PREFLIGHT ROJO: no se muta nada.")
     veredictos = []
     for mid, desc, cambios, tests in MUTANTES:

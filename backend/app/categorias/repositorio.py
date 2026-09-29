@@ -15,7 +15,13 @@
 #     datos para dar el error de dominio antes de escribir (AJ-S4-07).
 #   - Recorridos recursivos con CYCLE: un dato legacy corrupto no cuelga la
 #     consulta.
-# Version: 0.1.0
+#
+#   v0.2.0 (F05-01 S6-ICONO (F05-D013)): `insertar` persiste `icon_key` del
+#   alta (Q6) y COLUMNAS_EDITABLES incluye `icon_key` (§27.3; F05-D013 supera
+#   prospectivamente F05-D010 Q4). La validacion contra la biblioteca v1 la
+#   hace el servicio antes de escribir; el CHECK de 0340 es defensa residual.
+#   Sigue siendo el unico escritor runtime del catalogo; ningun DELETE.
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -131,18 +137,19 @@ def insertar(
     nombre: str,
     ambito: str,
     presupuestable_default: bool,
+    icon_key: str | None,
 ) -> None:
     sesion.uno(
         "INSERT INTO gapto.categorias_financieras (id, owner_user_id, parent_id, nombre, ambito, "
-        "presupuestable_default) VALUES (%s, current_setting('gapto.owner_user_id')::uuid, %s, %s, %s, %s) "
-        "RETURNING id",
-        (categoria_id, parent_id, nombre, ambito, presupuestable_default),
+        "presupuestable_default, icon_key) VALUES (%s, current_setting('gapto.owner_user_id')::uuid, "
+        "%s, %s, %s, %s, %s) RETURNING id",
+        (categoria_id, parent_id, nombre, ambito, presupuestable_default, icon_key),
     )
 
 
-#: Columnas que S4 puede modificar. icon_key NO (F05-D010 Q4) y
-#: presupuestable_default NO (Q6: no editable en S4).
-COLUMNAS_EDITABLES = frozenset({"nombre", "parent_id", "orden", "enabled", "ambito"})
+#: Columnas que los comandos pueden modificar. icon_key SI desde S6-ICONO
+#: (F05-D013 supera F05-D010 Q4); presupuestable_default NO (Q6: no editable).
+COLUMNAS_EDITABLES = frozenset({"nombre", "parent_id", "orden", "enabled", "ambito", "icon_key"})
 
 
 def actualizar(sesion: SesionMotor, categoria_id: uuid.UUID, cambios: dict[str, Any]) -> None:

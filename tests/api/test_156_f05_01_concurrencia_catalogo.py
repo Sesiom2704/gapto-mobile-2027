@@ -15,14 +15,22 @@
 #     - desactivar RAMA frente a alta bajo un descendiente, en ambos ordenes:
 #       nunca queda un nodo activo bajo un ancestro recien desactivado.
 #   Base local desechable 0001..0340 (estos tests confirman filas).
-# Version: 0.1.0
+#
+#   v0.2.0 (F05-01 S6-ICONO (F05-D013), AJ-ICON-06): el comando de icono
+#   entra en la bateria de advisory. Ademas se observa que la sesion del
+#   comando esta bloqueada POR la que retiene el advisory
+#   (pg_blocking_pids, con el PID real de pg_backend_pid()) y que lo que
+#   espera es un lock advisory no concedido.
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
 
 import threading
+import time
 import uuid
 
+import psycopg
 import pytest
 
 import f05_01_helpers as fh
@@ -79,6 +87,7 @@ _COMANDOS = {
     "orden": lambda cli, p, n: fh.cmd(cli, f"{B}/{n}/orden", {"orden": 4, "row_version": 1}),
     "ambito": lambda cli, p, n: fh.cmd(cli, f"{B}/{n}/ambito", {"ambito": "AMBOS", "confirmacion_uso": {}, "row_version": 1}),
     "desactivar": lambda cli, p, n: fh.cmd(cli, f"{B}/{n}/desactivar", {"modo": "RAMA", "row_version": 1}),
+    "icono": lambda cli, p, n: fh.cmd(cli, f"{B}/{n}/icono", {"icon_key": "hogar.casa", "row_version": 1}),
 }
 
 
@@ -93,6 +102,43 @@ def test_todo_escritor_espera_el_advisory(ctx, comando):
         fn = lambda: _COMANDOS[comando](cli, padre, nodo)  # noqa: E731
     salida = _barrera(owner, [(comando, fn)])
     assert salida[comando].status_code == 200, salida[comando].text
+
+
+def _bloqueados_por_advisory(pid_x: int, limite_s: float = 8.0) -> list[int]:
+    """PIDs de esta base bloqueados por `pid_x` y esperando un lock advisory."""
+    fin = time.monotonic() + limite_s
+    with psycopg.connect(h.dsn(), autocommit=True) as mon:
+        while time.monotonic() < fin:
+            pids = [f[0] for f in mon.execute(
+                "SELECT a.pid FROM pg_stat_activity a WHERE a.datname = current_database() "
+                "AND %s = ANY(pg_blocking_pids(a.pid)) AND EXISTS (SELECT 1 FROM pg_locks l "
+                "WHERE l.pid = a.pid AND l.locktype = 'advisory' AND NOT l.granted)",
+                (pid_x,),
+            ).fetchall()]
+            if pids:
+                return pids
+            time.sleep(0.05)
+    return []
+
+
+def test_icono_bloqueado_por_el_advisory_observado_con_pg_blocking_pids(ctx):
+    owner, _, cli = ctx
+    _, nodo = _preparar(owner, cli)
+    salida: dict = {}
+    x = fh.retener_advisory(owner)
+    try:
+        pid_x = fh.pid_servidor(x)
+        t = _lanzar(salida, "icono", lambda: fh.cmd(cli, f"{B}/{nodo}/icono",
+                                                    {"icon_key": "hogar.casa", "row_version": 1}))
+        assert len(_bloqueados_por_advisory(pid_x)) == 1, "el comando de icono no espera el advisory"
+        assert not salida and fh.rv(owner, nodo) == 1
+        x.execute("COMMIT")
+    finally:
+        x.close()
+    t.join(timeout=20)
+    assert not t.is_alive()
+    assert salida["icono"].status_code == 200, salida["icono"].text
+    assert fh.rv(owner, nodo) == 2
 
 
 # ------------------------------------------------------------ unicidad normalizada

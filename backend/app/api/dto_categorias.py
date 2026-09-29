@@ -15,7 +15,13 @@
 #   `CategoriaNodoArbol`, que amplia el nodo con sus magnitudes, `capturable`
 #   y `motivo_no_capturable`. Los comandos C06 siguen devolviendo
 #   `CategoriaNodo` sin cambios. Lectura: nunca autoridad de persistencia.
-# Version: 0.3.0
+#
+#   v0.4.0 (F05-01 S6-ICONO (F05-D013)): `IconoCategoria` para
+#   POST /v1/categorias/{id}/icono, con `icon_key` OBLIGATORIO en el cuerpo
+#   (clave o null; campo ausente -> 422 estructural). `AltaCategoria` admite
+#   `icon_key` opcional (Q6: omitido o null -> NULL). El DTO solo decide la
+#   forma: la pertenencia a la biblioteca v1 la decide el servicio.
+# Version: 0.4.0
 # ============================================================
 
 from __future__ import annotations
@@ -79,6 +85,7 @@ class AltaCategoria(_Estricto):
     parent_id: uuid.UUID | None
     ambito: AmbitoCategoria
     presupuestable_default: bool
+    icon_key: str | None = None
 
 
 class _ConVersion(_Estricto):
@@ -108,6 +115,11 @@ class OrdenCategoria(_ConVersion):
 class AmbitoCambio(_ConVersion):
     ambito: AmbitoCategoria
     confirmacion_uso: dict[str, int]
+
+
+class IconoCategoria(_ConVersion):
+    # Sin default: la clave debe venir; null es un valor valido (sin icono).
+    icon_key: str | None
 
 
 class ResultadoComandoCategoria(_Estricto):

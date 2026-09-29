@@ -15,7 +15,11 @@
 #     - orden y cambio de ambito con confirmacion del uso (C06);
 #     - matriz de auditoria accion/motivo y request_id comun en RAMA.
 #   Base local desechable 0001..0340 (estos tests confirman filas).
-# Version: 0.1.0
+#
+#   v0.2.0 (F05-01 S6-ICONO (F05-D013), Q6): la idempotencia del alta
+#   (AJ-S4-05) compara tambien `icon_key`: misma clave -> idempotente; otra
+#   clave, o clave frente a omitido -> IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION.
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -63,6 +67,31 @@ def test_alta_idempotente_solo_sin_evolucion_posterior(ctx):
     _, r4 = fh.alta(cli, "Ropa", cid=cid)
     assert r4.status_code == 409 and _codigo(r4) == "IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION"
     assert len(fh.auditorias(owner, cid)) == 3
+
+
+def _alta_con_icono(cli, cid: uuid.UUID, nombre: str, **icono):
+    return fh.cmd(cli, B, {"id": str(cid), "nombre": nombre, "parent_id": None, "ambito": "GASTO",
+                           "presupuestable_default": True, **icono})
+
+
+def test_alta_idempotente_compara_icon_key(ctx):
+    owner, _, cli = ctx
+    cid = uuid.uuid4()
+    assert _alta_con_icono(cli, cid, "Bus", icon_key="transporte.bus").status_code == 200
+    r = _alta_con_icono(cli, cid, "Bus", icon_key="transporte.bus")
+    assert r.status_code == 200 and r.json()["idempotente"] is True
+    for otra in ({"icon_key": "transporte.coche"}, {"icon_key": None}, {}):
+        r = _alta_con_icono(cli, cid, "Bus", **otra)
+        assert r.status_code == 409 and _codigo(r) == "IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION", otra
+    # Alta sin icono: el reintento con una clave tampoco es la misma intencion.
+    sin = uuid.uuid4()
+    assert _alta_con_icono(cli, sin, "Tren").status_code == 200
+    assert _alta_con_icono(cli, sin, "Tren", icon_key=None).json()["idempotente"] is True
+    r = _alta_con_icono(cli, sin, "Tren", icon_key="transporte.viaje")
+    assert r.status_code == 409 and _codigo(r) == "IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION"
+    assert h.leer(owner, "SELECT id, icon_key FROM gapto.categorias_financieras WHERE id = ANY(%s) ORDER BY nombre",
+                  ([cid, sin],)) == [(cid, "transporte.bus"), (sin, None)]
+    assert len(fh.auditorias(owner, cid)) == 1 and len(fh.auditorias(owner, sin)) == 1
 
 
 def test_alta_con_id_de_otro_tenant_no_revela_y_no_escribe(ctx):

@@ -60,7 +60,15 @@
 #       contexto_repository.py (alta OP-22, correccion OP-21); la frontera F05
 #       no escribe `hecho_magnitudes` directamente (solo via OP-22). Se
 #       congela la propiedad (conjunto de escritores), no una cardinalidad.
-# Version: 0.3.0
+#
+#   v0.4.0 (F05-01 S6-ICONO (F05-D013), AJ-ICON-06): se registran la ruta
+#   POST /v1/categorias/{id}/icono y el comando `cambiar_icono` (I1, I8: toma
+#   el advisory como PRIMERA llamada). COLUMNAS_EDITABLES incluye `icon_key`
+#   y sigue excluyendo presupuestable_default e identidad. I10: la biblioteca
+#   (backend/app/categorias/iconos.py) es un modulo puro, sin SQL, sin
+#   escritores y sin dependencias de acceso a datos; alta y cambiar_icono la
+#   invocan antes de escribir.
+# Version: 0.4.0
 # ============================================================
 
 from __future__ import annotations
@@ -109,10 +117,10 @@ REGISTRO: dict[tuple[str, str], tuple[str, str, str]] = {
     # --- catalogo S4 (escritor/lector de categorias_financieras)
     **{("backend/app/api/app.py", f"create_app.{n}"): ("CATALOGO", "ruta S4", "parametro de ruta del comando")
        for n in ("alta_categoria", "renombrar_categoria", "mover_categoria", "desactivar_categoria",
-                 "reactivar_categoria", "ordenar_categoria", "ambito_categoria")},
+                 "reactivar_categoria", "ordenar_categoria", "ambito_categoria", "icono_categoria")},
     **{("backend/app/categorias/servicio.py", n): ("CATALOGO", f"C06 {n}", "comando del arbol bajo advisory (I8)")
        for n in ("alta", "renombrar", "mover", "ordenar", "cambiar_ambito", "desactivar", "reactivar",
-                 "_auditar", "_nodo", "_resultado")},
+                 "cambiar_icono", "_auditar", "_nodo", "_resultado")},
     **{("backend/app/categorias/repositorio.py", n): ("CATALOGO", f"repositorio {n}", "unico escritor del catalogo (I5)")
        for n in ("leer", "snapshot", "insertar", "actualizar")},
     # --- motor F04 (certificado, no se modifica)
@@ -192,7 +200,8 @@ ESCRITORES_CATALOGO: dict[tuple[str, str], str] = {
 }
 SERVICIO = "backend/app/categorias/servicio.py"
 PRIMITIVAS_ESCRITURA = {"insertar", "actualizar"}
-COMANDOS = ("alta", "renombrar", "mover", "ordenar", "cambiar_ambito", "desactivar", "reactivar")
+COMANDOS = ("alta", "renombrar", "mover", "ordenar", "cambiar_ambito", "desactivar", "reactivar", "cambiar_icono")
+ICONOS = "backend/app/categorias/iconos.py"
 
 
 # ------------------------------------------------------------------ utilidades
@@ -506,6 +515,37 @@ def test_i8_primitivas_de_escritura_solo_desde_el_servicio():
                     raise AssertionError(f"{ruta} invoca una primitiva de escritura del catalogo")
         texto = p.read_bytes().decode("utf-8")
         assert "categorias.repositorio" not in texto and "categorias import repositorio" not in texto, ruta
+
+
+def test_i8_columnas_editables_incluyen_icon_key():
+    repo = importlib.import_module("app.categorias.repositorio")
+    assert repo.COLUMNAS_EDITABLES == frozenset({"nombre", "parent_id", "orden", "enabled", "ambito", "icon_key"})
+
+
+# ------------------------------------------------------------------ I10
+_SQL = re.compile(r"\b(SELECT|INSERT|UPDATE|DELETE|MERGE|TRUNCATE)\b|\bgapto\s*\.", re.IGNORECASE)
+
+
+def test_i10_biblioteca_de_iconos_sin_sql_ni_escritores():
+    texto = (RAIZ / ICONOS).read_bytes().decode("utf-8")
+    arbol = ast.parse(texto)
+    for n in ast.walk(arbol):
+        if isinstance(n, ast.Constant) and isinstance(n.value, str):
+            assert not _SQL.search(n.value), f"SQL en la biblioteca de iconos: {n.value!r}"
+    importados = {a.name for i in ast.walk(arbol) if isinstance(i, (ast.Import, ast.ImportFrom)) for a in i.names}
+    modulos = {i.module for i in ast.walk(arbol) if isinstance(i, ast.ImportFrom)}
+    assert importados <= {"annotations"} and modulos <= {"__future__"}, (importados, modulos)
+    llamadas = {_nombre_llamada(c) for c in ast.walk(arbol) if isinstance(c, ast.Call)}
+    assert not llamadas & (PRIMITIVAS_ESCRITURA | {"uno", "execute", "_escribir"}), llamadas
+
+
+def test_i10_alta_y_cambiar_icono_validan_con_la_biblioteca_antes_de_escribir():
+    for qual in ("alta", "cambiar_icono"):
+        fn = _nodo(SERVICIO, qual)
+        validaciones = _llamadas(fn, "icono_valido")
+        escrituras = _llamadas(fn, "_escribir")
+        assert len(validaciones) == 1 and len(escrituras) == 1, qual
+        assert validaciones[0].lineno < escrituras[0].lineno, f"{qual} escribe antes de validar el icono"
 
 
 # ------------------------------------------------------------------ I6

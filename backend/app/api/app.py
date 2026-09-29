@@ -30,7 +30,11 @@
 #   v0.4.0 (F05-01, S4): comandos de gestion del arbol (C06), uno por ruta,
 #   cada uno en una transaccion de la unidad de trabajo. Sin DELETE ni
 #   escritura de icon_key.
-# Version: 0.4.0
+#
+#   v0.5.0 (F05-01 S6-ICONO (F05-D013)): POST /v1/categorias/{id}/icono
+#   (cambiar_icono) y `icon_key` opcional en el alta. Sin DELETE; sin
+#   lectura de la biblioteca de iconos (queda para el mandato de UI).
+# Version: 0.5.0
 # ============================================================
 
 from __future__ import annotations
@@ -63,6 +67,7 @@ from app.api.dto_categorias import (
     ArbolCategorias,
     CategoriaNodo,
     DesactivarCategoria,
+    IconoCategoria,
     MoverCategoria,
     OrdenCategoria,
     ReactivarCategoria,
@@ -228,7 +233,7 @@ def create_app(
     def alta_categoria(c: AltaCategoria):
         return _comando("alta", lambda s: serv_cat.alta(
             s, categoria_id=c.id, nombre=c.nombre, parent_id=c.parent_id, ambito=c.ambito,
-            presupuestable_default=c.presupuestable_default))
+            presupuestable_default=c.presupuestable_default, icon_key=c.icon_key))
 
     @app.post("/v1/categorias/{categoria_id}/renombrar", **_R)
     def renombrar_categoria(categoria_id: uuid.UUID, c: RenombrarCategoria):
@@ -260,6 +265,11 @@ def create_app(
         return _comando("ambito", lambda s: serv_cat.cambiar_ambito(
             s, categoria_id=categoria_id, ambito=c.ambito, confirmacion_uso=c.confirmacion_uso,
             row_version=c.row_version))
+
+    @app.post("/v1/categorias/{categoria_id}/icono", **_R)
+    def icono_categoria(categoria_id: uuid.UUID, c: IconoCategoria):
+        return _comando("icono", lambda s: serv_cat.cambiar_icono(
+            s, categoria_id=categoria_id, icon_key=c.icon_key, row_version=c.row_version))
 
     @app.post(
         "/v1/intenciones/gasto-pagado",

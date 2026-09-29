@@ -32,7 +32,12 @@
 #   MAGNITUD_NO_ADMITIDA, MAGNITUD_OBLIGATORIA_AUSENTE y
 #   MAGNITUD_VALOR_NO_VALIDO. Los errores de forma del wire (null, repetida,
 #   `unidad`, sintaxis) son 422 ENTRADA_INVALIDA del DTO.
-# Version: 0.5.0
+#
+#   v0.6.0 (F05-01 S6-ICONO (F05-D013), AJ-ICON-05): codigo F05
+#   ICONO_CATEGORIA_NO_VALIDO (422: dato de entrada, como
+#   CATEGORIA_PADRE_NO_VALIDO) para una clave fuera de la biblioteca v1, en
+#   el alta y en el comando de icono. Sin escritura previa.
+# Version: 0.6.0
 # ============================================================
 
 from __future__ import annotations
@@ -152,6 +157,7 @@ _RECHAZOS_CATEGORIA: dict[str, tuple[int, str]] = {
     "VERSION_DESFASADA": (409, "La categoría ha cambiado desde que la abriste. Vuelve a cargarla."),
     "IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION": (409, "Este registro ya existe con otros datos. No se ha guardado nada nuevo."),
     "ENTRADA_INVALIDA": (422, "Revisa los datos."),
+    "ICONO_CATEGORIA_NO_VALIDO": (422, "Ese icono no está disponible. Elige otro o «Sin icono»."),
 }
 
 

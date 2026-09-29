@@ -25,7 +25,17 @@
 #   ACTUALIZAR, con motivo cerrado por operacion (MOTIVOS) y snapshots de la
 #   fila antes y despues. En DESACTIVAR_RAMA, una auditoria por nodo
 #   modificado con el mismo request_id de la transaccion.
-# Version: 0.1.0
+#
+#   v0.2.0 (F05-01 S6-ICONO (F05-D013)): comando `cambiar_icono` (§27.3) con
+#   el orden fijo de AJ-ICON-04: advisory -> nodo (FOR NO KEY UPDATE +
+#   row_version) -> validacion contra la biblioteca v1 (iconos.py, exacta,
+#   AJ-ICON-03) -> comparacion con el valor persistido -> UPDATE solo si
+#   cambia -> auditoria ACTUALIZAR motivo "F05-01 ICONO". Misma clave
+#   (incluido NULL -> NULL): sin escritura, idempotente como E1. Se admite en
+#   categorias deshabilitadas y solo toca icon_key (Q7). El alta admite
+#   `icon_key` opcional (Q6) y su idempotencia (AJ-S4-05) lo compara.
+#   Codigo F05 unico: ICONO_CATEGORIA_NO_VALIDO (AJ-ICON-05).
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -38,6 +48,7 @@ import psycopg
 
 from app.categorias import lecturas
 from app.categorias import repositorio as repo
+from app.categorias.iconos import icono_valido
 from app.categorias.normalizacion import nombre_valido, nombre_visible, normalizar
 from app.core.unidad_trabajo import SesionMotor
 from app.repositories import auditoria_repository as auditoria
@@ -55,6 +66,7 @@ MOTIVOS = {
     "DESACTIVAR": "F05-01 DESACTIVAR",
     "DESACTIVAR_RAMA": "F05-01 DESACTIVAR_RAMA",
     "REACTIVAR": "F05-01 REACTIVAR",
+    "ICONO": "F05-01 ICONO",
 }
 
 # Codigos de capa F05 (no forman parte de la taxonomia F04).
@@ -64,6 +76,7 @@ PADRE_DESHABILITADO = "CATEGORIA_PADRE_DESHABILITADO"
 TIENE_HIJOS_ACTIVOS = "CATEGORIA_TIENE_HIJOS_ACTIVOS"
 MOVIMIENTO_BLOQUEADO = "CATEGORIA_MOVIMIENTO_BLOQUEADO_POR_PRESUPUESTO"
 AMBITO_REQUIERE_CONFIRMACION = "CAMBIO_AMBITO_REQUIERE_CONFIRMACION"
+ICONO_NO_VALIDO = "ICONO_CATEGORIA_NO_VALIDO"
 # Codigos F04 reutilizados (contrato cerrado).
 NO_ENCONTRADO = "AGREGADO_NO_ENCONTRADO"
 VERSION_DESFASADA = "VERSION_DESFASADA"
@@ -77,6 +90,8 @@ _CONSTRAINTS = {
     "fk_categorias_financieras__parent": PADRE_NO_VALIDO,
     "fk_categorias_financieras__parent_same_owner": PADRE_NO_VALIDO,
     "ck_categorias_financieras__parent_no_self": PADRE_NO_VALIDO,
+    # Defensa residual (0340): inalcanzable si la biblioteca valida antes.
+    "ck_categorias_financieras__icon_key_no_vacia_recortada": ICONO_NO_VALIDO,
 }
 #: Identidad de la funcion del trigger tal como la informa el contexto
 #: PL/pgSQL del error (P0001), no el texto del mensaje.
@@ -174,10 +189,12 @@ def _resultado(sesion: SesionMotor, categoria_id, **kw) -> Resultado:
 
 # ------------------------------------------------------------------ comandos
 def alta(sesion: SesionMotor, *, categoria_id, nombre: str, parent_id, ambito: str,
-         presupuestable_default: bool) -> Resultado | Rechazo:
+         presupuestable_default: bool, icon_key: str | None = None) -> Resultado | Rechazo:
     repo.tomar_advisory(sesion)
     if ambito not in AMBITOS or not nombre_valido(nombre):
         return Rechazo(ENTRADA_INVALIDA)
+    if not icono_valido(icon_key):
+        return Rechazo(ICONO_NO_VALIDO)
     visible = nombre_visible(nombre)
     existente = repo.leer(sesion, categoria_id)
     if existente is not None:
@@ -187,7 +204,7 @@ def alta(sesion: SesionMotor, *, categoria_id, nombre: str, parent_id, ambito: s
             existente["row_version"] == 1 and existente["nombre"] == visible
             and existente["parent_id"] == parent_id and existente["ambito"] == ambito
             and existente["presupuestable_default"] == presupuestable_default
-            and existente["enabled"] and existente["icon_key"] is None
+            and existente["enabled"] and existente["icon_key"] == icon_key
             and existente["codigo"] is None and existente["orden"] == 0
         )
         return Resultado(categoria=existente, idempotente=True) if igual else Rechazo(IDENTIDAD_REUTILIZADA)
@@ -200,7 +217,7 @@ def alta(sesion: SesionMotor, *, categoria_id, nombre: str, parent_id, ambito: s
         return Rechazo(NOMBRE_DUPLICADO)
     rechazo = _escribir(sesion, lambda: repo.insertar(
         sesion, categoria_id=categoria_id, parent_id=parent_id, nombre=visible,
-        ambito=ambito, presupuestable_default=presupuestable_default))
+        ambito=ambito, presupuestable_default=presupuestable_default, icon_key=icon_key))
     if rechazo is not None:
         return rechazo
     _auditar(sesion, categoria_id, "ALTA", None)
@@ -330,4 +347,24 @@ def reactivar(sesion: SesionMotor, *, categoria_id, row_version: int) -> Resulta
     if rechazo is not None:
         return rechazo
     _auditar(sesion, categoria_id, "REACTIVAR", antes)
+    return _resultado(sesion, categoria_id, modificadas=(categoria_id,))
+
+
+def cambiar_icono(sesion: SesionMotor, *, categoria_id, icon_key: str | None, row_version: int) -> Resultado | Rechazo:
+    repo.tomar_advisory(sesion)
+    nodo = _nodo(sesion, categoria_id, row_version)
+    if isinstance(nodo, Rechazo):
+        return nodo
+    # AJ-ICON-03/05: pertenencia exacta a la biblioteca publicada; None = sin icono.
+    if not icono_valido(icon_key):
+        return Rechazo(ICONO_NO_VALIDO)
+    # Misma clave que la persistida: sin UPDATE ni auditoria (como E1).
+    if icon_key == nodo["icon_key"]:
+        return Resultado(categoria=nodo, idempotente=True)
+    # Q7: tambien en deshabilitadas; solo cambia icon_key (no reactiva).
+    antes = repo.snapshot(sesion, categoria_id)
+    rechazo = _escribir(sesion, lambda: repo.actualizar(sesion, categoria_id, {"icon_key": icon_key}))
+    if rechazo is not None:
+        return rechazo
+    _auditar(sesion, categoria_id, "ICONO", antes)
     return _resultado(sesion, categoria_id, modificadas=(categoria_id,))
