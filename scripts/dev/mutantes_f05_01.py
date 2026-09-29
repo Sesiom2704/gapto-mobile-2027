@@ -27,14 +27,18 @@
 #
 #   v0.3.0 (F05-01, S6-C07; F05-D014 §28.4): se RETIRA C07 (bloqueo
 #   transitorio CATEGORIA_REQUIERE_MAGNITUDES, retirado del codigo) y se
-#   anaden M01..M22: locks FOR SHARE y su orden, invocacion y posicion de C07,
+#   anaden M01..M23: locks FOR SHARE y su orden, invocacion y posicion de C07,
 #   regla de valor sin redondeo, orden de los codigos, identidad derivada,
 #   unidad snapshot, wire estructural, lectura de capturabilidad e inventario
 #   de escritores de magnitudes. Discriminantes nuevos: test_158 y test_154.
 #   Equivalente documentado: E02 (C07 sin comprobacion explicita de owner de
 #   la magnitud: no existe; la RLS bajo gapto_runtime la oculta y el WITH
 #   CHECK de categoria_magnitudes impide asociarla).
-# Version: 0.3.0
+#
+#   v0.3.1 (auditoria S6-C07, AJ-S6C07-02, solo documental): el censo
+#   vigente es C01..C17 sin C07 (retirado), S01..S21 con S10b y M01..M23:
+#   61 mutantes. Ninguna transformacion ni discriminante cambia.
+# Version: 0.3.1
 # ============================================================
 
 from __future__ import annotations

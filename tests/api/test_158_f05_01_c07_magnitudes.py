@@ -12,7 +12,14 @@
 #   incluidas hecho_magnitudes y auditoria).
 #   Base local desechable 0001..0340 (estos tests confirman filas). Datos
 #   sinteticos, creados como gapto_owner con la GUC del tenant (WM 12C.7).
-# Version: 0.1.0
+#
+#   v0.2.0 (auditoria S6-C07, AJ-S6C07-01): `test_valor_demasiado_largo_422`
+#   fijaba la decision D2 (rechazada). Se sustituye por dos discriminantes
+#   del contrato §28.2: un decimal canonico largo fuera de capacidad llega a
+#   C07 -> 409 MAGNITUD_VALOR_NO_VALIDO sin mutaciones; y un valor canonico
+#   largo pero numericamente valido (ceros de cola) se admite sin redondeo.
+#   Ambos fallan contra 203891b0 (WM 12C.2).
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -321,13 +328,28 @@ def test_dto_rechaza_estructura_antes_de_llegar_a_la_base():
     assert CategoriaSeleccionada.model_validate(base).magnitudes == ()
 
 
-def test_valor_demasiado_largo_422(tenant):
+@pytest.mark.parametrize("valor", ["1" * 41, "-" + "9" * 60, "123456789012" + "3" * 30 + ".5"])
+def test_valor_canonico_largo_fuera_de_capacidad_es_409(tenant, valor):
+    """§28.2: forma valida pero fuera de rango -> C07, nunca 422 del DTO."""
     owner, _, cuenta = tenant
     cat = fh.crear_categoria(owner, "Largo", "GASTO")
     m = _magnitud(owner, precision=6)
     _asociar(owner, cat, m, obligatoria=True)
-    r = _post(owner, _cuerpo(cuenta, cat, [(m, "1." + "0" * 40)]))
-    assert r.status_code == 422, r.text
+    cuerpo = _cuerpo(cuenta, cat, [(m, valor)])
+    _rechazo(_post(owner, cuerpo), "MAGNITUD_VALOR_NO_VALIDO")
+    _cero(owner, _hid(cuerpo))
+
+
+def test_valor_canonico_largo_numericamente_valido_se_admite(tenant):
+    """AJ-C07-06: los ceros decimales de cola no consumen precision."""
+    owner, _, cuenta = tenant
+    cat = fh.crear_categoria(owner, "Colas", "GASTO")
+    m = _magnitud(owner, precision=2)
+    _asociar(owner, cat, m, obligatoria=True)
+    cuerpo = _cuerpo(cuenta, cat, [(m, "1.25" + "0" * 60)])
+    assert _post(owner, cuerpo).status_code == 200
+    [(_, _, v, _)] = _filas_magnitud(owner, _hid(cuerpo))
+    assert str(v) == "1.250000"
 
 
 # ------------------------------------------------------------------ identidad antes de C07

@@ -40,13 +40,18 @@
 #     - cualquier magnitud dentro de SIN_CATEGORIA -> 422 (idem);
 #     - `valor` es TEXTO decimal canonico con punto: sin exponente, coma,
 #       signo `+`, NaN, infinitos, ceros a la izquierda ni forma negativa del
-#       cero; nunca un numero JSON (StrictStr). Longitud maxima estructural
-#       VALOR_MAX_CARACTERES.
+#       cero; nunca un numero JSON (StrictStr).
 #   La admisibilidad de cada magnitud (asociacion, `enabled`, precision,
 #   capacidad numeric(18,6)) la decide el servidor dentro de la transaccion
 #   (captura_magnitudes.py), nunca este DTO. Ausencia de una magnitud =
 #   desconocido, nunca cero.
-# Version: 0.4.0
+#
+#   v0.4.1 (auditoria S6-C07, AJ-S6C07-01; D2 RECHAZADA): se retira el
+#   limite de 40 caracteres de `valor`. Convertia en 422 valores canonicos
+#   fuera de rango, que §28.2 clasifica como 409 MAGNITUD_VALOR_NO_VALIDO, y
+#   rechazaba valores numericamente validos con ceros decimales de cola
+#   (AJ-C07-06). El DTO solo decide la FORMA; precision y capacidad son de C07.
+# Version: 0.4.1
 # ============================================================
 
 from __future__ import annotations
@@ -103,11 +108,9 @@ FinanciacionVs01 = Annotated[
 
 #: Sintaxis canonica del valor de una magnitud (AJ-C07-02): entero sin ceros
 #: a la izquierda, signo menos opcional y parte decimal opcional con punto.
+#: Sin limite de longitud propio: un texto canonico largo es FORMA valida y
+#: C07 decide precision y capacidad (409), nunca el DTO.
 VALOR_CANONICO = re.compile(r"-?(0|[1-9][0-9]*)(\.[0-9]+)?")
-#: Limite estructural del texto. numeric(18,6) admite 12 digitos enteros; el
-#: margen deja pasar ceros decimales a la derecha (p. ej. "1.230") y el
-#: servidor decide precision y capacidad (409).
-VALOR_MAX_CARACTERES = 40
 
 
 class MagnitudCapturada(_Estricto):
@@ -117,7 +120,7 @@ class MagnitudCapturada(_Estricto):
     adaptador, AJ-C07-03)."""
 
     magnitud_id: uuid.UUID
-    valor: StrictStr = Field(min_length=1, max_length=VALOR_MAX_CARACTERES)
+    valor: StrictStr = Field(min_length=1)
 
     @field_validator("valor")
     @classmethod
