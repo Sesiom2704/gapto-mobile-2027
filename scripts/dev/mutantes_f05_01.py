@@ -55,7 +55,24 @@
 #   0340 sin traduccion por identidad, AJ-S4-07). Discriminante: test_159.
 #   Censo vigente: C01..C17 sin C07, S01..S21 con S10b, M01..M23 e I01..I23:
 #   84 mutantes. Ninguna transformacion ni discriminante previo cambia.
-# Version: 0.5.0
+#
+#   v0.6.0 (F05-01 R-LOCALE; AJ-S6ICONO-AJ-02): la funcion del trigger se
+#   identifica por su firma (servicio._funcion_trigger). Nuevos: L01
+#   (traduccion dependiente del idioma: vuelve el prefijo ingles "function "),
+#   L02 (firma sin delimitar: prefijo del nombre sin "()"), ambos con
+#   discriminante test_160, e I24 (defensa residual del CHECK de icon_key
+#   traducida por el texto INGLES del mensaje en vez de por identidad; muere
+#   con la base local en espanol, discriminante test_159). S15 conserva su
+#   semantica (traduccion por texto libre del mensaje) con ancla nueva,
+#   porque la linea que mutaba ya no existe. Discriminante nuevo en el
+#   preflight: test_160. Censo vigente: C01..C17 sin C07, S01..S21 con S10b,
+#   M01..M23, I01..I24, L01..L02: 87 mutantes.
+#   Equivalente documentado nuevo: E03 (traducir la defensa residual buscando
+#   el NOMBRE de la constraint en el texto del mensaje): el nombre aparece
+#   literal en el mensaje en cualquier idioma, asi que ningun test sin
+#   artificio lo distingue de la traduccion por diag.constraint_name.
+#   Los mutantes se ejecutan con la base local con lc_messages en espanol.
+# Version: 0.6.0
 # ============================================================
 
 from __future__ import annotations
@@ -78,6 +95,7 @@ T156 = "tests/api/test_156_f05_01_concurrencia_catalogo.py"
 T157 = "tests/api/test_157_f05_01_bolsa_intensional.py"
 T158 = "tests/api/test_158_f05_01_c07_magnitudes.py"
 T159 = "tests/api/test_159_f05_01_icono_categoria.py"
+T160 = "tests/api/test_160_f05_01_traduccion_locale.py"
 ICON = "backend/app/categorias/iconos.py"
 DTOC = "backend/app/api/dto_categorias.py"
 ERRH = "backend/app/api/errores_http.py"
@@ -187,7 +205,7 @@ MUTANTES = [
     ("S13", "solo el padre inmediato, no la cadena de ancestros",
      [(SERV, "    return all(enabled for _, enabled in repo.cadena_ancestros(sesion, parent_id))", "    return repo.cadena_ancestros(sesion, parent_id)[0][1]")], [T155]),
     ("S14", "alta idempotente aunque haya evolucionado", [(SERV, '            existente["row_version"] == 1 and existente["nombre"] == visible', '            existente["nombre"] == visible')], [T155]),
-    ("S15", "traduccion por texto libre del error", [(SERV, "            if funcion in diag.context:\n                return codigo\n", "            if funcion in diag.context:\n                return diag.message_primary\n")], [T155]),
+    ("S15", "traduccion por texto libre del error", [(SERV, "        return _funcion_trigger(diag.context)\n", "        return diag.message_primary if _funcion_trigger(diag.context) else None\n")], [T155]),
     ("S16", "DESACTIVAR auditado con otro motivo valido", [(SERV, 'operacion = "DESACTIVAR_RAMA" if modo == "RAMA" else "DESACTIVAR"', 'operacion = "DESACTIVAR_RAMA" if modo == "RAMA" else "REACTIVAR"')], [T155]),
     ("S17", "DESACTIVAR_RAMA auditado como DESACTIVAR", [(SERV, 'operacion = "DESACTIVAR_RAMA" if modo == "RAMA" else "DESACTIVAR"', 'operacion = "DESACTIVAR"')], [T155]),
     ("S18", "RAMA sin auditar descendientes", [(SERV, "        _auditar(sesion, cid, operacion, antes)\n", "        if cid == categoria_id:\n            _auditar(sesion, cid, operacion, antes)\n")], [T155]),
@@ -319,6 +337,23 @@ MUTANTES = [
        "    rechazo = _escribir(sesion, lambda: repo.insertar(")], [T159]),
     ("I23", "CHECK de icon_key sin traduccion (defensa residual retirada)",
      [(SERV, '    "ck_categorias_financieras__icon_key_no_vacia_recortada": ICONO_NO_VALIDO,\n', "")], [T159]),
+    ("I24", "defensa residual del CHECK de icon_key traducida por el texto ingles del mensaje",
+     [(SERV, '    "ck_categorias_financieras__icon_key_no_vacia_recortada": ICONO_NO_VALIDO,\n', ""),
+      (SERV, "    if diag.constraint_name in _CONSTRAINTS:\n",
+       '    if exc.sqlstate == "23514" and "violates check constraint" in (diag.message_primary or "") '
+       'and "icon_key" in (diag.message_primary or ""):\n'
+       "        return ICONO_NO_VALIDO\n"
+       "    if diag.constraint_name in _CONSTRAINTS:\n")], [T159]),
+    # ---------------------------------------------------------------- R-LOCALE
+    ("L01", "traduccion de triggers dependiente del idioma (prefijo ingles)",
+     [(SERV, '    "gapto.fn_check_jerarquia_aciclica()": PADRE_NO_VALIDO,\n',
+       '    "function gapto.fn_check_jerarquia_aciclica()": PADRE_NO_VALIDO,\n'),
+      (SERV, '    "gapto.fn_check_categoria_deriva()": MOVIMIENTO_BLOQUEADO,\n',
+       '    "function gapto.fn_check_categoria_deriva()": MOVIMIENTO_BLOQUEADO,\n'),
+      (SERV, '    "gapto.fn_check_bolsa_prioridad()": MOVIMIENTO_BLOQUEADO,\n',
+       '    "function gapto.fn_check_bolsa_prioridad()": MOVIMIENTO_BLOQUEADO,\n')], [T160]),
+    ("L02", "firma sin delimitar (prefijo del nombre sin parentesis)",
+     [(SERV, "re.escape(firma)", 're.escape(firma.removesuffix("()"))')], [T160]),
 ]
 
 
@@ -349,7 +384,7 @@ def main() -> None:
         sys.exit("Falta GAPTO_TEST_DATABASE_URL (base local desechable).")
     if recuperar_si_pendiente():
         sys.exit("Habia un mutante pendiente: restaurado y verificado. Resultado NO-PASS; relanzar.")
-    if correr([T152, T153, T154, T155, T156, T157, T158, T159]) != 0:
+    if correr([T152, T153, T154, T155, T156, T157, T158, T159, T160]) != 0:
         sys.exit("PREFLIGHT ROJO: no se muta nada.")
     veredictos = []
     for mid, desc, cambios, tests in MUTANTES:

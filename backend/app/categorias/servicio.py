@@ -35,11 +35,19 @@
 #   categorias deshabilitadas y solo toca icon_key (Q7). El alta admite
 #   `icon_key` opcional (Q6) y su idempotencia (AJ-S4-05) lo compara.
 #   Codigo F05 unico: ICONO_CATEGORIA_NO_VALIDO (AJ-ICON-05).
-# Version: 0.2.0
+#
+#   v0.3.0 (F05-01 R-LOCALE): la funcion del trigger se identifica por su
+#   FIRMA calificada ("gapto.fn_...()"), que PostgreSQL no traduce, con
+#   coincidencia de firma completa (_funcion_trigger). Antes se buscaba el
+#   texto ingles "function gapto.fn_...()" y, con lc_messages en otro
+#   idioma, mover bajo D-121/D-122 devolvia 500 en vez de 409. Sin cambios
+#   de API, codigos, status ni orden de los comandos.
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
@@ -93,13 +101,21 @@ _CONSTRAINTS = {
     # Defensa residual (0340): inalcanzable si la biblioteca valida antes.
     "ck_categorias_financieras__icon_key_no_vacia_recortada": ICONO_NO_VALIDO,
 }
-#: Identidad de la funcion del trigger tal como la informa el contexto
-#: PL/pgSQL del error (P0001), no el texto del mensaje.
+#: Identidad de la funcion del trigger = su FIRMA calificada, que PostgreSQL
+#: no traduce, dentro del contexto PL/pgSQL del error (P0001). Nunca el texto
+#: localizable: ni el mensaje ni el prefijo del contexto ("PL/pgSQL function"
+#: / "funcion PL/pgSQL" segun lc_messages; R-LOCALE).
 _FUNCIONES_TRIGGER = {
-    "function gapto.fn_check_jerarquia_aciclica()": PADRE_NO_VALIDO,
-    "function gapto.fn_check_categoria_deriva()": MOVIMIENTO_BLOQUEADO,
-    "function gapto.fn_check_bolsa_prioridad()": MOVIMIENTO_BLOQUEADO,
+    "gapto.fn_check_jerarquia_aciclica()": PADRE_NO_VALIDO,
+    "gapto.fn_check_categoria_deriva()": MOVIMIENTO_BLOQUEADO,
+    "gapto.fn_check_bolsa_prioridad()": MOVIMIENTO_BLOQUEADO,
 }
+#: Firma completa: a la izquierda, ningun caracter de identificador; a la
+#: derecha, el "()" de la propia firma (fn_check_bolsa_prioridad no coincide
+#: con fn_check_bolsa_prioridad_alcance()).
+_PATRONES_TRIGGER = tuple(
+    (re.compile(r"(?<![\w$.])" + re.escape(firma)), codigo) for firma, codigo in _FUNCIONES_TRIGGER.items()
+)
 _TRIGGERS_DIFERIDOS = (
     "gapto.trg_categorias_financieras__aciclica",
     "gapto.trg_categorias_financieras__bolsa_reparenting",
@@ -124,10 +140,19 @@ def _traducir_fisico(exc: psycopg.Error) -> str | None:
     diag = exc.diag
     if diag.constraint_name in _CONSTRAINTS:
         return _CONSTRAINTS[diag.constraint_name]
-    if exc.sqlstate == "P0001" and diag.context:
-        for funcion, codigo in _FUNCIONES_TRIGGER.items():
-            if funcion in diag.context:
-                return codigo
+    if exc.sqlstate == "P0001":
+        return _funcion_trigger(diag.context)
+    return None
+
+
+def _funcion_trigger(contexto: str | None) -> str | None:
+    """Codigo de la primera firma de _FUNCIONES_TRIGGER presente en el
+    contexto PL/pgSQL (orden del diccionario); None si no hay ninguna."""
+    if not contexto:
+        return None
+    for patron, codigo in _PATRONES_TRIGGER:
+        if patron.search(contexto):
+            return codigo
     return None
 
 
