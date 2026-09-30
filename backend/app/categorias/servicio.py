@@ -42,7 +42,18 @@
 #   texto ingles "function gapto.fn_...()" y, con lc_messages en otro
 #   idioma, mover bajo D-121/D-122 devolvia 500 en vez de 409. Sin cambios
 #   de API, codigos, status ni orden de los comandos.
-# Version: 0.3.0
+#
+#   v0.4.0 (F05-01 S6-ORDEN (F05-D012 §26.3)): comando atomico `reordenar`
+#   del conjunto COMPLETO de hijos directos de un padre (raiz si None), en una
+#   transaccion: advisory -> padre existente (sin exigir habilitado ni
+#   bloquearlo) -> hijos persistidos FOR NO KEY UPDATE por id -> conjunto
+#   identico (si no, CONJUNTO_HERMANOS_DESFASADO sin distinguir la causa) ->
+#   row_version de cada hermano (VERSION_DESFASADA) -> orden objetivo = posicion
+#   0..n-1 -> UPDATE solo de las filas cuyo orden cambia -> una auditoria
+#   ACTUALIZAR "F05-01 REORDENAR" por fila modificada (mismo request_id).
+#   Todas las validaciones preceden a la primera escritura. Sin cambios: el
+#   orden persistido ya es el pedido -> idempotente, sin escritura.
+# Version: 0.4.0
 # ============================================================
 
 from __future__ import annotations
@@ -75,6 +86,7 @@ MOTIVOS = {
     "DESACTIVAR_RAMA": "F05-01 DESACTIVAR_RAMA",
     "REACTIVAR": "F05-01 REACTIVAR",
     "ICONO": "F05-01 ICONO",
+    "REORDENAR": "F05-01 REORDENAR",
 }
 
 # Codigos de capa F05 (no forman parte de la taxonomia F04).
@@ -85,6 +97,7 @@ TIENE_HIJOS_ACTIVOS = "CATEGORIA_TIENE_HIJOS_ACTIVOS"
 MOVIMIENTO_BLOQUEADO = "CATEGORIA_MOVIMIENTO_BLOQUEADO_POR_PRESUPUESTO"
 AMBITO_REQUIERE_CONFIRMACION = "CAMBIO_AMBITO_REQUIERE_CONFIRMACION"
 ICONO_NO_VALIDO = "ICONO_CATEGORIA_NO_VALIDO"
+CONJUNTO_DESFASADO = "CONJUNTO_HERMANOS_DESFASADO"
 # Codigos F04 reutilizados (contrato cerrado).
 NO_ENCONTRADO = "AGREGADO_NO_ENCONTRADO"
 VERSION_DESFASADA = "VERSION_DESFASADA"
@@ -131,6 +144,13 @@ class Rechazo:
 @dataclass(frozen=True)
 class Resultado:
     categoria: dict[str, Any]
+    idempotente: bool = False
+    modificadas: tuple[uuid.UUID, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
+class ResultadoReorden:
+    hermanos: tuple[dict[str, Any], ...]
     idempotente: bool = False
     modificadas: tuple[uuid.UUID, ...] = field(default_factory=tuple)
 
@@ -393,3 +413,32 @@ def cambiar_icono(sesion: SesionMotor, *, categoria_id, icon_key: str | None, ro
         return rechazo
     _auditar(sesion, categoria_id, "ICONO", antes)
     return _resultado(sesion, categoria_id, modificadas=(categoria_id,))
+
+
+# `hermanos`: [(id, row_version)] en el orden deseado; debe ser el conjunto
+# COMPLETO de hijos directos de `parent_id` (raiz si None).
+def reordenar(sesion: SesionMotor, *, parent_id, hermanos: list[tuple[uuid.UUID, int]]) -> ResultadoReorden | Rechazo:
+    repo.tomar_advisory(sesion)
+    if not hermanos or len(hermanos) > ORDEN_MAXIMO + 1:
+        return Rechazo(ENTRADA_INVALIDA)
+    if parent_id is not None and repo.leer(sesion, parent_id) is None:
+        return Rechazo(NO_ENCONTRADO)
+    persistidos = {f["id"]: f for f in repo.hijos_bloqueados(sesion, parent_id)}
+    pedidos = [cid for cid, _ in hermanos]
+    # Sin distinguir falta, sobra, inexistente, ajena u otro padre (no revela existencia).
+    if len(set(pedidos)) != len(pedidos) or set(pedidos) != set(persistidos):
+        return Rechazo(CONJUNTO_DESFASADO)
+    if any(persistidos[cid]["row_version"] != rv for cid, rv in hermanos):
+        return Rechazo(VERSION_DESFASADA)
+    cambian = [(cid, pos) for pos, cid in enumerate(pedidos) if persistidos[cid]["orden"] != pos]
+    for cid, pos in cambian:
+        antes = repo.snapshot(sesion, cid)
+        rechazo = _escribir(sesion, lambda cid=cid, pos=pos: repo.actualizar(sesion, cid, {"orden": pos}))
+        if rechazo is not None:
+            return rechazo
+        _auditar(sesion, cid, "REORDENAR", antes)
+    return ResultadoReorden(
+        hermanos=tuple(repo.leer(sesion, cid) for cid in pedidos),
+        idempotente=not cambian,
+        modificadas=tuple(cid for cid, _ in cambian),
+    )

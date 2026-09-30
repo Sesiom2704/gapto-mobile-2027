@@ -72,7 +72,15 @@
 #   literal en el mensaje en cualquier idioma, asi que ningun test sin
 #   artificio lo distingue de la traduccion por diag.constraint_name.
 #   Los mutantes se ejecutan con la base local con lc_messages en espanol.
-# Version: 0.6.0
+#
+#   v0.7.0 (F05-01 S6-ORDEN (F05-D012 §26.3)): serie O01..O10 del comando
+#   atomico `reordenar` (advisory, comparacion de conjuntos por subconjunto o
+#   por tamano, row_version, escritura parcial antes de rechazar, auditoria y
+#   motivo, escritura de filas que no cambian, bandera de idempotencia, lock
+#   FOR NO KEY UPDATE de los hermanos y orden objetivo 1..n). Discriminante
+#   nuevo en el preflight: test_161. Censo vigente: C01..C17 sin C07,
+#   S01..S21 con S10b, M01..M23, I01..I24, L01..L02 y O01..O10: 97 mutantes.
+# Version: 0.7.0
 # ============================================================
 
 from __future__ import annotations
@@ -96,6 +104,7 @@ T157 = "tests/api/test_157_f05_01_bolsa_intensional.py"
 T158 = "tests/api/test_158_f05_01_c07_magnitudes.py"
 T159 = "tests/api/test_159_f05_01_icono_categoria.py"
 T160 = "tests/api/test_160_f05_01_traduccion_locale.py"
+T161 = "tests/api/test_161_f05_01_reordenar_hermanos.py"
 ICON = "backend/app/categorias/iconos.py"
 DTOC = "backend/app/api/dto_categorias.py"
 ERRH = "backend/app/api/errores_http.py"
@@ -109,6 +118,15 @@ DTO = "backend/app/api/dto_vs01.py"
 TRAD = "backend/app/api/traductor_gasto_pagado.py"
 LECT = "backend/app/categorias/lecturas.py"
 ANCLA_LECT = "from app.core.unidad_trabajo import SesionMotor\n"
+
+REORDENAR_FIRMA = (
+    "def reordenar(sesion: SesionMotor, *, parent_id, hermanos: list[tuple[uuid.UUID, int]]) -> ResultadoReorden | Rechazo:\n"
+    "    repo.tomar_advisory(sesion)\n"
+)
+REORDENAR_VERSION = (
+    '    if any(persistidos[cid]["row_version"] != rv for cid, rv in hermanos):\n'
+    "        return Rechazo(VERSION_DESFASADA)\n"
+)
 
 ICONO_FIRMA = (
     "def cambiar_icono(sesion: SesionMotor, *, categoria_id, icon_key: str | None, row_version: int) -> Resultado | Rechazo:\n"
@@ -354,6 +372,34 @@ MUTANTES = [
        '    "function gapto.fn_check_bolsa_prioridad()": MOVIMIENTO_BLOQUEADO,\n')], [T160]),
     ("L02", "firma sin delimitar (prefijo del nombre sin parentesis)",
      [(SERV, "re.escape(firma)", 're.escape(firma.removesuffix("()"))')], [T160]),
+    # ---------------------------------------------------------------- S6-ORDEN
+    ("O01", "reordenar sin advisory",
+     [(SERV, REORDENAR_FIRMA, REORDENAR_FIRMA.replace("    repo.tomar_advisory(sesion)\n", ""))], [T154, T156]),
+    ("O02", "conjunto aceptado si es subconjunto del persistido",
+     [(SERV, "set(pedidos) != set(persistidos):", "not set(pedidos) <= set(persistidos):")], [T161]),
+    ("O03", "conjunto comparado solo por tamano (acepta id de otro padre)",
+     [(SERV, "set(pedidos) != set(persistidos):", "len(set(pedidos)) != len(persistidos):")], [T161]),
+    ("O04", "row_version de los hermanos no comprobada",
+     [(SERV, REORDENAR_VERSION, "")], [T161]),
+    ("O05", "escritura parcial: row_version comprobada fila a fila tras escribir las anteriores",
+     [(SERV, REORDENAR_VERSION, ""),
+      (SERV, "    for cid, pos in cambian:\n        antes = repo.snapshot(sesion, cid)\n",
+       "    for cid, pos in cambian:\n        if persistidos[cid][\"row_version\"] != dict(hermanos)[cid]:\n"
+       "            return Rechazo(VERSION_DESFASADA)\n        antes = repo.snapshot(sesion, cid)\n")], [T161]),
+    ("O06", "reordenacion sin auditoria",
+     [(SERV, '        _auditar(sesion, cid, "REORDENAR", antes)\n', "")], [T161]),
+    ("O07", "reordenacion auditada con otro motivo",
+     [(SERV, '    "REORDENAR": "F05-01 REORDENAR",\n', '    "REORDENAR": "F05-01 ORDEN",\n')], [T161]),
+    ("O08", "escribe tambien las filas cuyo orden no cambia",
+     [(SERV, ' for pos, cid in enumerate(pedidos) if persistidos[cid]["orden"] != pos]',
+       " for pos, cid in enumerate(pedidos)]")], [T161]),
+    ("O09", "bandera de idempotencia siempre False",
+     [(SERV, "        idempotente=not cambian,\n", "        idempotente=False,\n")], [T161]),
+    ("O10", "hermanos leidos sin FOR NO KEY UPDATE",
+     [(REPO, "AND parent_id IS NOT DISTINCT FROM %s ORDER BY id FOR NO KEY UPDATE",
+       "AND parent_id IS NOT DISTINCT FROM %s ORDER BY id")], [T156]),
+    ("O11", "orden objetivo 1..n en vez de 0..n-1",
+     [(SERV, "for pos, cid in enumerate(pedidos)", "for pos, cid in enumerate(pedidos, start=1)")], [T161]),
 ]
 
 
@@ -384,7 +430,7 @@ def main() -> None:
         sys.exit("Falta GAPTO_TEST_DATABASE_URL (base local desechable).")
     if recuperar_si_pendiente():
         sys.exit("Habia un mutante pendiente: restaurado y verificado. Resultado NO-PASS; relanzar.")
-    if correr([T152, T153, T154, T155, T156, T157, T158, T159, T160]) != 0:
+    if correr([T152, T153, T154, T155, T156, T157, T158, T159, T160, T161]) != 0:
         sys.exit("PREFLIGHT ROJO: no se muta nada.")
     veredictos = []
     for mid, desc, cambios, tests in MUTANTES:

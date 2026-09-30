@@ -68,7 +68,15 @@
 #   (backend/app/categorias/iconos.py) es un modulo puro, sin SQL, sin
 #   escritores y sin dependencias de acceso a datos; alta y cambiar_icono la
 #   invocan antes de escribir.
-# Version: 0.4.0
+#
+#   v0.5.0 (F05-01 S6-ORDEN (F05-D012 §26.3)): el comando `reordenar` entra
+#   en COMANDOS (I8: advisory como PRIMERA llamada; escribe solo via
+#   `_escribir` + `repo.actualizar`). Ninguna primitiva de escritura nueva:
+#   `hijos_bloqueados` es lectura. I11: prohibicion de §26.3 como propiedad
+#   estatica: la ruta por nodo /{id}/orden solo aparece en su declaracion de
+#   app.py; ningun otro codigo productivo ni el cliente movil la invoca, y la
+#   reordenacion tiene una unica ruta atomica /v1/categorias/reordenar.
+# Version: 0.5.0
 # ============================================================
 
 from __future__ import annotations
@@ -200,7 +208,8 @@ ESCRITORES_CATALOGO: dict[tuple[str, str], str] = {
 }
 SERVICIO = "backend/app/categorias/servicio.py"
 PRIMITIVAS_ESCRITURA = {"insertar", "actualizar"}
-COMANDOS = ("alta", "renombrar", "mover", "ordenar", "cambiar_ambito", "desactivar", "reactivar", "cambiar_icono")
+COMANDOS = ("alta", "renombrar", "mover", "ordenar", "cambiar_ambito", "desactivar", "reactivar", "cambiar_icono",
+            "reordenar")
 ICONOS = "backend/app/categorias/iconos.py"
 
 
@@ -604,3 +613,25 @@ def test_i7_cliente_movil_sin_menciones_sin_registrar():
         if p.suffix in {".ts", ".tsx", ".js", ".jsx"} and (TOKEN in t or "categorias_financieras" in t)
     )
     assert menciones == [], menciones
+
+
+# ------------------------------------------------------------------ I11
+_RUTA_POR_NODO = re.compile(r"/orden\b")
+
+
+def test_i11_reordenar_solo_por_la_ruta_atomica():
+    """F05-D012 §26.3: prohibido reordenar con N llamadas al comando por nodo.
+    La ruta /{id}/orden (S4) solo aparece en su declaracion de app.py; ningun
+    otro codigo productivo ni el cliente movil la invoca."""
+    usos = []
+    for p, texto in _textos_productivos():
+        for linea in texto.splitlines():
+            if linea.lstrip().startswith(("#", "//", "*", "/*")):
+                continue
+            if _RUTA_POR_NODO.search(linea):
+                usos.append((_rel(p), linea.strip()))
+    assert usos == [("backend/app/api/app.py", '@app.post("/v1/categorias/{categoria_id}/orden", **_R)')], usos
+    app_py = (RAIZ / "backend" / "app" / "api" / "app.py").read_bytes().decode("utf-8")
+    assert app_py.count('"/v1/categorias/reordenar"') == 1
+    comandos = [n for n in ast.walk(_nodo(SERVICIO, "reordenar")) if isinstance(n, ast.For)]
+    assert len(comandos) == 1, "reordenar: un unico bucle de escritura sobre las filas que cambian"

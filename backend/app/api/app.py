@@ -34,7 +34,13 @@
 #   v0.5.0 (F05-01 S6-ICONO (F05-D013)): POST /v1/categorias/{id}/icono
 #   (cambiar_icono) y `icon_key` opcional en el alta. Sin DELETE; sin
 #   lectura de la biblioteca de iconos (queda para el mandato de UI).
-# Version: 0.5.0
+#
+#   v0.6.0 (F05-01 S6-ORDEN (F05-D012 §26.3)): POST /v1/categorias/reordenar
+#   (reordenar hermanos, atomico, una transaccion de la UdT). El comando por
+#   nodo POST /v1/categorias/{id}/orden (S4) se CONSERVA sin cambios; la
+#   prohibicion de §26.3 (reordenar con N llamadas por nodo) rige para la UI,
+#   que solo usara /reordenar (D-ORD-08).
+# Version: 0.6.0
 # ============================================================
 
 from __future__ import annotations
@@ -72,7 +78,9 @@ from app.api.dto_categorias import (
     OrdenCategoria,
     ReactivarCategoria,
     RenombrarCategoria,
+    ReordenarHermanos,
     ResultadoComandoCategoria,
+    ResultadoReordenar,
     UsoCategoria,
 )
 from app.api.dto_vs01 import (
@@ -265,6 +273,21 @@ def create_app(
         return _comando("ambito", lambda s: serv_cat.cambiar_ambito(
             s, categoria_id=categoria_id, ambito=c.ambito, confirmacion_uso=c.confirmacion_uso,
             row_version=c.row_version))
+
+    @app.post("/v1/categorias/reordenar", response_model=ResultadoReordenar, dependencies=[Depends(autorizar)])
+    def reordenar_categorias(c: ReordenarHermanos):
+        salida = unidad.ejecutar(contexto(), lambda s: serv_cat.reordenar(
+            s, parent_id=c.parent_id, hermanos=[(h.id, h.row_version) for h in c.hermanos]),
+            nombre="F05-01 reordenar")
+        if isinstance(salida, serv_cat.Rechazo):
+            status, cuerpo = eh.rechazo_categoria(salida.codigo, salida.detalle)
+            return JSONResponse(cuerpo, status_code=status)
+        campos = CategoriaNodo.model_fields
+        return {
+            "hermanos": [{k: v for k, v in n.items() if k in campos} for n in salida.hermanos],
+            "idempotente": salida.idempotente,
+            "modificadas": list(salida.modificadas),
+        }
 
     @app.post("/v1/categorias/{categoria_id}/icono", **_R)
     def icono_categoria(categoria_id: uuid.UUID, c: IconoCategoria):

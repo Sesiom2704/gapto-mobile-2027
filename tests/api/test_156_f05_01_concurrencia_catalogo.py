@@ -7,7 +7,7 @@
 #   sesion retiene el advisory (CATEGORIAS, owner); los comandos quedan
 #   ESPERANDO (se observa en pg_stat_activity) y al liberarla se serializan
 #   en orden de llegada.
-#     - cada uno de los 7 comandos toma el advisory ANTES de escribir;
+#     - cada uno de los 9 comandos toma el advisory ANTES de escribir;
 #     - unicidad normalizada en las seis combinaciones alta / renombrado /
 #       reactivacion, con literales distintos ("Café" / "cafe") para que la
 #       UNIQUE fisica literal no pueda salvar el caso: solo el advisory +
@@ -21,7 +21,19 @@
 #   comando esta bloqueada POR la que retiene el advisory
 #   (pg_blocking_pids, con el PID real de pg_backend_pid()) y que lo que
 #   espera es un lock advisory no concedido.
-# Version: 0.2.0
+#
+#   v0.3.0 (F05-01 S6-ORDEN (F05-D012 §26.3)): `reordenar` entra en la
+#   bateria de advisory (9 comandos; cosmetico §30.6: el recuento de la
+#   cabecera decia 7). Caso especifico: la sesion A retiene el advisory y la
+#   B reordena y queda bloqueada POR A (pg_blocking_pids / pg_backend_pid);
+#   al liberar, B aplica sobre el estado actual si A no cambio nada, o
+#   rechaza sin escritura con CONJUNTO_HERMANOS_DESFASADO (A anadio un
+#   hermano) o VERSION_DESFASADA (A cambio un hermano).
+#   Ademas, el lock de filas del conjunto (FOR NO KEY UPDATE en la lectura de
+#   hermanos) frente a un escritor que NO toma el advisory: reordenar espera
+#   la fila y ve la version nueva (VERSION_DESFASADA); sin ese lock leeria la
+#   version antigua y aplicaria encima (perdida de actualizacion).
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
@@ -88,6 +100,8 @@ _COMANDOS = {
     "ambito": lambda cli, p, n: fh.cmd(cli, f"{B}/{n}/ambito", {"ambito": "AMBOS", "confirmacion_uso": {}, "row_version": 1}),
     "desactivar": lambda cli, p, n: fh.cmd(cli, f"{B}/{n}/desactivar", {"modo": "RAMA", "row_version": 1}),
     "icono": lambda cli, p, n: fh.cmd(cli, f"{B}/{n}/icono", {"icon_key": "hogar.casa", "row_version": 1}),
+    "reordenar": lambda cli, p, n: fh.cmd(cli, f"{B}/reordenar", {"parent_id": None, "hermanos": [
+        {"id": str(n), "row_version": 1}, {"id": str(p), "row_version": 1}]}),
 }
 
 
@@ -139,6 +153,67 @@ def test_icono_bloqueado_por_el_advisory_observado_con_pg_blocking_pids(ctx):
     assert not t.is_alive()
     assert salida["icono"].status_code == 200, salida["icono"].text
     assert fh.rv(owner, nodo) == 2
+
+
+@pytest.mark.parametrize("cambio_de_a", ["NINGUNO", "NUEVO_HERMANO", "HERMANO_MODIFICADO"])
+def test_reordenar_bloqueado_por_el_advisory_y_serializado(ctx, cambio_de_a):
+    owner, _, cli = ctx
+    padre, nodo = _preparar(owner, cli)
+    cuerpo = {"parent_id": None, "hermanos": [{"id": str(nodo), "row_version": 1}, {"id": str(padre), "row_version": 1}]}
+    salida: dict = {}
+    x = fh.retener_advisory(owner)
+    try:
+        pid_x = fh.pid_servidor(x)
+        t = _lanzar(salida, "reordenar", lambda: fh.cmd(cli, f"{B}/reordenar", cuerpo))
+        assert len(_bloqueados_por_advisory(pid_x)) == 1, "reordenar no espera el advisory"
+        assert not salida
+        if cambio_de_a == "NUEVO_HERMANO":
+            x.execute("INSERT INTO gapto.categorias_financieras (id, owner_user_id, parent_id, nombre, ambito, "
+                      "presupuestable_default) VALUES (%s, %s, NULL, 'Tercera', 'GASTO', true)", (uuid.uuid4(), owner))
+        elif cambio_de_a == "HERMANO_MODIFICADO":
+            x.execute("UPDATE gapto.categorias_financieras SET nombre = 'Nodo B', row_version = row_version + 1 "
+                      "WHERE id = %s", (nodo,))
+        x.execute("COMMIT")
+    finally:
+        x.close()
+    t.join(timeout=20)
+    assert not t.is_alive()
+    r = salida["reordenar"]
+    orden = dict(h.leer(owner, "SELECT id, orden FROM gapto.categorias_financieras WHERE id = ANY(%s)",
+                        ([padre, nodo],)))
+    reordenadas = h.leer(owner, "SELECT count(*) FROM gapto.auditoria WHERE motivo = 'F05-01 REORDENAR' "
+                                "AND registro_id = ANY(%s)", ([padre, nodo],))[0][0]
+    if cambio_de_a == "NINGUNO":
+        assert r.status_code == 200, r.text
+        assert orden == {nodo: 0, padre: 1} and reordenadas == 1
+    else:
+        esperado = "CONJUNTO_HERMANOS_DESFASADO" if cambio_de_a == "NUEVO_HERMANO" else "VERSION_DESFASADA"
+        assert r.status_code == 409 and r.json()["codigo"] == esperado, r.text
+        assert orden == {nodo: 0, padre: 0} and reordenadas == 0
+
+
+def test_reordenar_bloquea_las_filas_frente_a_un_escritor_sin_advisory(ctx):
+    owner, _, cli = ctx
+    padre, nodo = _preparar(owner, cli)
+    cuerpo = {"parent_id": None, "hermanos": [{"id": str(nodo), "row_version": 1}, {"id": str(padre), "row_version": 1}]}
+    salida: dict = {}
+    s = fh.sesion_owner(owner)  # escritor sin advisory, con la fila de `padre` modificada y sin confirmar
+    try:
+        s.execute("UPDATE gapto.categorias_financieras SET nombre = 'Padre B', row_version = row_version + 1 "
+                  "WHERE id = %s", (padre,))
+        pid_s = fh.pid_servidor(s)
+        t = _lanzar(salida, "reordenar", lambda: fh.cmd(cli, f"{B}/reordenar", cuerpo))
+        assert fh.esperar_bloqueo((pid_s,)), "reordenar no espero la fila del hermano"
+        assert not salida
+        s.execute("COMMIT")
+    finally:
+        s.close()
+    t.join(timeout=20)
+    assert not t.is_alive()
+    r = salida["reordenar"]
+    assert r.status_code == 409 and r.json()["codigo"] == "VERSION_DESFASADA", r.text
+    assert dict(h.leer(owner, "SELECT id, orden FROM gapto.categorias_financieras WHERE id = ANY(%s)",
+                       ([padre, nodo],))) == {padre: 0, nodo: 0}
 
 
 # ------------------------------------------------------------ unicidad normalizada

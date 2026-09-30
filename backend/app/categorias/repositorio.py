@@ -21,7 +21,13 @@
 #   prospectivamente F05-D010 Q4). La validacion contra la biblioteca v1 la
 #   hace el servicio antes de escribir; el CHECK de 0340 es defensa residual.
 #   Sigue siendo el unico escritor runtime del catalogo; ningun DELETE.
-# Version: 0.2.0
+#
+#   v0.3.0 (F05-01 S6-ORDEN (F05-D012 §26.3)): primitiva de LECTURA
+#   `hijos_bloqueados` (hijos directos de un padre, NULL-safe para la raiz,
+#   habilitados o no, FOR NO KEY UPDATE en orden por id) para el comando
+#   `reordenar`. Ningun escritor nuevo: la reordenacion escribe con
+#   `actualizar`. Cosmetico §30.6: el mensaje de `actualizar` ya no alude a S4.
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
@@ -129,6 +135,20 @@ def bloquear(sesion: SesionMotor, ids: list[uuid.UUID]) -> list[tuple[uuid.UUID,
         return list(cur.fetchall())
 
 
+def hijos_bloqueados(sesion: SesionMotor, parent_id: uuid.UUID | None) -> list[dict[str, Any]]:
+    """Hijos DIRECTOS de `parent_id` (raiz si None, comparacion NULL-safe),
+    habilitados o no, con FOR NO KEY UPDATE en orden determinista por id
+    (S6-ORDEN: el conjunto persistido se compara bajo el advisory)."""
+    with sesion.conexion.cursor() as cur:
+        cur.execute(
+            "SELECT id, orden, row_version FROM gapto.categorias_financieras "
+            "WHERE owner_user_id = current_setting('gapto.owner_user_id')::uuid "
+            "AND parent_id IS NOT DISTINCT FROM %s ORDER BY id FOR NO KEY UPDATE",
+            (parent_id,),
+        )
+        return [{"id": i, "orden": o, "row_version": rv} for i, o, rv in cur.fetchall()]
+
+
 def insertar(
     sesion: SesionMotor,
     *,
@@ -156,7 +176,7 @@ def actualizar(sesion: SesionMotor, categoria_id: uuid.UUID, cambios: dict[str, 
     """UPDATE con row_version + 1 y updated_at. El control de version del
     cliente lo hace el servicio sobre la fila ya bloqueada."""
     if not cambios or not set(cambios) <= COLUMNAS_EDITABLES:
-        raise ValueError(f"columnas no editables en S4: {sorted(set(cambios) - COLUMNAS_EDITABLES)}")
+        raise ValueError(f"columnas no editables por los comandos: {sorted(set(cambios) - COLUMNAS_EDITABLES)}")
     columnas = sorted(cambios)
     asignaciones = ", ".join(f"{c} = %s" for c in columnas)
     sesion.uno(

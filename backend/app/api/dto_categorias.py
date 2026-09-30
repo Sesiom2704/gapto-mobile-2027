@@ -21,7 +21,14 @@
 #   (clave o null; campo ausente -> 422 estructural). `AltaCategoria` admite
 #   `icon_key` opcional (Q6: omitido o null -> NULL). El DTO solo decide la
 #   forma: la pertenencia a la biblioteca v1 la decide el servicio.
-# Version: 0.4.0
+#
+#   v0.5.0 (F05-01 S6-ORDEN (F05-D012 §26.3)): `ReordenarHermanos` para
+#   POST /v1/categorias/reordenar: `parent_id` obligatorio (null = raiz) y
+#   `hermanos` = conjunto completo [{id, row_version}] en el orden deseado.
+#   422 estructural: lista vacia, mas de 32768 elementos, ids repetidos,
+#   row_version < 1 o campo extra. `ResultadoReordenar` devuelve los hermanos
+#   (CategoriaNodo) en el orden persistido resultante.
+# Version: 0.5.0
 # ============================================================
 
 from __future__ import annotations
@@ -29,7 +36,7 @@ from __future__ import annotations
 import uuid
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class _Estricto(BaseModel):
@@ -124,5 +131,29 @@ class IconoCategoria(_ConVersion):
 
 class ResultadoComandoCategoria(_Estricto):
     categoria: CategoriaNodo
+    idempotente: bool
+    modificadas: list[uuid.UUID]
+
+
+class HermanoOrden(_ConVersion):
+    id: uuid.UUID
+
+
+class ReordenarHermanos(_Estricto):
+    # Sin default: el padre debe venir; null es la raiz.
+    parent_id: uuid.UUID | None
+    # Conjunto completo; 32768 = posiciones 0..32767 (orden smallint).
+    hermanos: list[HermanoOrden] = Field(min_length=1, max_length=32768)
+
+    @field_validator("hermanos")
+    @classmethod
+    def _sin_repetidos(cls, v: list[HermanoOrden]) -> list[HermanoOrden]:
+        if len({h.id for h in v}) != len(v):
+            raise ValueError("ids repetidos")
+        return v
+
+
+class ResultadoReordenar(_Estricto):
+    hermanos: list[CategoriaNodo]
     idempotente: bool
     modificadas: list[uuid.UUID]

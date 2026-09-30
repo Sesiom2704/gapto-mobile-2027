@@ -37,7 +37,12 @@
 #   ICONO_CATEGORIA_NO_VALIDO (422: dato de entrada, como
 #   CATEGORIA_PADRE_NO_VALIDO) para una clave fuera de la biblioteca v1, en
 #   el alta y en el comando de icono. Sin escritura previa.
-# Version: 0.6.0
+#
+#   v0.7.0 (F05-01 S6-ORDEN (F05-D012 §26.3)): codigo F05
+#   CONJUNTO_HERMANOS_DESFASADO (409: el conjunto de hermanos persistido no
+#   coincide con el enviado; no distingue falta, sobra, inexistente, ajena u
+#   otro padre).
+# Version: 0.7.0
 # ============================================================
 
 from __future__ import annotations
@@ -158,6 +163,7 @@ _RECHAZOS_CATEGORIA: dict[str, tuple[int, str]] = {
     "IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION": (409, "Este registro ya existe con otros datos. No se ha guardado nada nuevo."),
     "ENTRADA_INVALIDA": (422, "Revisa los datos."),
     "ICONO_CATEGORIA_NO_VALIDO": (422, "Ese icono no está disponible. Elige otro o «Sin icono»."),
+    "CONJUNTO_HERMANOS_DESFASADO": (409, "Las categorías de este nivel han cambiado. Vuelve a cargarlas."),
 }
 
 
