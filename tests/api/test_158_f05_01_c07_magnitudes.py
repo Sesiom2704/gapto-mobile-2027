@@ -19,7 +19,11 @@
 #   C07 -> 409 MAGNITUD_VALOR_NO_VALIDO sin mutaciones; y un valor canonico
 #   largo pero numericamente valido (ceros de cola) se admite sin redondeo.
 #   Ambos fallan contra 203891b0 (WM 12C.2).
-# Version: 0.2.0
+#
+#   v0.3.0 (F05-01 S6-WIRE+UI (este mandato); F05 §28.3): fin de la transicion.
+#   Un payload VS-01 sin `categoria` ya no es de compatibilidad: 422 sin hecho
+#   ni filas de hecho_magnitudes.
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
@@ -104,12 +108,12 @@ def _rechazo(r, codigo) -> None:
 
 
 # ------------------------------------------------------------------ transicion
-def test_payload_vs01_sin_categoria_sigue_siendo_legacy(tenant):
+def test_payload_vs01_sin_categoria_es_422_sin_escritura(tenant):
     owner, _, cuenta = tenant
     cuerpo = h.intencion(cuenta)
+    del cuerpo["categoria"]
     r = _post(owner, cuerpo)
-    assert r.status_code == 200, r.text
-    assert r.json()["estado_categorial"] == "NO_CAPTURADA_LEGACY"
+    assert r.status_code == 422 and r.json()["codigo"] == "ENTRADA_INVALIDA", r.text
     assert _filas_magnitud(owner, _hid(cuerpo)) == []
 
 

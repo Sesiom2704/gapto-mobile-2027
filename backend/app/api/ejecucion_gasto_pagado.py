@@ -49,7 +49,7 @@
 #     relectura owner/enabled/ambito -> OP-22.
 #   Un reintento de una intencion ya materializada NO revalida la categoria
 #   (un hecho valido no se rechaza porque su categoria se desactivara
-#   despues). SIN_CATEGORIA y NO_CAPTURADA_LEGACY no invocan la guarda.
+#   despues). SIN_CATEGORIA no invoca la guarda.
 #   Orden de locks resultante: cuenta -> categoria -> raiz -> movimiento. La
 #   gestion del catalogo no bloquea cuentas, asi que no se crea un ciclo; VS-01
 #   no escribe hecho_entidades, de modo que el advisory INVERSIONES no entra
@@ -67,7 +67,13 @@
 #   Orden de locks resultante: cuenta -> categoria -> categoria_magnitudes ->
 #   magnitudes -> raiz -> movimiento. Hoy no existe writer runtime de
 #   magnitudes ni de categoria_magnitudes (gate F05-01-R16).
-# Version: 0.4.0
+#
+#   v0.5.0 (F05-01 S6-WIRE+UI (este mandato); F05 §26.2 AJ-03): la intencion
+#   trae SIEMPRE un estado categorial resuelto (CATEGORIA o SIN_CATEGORIA):
+#   se retira el estado de compatibilidad derivado de la ausencia del campo.
+#   Sin cambios de logica: CATEGORIA pasa por C-a y C07; SIN_CATEGORIA
+#   persiste NULL sin invocar la guarda.
+# Version: 0.5.0
 # ============================================================
 
 from __future__ import annotations

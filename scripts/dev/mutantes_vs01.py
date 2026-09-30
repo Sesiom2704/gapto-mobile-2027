@@ -22,7 +22,20 @@
 #   v0.3.0 (F05 §18, tras F04-D051): se retira A15 junto con la guarda
 #   `_agregado_sin_extras`; la propiedad la impone OP-22 y la discrimina
 #   D050-M1 en scripts/mutantes/f04_d050.py.
-# Version: 0.3.0
+#   v0.4.0 (F05-01 S6-WIRE+UI (este mandato)): M07 se reancla con la MISMA
+#   semantica (un indeterminado se clasifica como rechazo definitivo) sobre la
+#   linea que sustituye a la anterior en cliente.ts 0.3.0 (el mensaje
+#   indeterminado se calcula una vez en `msgIndeterminado`). Nuevos U01..U06
+#   del cliente de categorias (suite js): visibilidad en el registro,
+#   error de carga que no selecciona «Sin categoria» (AJ-09), obligatoria que
+#   bloquea, valor canonico con punto en el sellado, «Usar...» solo en nodo
+#   elegible, aviso D-198 solo con padre y U07 (una categoria habilitada de
+#   gasto no capturable se oculta en el registro, contra la decision de Moises
+#   de mostrarla con su motivo: F09 §12.97.3, lamina R05). Censo: A01..A20 sin
+#   A15 (19 py), M01..M12 y U01..U07 (19 js) = 38. Correccion de ejecucion:
+#   `npx` se resuelve con shutil.which (en Windows es npx.cmd y subprocess sin
+#   shell no lo encontraba: el preflight js fallaba con FileNotFoundError).
+# Version: 0.4.0
 # ============================================================
 
 from __future__ import annotations
@@ -31,6 +44,7 @@ import hashlib
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 
@@ -38,7 +52,8 @@ RAIZ = pathlib.Path(__file__).resolve().parents[2]
 JOURNAL = RAIZ / ".mutantes_vs01.journal.json"
 
 PY = [sys.executable, "-m", "pytest", "tests/api", "-q", "-x", "-p", "no:cacheprovider", "--rootdir=tests/api"]
-JS = ["npx", "jest", "--silent"]
+# En Windows `npx` es npx.cmd: subprocess sin shell no lo resuelve por nombre (se resuelve con which).
+JS = [shutil.which("npx") or "npx", "jest", "--silent"]
 
 # (id, fichero, texto_original, texto_mutado, suite_discriminante)
 MUTANTES = [
@@ -67,12 +82,20 @@ MUTANTES = [
     ("M04", "mobile/src/domain/intencion.ts", "soloMio: false,", "soloMio: true,", "js"),
     ("M05", "mobile/App.tsx", "if (registrado) setRefresco((n) => n + 1);", "if (false) setRefresco((n) => n + 1);", "js"),
     ("M06", "mobile/src/state/useEnvioGasto.ts", "} else if (r.tipo === 'RECHAZADO') {", "} else if (false) {", "js"),
-    ("M07", "mobile/src/api/cliente.ts", "      return { tipo: 'INDETERMINADO', mensaje: esEscritura ? MSG_INDETERMINADO : MSG_SIN_CONEXION };\n    } catch {", "      return { tipo: 'RECHAZADO', codigo: 'X', mensaje: '' } as any;\n    } catch {", "js"),
+    ("M07", "mobile/src/api/cliente.ts", "      return { tipo: 'INDETERMINADO', mensaje: msgIndeterminado };\n    } catch {", "      return { tipo: 'RECHAZADO', codigo: 'X', mensaje: '' } as any;\n    } catch {", "js"),
     ("M08", "mobile/src/domain/importe.ts", "if (dec.length > 2) return { ok: false, motivo: 'DECIMALES' };", "", "js"),
     ('M09', 'mobile/src/domain/intencion.ts', "if (b.propuesta === 'SELF_100' && !b.propuestaRechazada) {", "if (b.propuesta === 'SELF_100') {", 'js'),
     ('M10', 'mobile/src/domain/intencion.ts', "  else if (b.fechaHecho > hoyIso) e.fecha = 'Solo gastos ya ocurridos: la fecha no puede ser futura.';\n", '', 'js'),
     ('M11', 'mobile/src/screens/RegistroGastoScreen.tsx', '  }, [b.fechaHecho]);', '  }, []);', 'js'),
     ('M12', 'mobile/src/screens/HomeScreen.tsx', '          <Columna etiqueta="Gastos">\n            <EstadoDato estado="NO_DISPONIBLE" />\n          </Columna>', '          <Columna etiqueta="Gastos">\n            <CeldaGastos lectura={gasto} onReintentar={cargar} />\n          </Columna>', 'js'),
+    # ---------------------------------------------------------------- F05-01 S6-WIRE+UI (cliente de categorias)
+    ("U01", "mobile/src/domain/categoria.ts", "  if (elegible(n, naturaleza)) return true;\n  if (n.enabled", "  return true;\n  if (n.enabled", "js"),
+    ("U02", "mobile/src/screens/RegistroGastoScreen.tsx", "    if (r.tipo !== 'OK') return setArbol({ fase: 'ERROR' });", "    if (r.tipo !== 'OK') { setB((x) => ({ ...x, categoria: { estado: 'SIN_CATEGORIA' } })); return setArbol({ fase: 'ERROR' }); }", "js"),
+    ("U03", "mobile/src/domain/intencion.ts", "        if (m.obligatoria) em[m.magnitud_id] = ", "        if (false) em[m.magnitud_id] = ", "js"),
+    ("U04", "mobile/src/domain/intencion.ts", "magnitudes.push(Object.freeze({ magnitud_id: m.magnitud_id, valor: r.valor }));", "magnitudes.push(Object.freeze({ magnitud_id: m.magnitud_id, valor: texto }));", "js"),
+    ("U05", "mobile/src/components/SelectorCategorias.tsx", "          {actual && p.esSeleccionable(actual) ? (", "          {actual ? (", "js"),
+    ("U06", "mobile/src/screens/NuevaCategoriaScreen.tsx", "        {padre !== null ? (\n          <View testID=\"aviso-d198\"", "        {true ? (\n          <View testID=\"aviso-d198\"", "js"),
+    ("U07", "mobile/src/domain/categoria.ts", "  if (n.enabled && (n.ambito === naturaleza || n.ambito === 'AMBOS') && !n.capturable) return true;\n", "", "js"),
 ]
 
 

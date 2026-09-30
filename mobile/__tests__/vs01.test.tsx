@@ -5,7 +5,8 @@
 // Descripción: Tests de cliente VS-01 (mandato §22): Home, acción rápida, validación, «Solo mío» explícito, presupuestable no inventado, intención correcta, doble tap, timeout conserva identidad, error no muestra éxito, éxito refresca Home desde backend.
 // v0.2.0 (F05-D003): tarjeta parcial de Home fuera de «Este mes», fecha editable ≤ hoy, financiación visible y sellada, rechazo por propuesta obsoleta.
 // v0.3.0 (F05 — VS-01 · Alineación visual): A1 — los bloques de Home no son tarjetas; A2 — SPEC-08: «Registrar gasto» desactivado mientras falte una decisión bloqueante, con indicación visible de lo que falta. Los tests de validación (antes: pulsar y leer errores) comprueban ahora el estado disabled de forma discriminante y conservan la propiedad «ante cualquier condición bloqueante no se produce ninguna petición ni mutación».
-// Versión: 0.3.0
+// v0.4.0 (F05-01 S6-WIRE+UI (este mandato)): el estado categorial es una decisión bloqueante más (S6-WIRE, F09 §12.97.1). El cliente simulado sirve el árbol de categorías; `rellenar()` elige por defecto «Sin categoría» en el selector (decisión explícita); `faltan` nombra la categoría y la intención sellada lleva {estado:'SIN_CATEGORIA'}. Las pruebas de REG-CAT viven en regcat.test.tsx.
+// Versión: 0.4.0
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
@@ -15,8 +16,11 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { Raiz } from '../App';
 import type { ClienteApi, CuentaPago, GastoMes, Respuesta, ResultadoRegistro } from '../src/api/cliente';
+import type { CategoriaNodo } from '../src/domain/categoria';
 import type { PayloadGastoPagado } from '../src/domain/intencion';
 import { ProveedorTema } from '../src/theme/tema';
+
+import { clienteCategoriasStub } from './fixtures_categorias';
 
 const CUENTA = 'c0000000-0000-4000-8000-000000000001';
 const AHORA = () => new Date(2026, 8, 24, 10, 0, 0);
@@ -26,7 +30,7 @@ function gasto(valor: string, estado: 'CONFIRMADO' | 'PARCIAL' = 'CONFIRMADO', s
 }
 
 function ok(p: PayloadGastoPagado): Respuesta<ResultadoRegistro> {
-  return { tipo: 'OK', datos: { hecho_id: p.intencion_id, idempotente: false, importe: p.importe, estado_atribucion: p.atribucion === 'SOLO_MIO' ? 'COMPLETA' : 'NO_DISPONIBLE', aportacion_criterio: p.financiacion.estado === 'PROPUESTA_ACEPTADA' ? 'PARTICIPACION_CUENTA' : null, financiacion: p.financiacion.estado } };
+  return { tipo: 'OK', datos: { hecho_id: p.intencion_id, idempotente: false, importe: p.importe, estado_atribucion: p.atribucion === 'SOLO_MIO' ? 'COMPLETA' : 'NO_DISPONIBLE', aportacion_criterio: p.financiacion.estado === 'PROPUESTA_ACEPTADA' ? 'PARTICIPACION_CUENTA' : null, financiacion: p.financiacion.estado, estado_categorial: p.categoria.estado } };
 }
 
 type Propuesta = CuentaPago['propuesta_financiacion'];
@@ -36,6 +40,7 @@ function crearFake(
     registrar?: (p: PayloadGastoPagado) => Promise<Respuesta<ResultadoRegistro>>;
     gastos?: Respuesta<GastoMes>[];
     propuesta?: (fecha: string) => Propuesta;
+    categorias?: CategoriaNodo[];
   } = {},
 ) {
   const enviados: PayloadGastoPagado[] = [];
@@ -56,6 +61,7 @@ function crearFake(
       lecturasHome += 1;
       return colaGastos.length > 1 ? colaGastos.shift()! : colaGastos[0];
     }),
+    ...clienteCategoriasStub(opciones.categorias ?? []),
   };
   return { cliente, enviados, fechasConsultadas, lecturas: () => lecturasHome };
 }
@@ -93,11 +99,18 @@ async function abrirFormulario() {
   await screen.findByTestId('financiacion'); // propuesta conocida para la fecha
 }
 
-function rellenar({ importe = '3,50', concepto = 'Café', presupuestable = true as boolean | null, soloMio = true } = {}) {
+function rellenar({ importe = '3,50', concepto = 'Café', presupuestable = true as boolean | null, soloMio = true, sinCategoria = true } = {}) {
   fireEvent.changeText(screen.getByTestId('campo-importe'), importe);
   fireEvent.changeText(screen.getByTestId('campo-concepto'), concepto);
+  if (sinCategoria) elegirSinCategoria();
   if (presupuestable !== null) fireEvent.press(screen.getByTestId(`presupuestable-${presupuestable}`));
   if (soloMio) fireEvent.press(screen.getByTestId('solo-mio'));
+}
+
+/** Decisión explícita «Sin categoría» desde el selector (S6-WIRE: la categoría ya no es opcional). */
+function elegirSinCategoria() {
+  fireEvent.press(screen.getByTestId('campo-categoria'));
+  fireEvent.press(screen.getByTestId('selector-sin-categoria'));
 }
 
 beforeEach(() => {
@@ -158,7 +171,7 @@ test('validación local de importe y concepto: botón desactivado, errores al es
   fireEvent.press(screen.getByTestId('presupuestable-true'));
   // El error de formato se ve sin pulsar nada (SPEC-08: no depende del botón desactivado).
   expect(screen.getByText('Máximo dos decimales.')).toBeTruthy();
-  expect(screen.getByTestId('faltan').props.children).toBe('Para registrar falta: importe válido y concepto.');
+  expect(screen.getByTestId('faltan').props.children).toBe('Para registrar falta: importe válido, concepto y categoría.');
   await pulsarBloqueado(f);
   fireEvent.changeText(screen.getByTestId('campo-importe'), '0');
   expect(screen.getByText('El importe debe ser mayor que 0.')).toBeTruthy();
@@ -166,6 +179,9 @@ test('validación local de importe y concepto: botón desactivado, errores al es
   // Discriminante inverso: completar lo que falta habilita el botón.
   fireEvent.changeText(screen.getByTestId('campo-importe'), '3,50');
   fireEvent.changeText(screen.getByTestId('campo-concepto'), 'Café');
+  expect(screen.getByTestId('faltan').props.children).toBe('Para registrar falta: categoría.');
+  await pulsarBloqueado(f);
+  elegirSinCategoria();
   expect(screen.getByTestId('registrar')).toBeEnabled();
   expect(screen.queryByTestId('faltan')).toBeNull();
   sinEscritura(f);
@@ -205,6 +221,7 @@ test('submit construye la intención correcta (magnitud positiva, decisiones exp
     {
       intencion_id: '00000000-0000-4000-8000-000000000001', concepto: 'Café', importe: '3.50', moneda: 'EUR', fecha_hecho: '2026-09-24', cuenta_id: CUENTA, presupuestable: false, atribucion: 'SOLO_MIO',
       financiacion: { estado: 'PROPUESTA_ACEPTADA', actor: 'SELF', criterio: 'PARTICIPACION_CUENTA', porcentaje: '100', importe: '3.50' },
+      categoria: { estado: 'SIN_CATEGORIA' },
     },
   ]);
 });
@@ -388,8 +405,8 @@ test('SPEC-08: al abrir, todo lo bloqueante pendiente se indica y el botón est�
   montar(f.cliente);
   await abrirFormulario();
   expect(screen.getByTestId('registrar')).toBeDisabled();
-  expect(screen.getByTestId('faltan').props.children).toBe('Para registrar falta: importe, concepto y si cuenta para el presupuesto.');
-  expect(screen.getByTestId('registrar').props.accessibilityHint).toBe('Para registrar falta: importe, concepto y si cuenta para el presupuesto.');
+  expect(screen.getByTestId('faltan').props.children).toBe('Para registrar falta: importe, concepto, categoría y si cuenta para el presupuesto.');
+  expect(screen.getByTestId('registrar').props.accessibilityHint).toBe('Para registrar falta: importe, concepto, categoría y si cuenta para el presupuesto.');
   await pulsarBloqueado(f);
 });
 

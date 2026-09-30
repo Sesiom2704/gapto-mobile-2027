@@ -24,8 +24,9 @@
 #   ejecucion_gasto_pagado.py); cuentas-pago recibe la fecha del pago.
 #
 #   v0.3.0 (F05-01, F05-D009): la intencion admite la dimension categorial
-#   (CATEGORIA / SIN_CATEGORIA; ausencia = NO_CAPTURADA_LEGACY) y la respuesta
-#   informa `estado_categorial`. Lecturas del arbol de categorias.
+#   (CATEGORIA / SIN_CATEGORIA; la ausencia derivaba entonces un estado de
+#   compatibilidad, retirado en v0.7.0) y la respuesta informa
+#   `estado_categorial`. Lecturas del arbol de categorias.
 #
 #   v0.4.0 (F05-01, S4): comandos de gestion del arbol (C06), uno por ruta,
 #   cada uno en una transaccion de la unidad de trabajo. Sin DELETE ni
@@ -40,7 +41,11 @@
 #   nodo POST /v1/categorias/{id}/orden (S4) se CONSERVA sin cambios; la
 #   prohibicion de §26.3 (reordenar con N llamadas por nodo) rige para la UI,
 #   que solo usara /reordenar (D-ORD-08).
-# Version: 0.6.0
+#
+#   v0.7.0 (F05-01 S6-WIRE+UI (este mandato); F05 §26.2 AJ-03): la intencion
+#   exige `categoria` (ausente o null -> 422); `estado_categorial` es siempre
+#   CATEGORIA o SIN_CATEGORIA. Sin rutas nuevas.
+# Version: 0.7.0
 # ============================================================
 
 from __future__ import annotations

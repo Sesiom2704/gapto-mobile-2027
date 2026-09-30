@@ -11,7 +11,11 @@
 #   DESECHABLE local con la cadena 0001..0330 (estos tests confirman filas).
 #   v0.2.0 (F05-D003): la intencion incluye la financiacion sellada; por
 #   defecto PROPUESTA_ACEPTADA self 100 % por el importe del gasto.
-# Version: 0.2.0
+#   v0.3.0 (F05-01 S6-WIRE+UI (este mandato); F05 §26.2 AJ-03): la intencion
+#   lleva SIEMPRE `categoria`; por defecto la decision explicita
+#   {estado: SIN_CATEGORIA} (sobrescribible). Un test que necesite el payload
+#   sin `categoria` la elimina expresamente.
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
@@ -152,4 +156,5 @@ def intencion(cuenta: uuid.UUID, **cambios) -> dict:
     }
     base.update(cambios)
     base.setdefault("financiacion", propuesta_self_100(base["importe"]))
+    base.setdefault("categoria", {"estado": "SIN_CATEGORIA"})
     return base

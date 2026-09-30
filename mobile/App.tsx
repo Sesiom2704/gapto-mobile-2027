@@ -3,7 +3,8 @@
 // Fichero: App.tsx
 // Ruta: mobile/App.tsx
 // Descripción: Raíz del cliente. Navegación mínima propia de VS-01 (decisión de ejecución: sin librería de navegación hasta F11-00): cinco destinos persistentes montados (conservan su contexto al cambiar de pestaña) y una tarea inmersiva CREATE superpuesta que oculta la barra inferior (F09 BLOQUE A). Tras un registro confirmado, Inicio vuelve a leer del backend (sin optimistic update).
-// Versión: 0.1.0
+// v0.2.0 (F05-01 S6-WIRE+UI (este mandato); D-UI-03, F09 §12.91.1/§12.97.4): el destino MAS deja de ser territorio pendiente: Más → Ajustes (10 secciones; solo Categorías operativa) → Categorías. Las listas conservan la barra inferior; las tareas inmersivas de Ajustes (alta CREATE-M y selectores) la ocultan, igual que la tarea de registro. «Atrás» vuelve al nivel anterior real; la pila de Más conserva su contexto al cambiar de pestaña. Los otros tres territorios siguen pendientes.
+// Versión: 0.2.0
 // ============================================================
 
 import * as Crypto from 'expo-crypto';
@@ -15,18 +16,24 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ClienteApi, crearCliente } from './src/api/cliente';
 import { configApi } from './src/api/config';
 import { BarraInferior, Destino } from './src/components/BarraInferior';
+import { CategoriasAjustesScreen } from './src/screens/CategoriasAjustesScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
+import { AjustesScreen, MasScreen } from './src/screens/MasScreen';
 import { RegistroGastoScreen } from './src/screens/RegistroGastoScreen';
 import { TerritorioPendiente } from './src/screens/TerritorioPendiente';
 import { ProveedorTema, useTema } from './src/theme/tema';
 
-const TITULOS: Record<Exclude<Destino, 'INICIO'>, string> = { DIA: 'Día a día', MES: 'Mes', PATRIMONIO: 'Patrimonio', MAS: 'Más' };
+const TITULOS: Record<Exclude<Destino, 'INICIO' | 'MAS'>, string> = { DIA: 'Día a día', MES: 'Mes', PATRIMONIO: 'Patrimonio' };
+
+type PantallaMas = 'MAS' | 'AJUSTES' | 'CATEGORIAS';
 
 export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () => Date }) {
   const { c, esquema } = useTema();
   const [destino, setDestino] = useState<Destino>('INICIO');
   const [tarea, setTarea] = useState<'REGISTRO_GASTO' | null>(null);
   const [refresco, setRefresco] = useState(0);
+  const [pantallaMas, setPantallaMas] = useState<PantallaMas>('MAS');
+  const [inmersivaMas, setInmersivaMas] = useState(false);
 
   const cerrarTarea = useCallback((registrado: boolean) => {
     setTarea(null);
@@ -44,13 +51,28 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
         {(Object.keys(TITULOS) as (keyof typeof TITULOS)[]).map((d) =>
           destino === d ? <TerritorioPendiente key={d} titulo={TITULOS[d]} /> : null,
         )}
+        {/* Más: pila propia montada (conserva el nivel al cambiar de pestaña). */}
+        <View style={[s.raiz, destino !== 'MAS' && s.oculto]}>
+          {pantallaMas === 'MAS' ? <MasScreen onAjustes={() => setPantallaMas('AJUSTES')} /> : null}
+          {pantallaMas === 'AJUSTES' ? (
+            <AjustesScreen onAtras={() => setPantallaMas('MAS')} onCategorias={() => setPantallaMas('CATEGORIAS')} />
+          ) : null}
+          {pantallaMas === 'CATEGORIAS' ? (
+            <CategoriasAjustesScreen
+              cliente={p.cliente}
+              nuevoId={p.nuevoId}
+              onAtras={() => setPantallaMas('AJUSTES')}
+              onInmersiva={setInmersivaMas}
+            />
+          ) : null}
+        </View>
         {tarea === 'REGISTRO_GASTO' ? (
           <View style={[StyleSheet.absoluteFill, { backgroundColor: c.background }]}>
             <RegistroGastoScreen cliente={p.cliente} nuevoId={p.nuevoId} ahora={p.ahora} onCerrar={cerrarTarea} />
           </View>
         ) : null}
       </View>
-      {tarea === null ? <BarraInferior actual={destino} onCambiar={setDestino} /> : null}
+      {tarea === null && !(destino === 'MAS' && inmersivaMas) ? <BarraInferior actual={destino} onCambiar={setDestino} /> : null}
     </View>
   );
 }

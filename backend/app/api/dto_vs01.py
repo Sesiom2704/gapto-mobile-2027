@@ -21,14 +21,9 @@
 #   la fecha es la fecha COMUN de gasto y pago y no puede ser futura (§16.3).
 #
 #   v0.3.0 (F05-01, mandato backend v0.2, F05-D009): dimension CATEGORIAL de la
-#   intencion sellada, con tres estados que NO se confunden (C01, AJ-01):
-#     CATEGORIA(id)       -> seleccion explicita; pasa por la guarda C-a;
-#     SIN_CATEGORIA       -> decision explicita del usuario; persiste NULL;
-#     NO_CAPTURADA_LEGACY -> solo compatibilidad del wire VS-01 actual: se
-#                            DERIVA de la ausencia del campo `categoria`. No es
-#                            un valor que el cliente pueda enviar, no significa
-#                            "Sin categoria" y no invoca la guarda. F05-01 no es
-#                            cerrable mientras el registro ordinario la necesite.
+#   intencion sellada (C01, AJ-01): CATEGORIA(id) pasa por la guarda C-a;
+#   SIN_CATEGORIA es decision explicita y persiste NULL; un tercer estado de
+#   compatibilidad se derivaba de la AUSENCIA del campo (retirado en v0.5.0).
 #
 #   v0.4.0 (F05-01, S6-C07; F05-D014 §28.2, AJ-C07-02): solo la variante
 #   CATEGORIA admite `magnitudes: [{magnitud_id, valor}]`. Reglas ESTRUCTURALES
@@ -51,7 +46,15 @@
 #   fuera de rango, que §28.2 clasifica como 409 MAGNITUD_VALOR_NO_VALIDO, y
 #   rechazaba valores numericamente validos con ceros decimales de cola
 #   (AJ-C07-06). El DTO solo decide la FORMA; precision y capacidad son de C07.
-# Version: 0.4.1
+#
+#   v0.5.0 (F05-01 S6-WIRE+UI (este mandato); F05 §26.2 AJ-03, §28.3): corte
+#   atomico del wire categorial. `categoria` es OBLIGATORIA y sin default:
+#   ausente -> 422; `null` -> 422 (por tipo: ni CATEGORIA ni SIN_CATEGORIA).
+#   Se retira el estado de compatibilidad derivado de la ausencia: el estado
+#   categorial es siempre `categoria.estado` (CATEGORIA | SIN_CATEGORIA). La
+#   union discriminada y las reglas de magnitudes de §28.2 no cambian. La
+#   historia NULL existente no se reinterpreta (sin cambios en lecturas ni OP-22).
+# Version: 0.5.0
 # ============================================================
 
 from __future__ import annotations
@@ -161,11 +164,6 @@ CategoriaVs01 = Annotated[
     Field(discriminator="estado"),
 ]
 
-#: Estado interno derivado de la AUSENCIA del campo en el wire VS-01. No es
-#: un literal aceptado en la entrada (AJ-01).
-ESTADO_NO_CAPTURADA_LEGACY = "NO_CAPTURADA_LEGACY"
-
-
 class IntencionGastoPagado(_Estricto):
     intencion_id: uuid.UUID
     concepto: str = Field(min_length=1, max_length=200)
@@ -179,22 +177,12 @@ class IntencionGastoPagado(_Estricto):
     presupuestable: bool
     atribucion: AtribucionVs01
     financiacion: FinanciacionVs01
-    # Compatibilidad acotada VS-01 (AJ-01): ausente -> NO_CAPTURADA_LEGACY.
-    categoria: CategoriaVs01 | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def _categoria_null_explicito(cls, datos):
-        # NO_CAPTURADA_LEGACY solo se deriva de la AUSENCIA del campo. Un
-        # `null` explicito no es ni una decision ni una ausencia: se rechaza.
-        if isinstance(datos, dict) and "categoria" in datos and datos["categoria"] is None:
-            raise ValueError("categoria: null no admitido; omitir el campo o enviar un estado")
-        return datos
+    # S6-WIRE (AJ-03): estado categorial resuelto OBLIGATORIO (C01). Ausente
+    # -> 422 (campo requerido); `null` -> 422 (no es ninguna variante).
+    categoria: CategoriaVs01
 
     @property
     def estado_categorial(self) -> str:
-        if self.categoria is None:
-            return ESTADO_NO_CAPTURADA_LEGACY
         return self.categoria.estado
 
     @property
@@ -244,7 +232,7 @@ class ResultadoGastoPagado(_Estricto):
     estado_atribucion: str
     aportacion_criterio: str | None
     financiacion: Literal["PROPUESTA_ACEPTADA", "NO_DETERMINADA"]
-    estado_categorial: Literal["CATEGORIA", "SIN_CATEGORIA", "NO_CAPTURADA_LEGACY"]
+    estado_categorial: Literal["CATEGORIA", "SIN_CATEGORIA"]
     aviso: str
 
 

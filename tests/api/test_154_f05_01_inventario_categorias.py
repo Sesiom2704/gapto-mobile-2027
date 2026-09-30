@@ -76,7 +76,19 @@
 #   estatica: la ruta por nodo /{id}/orden solo aparece en su declaracion de
 #   app.py; ningun otro codigo productivo ni el cliente movil la invoca, y la
 #   reordenacion tiene una unica ruta atomica /v1/categorias/reordenar.
-# Version: 0.5.0
+#
+#   v0.6.0 (F05-01 S6-WIRE+UI (este mandato); F05 §26.2 AJ-03, §28.3): I12, el
+#   estado de compatibilidad retirado por S6-WIRE no aparece en el codigo
+#   productivo (backend/app) ni en el cliente (mobile/src, mobile/App.tsx),
+#   ni siquiera en comentarios.
+#   Ademas (mismo corte): clase SEED_DEV (F05 §26.4 Q8) para los dos writers
+#   SQL del seed de ENV-DEV (bootstrap_dev_db.py: `magnitudes` y
+#   `categoria_magnitudes`), sin valor certificador: I9 sigue exigiendo CERO
+#   escritores RUNTIME y autoriza exactamente esas dos funciones del script de
+#   desarrollo. I7 pasa de «cero menciones» a REGISTRO CERRADO de menciones del
+#   cliente movil (fail-closed en ambos sentidos): S6-WIRE obliga al cliente a
+#   sellar `categoria_id` en el wire de §28.2 y a leer el uso de una categoria.
+# Version: 0.6.0
 # ============================================================
 
 from __future__ import annotations
@@ -99,6 +111,13 @@ TOKEN = "categoria_id"
 # ------------------------------------------------------------------ registro
 # (ruta, funcion) -> (clase, operacion, justificacion)
 REGISTRO: dict[tuple[str, str], tuple[str, str, str]] = {
+    # --- seed de ENV-DEV (F05 §26.4 Q8): solo desarrollo, sin valor certificador
+    ("scripts/dev/bootstrap_dev_db.py", "_seed_asociaciones"): (
+        "SEED_DEV", "seed ENV-DEV categoria_magnitudes", "SQL de desarrollo idempotente; nunca runtime"),
+    # --- E2E web de desarrollo (corroboracion, no runtime): solo lectura de verificacion
+    ("scripts/dev/e2e_vs01.py", "leer_bd"): ("R", "E2E VS-01 verificacion", "lee hecho_efectos.categoria_id del hecho registrado"),
+    ("scripts/dev/e2e_regcat.py", "hechos_de"): ("R", "E2E REG-CAT verificacion", "lee categoria_id y hecho_magnitudes del hecho"),
+    ("scripts/dev/e2e_regcat.py", "main"): ("R", "E2E REG-CAT", "compara el categoria_id leido con el esperado"),
     # --- frontera F05
     ("backend/app/api/elegibilidad_categoria.py", "validar_seleccion_categoria"): (
         "GUARDA", "F05-01 C-a", "guarda unica de elegibilidad (F05-D009 §23.3)"),
@@ -178,7 +197,7 @@ REGISTRO: dict[tuple[str, str], tuple[str, str, str]] = {
     ("backend/app/repositories/previsiones_repository.py", "<modulo>"): ("R", "tipos SQL", "mapa de columnas"),
 }
 
-CLASES = {"A_FRONTERA", "GUARDA", "A_MOTOR", "B", "P", "R", "CATALOGO"}
+CLASES = {"A_FRONTERA", "GUARDA", "A_MOTOR", "B", "P", "R", "CATALOGO", "SEED_DEV"}
 
 #: Servicios del motor que la frontera NO puede referenciar (I3): tienen
 #: caminos A_MOTOR, B o P con categoria. OP-22 es la unica puerta.
@@ -460,11 +479,29 @@ ESCRITORES_HECHO_MAGNITUDES = {
 }
 
 
+#: Writers SQL de desarrollo (SEED_DEV, F05 §26.4): unicos escritores autorizados
+#: de magnitudes / categoria_magnitudes; ninguno en runtime (gate F05-01-R16).
+ESCRITORES_SEED_DEV = {
+    "magnitudes": {("scripts/dev/bootstrap_dev_db.py", "_seed_magnitudes")},
+    "categoria_magnitudes": {("scripts/dev/bootstrap_dev_db.py", "_seed_asociaciones")},
+}
+
+
 def test_i9_sin_escritores_runtime_de_magnitudes_ni_asociaciones():
     for tabla in ("magnitudes", "categoria_magnitudes"):
         patron = _escritura_de(tabla)
         encontrados = sorted(_rel(p) for p, texto in _textos_productivos() if patron.search(texto))
-        assert encontrados == [], f"escritor runtime de {tabla} no autorizado (F05-01-R16): {encontrados}"
+        autorizados = sorted({ruta for ruta, _ in ESCRITORES_SEED_DEV[tabla]})
+        assert encontrados == autorizados, f"escritor de {tabla} no autorizado (F05-01-R16): {encontrados}"
+        assert not any(r.startswith("backend/") or r.startswith("mobile/") for r in encontrados)
+        # Dentro del script de desarrollo, solo la funcion SEED_DEV registrada escribe esa tabla.
+        for ruta in autorizados:
+            texto = (RAIZ / ruta).read_bytes().decode("utf-8")
+            lineas = texto.splitlines()
+            con_escritura = {(ruta, q) for q, n in _funciones(ast.parse(texto))
+                             if not isinstance(n, ast.ClassDef) and patron.search("\n".join(lineas[n.lineno - 1:n.end_lineno]))
+                             and not any(isinstance(h, (ast.FunctionDef, ast.AsyncFunctionDef)) for h in ast.iter_child_nodes(n))}
+            assert con_escritura == ESCRITORES_SEED_DEV[tabla], (tabla, con_escritura)
 
 
 def test_i9_escritores_de_hecho_magnitudes_solo_f04():
@@ -607,12 +644,23 @@ def test_exclusiones_cerradas_y_existentes():
 
 
 # ------------------------------------------------------------------ I7
+#: Menciones de `categoria_id` en el cliente movil (registro cerrado, S6-WIRE): la
+#: app SELLA la categoria en el wire de §28.2 y LEE el uso de una categoria.
+#: Nunca escribe categorias_financieras (eso es I5, que sigue sin el cliente).
+MENCIONES_CLIENTE: dict[str, str] = {
+    "mobile/src/domain/intencion.ts": "sella {estado:'CATEGORIA', categoria_id, magnitudes} (A_FRONTERA via VS-01; C-a en servidor)",
+    "mobile/src/api/cliente.ts": "tipo de lectura de GET /v1/categorias/{id}/uso (R)",
+}
+
+
 def test_i7_cliente_movil_sin_menciones_sin_registrar():
     menciones = sorted(
         _rel(p) for p, t in _textos_productivos()
         if p.suffix in {".ts", ".tsx", ".js", ".jsx"} and (TOKEN in t or "categorias_financieras" in t)
     )
-    assert menciones == [], menciones
+    assert menciones == sorted(MENCIONES_CLIENTE), menciones
+    for ruta, texto in ((r, (RAIZ / r).read_bytes().decode("utf-8")) for r in MENCIONES_CLIENTE):
+        assert "categorias_financieras" not in texto, ruta
 
 
 # ------------------------------------------------------------------ I11
@@ -635,3 +683,17 @@ def test_i11_reordenar_solo_por_la_ruta_atomica():
     assert app_py.count('"/v1/categorias/reordenar"') == 1
     comandos = [n for n in ast.walk(_nodo(SERVICIO, "reordenar")) if isinstance(n, ast.For)]
     assert len(comandos) == 1, "reordenar: un unico bucle de escritura sobre las filas que cambian"
+
+
+# ------------------------------------------------------------------ I12
+ESTADO_RETIRADO = "NO_CAPTURADA" + "_LEGACY"
+
+
+def test_i12_estado_de_compatibilidad_retirado_del_codigo_y_del_cliente():
+    """S6-WIRE (F05 §26.2 AJ-03): ninguna peticion ordinaria genera el estado de
+    compatibilidad; su literal no sobrevive en el codigo ni en comentarios."""
+    candidatos = sorted(APP.rglob("*.py")) + sorted((RAIZ / "mobile" / "src").rglob("*")) + [RAIZ / "mobile" / "App.tsx"]
+    apariciones = [_rel(p) for p in candidatos
+                   if p.is_file() and p.suffix in {".py", ".ts", ".tsx", ".js", ".jsx"}
+                   and ESTADO_RETIRADO in p.read_bytes().decode("utf-8")]
+    assert apariciones == [], apariciones

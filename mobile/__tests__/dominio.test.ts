@@ -4,7 +4,8 @@
 // Ruta: mobile/__tests__/dominio.test.ts
 // Descripción: Tests de dominio del cliente: importe, contraste de tokens DS-01 y clasificación de respuestas HTTP.
 // v0.2.0 (F05-D003): payload con financiación; conversión de fechas dd/mm/aaaa.
-// Versión: 0.2.0
+// v0.3.0 (F05-01 S6-WIRE+UI (este mandato)): el payload de prueba lleva el estado categorial obligatorio (S6-WIRE).
+// Versión: 0.3.0
 // ============================================================
 
 import { crearCliente } from '../src/api/cliente';
@@ -48,7 +49,7 @@ test('warning claro NO es apto para texto (3,19:1): solo iconografía/superficie
   expect(contraste(colores.light.warning, colores.light.surfacePrimary)).toBeGreaterThanOrEqual(3);
 });
 
-const P = { intencion_id: 'x', concepto: 'c', importe: '1.00', moneda: 'EUR' as const, fecha_hecho: '2026-09-24', cuenta_id: 'k', presupuestable: true, atribucion: 'SOLO_MIO' as const, financiacion: { estado: 'NO_DETERMINADA' as const } };
+const P = { intencion_id: 'x', concepto: 'c', importe: '1.00', moneda: 'EUR' as const, fecha_hecho: '2026-09-24', cuenta_id: 'k', presupuestable: true, atribucion: 'SOLO_MIO' as const, financiacion: { estado: 'NO_DETERMINADA' as const }, categoria: { estado: 'SIN_CATEGORIA' as const } };
 const resp = (status: number, body: unknown) => ({ ok: status < 300, status, json: async () => body }) as unknown as Response;
 
 test('clasificación: 2xx OK, 4xx RECHAZADO, 5xx/red/timeout INDETERMINADO', async () => {

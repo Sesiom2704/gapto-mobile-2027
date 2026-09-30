@@ -4,11 +4,14 @@
 // Ruta: mobile/src/components/Basicos.tsx
 // Descripción: Componentes básicos derivados de DS-05 (botón primario/texto, sección, chip, control segmentado) y DS-06 §9 (estado del dato). Consumen solo tokens semánticos.
 // v0.2.0 (F05 — VS-01 · Alineación visual, A1/A2): «Seccion» deja de ser tarjeta (sin superficie propia ni radio): se asienta sobre el fondo y se separa con una única línea estructural `separator` (F09 §6 «pocas tarjetas y pocos bordes»; sin HEX ni tokens nuevos). «BotonPrimario» declara `disabled` nativo y acepta `ayuda` (accessibilityHint) para decir qué falta (REG-SPEC-01 SPEC-08).
-// Versión: 0.2.0
+// v0.3.0 (F05-01 S6-WIRE+UI (este mandato)): «Velo» de las hojas modales (láminas REG-CAT R07 y SET-CAT S04/S05) como TRATAMIENTO de tokens existentes (tono oscuro del tema con opacidad), sin color físico ni token nuevo (DS-RULE-12, ds_conformidad). «CabeceraNavegacion» de pantallas de lista (‹ Atrás · título · acción), con «Atrás» al nivel anterior real (lámina SET-CAT S01/S03).
+// Versión: 0.3.0
 // ============================================================
 
+import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View, ViewStyle } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTema } from '../theme/tema';
 import { espacio, radio, TACTIL_MIN, tipo } from '../theme/tokens';
@@ -31,6 +34,37 @@ export function BotonPrimario(p: { titulo: string; onPress: () => void; cargando
       <Text style={[tipo.bodyEmphasis, { color: off ? c.textSecondary : c.onAccent }]}>{p.titulo}</Text>
     </Pressable>
   );
+}
+
+/** Cabecera de navegación de lista: «‹ <atrás>» · título · acción opcional a la derecha. */
+export function CabeceraNavegacion(p: {
+  titulo: string;
+  atras?: { etiqueta: string; onPress: () => void };
+  derecha?: React.ReactNode;
+  testIDAtras?: string;
+}) {
+  const { c } = useTema();
+  const inset = useSafeAreaInsets();
+  return (
+    <View style={[s.cabNav, { paddingTop: inset.top + espacio.s, borderBottomColor: c.borderDefault, backgroundColor: c.background }]}>
+      <View style={s.cabLado}>
+        {p.atras ? (
+          <Pressable testID={p.testIDAtras ?? 'atras'} accessibilityRole="button" accessibilityLabel={`Atrás: ${p.atras.etiqueta}`} onPress={p.atras.onPress} hitSlop={8} style={s.atras}>
+            <Ionicons name="chevron-back" size={18} color={c.accent} />
+            <Text numberOfLines={1} style={[tipo.body, { color: c.accent, flexShrink: 1 }]}>{p.atras.etiqueta}</Text>
+          </Pressable>
+        ) : null}
+      </View>
+      <Text accessibilityRole="header" numberOfLines={1} style={[tipo.titleSmall, { color: c.textPrimary, flexShrink: 1, textAlign: 'center' }]}>{p.titulo}</Text>
+      <View style={[s.cabLado, { alignItems: 'flex-end' }]}>{p.derecha}</View>
+    </View>
+  );
+}
+
+/** Velo de hoja modal: tono oscuro del tema (textPrimary en claro, background en oscuro) con opacidad. */
+export function Velo() {
+  const { c, esquema } = useTema();
+  return <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: esquema === 'dark' ? c.background : c.textPrimary, opacity: esquema === 'dark' ? 0.7 : 0.35 }]} />;
 }
 
 export function BotonTexto(p: { titulo: string; onPress: () => void; testID?: string; critico?: boolean }) {
@@ -129,6 +163,9 @@ export function Segmentado<T extends string | boolean>(p: {
 }
 
 const s = StyleSheet.create({
+  cabNav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: espacio.l, paddingBottom: espacio.s, borderBottomWidth: StyleSheet.hairlineWidth, gap: espacio.s },
+  cabLado: { flex: 1, minHeight: TACTIL_MIN, justifyContent: 'center' },
+  atras: { flexDirection: 'row', alignItems: 'center', gap: 2, minHeight: TACTIL_MIN },
   primario: { minHeight: 52, borderRadius: radio.m, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', paddingHorizontal: espacio.l },
   texto: { minHeight: TACTIL_MIN, justifyContent: 'center', paddingHorizontal: espacio.xs },
   seccion: { gap: espacio.m },

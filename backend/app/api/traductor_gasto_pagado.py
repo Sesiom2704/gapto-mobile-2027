@@ -35,8 +35,8 @@
 #   aportacion deja de deducirse del estado de la cuenta.
 #
 #   v0.3.0 (F05-01, F05-D009): el efecto GASTO lleva `categoria_id` SOLO si la
-#   intencion sellada trae {estado: CATEGORIA}. SIN_CATEGORIA y
-#   NO_CAPTURADA_LEGACY persisten NULL. `componer` NO valida elegibilidad: la
+#   intencion sellada trae {estado: CATEGORIA}. SIN_CATEGORIA persiste NULL.
+#   `componer` NO valida elegibilidad: la
 #   guarda C-a la ejecuta `ejecucion_gasto_pagado.registrar_gasto_pagado`
 #   antes de llamar aqui, y el inventario C-b exige que ese sea el unico
 #   llamador productivo.
@@ -54,7 +54,11 @@
 #       exceso de precision).
 #   Sin categoria o sin magnitudes el contexto queda vacio: las intenciones
 #   anteriores reproducen exactamente el mismo agregado.
-# Version: 0.4.0
+#
+#   v0.5.0 (F05-01 S6-WIRE+UI (este mandato); F05 §26.2 AJ-03): se retira el
+#   estado de compatibilidad derivado de la ausencia de `categoria` (solo
+#   comentarios; la composicion no cambia).
+# Version: 0.5.0
 # ============================================================
 
 from __future__ import annotations

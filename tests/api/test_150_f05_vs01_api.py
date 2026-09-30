@@ -13,7 +13,10 @@
 #   v0.2.0 (F05-D003): financiacion sellada en la intencion y cuentas-pago
 #   por fecha del pago. Las pruebas nuevas de §16.4/§16.5 viven en
 #   test_151_f05_vs01_financiacion_atomicidad.py.
-# Version: 0.2.0
+#   v0.3.0 (F05-01 S6-WIRE+UI (este mandato); F05 §26.2 AJ-03): `categoria`
+#   entra en los campos de decision obligatorios sin default; un payload VS-01
+#   sin `categoria` (o con `categoria: null`) es 422 ENTRADA_INVALIDA sin hecho.
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
@@ -124,13 +127,29 @@ def test_cuenta_de_otro_tenant_es_invisible_y_nada_persiste(tenant):
     assert _conteos(owner, hid)["hecho"] == 0 and _conteos(otro, hid)["hecho"] == 0
 
 
-@pytest.mark.parametrize("campo", ["presupuestable", "atribucion", "cuenta_id", "fecha_hecho", "intencion_id", "financiacion"])
+@pytest.mark.parametrize("campo", ["presupuestable", "atribucion", "cuenta_id", "fecha_hecho", "intencion_id", "financiacion",
+                                   "categoria"])
 def test_campos_de_decision_obligatorios_sin_default(tenant, campo):
     owner, _, cuenta = tenant
     cuerpo = h.intencion(cuenta)
     del cuerpo[campo]
     r = h.cliente(owner).post("/v1/intenciones/gasto-pagado", json=cuerpo, headers=h.AUTH)
     assert r.status_code == 422 and campo in r.json()["mensaje"]
+
+
+@pytest.mark.parametrize("variante", ["AUSENTE", "NULL"])
+def test_payload_vs01_sin_categoria_es_422_sin_hecho(tenant, variante):
+    """S6-WIRE (AJ-03): ya no hay estado de compatibilidad por ausencia."""
+    owner, _, cuenta = tenant
+    cuerpo = h.intencion(cuenta)
+    if variante == "AUSENTE":
+        del cuerpo["categoria"]
+    else:
+        cuerpo["categoria"] = None
+    r = h.cliente(owner).post("/v1/intenciones/gasto-pagado", json=cuerpo, headers=h.AUTH)
+    assert r.status_code == 422 and r.json()["codigo"] == "ENTRADA_INVALIDA", r.text
+    assert "categoria" in r.json()["mensaje"]
+    assert _conteos(owner, uuid.UUID(cuerpo["intencion_id"]))["hecho"] == 0
 
 
 @pytest.mark.parametrize("importe", ["0", "-3.50", "3.505"])

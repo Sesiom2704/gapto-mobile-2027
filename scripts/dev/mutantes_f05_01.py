@@ -73,14 +73,27 @@
 #   artificio lo distingue de la traduccion por diag.constraint_name.
 #   Los mutantes se ejecutan con la base local con lc_messages en espanol.
 #
-#   v0.7.0 (F05-01 S6-ORDEN (F05-D012 §26.3)): serie O01..O10 del comando
+#   v0.7.0 (F05-01 S6-ORDEN (F05-D012 §26.3)): serie O01..O11 del comando
 #   atomico `reordenar` (advisory, comparacion de conjuntos por subconjunto o
 #   por tamano, row_version, escritura parcial antes de rechazar, auditoria y
 #   motivo, escritura de filas que no cambian, bandera de idempotencia, lock
 #   FOR NO KEY UPDATE de los hermanos y orden objetivo 1..n). Discriminante
 #   nuevo en el preflight: test_161. Censo vigente: C01..C17 sin C07,
-#   S01..S21 con S10b, M01..M23, I01..I24, L01..L02 y O01..O10: 97 mutantes.
-# Version: 0.7.0
+#   S01..S21 con S10b, M01..M23, I01..I24, L01..L02 y O01..O11: 98 mutantes
+#   (corregido en v0.8.0, AJ-S6ORDEN-01: la v0.7.0 decia O01..O10 / 97).
+#
+#   v0.8.0 (F05-01 S6-WIRE+UI (este mandato); F05 §26.2 AJ-03): `categoria`
+#   obligatoria en el wire VS-01. Nuevos W01 (categoria opcional con default
+#   None) y W02 (SIN_CATEGORIA invoca la guarda C-a). C08 («null explicito
+#   aceptado») se reancla con la MISMA semantica sobre la declaracion del
+#   campo, porque el validador explicito de `null` desaparece: ahora lo
+#   rechaza el tipo. Discriminantes: test_150 (nuevo en el preflight) y
+#   test_152. Equivalente documentado nuevo: E04 («la respuesta admite el
+#   estado de compatibilidad retirado» en el Literal de ResultadoGastoPagado):
+#   ningun camino productivo puede producirlo (estado_categorial es siempre
+#   categoria.estado), asi que ampliar el Literal no cambia ninguna respuesta.
+#   Censo vigente: 98 + W01..W02 = 100 mutantes.
+# Version: 0.8.0
 # ============================================================
 
 from __future__ import annotations
@@ -95,6 +108,7 @@ import sys
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
 JOURNAL = RAIZ / ".mutantes_f05_01.journal.json"
 
+T150 = "tests/api/test_150_f05_vs01_api.py"
 T152 = "tests/api/test_152_f05_01_elegibilidad_categoria.py"
 T153 = "tests/api/test_153_f05_01_lecturas_categorias.py"
 T154 = "tests/api/test_154_f05_01_inventario_categorias.py"
@@ -166,8 +180,7 @@ MUTANTES = [
              "                if rechazo is not None:\n                    return RechazoIntegracion(rechazo)\n",
        "                rechazo = validar_seleccion_categoria(sesion, intencion.categoria_id, \"GASTO\")\n")], [T152]),
     ("C08", "null explicito aceptado como legacy",
-     [(DTO, '        if isinstance(datos, dict) and "categoria" in datos and datos["categoria"] is None:\n',
-       "        if False:\n")], [T152]),
+     [(DTO, "    categoria: CategoriaVs01\n", "    categoria: CategoriaVs01 | None\n")], [T152]),
     ("C09", "el traductor no sella la categoria",
      [(TRAD, '            estado_atribucion="COMPLETA",\n            categoria_id=intencion.categoria_id,\n',
        '            estado_atribucion="COMPLETA",\n')], [T152]),
@@ -400,6 +413,12 @@ MUTANTES = [
        "AND parent_id IS NOT DISTINCT FROM %s ORDER BY id")], [T156]),
     ("O11", "orden objetivo 1..n en vez de 0..n-1",
      [(SERV, "for pos, cid in enumerate(pedidos)", "for pos, cid in enumerate(pedidos, start=1)")], [T161]),
+    # ---------------------------------------------------------------- S6-WIRE
+    ("W01", "categoria vuelve a ser opcional con default None",
+     [(DTO, "    categoria: CategoriaVs01\n", "    categoria: CategoriaVs01 | None = None\n")], [T150, T152]),
+    ("W02", "SIN_CATEGORIA invoca la guarda C-a",
+     [(EJEC, "            if intencion.categoria_id is not None:\n",
+       '            if intencion.estado_categorial in ("CATEGORIA", "SIN_CATEGORIA"):\n')], [T152]),
 ]
 
 
@@ -430,7 +449,7 @@ def main() -> None:
         sys.exit("Falta GAPTO_TEST_DATABASE_URL (base local desechable).")
     if recuperar_si_pendiente():
         sys.exit("Habia un mutante pendiente: restaurado y verificado. Resultado NO-PASS; relanzar.")
-    if correr([T152, T153, T154, T155, T156, T157, T158, T159, T160, T161]) != 0:
+    if correr([T150, T152, T153, T154, T155, T156, T157, T158, T159, T160, T161]) != 0:
         sys.exit("PREFLIGHT ROJO: no se muta nada.")
     veredictos = []
     for mid, desc, cambios, tests in MUTANTES:

@@ -7,8 +7,8 @@
 #   backend v0.2, AJ-01/AJ-02):
 #     - matriz C02 literal (AMBOS = GASTO + INGRESO, nunca otra naturaleza);
 #     - owner, enabled y ambito releidos dentro de la transaccion;
-#     - tres estados categoriales (CATEGORIA / SIN_CATEGORIA /
-#       NO_CAPTURADA_LEGACY derivado solo de la ausencia);
+#     - estados categoriales (CATEGORIA / SIN_CATEGORIA; desde v0.3.0 la
+#       ausencia y `null` son 422);
 #     - magnitud obligatoria sin informar bloquea sin mutacion parcial (C07;
 #       desde v0.2.0 con el codigo definitivo MAGNITUD_OBLIGATORIA_AUSENTE);
 #     - identidad antes que guarda (reintento idempotente con la categoria ya
@@ -25,7 +25,11 @@
 #   CATEGORIA_REQUIERE_MAGNITUDES. La propiedad que protegia el test se
 #   conserva (obligatoria sin informar -> 409 sin escritura) con el codigo
 #   definitivo de C07. La bateria completa de C07 esta en test_158.
-# Version: 0.2.0
+#
+#   v0.3.0 (F05-01 S6-WIRE+UI (este mandato); F05 §26.2 AJ-03): la ausencia de
+#   `categoria` deja de derivar un estado de compatibilidad: 422 sin hecho,
+#   igual que `null`. El literal del estado retirado sigue sin ser enviable.
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
@@ -155,14 +159,13 @@ def test_sin_categoria_explicita_persiste_null(tenant):
     assert fh.categoria_del_efecto(owner, _hid(cuerpo)) == [(None,)]
 
 
-def test_ausencia_es_no_capturada_legacy_y_no_sin_categoria(tenant):
+def test_ausencia_de_categoria_es_422_y_no_sin_categoria(tenant):
     owner, _, cuenta = tenant
     cuerpo = h.intencion(cuenta)
-    assert "categoria" not in cuerpo
+    del cuerpo["categoria"]
     r = h.cliente(owner).post(URL, json=cuerpo, headers=h.AUTH)
-    assert r.status_code == 200, r.text
-    assert r.json()["estado_categorial"] == "NO_CAPTURADA_LEGACY"
-    assert fh.categoria_del_efecto(owner, _hid(cuerpo)) == [(None,)]
+    assert r.status_code == 422 and r.json()["codigo"] == "ENTRADA_INVALIDA", r.text
+    _cero(owner, _hid(cuerpo))
 
 
 @pytest.mark.parametrize(

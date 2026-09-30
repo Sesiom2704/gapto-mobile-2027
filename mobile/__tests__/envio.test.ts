@@ -4,7 +4,8 @@
 // Ruta: mobile/__tests__/envio.test.ts
 // Descripción: Tests a nivel de hook de useEnvioGasto: discriminan las guardas del propio hook (doble envío concurrente y reintento sellado) con independencia del botón deshabilitado de la UI, que por sí solo las enmascaraba (mutantes M01/M02).
 // v0.2.0 (F05-D003): borrador con propuesta de financiación y validación con fecha de hoy.
-// Versión: 0.2.0
+// v0.3.0 (F05-01 S6-WIRE+UI (este mandato)): el borrador válido resuelve el estado categorial («Sin categoría») y el cliente simulado incluye los métodos de categorías; el resultado informa `estado_categorial`.
+// Versión: 0.3.0
 // ============================================================
 
 import { act, renderHook } from '@testing-library/react-native';
@@ -13,7 +14,9 @@ import type { ClienteApi, Respuesta, ResultadoRegistro } from '../src/api/client
 import { Borrador, borradorInicial, PayloadGastoPagado } from '../src/domain/intencion';
 import { useEnvioGasto } from '../src/state/useEnvioGasto';
 
-const valido: Borrador = { ...borradorInicial('2026-09-24'), importeTexto: '3,50', concepto: 'Café', presupuestable: true, soloMio: true, cuentaId: 'k', cuentaOrigen: 'INFERIDO', propuesta: 'SELF_100' };
+import { clienteCategoriasStub } from './fixtures_categorias';
+
+const valido: Borrador = { ...borradorInicial('2026-09-24'), importeTexto: '3,50', concepto: 'Café', presupuestable: true, soloMio: true, cuentaId: 'k', cuentaOrigen: 'INFERIDO', propuesta: 'SELF_100', categoria: { estado: 'SIN_CATEGORIA' } };
 const HOY = '2026-09-24';
 
 function cliente(registrar: (p: PayloadGastoPagado) => Promise<Respuesta<ResultadoRegistro>>) {
@@ -25,6 +28,7 @@ function cliente(registrar: (p: PayloadGastoPagado) => Promise<Respuesta<Resulta
     },
     cuentasPago: async () => ({ tipo: 'OK', datos: { cuentas: [] } }),
     gastoMes: async () => ({ tipo: 'INDETERMINADO', mensaje: '' }),
+    ...clienteCategoriasStub(),
   };
   return { c, enviados };
 }
@@ -34,7 +38,7 @@ const nuevoId = () => `id-${++n}`;
 
 test('dos envíos concurrentes desde el hook producen un único POST', async () => {
   let liberar: () => void = () => {};
-  const { c, enviados } = cliente((p) => new Promise((r) => { liberar = () => r({ tipo: 'OK', datos: { hecho_id: p.intencion_id, idempotente: false, importe: p.importe, estado_atribucion: 'COMPLETA', aportacion_criterio: null, financiacion: 'PROPUESTA_ACEPTADA' } }); }));
+  const { c, enviados } = cliente((p) => new Promise((r) => { liberar = () => r({ tipo: 'OK', datos: { hecho_id: p.intencion_id, idempotente: false, importe: p.importe, estado_atribucion: 'COMPLETA', aportacion_criterio: null, financiacion: 'PROPUESTA_ACEPTADA', estado_categorial: 'SIN_CATEGORIA' } }); }));
   const { result } = renderHook(() => useEnvioGasto(c, nuevoId));
   await act(async () => {
     void result.current.enviar(valido, HOY);
@@ -49,7 +53,7 @@ test('dos envíos concurrentes desde el hook producen un único POST', async () 
 test('en INDETERMINADO, enviar con un borrador distinto reenvía la intención SELLADA original', async () => {
   let k = 0;
   const { c, enviados } = cliente(async (p) =>
-    ++k === 1 ? { tipo: 'INDETERMINADO', mensaje: 'x' } : { tipo: 'OK', datos: { hecho_id: p.intencion_id, idempotente: true, importe: p.importe, estado_atribucion: 'COMPLETA', aportacion_criterio: null, financiacion: 'PROPUESTA_ACEPTADA' } },
+    ++k === 1 ? { tipo: 'INDETERMINADO', mensaje: 'x' } : { tipo: 'OK', datos: { hecho_id: p.intencion_id, idempotente: true, importe: p.importe, estado_atribucion: 'COMPLETA', aportacion_criterio: null, financiacion: 'PROPUESTA_ACEPTADA', estado_categorial: 'SIN_CATEGORIA' } },
   );
   const { result } = renderHook(() => useEnvioGasto(c, nuevoId));
   await act(async () => { await result.current.enviar(valido, HOY); });
@@ -60,7 +64,7 @@ test('en INDETERMINADO, enviar con un borrador distinto reenvía la intención S
 });
 
 test('la intención sellada lleva la financiación: propuesta self 100 % aceptada o NO_DETERMINADA', async () => {
-  const ok = async (p: PayloadGastoPagado) => ({ tipo: 'OK' as const, datos: { hecho_id: p.intencion_id, idempotente: false, importe: p.importe, estado_atribucion: 'COMPLETA' as const, aportacion_criterio: null, financiacion: p.financiacion.estado } });
+  const ok = async (p: PayloadGastoPagado) => ({ tipo: 'OK' as const, datos: { hecho_id: p.intencion_id, idempotente: false, importe: p.importe, estado_atribucion: 'COMPLETA' as const, aportacion_criterio: null, financiacion: p.financiacion.estado, estado_categorial: 'SIN_CATEGORIA' as const } });
   const a = cliente(ok);
   const h1 = renderHook(() => useEnvioGasto(a.c, nuevoId));
   await act(async () => { await h1.result.current.enviar(valido, HOY); });

@@ -4,7 +4,9 @@
 # Ruta: backend/app/categorias/iconos.py
 # Descripcion: Biblioteca de iconos de categoria v1 (F05-D013 §27.2; F09
 #   §12.97.9, PUBLICADA, version 1). El backend es la autoridad de la
-#   biblioteca (Q4); la app mantiene una copia con test cruzado.
+#   biblioteca (Q4). La copia de la app es mobile/src/theme/iconosCategoria.ts
+#   y el test cruzado BLOQUEANTE (version y claves) es
+#   mobile/__tests__/iconos_biblioteca.test.ts.
 #
 #   - Solo CLAVES semanticas: ni etiquetas ni glifos (AJ-ICON-08; la
 #     presentacion es de la app). El icono de reserva
@@ -16,7 +18,12 @@
 #   - Validacion exacta (AJ-ICON-03): pertenencia literal al conjunto
 #     publicado, sin recorte, sin cambio de mayusculas y sin alias.
 #   Sin SQL: modulo puro (inventario C-b, test_154).
-# Version: 0.1.0
+#
+#   v0.1.0 (F05-01 S6-ICONO (F05-D013)): biblioteca v1, 30 claves publicadas.
+#   v0.1.1 (F05-01 S6-WIRE+UI (este mandato)): solo cabecera (limpieza F05
+#   §30.6): la copia de la app y su test cruzado ya existen y se nombran; se
+#   anade la formula literal de la version inicial. Sin cambios de codigo.
+# Version: 0.1.1
 # ============================================================
 
 from __future__ import annotations
