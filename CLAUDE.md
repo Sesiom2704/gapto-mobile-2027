@@ -154,3 +154,14 @@ Arneses que aplican mutantes de texto exacto sobre el código y exigen que la su
 
 ### Idioma y estilo
 - Español en código, comentarios, mensajes de commit y handoffs. Ejecución concisa, sin narración; resúmenes de comandos, no logs completos.
+
+### Comandos y permisos
+- Los comandos de solo lectura (git status/diff/log, Get-ChildItem, Get-Content, Get-FileHash, pytest, python --version) se lanzan como comandos simples y separados, no encadenados con `;` ni `|`, para que Moisés pueda aprobarlos de forma permanente.
+- Los comandos que tocan Neon, Supabase, ENV-DEV, la carpeta de Drive o `origin/main` se lanzan siempre de uno en uno y se anuncian antes con lo que van a hacer.
+
+### Plan y tiempos de espera
+- Al recibir un mandato, antes de ejecutar nada, devolver un plan numerado con los pasos y una estimación de duración por paso (rango en minutos) y el total. Marcar qué pasos requieren aprobación de Moisés y cuáles son de larga duración (más de 5 min).
+- Las estimaciones se basan en referencias del propio proyecto cuando existan (por ejemplo, duración de replays 0002..0340 y suites en evidencias anteriores); si no hay referencia, decirlo y estimar con rango amplio. Nunca dar una cifra exacta que no se pueda justificar.
+- Durante la ejecución, al empezar cada paso indicar "Paso N/M — inicio hh:mm — estimado X min", y al terminarlo la duración real. Así Moisés sabe si puede ausentarse y cuánto.
+- En pasos de larga duración, si el comando lo permite, mostrar progreso periódico; si no lo permite, decir antes de lanzarlo que no habrá salida hasta el final.
+- En el handoff final, incluir una tabla paso / estimado / real, para que las estimaciones mejoren en bloques siguientes.
