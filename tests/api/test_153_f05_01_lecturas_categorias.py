@@ -6,12 +6,16 @@
 #     - el arbol incluye las deshabilitadas, marcadas (D-198: la historia no
 #       filtra por enabled);
 #     - aislamiento de tenant (RLS) y orden estable orden/nombre/id;
-#     - icon_key NULL se devuelve como NULL (fallback neutro, C08); no hay
-#       ruta de escritura de icon_key (Q4);
+#     - icon_key NULL se devuelve como NULL (fallback neutro, C08); la lectura
+#       devuelve icon_key tal cual, incluidas claves legacy fuera de la
+#       biblioteca (AJ-ICON-07); la escritura es S6-ICONO (test_159);
 #     - uso historico por naturaleza cuenta solo efectos de hechos ACTIVOS y
 #       no revela categorias ajenas (404).
 #   Base local desechable 0001..0340 (estos tests confirman filas).
-# Version: 0.1.0
+#
+#   v0.1.1 (F05-01 S6-ICONO-AJ (AJ-S6ICONO-06)): solo cabecera; el comentario
+#   Q4 (sin ruta de escritura de icon_key) quedo obsoleto con S6-ICONO.
+# Version: 0.1.1
 # ============================================================
 
 from __future__ import annotations

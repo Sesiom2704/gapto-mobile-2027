@@ -19,7 +19,18 @@
 #   v0.2.0 (F05-01 S6-ICONO (F05-D013), Q6): la idempotencia del alta
 #   (AJ-S4-05) compara tambien `icon_key`: misma clave -> idempotente; otra
 #   clave, o clave frente a omitido -> IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION.
-# Version: 0.2.0
+#
+#   v0.3.0 (F05-01 S6-ICONO-AJ (AJ-S6ICONO-01)): el antiguo
+#   test_no_hay_escritura_de_icon_key_ni_presupuestable_default solo
+#   comprobaba el status 422 y, tras S6-ICONO, su alta con icon_key pasaba por
+#   coincidencia (ICONO_CATEGORIA_NO_VALIDO en vez de ENTRADA_INVALIDA). Se
+#   sustituye por dos tests que comprueban el codigo: renombrar sigue sin
+#   admitir icon_key ni presupuestable_default (422 estructural, sin
+#   escritura), y el alta con una clave no publicada es
+#   ICONO_CATEGORIA_NO_VALIDO y no estructural. Este segundo solapa con
+#   test_159[star] a proposito: fija el cambio de semantica de este test ya
+#   aceptado.
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
@@ -299,11 +310,22 @@ def test_matriz_de_auditoria_por_operacion(ctx):
     assert snap == [("true", "false")]
 
 
-def test_no_hay_escritura_de_icon_key_ni_presupuestable_default(ctx):
-    _, _, cli = ctx
+@pytest.mark.parametrize("extra", [{"icon_key": "hogar.casa"}, {"presupuestable_default": False}])
+def test_renombrar_no_admite_icon_key_ni_presupuestable_default(ctx, extra):
+    owner, _, cli = ctx
     a, _ = fh.alta(cli, "Iconos")
-    r = fh.cmd(cli, f"{B}/{a}/renombrar", {"nombre": "X", "row_version": 1, "icon_key": "star"})
-    assert r.status_code == 422
-    r = fh.cmd(cli, fh.BASE, {"id": str(uuid.uuid4()), "nombre": "Y", "parent_id": None, "ambito": "GASTO",
+    r = fh.cmd(cli, f"{B}/{a}/renombrar", {"nombre": "X", "row_version": 1, **extra})
+    assert r.status_code == 422 and _codigo(r) == "ENTRADA_INVALIDA", r.text
+    assert h.leer(owner, "SELECT nombre, row_version, icon_key, presupuestable_default "
+                         "FROM gapto.categorias_financieras WHERE id=%s", (a,)) == [("Iconos", 1, None, True)]
+    assert [(ac, m) for ac, m, _ in fh.auditorias(owner, a)] == [("CREAR", "F05-01 ALTA")]
+
+
+def test_alta_con_icon_key_no_publicado_es_icono_no_valido_y_no_estructural(ctx):
+    owner, _, cli = ctx
+    cid = uuid.uuid4()
+    r = fh.cmd(cli, fh.BASE, {"id": str(cid), "nombre": "Y", "parent_id": None, "ambito": "GASTO",
                               "presupuestable_default": True, "icon_key": "star"})
-    assert r.status_code == 422
+    assert r.status_code == 422 and _codigo(r) == "ICONO_CATEGORIA_NO_VALIDO", r.text
+    assert h.leer(owner, "SELECT count(*) FROM gapto.categorias_financieras WHERE id=%s", (cid,)) == [(0,)]
+    assert fh.auditorias(owner, cid) == []

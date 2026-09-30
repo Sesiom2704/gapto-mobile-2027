@@ -12,7 +12,15 @@
 #   auditoria intactos). Base local desechable 0001..0340 (estos tests
 #   confirman filas). Datos sinteticos, creados como gapto_owner con la GUC
 #   del tenant (WM 12C.7).
-# Version: 0.1.0
+#
+#   v0.2.0 (F05-01 S6-ICONO-AJ (AJ-S6ICONO-02, AJ-S6ICONO-03)): D3 fijada (en
+#   el alta la clave se valida ANTES de la idempotencia AJ-S4-05: un id
+#   existente con clave no publicada es ICONO_CATEGORIA_NO_VALIDO, nunca
+#   IDENTIDAD_REUTILIZADA ni idempotente; mutante I22) y defensa residual del
+#   CHECK de 0340 ejercitada sin API ni biblioteca, via _escribir sobre
+#   actualizar e insertar, traducida por identidad de constraint (AJ-S4-07;
+#   mutante I23).
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -26,6 +34,8 @@ import pytest
 import f05_01_helpers as fh
 import vs01_api_helpers as h
 from app.categorias import iconos
+from app.categorias import repositorio as repo
+from app.categorias import servicio
 
 B = fh.BASE
 ICONO_NO_VALIDO = "ICONO_CATEGORIA_NO_VALIDO"
@@ -252,3 +262,43 @@ def test_alta_con_icono_no_publicado_rechazada_sin_escritura(ctx, clave):
     assert r.status_code == 422 and _codigo(r) == ICONO_NO_VALIDO, r.text
     assert h.leer(owner, "SELECT count(*) FROM gapto.categorias_financieras WHERE id=%s", (cid,)) == [(0,)]
     assert fh.auditorias(owner, cid) == []
+
+
+@pytest.mark.parametrize("previa", ["MISMA_SALVO_ICONO", "OTRA_INTENCION"])
+@pytest.mark.parametrize("clave", ["ocio.juguete", "Ocio.regalo"])
+def test_alta_con_id_existente_y_clave_no_publicada_es_icono_no_valido(ctx, previa, clave):
+    """D3: la clave se valida antes de la idempotencia del alta (AJ-S4-05)."""
+    owner, _, cli = ctx
+    cid, r = _alta(cli, "Juguetes" if previa == "MISMA_SALVO_ICONO" else "Otra")
+    assert r.status_code == 200, r.text
+    r = fh.cmd(cli, B, {"id": str(cid), "nombre": "Juguetes", "parent_id": None, "ambito": "GASTO",
+                        "presupuestable_default": False, "icon_key": clave})
+    assert r.status_code == 422 and _codigo(r) == ICONO_NO_VALIDO, r.text
+    assert _fila(owner, cid)[:2] == (None, 1)
+    assert [(a, m) for a, m, _ in fh.auditorias(owner, cid)] == [("CREAR", "F05-01 ALTA")]
+
+
+# ------------------------------------------------------------------ defensa residual (AJ-S4-07)
+@pytest.mark.parametrize("valor", ["", " hogar.casa"])
+def test_defensa_residual_check_icon_key_traducida_por_identidad(ctx, valor):
+    """Sin API ni biblioteca: el CHECK de 0340 se traduce por su nombre de
+    constraint a ICONO_CATEGORIA_NO_VALIDO, dentro de un savepoint y sin
+    escritura (inalcanzable por la API mientras la biblioteca valide antes)."""
+    owner, _, _ = ctx
+    cid = fh.crear_categoria(owner, "Agua", "GASTO", icon_key="hogar.agua")
+    antes = _fila(owner, cid)
+    nuevo = uuid.uuid4()
+
+    def operacion(s):
+        return (
+            servicio._escribir(s, lambda: repo.actualizar(s, cid, {"icon_key": valor})),
+            servicio._escribir(s, lambda: repo.insertar(
+                s, categoria_id=nuevo, parent_id=None, nombre="X", ambito="GASTO",
+                presupuestable_default=False, icon_key=valor)),
+        )
+
+    esperado = servicio.Rechazo(ICONO_NO_VALIDO)
+    assert fh.en_transaccion(owner, operacion) == (esperado, esperado)
+    assert _fila(owner, cid) == antes
+    assert h.leer(owner, "SELECT count(*) FROM gapto.categorias_financieras WHERE id=%s", (nuevo,)) == [(0,)]
+    assert fh.auditorias(owner, cid) == [] and fh.auditorias(owner, nuevo) == []

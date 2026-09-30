@@ -48,7 +48,14 @@
 #   Discriminante nuevo: test_159 (preflight incluido). Censo vigente:
 #   C01..C17 sin C07, S01..S21 con S10b, M01..M23 e I01..I21: 82 mutantes.
 #   Equivalentes documentados sin cambios: E01 y E02.
-# Version: 0.4.0
+#
+#   v0.5.0 (F05-01 S6-ICONO-AJ (AJ-S6ICONO-02, AJ-S6ICONO-03)): I22 (el alta
+#   valida icon_key despues de la idempotencia AJ-S4-05; invierte solo D3 y
+#   conserva validar antes de escribir) e I23 (defensa residual del CHECK de
+#   0340 sin traduccion por identidad, AJ-S4-07). Discriminante: test_159.
+#   Censo vigente: C01..C17 sin C07, S01..S21 con S10b, M01..M23 e I01..I23:
+#   84 mutantes. Ninguna transformacion ni discriminante previo cambia.
+# Version: 0.5.0
 # ============================================================
 
 from __future__ import annotations
@@ -304,6 +311,14 @@ MUTANTES = [
     ("I21", "el INSERT del alta descarta icon_key",
      [(REPO, "(categoria_id, parent_id, nombre, ambito, presupuestable_default, icon_key),",
        "(categoria_id, parent_id, nombre, ambito, presupuestable_default, None),")], [T159]),
+    ("I22", "el alta valida icon_key despues de la idempotencia (D3 invertida)",
+     [(SERV, "    if not icono_valido(icon_key):\n        return Rechazo(ICONO_NO_VALIDO)\n    visible = nombre_visible(nombre)\n",
+       "    visible = nombre_visible(nombre)\n"),
+      (SERV, "    rechazo = _escribir(sesion, lambda: repo.insertar(",
+       "    if not icono_valido(icon_key):\n        return Rechazo(ICONO_NO_VALIDO)\n"
+       "    rechazo = _escribir(sesion, lambda: repo.insertar(")], [T159]),
+    ("I23", "CHECK de icon_key sin traduccion (defensa residual retirada)",
+     [(SERV, '    "ck_categorias_financieras__icon_key_no_vacia_recortada": ICONO_NO_VALIDO,\n', "")], [T159]),
 ]
 
 
