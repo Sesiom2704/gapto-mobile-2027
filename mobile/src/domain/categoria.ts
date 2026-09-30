@@ -5,6 +5,7 @@
 // Descripción: Modelo del árbol de categorías en el cliente (espejo de CategoriaNodoArbol y MagnitudCategoria de GET /v1/categorias). Reglas puras de F05 §22.2 C02 y F09 §12.97.2: elegibilidad para GASTO, visibilidad en el registro (elegible o con algún descendiente elegible), motivo de no seleccionable con prioridad fija, ruta de ancestros y construcción del árbol desde la lista plana. El ORDEN es el de la API (orden → nombre → id): el cliente no reordena. La lectura nunca es autoridad de persistencia: el servidor decide en cada escritura.
 // Visibilidad en el registro (decisión de Moisés en sesión, contradicción F09 §12.97.2 / §12.97.3 y lámina R05): se muestra un nodo elegible, uno con algún descendiente visible, y también uno HABILITADO y de ámbito compatible pero NO capturable (no seleccionable, con motivo «Requiere un dato no disponible»). Las desactivadas y las de solo ingresos sin descendientes elegibles se ocultan.
 // Versión: 0.1.0 (F05-01 S6-WIRE+UI (este mandato))
+// Versión: 0.2.0 (F05-01 S6-WIRE+UI (este mandato), commit 2): Editar orden (D-UI-01) — `moverHermano` (subir/bajar un puesto sobre el conjunto COMPLETO de hermanos, sin salir de los extremos) y `mismoOrden` (el orden editado coincide con el cargado: no se envía nada); `subcategoriasActivas` (subárbol completo, atravesando desactivadas, como AJ-S4-02) para la N de «Desactivar también sus N subcategorías». El cliente sigue sin reordenar la lectura: solo propone el orden que el servidor aplica en una llamada.
 // ============================================================
 
 export type Ambito = 'GASTO' | 'INGRESO' | 'AMBOS';
@@ -132,4 +133,23 @@ export function descendientes(a: Arbol, id: string): CategoriaNodo[] {
     pila.push(...hijosDe(a, n.id));
   }
   return res;
+}
+
+/** Subcategorías activas de TODO el subárbol (atraviesa las desactivadas, como el servidor en AJ-S4-02). */
+export function subcategoriasActivas(a: Arbol, id: string): CategoriaNodo[] {
+  return descendientes(a, id).filter((n) => n.enabled);
+}
+
+/** Editar orden (D-UI-01): mueve el elemento `i` un puesto arriba (-1) o abajo (+1); en los extremos no cambia nada. */
+export function moverHermano<T>(lista: readonly T[], i: number, delta: -1 | 1): T[] {
+  const j = i + delta;
+  const res = [...lista];
+  if (i < 0 || i >= lista.length || j < 0 || j >= lista.length) return res;
+  [res[i], res[j]] = [res[j], res[i]];
+  return res;
+}
+
+/** El orden editado coincide con el cargado (mismos ids en la misma posición). */
+export function mismoOrden(a: readonly { id: string }[], b: readonly { id: string }[]): boolean {
+  return a.length === b.length && a.every((n, i) => n.id === b[i].id);
 }

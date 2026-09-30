@@ -5,7 +5,8 @@
 // Descripción: Cliente HTTP del adaptador F05-00-B. Clasifica cada respuesta en resultados de dominio del cliente: OK, RECHAZADO (definitivo, no persistido) o INDETERMINADO (timeout, red, 5xx: puede haberse confirmado; se reintenta la MISMA intención). Nunca expone texto técnico.
 // v0.2.0 (F05-D003): cuentas-pago por fecha del pago con propuesta de financiación; resultado con la financiación sellada.
 // v0.3.0 (F05-01 S6-WIRE+UI (este mandato)): lectura del árbol y del uso de una categoría y comandos de Ajustes › Categorías (alta, icono, renombrar, mover, desactivar, reactivar, ámbito y reordenar), todos con la clasificación OK / RECHAZADO(codigo) / INDETERMINADO vigente. La reordenación usa SOLO la ruta atómica /v1/categorias/reordenar (F05 §26.3): el cliente no invoca el comando por nodo. El resultado del registro informa el estado categorial.
-// Versión: 0.3.0
+// v0.4.0 (F05-01 S6-WIRE+UI (este mandato), commit 2): un RECHAZADO conserva el `detalle` del servidor cuando lo trae (CAMBIO_AMBITO_REQUIERE_CONFIRMACION devuelve el uso vigente `efectos_activos`, que la UI vuelve a mostrar y confirmar).
+// Versión: 0.4.0
 // ============================================================
 
 import type { Ambito, CategoriaNodo } from '../domain/categoria';
@@ -76,7 +77,7 @@ export interface GastoMes {
 
 export type Respuesta<T> =
   | { tipo: 'OK'; datos: T }
-  | { tipo: 'RECHAZADO'; codigo: string; mensaje: string }
+  | { tipo: 'RECHAZADO'; codigo: string; mensaje: string; detalle?: Record<string, unknown> }
   | { tipo: 'INDETERMINADO'; mensaje: string };
 
 const MSG_INDETERMINADO = 'No se ha podido confirmar el registro. Puedes reintentar: no se duplicará.';
@@ -130,7 +131,9 @@ export function crearCliente(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): C
       }
       if (r.ok) return { tipo: 'OK', datos: cuerpo as T };
       if (r.status >= 400 && r.status < 500 && cuerpo && typeof cuerpo.codigo === 'string') {
-        return { tipo: 'RECHAZADO', codigo: cuerpo.codigo, mensaje: String(cuerpo.mensaje ?? '') };
+        const rechazo: Respuesta<T> = { tipo: 'RECHAZADO', codigo: cuerpo.codigo, mensaje: String(cuerpo.mensaje ?? '') };
+        if (cuerpo.detalle && typeof cuerpo.detalle === 'object') return { ...rechazo, detalle: cuerpo.detalle } as Respuesta<T>;
+        return rechazo;
       }
       return { tipo: 'INDETERMINADO', mensaje: msgIndeterminado };
     } catch {

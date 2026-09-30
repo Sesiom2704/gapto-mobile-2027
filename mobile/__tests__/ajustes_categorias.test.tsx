@@ -4,6 +4,7 @@
 // Ruta: mobile/__tests__/ajustes_categorias.test.tsx
 // Descripción: Más → Ajustes → Categorías (D-UI-03; F09 §12.91.1, §12.97.4–12.97.6, §12.97.9 I01–I03; lámina SET-CAT v1.0), commit 1: diez secciones en orden con solo «Categorías» operativa y el resto «No disponible» no pulsable; lista por niveles con filtro Activas (por defecto) / Todas y desactivadas con texto; detalle en lectura SIN acciones EDIT-* (llegan en el commit 2) y fila «Icono» que guarda con el row_version vigente; conflicto de versión que recarga sin reintento; alta CREATE-M con acción desactivada hasta completar, sin preselección de ámbito ni presupuesto, aviso D-198 solo con padre, ubicación restringida a padres habilitados, id sellado y reutilizado en el reintento indeterminado, y tratamiento de los códigos de rechazo; tareas inmersivas sin barra inferior.
 // Versión: 0.1.0 (F05-01 S6-WIRE+UI (este mandato))
+// Versión: 0.2.0 (F05-01 S6-WIRE+UI (este mandato), commit 2): el detalle ya muestra las acciones EDIT-* (cubiertas en ajustes_edicion.test.tsx); aquí se comprueba que «Editar orden» es de la lista y no del detalle.
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
@@ -99,7 +100,7 @@ test('lista: Activas por defecto, Todas muestra las desactivadas con texto; nive
   expect(screen.getByTestId('pantalla-ajustes')).toBeTruthy();
 });
 
-test('detalle en lectura SIN acciones EDIT-* en este corte; hueco de icono con reserva', async () => {
+test('detalle: datos en lectura, acciones EDIT-* presentes y «Editar orden» solo en la lista', async () => {
   const f = fake();
   await irACategorias(f.cliente);
   fireEvent.press(screen.getByTestId('fila-hogar'));
@@ -108,9 +109,9 @@ test('detalle en lectura SIN acciones EDIT-* en este corte; hueco de icono con r
   expect(screen.getByTestId('detalle-ambito').props.accessibilityLabel).toBe('Ámbito: Gasto');
   expect(screen.getByTestId('detalle-estado').props.accessibilityLabel).toBe('Estado: Activa');
   expect(screen.getByTestId('detalle-icono').props.accessibilityLabel).toBe('Icono: Luz. Cambiar icono');
-  for (const t of ['Renombrar', 'Mover a otra categoría', 'Cambiar ámbito', 'Desactivar', 'Reactivar', 'Editar orden']) {
-    expect(screen.queryByText(t)).toBeNull();
-  }
+  for (const t of ['Renombrar', 'Mover a otra categoría', 'Cambiar ámbito', 'Desactivar']) expect(screen.getByText(t)).toBeTruthy();
+  expect(screen.queryByText('Reactivar')).toBeNull();
+  expect(screen.queryByText('Editar orden')).toBeNull();
   fireEvent.press(screen.getByTestId('detalle-atras'));
   fireEvent.press(screen.getByTestId('ver-detalle-nivel'));
   expect(screen.getByTestId('detalle-categoria')).toBeTruthy();

@@ -4,6 +4,7 @@
 // Ruta: mobile/__tests__/categorias_dominio.test.ts
 // Descripción: Dominio de categorías del cliente (F05 §22.2 C01/C02/C07, §28.2; F09 §12.97.1–12.97.3): árbol desde la lista plana en el orden de la API, ruta, elegibilidad para GASTO, visibilidad en el registro (incluidos padre INGRESO con hijo GASTO y padre desactivado con hijo activo, estado inalcanzable por API que se cubre con fixture, F05 §26.4), motivo de no seleccionable con prioridad, normalización de valores de magnitud (casos de §28.2 y D1), conservación/descarte al cambiar de categoría, y validación/sellado de la intención con la dimensión categorial (S6-WIRE).
 // Versión: 0.1.0 (F05-01 S6-WIRE+UI (este mandato))
+// Versión: 0.2.0 (F05-01 S6-WIRE+UI (este mandato), commit 2): Editar orden (`moverHermano`, `mismoOrden`) y subcategorías activas del subárbol completo (`subcategoriasActivas`).
 // ============================================================
 
 import {
@@ -14,8 +15,11 @@ import {
   elegibleParaGasto,
   hijosDe,
   magnitudesPedibles,
+  mismoOrden,
   motivoNoSeleccionable,
+  moverHermano,
   rutaTexto,
+  subcategoriasActivas,
   visibleEnRegistro,
 } from '../src/domain/categoria';
 import { conservarMagnitudes, descartadas, normalizarValorMagnitud } from '../src/domain/magnitud';
@@ -139,4 +143,29 @@ test('CATEGORIA sin magnitudes informadas y sin obligatorias: lista vacía', () 
 test('valor no válido en una magnitud bloquea con su motivo', () => {
   const b = listo({ categoria: LUZ, magnitudesTexto: { kwh: '1,234' } });
   expect(validar(b, '2026-09-30').magnitudes).toEqual({ kwh: 'Máximo 2 decimales.' });
+});
+
+test('moverHermano: sube/baja un puesto sin salir de los extremos y sin mutar la lista', () => {
+  const l = ['a', 'b', 'c'];
+  expect(moverHermano(l, 2, -1)).toEqual(['a', 'c', 'b']);
+  expect(moverHermano(l, 0, 1)).toEqual(['b', 'a', 'c']);
+  expect(moverHermano(l, 0, -1)).toEqual(l);
+  expect(moverHermano(l, 2, 1)).toEqual(l);
+  expect(l).toEqual(['a', 'b', 'c']);
+});
+
+test('mismoOrden: mismos ids en la misma posición', () => {
+  expect(mismoOrden([{ id: 'a' }, { id: 'b' }], [{ id: 'a' }, { id: 'b' }])).toBe(true);
+  expect(mismoOrden([{ id: 'b' }, { id: 'a' }], [{ id: 'a' }, { id: 'b' }])).toBe(false);
+  expect(mismoOrden([{ id: 'a' }], [{ id: 'a' }, { id: 'b' }])).toBe(false);
+});
+
+test('subcategoriasActivas: todo el subárbol, atravesando desactivadas (AJ-S4-02)', () => {
+  const a = construirArbol([
+    nodo({ id: 'r', nombre: 'R' }),
+    nodo({ id: 'x', nombre: 'X', parent_id: 'r', enabled: false }),
+    nodo({ id: 'y', nombre: 'Y', parent_id: 'x' }),
+    nodo({ id: 'z', nombre: 'Z', parent_id: 'r' }),
+  ]);
+  expect(subcategoriasActivas(a, 'r').map((n) => n.id).sort()).toEqual(['y', 'z']);
 });

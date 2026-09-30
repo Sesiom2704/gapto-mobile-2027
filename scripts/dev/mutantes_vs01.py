@@ -35,7 +35,14 @@
 #   A15 (19 py), M01..M12 y U01..U07 (19 js) = 38. Correccion de ejecucion:
 #   `npx` se resuelve con shutil.which (en Windows es npx.cmd y subprocess sin
 #   shell no lo encontraba: el preflight js fallaba con FileNotFoundError).
-# Version: 0.4.0
+#   v0.5.0 (F05-01 S6-WIRE+UI (este mandato), commit 2): U08..U10 de las
+#   acciones EDIT-* de Ajustes > Categorias (suite js): Editar orden envia N
+#   llamadas (una por hermano) en lugar de UNA a reordenar con el conjunto
+#   completo; «Desactivar» desactiva la rama sin confirmacion; reactivar en
+#   cascada en el cliente (Q4: solo el nodo). M07 conserva su ancla (el
+#   RECHAZADO del cliente ahora conserva `detalle`, fuera del ancla).
+#   Censo: 19 py + M01..M12 y U01..U10 (22 js) = 41.
+# Version: 0.5.0
 # ============================================================
 
 from __future__ import annotations
@@ -96,6 +103,20 @@ MUTANTES = [
     ("U05", "mobile/src/components/SelectorCategorias.tsx", "          {actual && p.esSeleccionable(actual) ? (", "          {actual ? (", "js"),
     ("U06", "mobile/src/screens/NuevaCategoriaScreen.tsx", "        {padre !== null ? (\n          <View testID=\"aviso-d198\"", "        {true ? (\n          <View testID=\"aviso-d198\"", "js"),
     ("U07", "mobile/src/domain/categoria.ts", "  if (n.enabled && (n.ambito === naturaleza || n.ambito === 'AMBOS') && !n.capturable) return true;\n", "", "js"),
+    # ---------------------------------------------------------------- F05-01 S6-WIRE+UI commit 2 (EDIT-* y Editar orden)
+    ("U08", "mobile/src/screens/CategoriasAjustesScreen.tsx",
+     "    const r = await p.cliente.reordenarCategorias({ parent_id: padre, hermanos: orden.map((n) => ({ id: n.id, row_version: n.row_version })) });",
+     "    let r: any = null;\n    for (const n of orden) r = await p.cliente.reordenarCategorias({ parent_id: padre, hermanos: [{ id: n.id, row_version: n.row_version }] });",
+     "js"),
+    ("U09", "mobile/src/screens/CategoriasAjustesScreen.tsx",
+     "<FilaAccion testID=\"accion-desactivar\" titulo=\"Desactivar\" critica onPress={() => setTarea({ tipo: 'DESACTIVAR' })} />",
+     "<FilaAccion testID=\"accion-desactivar\" titulo=\"Desactivar\" critica onPress={() => void desactivar('RAMA')} />",
+     "js"),
+    ("U10", "mobile/src/screens/CategoriasAjustesScreen.tsx",
+     "    const r = await p.cliente.reactivarCategoria(detalle.id, { row_version: detalle.row_version });\n",
+     "    const r = await p.cliente.reactivarCategoria(detalle.id, { row_version: detalle.row_version });\n"
+     "    for (const d of descendientes(arbol!, detalle.id).filter((x) => !x.enabled)) await p.cliente.reactivarCategoria(d.id, { row_version: d.row_version });\n",
+     "js"),
 ]
 
 
