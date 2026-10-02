@@ -36,15 +36,15 @@
 #         uuid5(NS, "seed.magnitud.<clave>"), INSERT ... WHERE NOT EXISTS
 #         (nunca UPDATE de filas existentes);
 #     (2) categorias por la API HTTP (POST /v1/categorias) con
-#         id = uuid5(NS, "seed.categoria.<clave>") e icon_key del catalogo; la
-#         idempotencia la da AJ-S4-05 (mismo id + mismo contenido ->
-#         idempotente); IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION aborta y se
-#         explica, nunca se corrige;
+#         id = uuid5(NS, "seed.categoria.<clave>") e icon_key del catalogo;
+#         desde v0.6.0 (D33) solo se envia el alta de las que NO existen por
+#         ese UUID (las existentes se registran «existente, no modificada»
+#         y nunca se corrigen); cualquier rechazo del alta aborta;
 #     (3) SQL `categoria_magnitudes` idempotente (WHERE NOT EXISTS por
 #         (categoria_id, magnitud_id));
 #     (4) POST /v1/categorias/{id}/desactivar (SOLO_SI_SIN_HIJOS_ACTIVOS, con
 #         el row_version leido de GET /v1/categorias) de la categoria marcada
-#         DESACTIVADA (E1 hace idempotente la repeticion).
+#         DESACTIVADA, solo si la creo esta misma ejecucion (v0.6.0, D33).
 #   Protecciones: --dev-dsn LOCAL (_exigir_local) y base SIEMPRE
 #   gapto2027_dev; --api-url solo loopback o red privada (10/8, 172.16/12,
 #   192.168/16); el token SOLO de la variable de entorno GAPTO_DEV_TOKEN (nunca
@@ -57,6 +57,16 @@
 #     python scripts/dev/bootstrap_dev_db.py --seed-categorias \
 #       --dev-dsn "host=127.0.0.1 port=5434 dbname=gapto2027_dev user=<rol>" \
 #       --api-url http://192.168.1.10:8027
+# Version: 0.6.0  -- F05-01 S7-MAG, decision de ejecucion D33 (Moises, 2026-10-02):
+#                   el seed GARANTIZA EXISTENCIA, NO ESTADO. Paso (2): antes de
+#                   cada POST de categoria se comprueba por su UUID determinista
+#                   (GET /v1/categorias) si ya existe; si existe NO se envia nada
+#                   y se registra «existente, no modificada» (una categoria
+#                   sembrada que el usuario renombro, movio, cambio de icono u
+#                   ordeno ya no aborta el seed por AJ-S4-05). Paso (4): solo se
+#                   desactivan las categorias creadas en ESTA ejecucion; una
+#                   existente no se toca. Los pasos (1) y (3) ya eran de
+#                   existencia (INSERT ... WHERE NOT EXISTS, nunca UPDATE).
 # Version: 0.5.0  -- F05-01 S7-MAG (F05-D020 D-MAG-06, D-S7-04): el seed cubre
 #                   los cinco huecos de §34.1 sin categorias nuevas (siguen 23):
 #                   (1) Luz con obligatoria + opcionales; (2) Kilometros
@@ -334,17 +344,18 @@ def _api(api: str, token: str, metodo: str, ruta: str, cuerpo: dict | None = Non
             return e.code, {}
 
 
-def _seed_categorias_api(api: str, token: str) -> list[str]:
+def _seed_categorias_api(api: str, token: str) -> tuple[list[str], set[str]]:
+    """Paso (2). Devuelve (lineas, claves creadas en esta ejecucion). D33: existencia, no estado."""
     status, arbol = _api(api, token, "GET", "/v1/categorias")
     if status != 200:
         sys.exit(f"ABORTADO: GET /v1/categorias devolvio HTTP {status}")
-    existentes = {c["id"]: c for c in arbol["categorias"]}
-    salida = []
+    existentes = {c["id"] for c in arbol["categorias"]}
+    salida: list[str] = []
+    creadas: set[str] = set()
     for clave, nombre, padre, ambito, icono in SEED_CATEGORIAS:
-        previa = existentes.get(str(id_categoria(clave)))
-        if clave in SEED_DESACTIVADAS and previa is not None and not previa["enabled"]:
-            # La desactivo el propio seed (paso 4): su alta ya no es idempotente (row_version > 1).
-            salida.append(f"CATEGORIA {clave}: ya existia desactivada por el seed (sin cambios)")
+        if str(id_categoria(clave)) in existentes:
+            # Existe por su UUID determinista: no se envia nada, aunque el usuario la haya cambiado.
+            salida.append(f"CATEGORIA {clave}: existente, no modificada")
             continue
         alta = {"id": str(id_categoria(clave)), "nombre": nombre,
                 "parent_id": None if padre is None else str(id_categoria(padre)), "ambito": ambito,
@@ -352,23 +363,28 @@ def _seed_categorias_api(api: str, token: str) -> list[str]:
         status, cuerpo = _api(api, token, "POST", "/v1/categorias", alta)
         if status == 200:
             salida.append(f"CATEGORIA {clave}: {'ya existia (idempotente)' if cuerpo.get('idempotente') else 'creada'}")
+            if not cuerpo.get("idempotente"):
+                creadas.add(clave)
             continue
         codigo = cuerpo.get("codigo")
-        if codigo == "IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION":
-            sys.exit(f"ABORTADO en {clave}: la categoria sembrada ya existe con otro contenido (AJ-S4-05; se "
-                     "renombro, movio, desactivo u ordeno en ENV-DEV). El seed no la corrige: decide si "
-                     "recrear gapto2027_dev con --recrear o dejarla como esta.")
         sys.exit(f"ABORTADO en {clave}: HTTP {status} {codigo or ''}".rstrip())
-    return salida
+    return salida, creadas
 
 
-def _seed_desactivar(api: str, token: str) -> list[str]:
+def _seed_desactivar(api: str, token: str, creadas: set[str]) -> list[str]:
+    """Paso (4): solo las categorias marcadas DESACTIVADA que creo esta ejecucion (D33)."""
+    salida = []
+    pendientes = [c for c in SEED_DESACTIVADAS if c in creadas]
+    for clave in SEED_DESACTIVADAS:
+        if clave not in creadas:
+            salida.append(f"DESACTIVADA {clave}: existente, no modificada")
+    if not pendientes:
+        return salida
     status, arbol = _api(api, token, "GET", "/v1/categorias")
     if status != 200:
         sys.exit(f"ABORTADO: GET /v1/categorias devolvio HTTP {status}")
     por_id = {c["id"]: c for c in arbol["categorias"]}
-    salida = []
-    for clave in SEED_DESACTIVADAS:
+    for clave in pendientes:
         nodo = por_id.get(str(id_categoria(clave)))
         if nodo is None:
             sys.exit(f"ABORTADO: {clave} no esta en el arbol")
@@ -387,9 +403,10 @@ def seed_categorias(dev_dsn: str, api_url: str) -> None:
     if not token:
         sys.exit("Falta la variable de entorno GAPTO_DEV_TOKEN (nunca se pasa por argumento).")
     lineas = _seed_magnitudes(dsn_dev)
-    lineas += _seed_categorias_api(api, token)
+    categorias, creadas = _seed_categorias_api(api, token)
+    lineas += categorias
     lineas += _seed_asociaciones(dsn_dev)
-    lineas += _seed_desactivar(api, token)
+    lineas += _seed_desactivar(api, token, creadas)
     for linea in lineas:
         print(linea)
     print(f"OK seed-categorias {BASE_DEV} owner={OWNER}: {len(SEED_CATEGORIAS)} categorias, "
