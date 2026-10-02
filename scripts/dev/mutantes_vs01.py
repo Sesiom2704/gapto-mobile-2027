@@ -47,7 +47,14 @@
 #   true sin comprobar ningun descendiente elegible). Discriminante: suite js
 #   (regcat.test.tsx, casos AJ-09).
 #   Censo: 19 py + M01..M12 y U01..U11 (23 js) = 42.
-# Version: 0.6.0
+#   v0.7.0 (F05-01 S7-MAG UI, hito 2; F05-D020, F09 §12.97.10): U12 (Editar
+#   orden de magnitudes envia un SUBCONJUNTO en lugar del conjunto completo),
+#   U13 (el reintento del alta NUEVA usa un magnitud_id NUEVO en vez del del
+#   formulario: duplicaria) y U14 (deshabilitar reenvia solo ante un impacto
+#   cambiado en lugar de pedir otra confirmacion, M15). Discriminante: suite
+#   js (ajustes_magnitudes.test.tsx).
+#   Censo: 19 py + M01..M12 y U01..U14 (26 js) = 45.
+# Version: 0.7.0
 # ============================================================
 
 from __future__ import annotations
@@ -126,6 +133,19 @@ MUTANTES = [
     ("U11", "mobile/src/components/SelectorCategorias.tsx",
      "  const usables = (n: CategoriaNodo) => !!arbol && tieneDescendienteElegible(arbol, n, 'GASTO');\n",
      "  const usables = (_n: CategoriaNodo) => true;\n",
+     "js"),
+    # ---------------------------------------------------------------- F05-01 S7-MAG UI (hito 2)
+    ("U12", "mobile/src/components/MagnitudesCategoria.tsx",
+     "      const r = await p.cliente.reordenarMagnitudes(cat.id, { asociaciones: conjuntoReordenar(orden) });\n",
+     "      const r = await p.cliente.reordenarMagnitudes(cat.id, { asociaciones: conjuntoReordenar(orden.slice(1)) });\n",
+     "js"),
+    ("U13", "mobile/src/components/NuevaMagnitud.tsx",
+     "      magnitud_id: idIntento,\n",
+     "      magnitud_id: p.nuevoId(),\n",
+     "js"),
+    ("U14", "mobile/src/components/MagnitudesCategoria.tsx",
+     "      if (nuevas) return setHoja({ tipo: 'DESHABILITAR', afectadas: nuevas, previas: confirmadas, cambiado: true });\n",
+     "      if (nuevas) { await p.cliente.deshabilitarMagnitud(m.id, { row_version: m.row_version, confirmacion_impacto: nuevas.map((a) => a.id) }); return setHoja(null); }\n",
      "js"),
 ]
 

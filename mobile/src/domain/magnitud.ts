@@ -5,6 +5,7 @@
 // Descripción: Valores de magnitudes en el registro (F05 §28.2 AJ-C07-02/06; F09 §12.97.3). `normalizarValorMagnitud` convierte lo escrito en texto decimal CANÓNICO con punto (acepta coma como separador de entrada) y rechaza vacío, signo «+», exponente, NaN/∞, cero con signo («-0»), ceros a la izquierda, más de `precision_decimales` cifras decimales significativas (los ceros de cola no cuentan: con precisión 2, «1.230» es válido y «1.234» no) y más de 12 cifras enteras. Es ayuda de captura: la autoridad es el servidor (C07). Desconocido ≠ cero: nunca se rellena «0». `conservarMagnitudes` / `descartadas` gestionan el cambio de categoría (C07: se conservan las comunes y se confirma antes de descartar valores informados).
 // Versión: 0.1.0 (F05-01 S6-WIRE+UI (este mandato))
 // Versión: 0.2.0 (F05-01 S7-MAG UI, hito 1; F05-D020, F09 §12.97.10, lámina SET-MAG v0.1): catálogo de magnitudes del owner (GET /v1/magnitudes) y lógica pura de la sección «Magnitudes» de Ajustes › Categorías: «unidad · decimales», resumen «N obligatorias, M opcionales», estado «No usable en registros nuevos» (obligatoria deshabilitada, M03), secciones del selector (Disponibles / Deshabilitadas / Ya en <categoría>, M06) con búsqueda por nombre normalizado y subtítulo «… · usada en …» / «sin categorías». Lectura: nunca autoridad; el servidor decide en cada comando.
+// Versión: 0.3.0 (F05-01 S7-MAG UI, hito 2): validación del alta rápida igual que el servidor (nombre 1..80 y unidad 1..20 visibles tras NFKC + recorte + colapso; decimales 0..6) y el texto «Para crear falta: …» (M07); conjunto COMPLETO para reordenar con el orden y la obligatoriedad cargados (M10); lista de impacto de deshabilitar (M14/M15): obligatorias afectadas según el servidor, opcionales del catálogo «sigue usable» y las que aparecen por primera vez marcadas «nueva».
 // ============================================================
 
 import type { MagnitudCategoria } from './categoria';
@@ -180,4 +181,88 @@ export function seccionesSelector(catalogo: MagnitudCatalogo[], asociadas: Magni
     deshabilitadas: libres.filter((m) => !m.enabled),
     yaEn: asociadas.filter((a) => casa(a.nombre)).map((a) => ({ magnitud_id: a.magnitud_id, nombre: a.nombre, obligatoria: a.obligatoria })),
   };
+}
+
+
+// ------------------------------------------------------------------ S7-MAG hito 2: alta rápida, orden e impacto
+export const LONGITUD_NOMBRE_MAGNITUD = 80;
+export const LONGITUD_UNIDAD = 20;
+
+/** Forma visible: NFKC (si el motor la ofrece), recorte y espacios internos colapsados (como el servidor, D30). */
+export function visible(texto: string): string {
+  let t = texto;
+  try {
+    t = t.normalize('NFKC');
+  } catch {
+    // Sin normalize: el servidor sigue siendo la autoridad.
+  }
+  return t.trim().replace(/\s+/g, ' ');
+}
+
+export interface FormNuevaMagnitud {
+  nombre: string;
+  unidad: string;
+  decimales: number | null;
+  obligatoria: boolean | null;
+}
+
+export interface ValidacionNueva {
+  completa: boolean;
+  /** «Para crear falta: …» o null si no falta nada. */
+  faltan: string | null;
+  errorNombre: string | null;
+  errorUnidad: string | null;
+}
+
+export function validarNuevaMagnitud(f: FormNuevaMagnitud): ValidacionNueva {
+  const nombre = visible(f.nombre);
+  const unidad = visible(f.unidad);
+  const errorNombre = nombre.length > LONGITUD_NOMBRE_MAGNITUD ? `Máximo ${LONGITUD_NOMBRE_MAGNITUD} caracteres.` : null;
+  const errorUnidad = unidad.length > LONGITUD_UNIDAD ? `Máximo ${LONGITUD_UNIDAD} caracteres.` : null;
+  const falta = [
+    nombre ? null : 'nombre',
+    unidad ? null : 'unidad',
+    f.decimales === null ? 'decimales' : null,
+    f.obligatoria === null ? 'si es obligatoria' : null,
+  ].filter((x): x is string => x !== null);
+  const faltan = falta.length ? `Para crear falta: ${enumerar(falta)}.` : null;
+  return { completa: !falta.length && !errorNombre && !errorUnidad, faltan, errorNombre, errorUnidad };
+}
+
+/** Conjunto COMPLETO para POST …/magnitudes/reordenar: identidad, orden y obligatoriedad CARGADOS, en el orden propuesto. */
+export function conjuntoReordenar(propuesto: MagnitudCategoria[]) {
+  return propuesto.map((m) => ({ asociacion_id: m.asociacion_id, magnitud_id: m.magnitud_id, orden: m.orden, obligatoria: m.obligatoria }));
+}
+
+export function mismoOrdenAsociaciones(a: MagnitudCategoria[], b: MagnitudCategoria[]): boolean {
+  return a.length === b.length && a.every((m, i) => m.asociacion_id === b[i].asociacion_id);
+}
+
+export interface FilaImpacto {
+  id: string;
+  nombre: string;
+  etiqueta: string;
+}
+
+/**
+ * Lista de la hoja de deshabilitar (M14/M15): primero las categorías que el SERVIDOR calculó bajo lock (habilitadas
+ * con la magnitud obligatoria: «obligatoria», y «· nueva» si no estaban en la confirmación anterior), después las
+ * opcionales habilitadas del catálogo («opcional · sigue usable»).
+ */
+export function filasImpacto(
+  afectadas: { id: string; nombre: string }[],
+  usos: UsoEnCategoria[],
+  previas: string[] | null,
+  ruta: (id: string, nombre: string) => string,
+): FilaImpacto[] {
+  const ids = new Set(afectadas.map((a) => a.id));
+  const obligatorias = afectadas.map((a) => ({
+    id: a.id,
+    nombre: ruta(a.id, a.nombre),
+    etiqueta: previas && !previas.includes(a.id) ? 'obligatoria · nueva' : 'obligatoria',
+  }));
+  const opcionales = usos
+    .filter((u) => !ids.has(u.id) && !u.obligatoria && u.enabled)
+    .map((u) => ({ id: u.id, nombre: ruta(u.id, u.nombre), etiqueta: 'opcional · sigue usable' }));
+  return [...obligatorias, ...opcionales];
 }

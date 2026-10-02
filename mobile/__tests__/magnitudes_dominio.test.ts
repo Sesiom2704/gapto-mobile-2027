@@ -4,9 +4,13 @@
 // Ruta: mobile/__tests__/magnitudes_dominio.test.ts
 // Descripción: Lógica pura de S7-MAG en el cliente (F05-D020; F09 §12.97.10; lámina SET-MAG v0.1): «unidad · decimales», resumen de la sección, estado «No usable en registros nuevos» (M03), búsqueda normalizada, subtítulo del catálogo y secciones del selector (M06).
 // Versión: 0.1.0 (F05-01 S7-MAG UI, hito 1)
+// Versión: 0.2.0 (F05-01 S7-MAG UI, hito 2): validación del alta igual que el servidor (80 / 20 visibles tras NFKC, 0..6), «Para crear falta: …», conjunto completo para reordenar y lista de impacto de deshabilitar (M14/M15).
 // ============================================================
 
 import {
+  conjuntoReordenar,
+  filasImpacto,
+  mismoOrdenAsociaciones,
   normalizarBusqueda,
   obligatoriasDeshabilitadas,
   resumenMagnitudes,
@@ -15,6 +19,8 @@ import {
   textoNoUsable,
   textoUnidadDecimales,
   usosDe,
+  validarNuevaMagnitud,
+  visible,
 } from '../src/domain/magnitud';
 
 import { mag } from './fixtures_categorias';
@@ -69,4 +75,58 @@ test('secciones del selector: disponibles, deshabilitadas y ya asociadas en su o
   expect(busq.disponibles.map((m) => m.id)).toEqual(['m3']);
   expect(busq.deshabilitadas.map((m) => m.id)).toEqual(['kwhgas']);
   expect(busq.yaEn.map((a) => a.magnitud_id)).toEqual(['kwh']);
+});
+
+// ------------------------------------------------------------------ hito 2
+const completa = { nombre: 'Horas', unidad: 'h', decimales: 0, obligatoria: true };
+
+test('visible: NFKC, recorte y colapso como el servidor', () => {
+  expect(visible('  Horas   extra ')).toBe('Horas extra');
+  expect(visible('ﬁlo')).toBe('filo');
+});
+
+test('alta: completa y lo que falta en el texto «Para crear falta: …» (M07)', () => {
+  expect(validarNuevaMagnitud(completa)).toEqual({ completa: true, faltan: null, errorNombre: null, errorUnidad: null });
+  expect(validarNuevaMagnitud({ ...completa, decimales: null, obligatoria: null }).faltan).toBe('Para crear falta: decimales y si es obligatoria.');
+  expect(validarNuevaMagnitud({ nombre: ' ', unidad: '', decimales: null, obligatoria: null }).faltan).toBe(
+    'Para crear falta: nombre, unidad, decimales y si es obligatoria.',
+  );
+});
+
+test('alta: límites 80 y 20 visibles tras NFKC (como el servidor)', () => {
+  expect(validarNuevaMagnitud({ ...completa, nombre: 'a'.repeat(80) }).completa).toBe(true);
+  const largo = validarNuevaMagnitud({ ...completa, nombre: 'a'.repeat(81) });
+  expect(largo.completa).toBe(false);
+  expect(largo.errorNombre).toBe('Máximo 80 caracteres.');
+  expect(validarNuevaMagnitud({ ...completa, nombre: 'ﬁ'.repeat(40) }).completa).toBe(true); // 80 tras NFKC
+  expect(validarNuevaMagnitud({ ...completa, nombre: 'ﬁ'.repeat(41) }).errorNombre).toBe('Máximo 80 caracteres.'); // 82 tras NFKC
+  expect(validarNuevaMagnitud({ ...completa, nombre: '  ' + 'a'.repeat(80) + '  ' }).completa).toBe(true); // el recorte no cuenta
+  expect(validarNuevaMagnitud({ ...completa, unidad: 'u'.repeat(20) }).completa).toBe(true);
+  expect(validarNuevaMagnitud({ ...completa, unidad: 'u'.repeat(21) }).errorUnidad).toBe('Máximo 20 caracteres.');
+  for (const d of [0, 6]) expect(validarNuevaMagnitud({ ...completa, decimales: d }).completa).toBe(true);
+});
+
+test('reordenar: conjunto COMPLETO con orden y obligatoriedad cargados, en el orden propuesto', () => {
+  expect(conjuntoReordenar([POT, KWH])).toEqual([
+    { asociacion_id: 'a-pot', magnitud_id: 'pot', orden: 1, obligatoria: false },
+    { asociacion_id: 'a-kwh', magnitud_id: 'kwh', orden: 0, obligatoria: true },
+  ]);
+  expect(mismoOrdenAsociaciones([KWH, POT], [KWH, POT])).toBe(true);
+  expect(mismoOrdenAsociaciones([POT, KWH], [KWH, POT])).toBe(false);
+});
+
+test('impacto de deshabilitar: obligatorias del servidor, opcionales «sigue usable» y nuevas marcadas (M14/M15)', () => {
+  const usos = [
+    { id: 'luz', nombre: 'Luz', obligatoria: true, enabled: true },
+    { id: 'placas', nombre: 'Placas solares', obligatoria: false, enabled: true },
+    { id: 'vieja', nombre: 'Vieja', obligatoria: false, enabled: false },
+  ];
+  const ruta = (id: string, n: string) => (id === 'coche' ? 'Transporte › Coche eléctrico' : `Hogar › ${n}`);
+  expect(filasImpacto([{ id: 'luz', nombre: 'Luz' }], usos, null, ruta)).toEqual([
+    { id: 'luz', nombre: 'Hogar › Luz', etiqueta: 'obligatoria' },
+    { id: 'placas', nombre: 'Hogar › Placas solares', etiqueta: 'opcional · sigue usable' },
+  ]);
+  const cambiado = filasImpacto([{ id: 'luz', nombre: 'Luz' }, { id: 'coche', nombre: 'Coche eléctrico' }], usos, ['luz'], ruta);
+  expect(cambiado.map((f) => f.etiqueta)).toEqual(['obligatoria', 'obligatoria · nueva', 'opcional · sigue usable']);
+  expect(cambiado[1].nombre).toBe('Transporte › Coche eléctrico');
 });

@@ -4,12 +4,13 @@
 // Ruta: mobile/src/components/HojasMagnitud.tsx
 // Descripción: Hojas y piezas de presentación de las magnitudes de una categoría (F09 §12.97.10; lámina SET-MAG v0.1; F05-D020). Solo presentación: no llaman al cliente; el controlador (MagnitudesCategoria.tsx) decide el comando y trata los rechazos. Píldoras de estado con TEXTO («Obligatoria», «Opcional», «Deshabilitada»), nunca solo color. Hito 1: añadir una magnitud existente (M09: aviso previo si está deshabilitada, «Añadir de todos modos»; la obligatoriedad se elige siempre, sin preselección), cambiar obligatoriedad (M11, guarda prospectiva) y quitar de la categoría (M12, mensaje seguro de AJ-S7MAG-06 con N = registros históricos de la magnitud). Consume solo tokens semánticos.
 // Versión: 0.1.0 (F05-01 S7-MAG UI, hito 1)
+// Versión: 0.2.0 (F05-01 S7-MAG UI, hito 2): renombrar la magnitud (microcopy de M13; colisión junto al nombre), deshabilitar con impacto calculado por el servidor bajo lock (M14) y «El impacto ha cambiado» con la lista nueva (M15), y rehabilitar con confirmación simple.
 // ============================================================
 
 import React, { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
 
-import type { MagnitudCatalogo } from '../domain/magnitud';
+import type { FilaImpacto, MagnitudCatalogo } from '../domain/magnitud';
 import { useTema } from '../theme/tema';
 import { espacio, radio, tipo } from '../theme/tokens';
 import { BotonPrimario, Segmentado } from './Basicos';
@@ -132,6 +133,106 @@ export function HojaQuitar(p: {
   );
 }
 
+// ------------------------------------------------------------------ Renombrar la magnitud (M13)
+export const MICROCOPY_RENOMBRAR_MAGNITUD =
+  'Renombrar corrige el nombre también en lo ya registrado. Si cambia su significado, crea otra magnitud y deshabilita esta.';
+
+export function HojaRenombrarMagnitud(p: {
+  magnitud: string;
+  guardando: boolean;
+  errorNombre: string | null;
+  onLimpiarError: () => void;
+  onGuardar: (nombre: string) => void;
+  onCancelar: () => void;
+}) {
+  const { c } = useTema();
+  const [nombre, setNombre] = useState(p.magnitud);
+  const limpio = nombre.trim();
+  return (
+    <Hoja titulo={`Renombrar «${p.magnitud}»`} testID="hoja-renombrar-magnitud">
+      <TextInput
+        testID="renmag-nombre"
+        accessibilityLabel="Nuevo nombre"
+        value={nombre}
+        onChangeText={(t) => { setNombre(t); p.onLimpiarError(); }}
+        editable={!p.guardando}
+        maxLength={400}
+        style={[tipo.body, s.input, { color: c.textPrimary, backgroundColor: c.surfacePrimary, borderColor: p.errorNombre ? c.critical : c.borderStandard }]}
+      />
+      {p.errorNombre ? <Text testID="renmag-error" accessibilityRole="alert" style={[tipo.footnote, { color: c.critical }]}>{p.errorNombre}</Text> : null}
+      <Text style={[tipo.footnote, { color: c.textSecondary }]}>{MICROCOPY_RENOMBRAR_MAGNITUD}</Text>
+      <BotonPrimario
+        testID="renmag-guardar"
+        titulo="Guardar nombre"
+        cargando={p.guardando}
+        deshabilitado={limpio === '' || limpio === p.magnitud || p.guardando}
+        onPress={() => p.onGuardar(limpio)}
+      />
+      <BotonSecundario testID="renmag-cancelar" titulo="Cancelar" onPress={p.onCancelar} />
+    </Hoja>
+  );
+}
+
+// ------------------------------------------------------------------ Deshabilitar (M14 / M15)
+export const TEXTO_DESHABILITAR =
+  'Es obligatoria en estas categorías, que dejarán de poder usarse en registros nuevos hasta que la rehabilites o la hagas opcional:';
+export const NOTA_DESHABILITAR = 'Nada de lo ya registrado cambia. No se quita de ninguna categoría.';
+export const IMPACTO_CAMBIADO = {
+  titulo: 'El impacto ha cambiado',
+  texto: 'Mientras confirmabas, otra categoría ha empezado a usar esta magnitud. Revisa la lista y confirma de nuevo.',
+};
+
+export function HojaDeshabilitar(p: {
+  magnitud: string;
+  filas: FilaImpacto[];
+  cambiado: boolean;
+  guardando: boolean;
+  onDeshabilitar: () => void;
+  onCancelar: () => void;
+}) {
+  const { c } = useTema();
+  return (
+    <Hoja titulo={`Deshabilitar «${p.magnitud}»`} testID="hoja-deshabilitar">
+      {p.cambiado ? (
+        <View testID="deshabilitar-cambiado" accessibilityRole="alert" style={[s.aviso, { backgroundColor: c.partialSurface }]}>
+          <Text style={[tipo.subheadline, { color: c.textPrimary, fontWeight: '600' }]}>{IMPACTO_CAMBIADO.titulo}</Text>
+          <Text style={[tipo.footnote, { color: c.textPrimary }]}>{IMPACTO_CAMBIADO.texto}</Text>
+        </View>
+      ) : (
+        <Text style={[tipo.body, { color: c.textPrimary }]}>{TEXTO_DESHABILITAR}</Text>
+      )}
+      <View>
+        {p.filas.map((f) => (
+          <View key={f.id} testID={`impacto-${f.id}`} accessible accessibilityLabel={`${f.nombre}: ${f.etiqueta}`} style={[s.filaImpacto, { borderBottomColor: c.separator }]}>
+            <Text style={[tipo.body, { color: c.textPrimary, flex: 1 }]}>{f.nombre}</Text>
+            <Text style={[tipo.caption, { color: c.textSecondary }]}>{f.etiqueta}</Text>
+          </View>
+        ))}
+      </View>
+      <Text style={[tipo.footnote, { color: c.textSecondary }]}>{NOTA_DESHABILITAR}</Text>
+      <BotonCritico testID="deshabilitar-confirmar" titulo="Deshabilitar de todos modos" deshabilitado={p.guardando} onPress={p.onDeshabilitar} />
+      <BotonSecundario testID="deshabilitar-cancelar" titulo="Cancelar" onPress={p.onCancelar} />
+    </Hoja>
+  );
+}
+
+// ------------------------------------------------------------------ Rehabilitar
+export const TEXTO_REHABILITAR = 'Volverá a poder pedirse en las categorías que la usan. Lo ya registrado no cambia.';
+
+export function HojaRehabilitar(p: { magnitud: string; guardando: boolean; onRehabilitar: () => void; onCancelar: () => void }) {
+  const { c } = useTema();
+  return (
+    <Hoja titulo={`Rehabilitar «${p.magnitud}»`} testID="hoja-rehabilitar">
+      <Text style={[tipo.body, { color: c.textPrimary }]}>{TEXTO_REHABILITAR}</Text>
+      <BotonPrimario testID="rehabilitar-confirmar" titulo="Rehabilitar" cargando={p.guardando} deshabilitado={p.guardando} onPress={p.onRehabilitar} />
+      <BotonSecundario testID="rehabilitar-cancelar" titulo="Cancelar" onPress={p.onCancelar} />
+    </Hoja>
+  );
+}
+
 const s = StyleSheet.create({
+  input: { borderWidth: 1, borderRadius: radio.m, paddingHorizontal: espacio.m, minHeight: 48 },
+  aviso: { gap: 2, borderRadius: radio.m, padding: espacio.m },
+  filaImpacto: { flexDirection: 'row', alignItems: 'center', gap: espacio.s, minHeight: 40, borderBottomWidth: StyleSheet.hairlineWidth },
   pildora: { borderWidth: 1, borderRadius: radio.pill, paddingHorizontal: espacio.s, paddingVertical: 2, alignSelf: 'center' },
 });
