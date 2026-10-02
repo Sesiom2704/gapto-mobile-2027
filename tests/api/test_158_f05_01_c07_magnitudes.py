@@ -23,7 +23,12 @@
 #   v0.3.0 (F05-01 S6-WIRE+UI (este mandato); F05 §28.3): fin de la transicion.
 #   Un payload VS-01 sin `categoria` ya no es de compatibilidad: 422 sin hecho
 #   ni filas de hecho_magnitudes.
-# Version: 0.3.0
+#
+#   v0.4.0 (F05-01 S7-MAG (F05-D020 D-MAG-04), commit 1): la lectura del arbol
+#   incluye `asociacion_id` en cada magnitud; el test de campos lo exige igual
+#   a la PK de la asociacion persistida (se extiende, no se relaja) y uno
+#   nuevo comprueba que cada asociacion visible tiene identidad propia.
+# Version: 0.4.0
 # ============================================================
 
 from __future__ import annotations
@@ -643,16 +648,29 @@ def test_lectura_campos_y_orden_de_magnitudes(tenant):
     a = _magnitud(owner, "Alfa", unidad="km", precision=1)
     b = _magnitud(owner, "Beta", unidad="l", precision=2)
     _asociar(owner, cat, b, obligatoria=False, orden=1)
-    _asociar(owner, cat, a, obligatoria=True, orden=1)
+    cm_a = _asociar(owner, cat, a, obligatoria=True, orden=1)
     _asociar(owner, cat, z, obligatoria=False, orden=0)
     nodo = _nodo(owner, cat)
     assert [x["nombre"] for x in nodo["magnitudes"]] == ["Zeta", "Alfa", "Beta"]
     alfa = nodo["magnitudes"][1]
     assert alfa == {
-        "magnitud_id": str(a), "nombre": "Alfa", "obligatoria": True, "orden": 1, "enabled": True,
-        "unidad_default": "km", "precision_decimales": 1, "row_version": 1,
+        "asociacion_id": str(cm_a), "magnitud_id": str(a), "nombre": "Alfa", "obligatoria": True, "orden": 1,
+        "enabled": True, "unidad_default": "km", "precision_decimales": 1, "row_version": 1,
     }
     assert nodo["capturable"] is True
+
+
+def test_lectura_asociacion_id_es_la_identidad_de_cada_asociacion(tenant):
+    """S7-MAG D-MAG-04: la misma magnitud en dos categorias tiene dos asociaciones distintas."""
+    owner, _, _ = tenant
+    c1 = fh.crear_categoria(owner, "Uno", "GASTO")
+    c2 = fh.crear_categoria(owner, "Dos", "GASTO")
+    m = _magnitud(owner, "Compartida")
+    cm1 = _asociar(owner, c1, m, obligatoria=True)
+    cm2 = _asociar(owner, c2, m, obligatoria=False)
+    assert [x["asociacion_id"] for x in _nodo(owner, c1)["magnitudes"]] == [str(cm1)]
+    assert [x["asociacion_id"] for x in _nodo(owner, c2)["magnitudes"]] == [str(cm2)]
+    assert cm1 != cm2
 
 
 def test_lectura_obligatoria_deshabilitada_no_capturable(tenant):

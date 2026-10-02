@@ -15,7 +15,11 @@
 #
 #   v0.1.1 (F05-01 S6-ICONO-AJ (AJ-S6ICONO-06)): solo cabecera; el comentario
 #   Q4 (sin ruta de escritura de icon_key) quedo obsoleto con S6-ICONO.
-# Version: 0.1.1
+#
+#   v0.2.0 (F05-01 S7-MAG (F05-D020 D-MAG-04), commit 1): cada magnitud del
+#   arbol trae `asociacion_id` = PK de la asociacion persistida, con el
+#   conjunto exacto de claves del contrato (campo aditivo; nada se relaja).
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -108,6 +112,22 @@ def test_uso_de_categoria_ajena_o_inexistente_es_404(tenant, origen):
         cat = uuid.uuid4()
     r = h.cliente(owner).get(f"/v1/categorias/{cat}/uso", headers=h.AUTH)
     assert r.status_code == 404 and r.json()["codigo"] == "AGREGADO_NO_ENCONTRADO"
+
+
+def test_arbol_magnitudes_con_asociacion_id_y_claves_exactas(tenant):
+    owner, _, _ = tenant
+    cat = fh.crear_categoria(owner, "Luz", "GASTO")
+    mid, cm = uuid.uuid4(), uuid.uuid4()
+    h.como_owner(owner, "INSERT INTO gapto.magnitudes (id, owner_user_id, nombre, unidad_default, precision_decimales) "
+                        "VALUES (%s, %s, 'Consumo', 'kWh', 2)", (mid, owner))
+    h.como_owner(owner, "INSERT INTO gapto.categoria_magnitudes (id, categoria_id, magnitud_id, obligatoria, orden) "
+                        "VALUES (%s, %s, %s, true, 0)", (cm, cat, mid))
+    cats = h.cliente(owner).get("/v1/categorias", headers=h.AUTH).json()["categorias"]
+    [nodo] = [c for c in cats if c["id"] == str(cat)]
+    [m] = nodo["magnitudes"]
+    assert set(m) == {"asociacion_id", "magnitud_id", "nombre", "obligatoria", "orden", "enabled",
+                      "unidad_default", "precision_decimales", "row_version"}
+    assert m["asociacion_id"] == str(cm) and m["magnitud_id"] == str(mid)
 
 
 def test_lecturas_exigen_token(tenant):

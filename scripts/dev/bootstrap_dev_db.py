@@ -57,6 +57,15 @@
 #     python scripts/dev/bootstrap_dev_db.py --seed-categorias \
 #       --dev-dsn "host=127.0.0.1 port=5434 dbname=gapto2027_dev user=<rol>" \
 #       --api-url http://192.168.1.10:8027
+# Version: 0.5.0  -- F05-01 S7-MAG (F05-D020 D-MAG-06, D-S7-04): el seed cubre
+#                   los cinco huecos de §34.1 sin categorias nuevas (siguen 23):
+#                   (1) Luz con obligatoria + opcionales; (2) Kilometros
+#                   compartida por Combustible y Transporte publico; (3) `orden`
+#                   explicito 0..n-1 (la tupla de asociacion incluye el orden);
+#                   (4) opcional deshabilitada en Agua que NO la hace no
+#                   capturable; (5) precisiones 0 (Kilometros) y 6 (Precio del
+#                   kWh). Sigue idempotente (INSERT ... WHERE NOT EXISTS, nunca
+#                   UPDATE) y SEED_DEV sin valor certificador.
 # Version: 0.4.0  -- F05-01 S6-WIRE+UI (este mandato): modo --seed-categorias
 #                   (F05 §26.4). El modo de creacion no cambia.
 # Version: 0.3.0  -- D-197: HEAD_AUTORIZADO_ENVDEV pasa de "0330" a "0340"
@@ -191,6 +200,11 @@ SEED_MAGNITUDES = (
     ("consumo_agua", "Consumo de agua", "m3", 3, True),
     ("consumo_gas", "Consumo de gas", "kWh", 2, False),  # deshabilitada: Gas NO capturable
     ("litros", "Litros", "l", 2, True),
+    # S7-MAG (D-MAG-06): huecos (1), (2), (4) y (5).
+    ("potencia_contratada", "Potencia contratada", "kW", 1, True),
+    ("precio_kwh", "Precio del kWh", "€/kWh", 6, True),  # precision 6
+    ("lectura_contador", "Lectura del contador", "m3", 3, False),  # opcional deshabilitada
+    ("kilometros", "Kilómetros", "km", 0, True),  # precision 0; compartida
 )
 #: (clave, nombre, clave del padre, ambito, icon_key) en orden de alta (padres antes que hijos).
 SEED_CATEGORIAS = (
@@ -218,12 +232,18 @@ SEED_CATEGORIAS = (
     ("gastos_profesionales", "Gastos profesionales", "trabajo", "GASTO", "transporte.viaje"),
     ("viajes_2025", "Viajes 2025", None, "GASTO", "transporte.viaje"),
 )
-#: (clave de categoria, clave de magnitud, obligatoria)
+#: (clave de categoria, clave de magnitud, obligatoria, orden). Invariante D-S7-04:
+#: en cada categoria, `orden` contiguo 0..n-1.
 SEED_ASOCIACIONES = (
-    ("luz", "consumo_electrico", True),
-    ("agua", "consumo_agua", False),
-    ("gas", "consumo_gas", True),
-    ("combustible", "litros", True),
+    ("luz", "consumo_electrico", True, 0),
+    ("luz", "potencia_contratada", False, 1),
+    ("luz", "precio_kwh", False, 2),
+    ("agua", "consumo_agua", False, 0),
+    ("agua", "lectura_contador", False, 1),
+    ("gas", "consumo_gas", True, 0),
+    ("combustible", "litros", True, 0),
+    ("combustible", "kilometros", False, 1),
+    ("transporte_publico", "kilometros", False, 0),
 )
 SEED_DESACTIVADAS = ("viajes_2025",)
 REDES_API = tuple(ipaddress.ip_network(r) for r in ("127.0.0.0/8", "::1/128", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"))
@@ -288,13 +308,13 @@ def _seed_asociaciones(dsn_dev: str) -> list[str]:
         cur = c.cursor()
         cur.execute("SET LOCAL ROLE gapto_owner")
         cur.execute("SELECT set_config('gapto.owner_user_id', %s, true)", (str(OWNER),))
-        for cat, mag, obligatoria in SEED_ASOCIACIONES:
+        for cat, mag, obligatoria, orden in SEED_ASOCIACIONES:
             cur.execute(
-                "INSERT INTO gapto.categoria_magnitudes (id, categoria_id, magnitud_id, obligatoria) "
-                "SELECT %s, %s, %s, %s WHERE NOT EXISTS (SELECT 1 FROM gapto.categoria_magnitudes "
+                "INSERT INTO gapto.categoria_magnitudes (id, categoria_id, magnitud_id, obligatoria, orden) "
+                "SELECT %s, %s, %s, %s, %s WHERE NOT EXISTS (SELECT 1 FROM gapto.categoria_magnitudes "
                 "WHERE categoria_id = %s AND magnitud_id = %s)",
                 (uuid.uuid5(NS, f"seed.asociacion.{cat}.{mag}"), id_categoria(cat), id_magnitud(mag), obligatoria,
-                 id_categoria(cat), id_magnitud(mag)),
+                 orden, id_categoria(cat), id_magnitud(mag)),
             )
             salida.append(f"ASOCIACION {cat}->{mag}: {'creada' if cur.rowcount == 1 else 'ya existia (sin cambios)'}")
     return salida

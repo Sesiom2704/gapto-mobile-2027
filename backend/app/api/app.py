@@ -45,7 +45,11 @@
 #   v0.7.0 (F05-01 S6-WIRE+UI (este mandato); F05 §26.2 AJ-03): la intencion
 #   exige `categoria` (ausente o null -> 422); `estado_categorial` es siempre
 #   CATEGORIA o SIN_CATEGORIA. Sin rutas nuevas.
-# Version: 0.7.0
+#
+#   v0.8.0 (F05-01 S7-MAG (F05-D020 D-MAG-04), commit 1): GET /v1/categorias
+#   responde con ArbolCategoriasMagnitudes (dto_magnitudes.py): cada magnitud
+#   asociada anade `asociacion_id`. Campo aditivo; sin rutas nuevas.
+# Version: 0.8.0
 # ============================================================
 
 from __future__ import annotations
@@ -75,7 +79,6 @@ from app.api.configuracion import (
 from app.api.dto_categorias import (
     AltaCategoria,
     AmbitoCambio,
-    ArbolCategorias,
     CategoriaNodo,
     DesactivarCategoria,
     IconoCategoria,
@@ -88,6 +91,7 @@ from app.api.dto_categorias import (
     ResultadoReordenar,
     UsoCategoria,
 )
+from app.api.dto_magnitudes import ArbolCategoriasMagnitudes
 from app.api.dto_vs01 import (
     GastoMesVs01,
     IntencionGastoPagado,
@@ -213,7 +217,7 @@ def create_app(
             )
         return unidad.ejecutar(contexto(), lambda s: lect.gasto_mes(s, mes), nombre="VS01 gasto_mes")
 
-    @app.get("/v1/categorias", response_model=ArbolCategorias, dependencies=[Depends(autorizar)])
+    @app.get("/v1/categorias", response_model=ArbolCategoriasMagnitudes, dependencies=[Depends(autorizar)])
     def categorias() -> dict:
         filas = unidad.ejecutar(contexto(), lect_cat.arbol, nombre="F05-01 arbol_categorias")
         return {"categorias": filas}

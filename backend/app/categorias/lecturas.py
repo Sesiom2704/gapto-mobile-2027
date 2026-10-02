@@ -26,7 +26,12 @@
 #   categoria no capturable. `capturable` no sustituye a `enabled` ni a
 #   `ambito`, y esta lectura nunca es autoridad de persistencia: decide C07
 #   dentro de la transaccion del registro (captura_magnitudes.py). Sin locks.
-# Version: 0.2.0
+#
+#   v0.3.0 (F05-01 S7-MAG (F05-D020 D-MAG-04)): cada magnitud de `arbol`
+#   incluye `asociacion_id` (PK de la fila de categoria_magnitudes), la
+#   identidad estable que los comandos de asociaciones exigen bajo lock. Campo
+#   aditivo: ni el orden ni `capturable` cambian.
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
@@ -54,6 +59,7 @@ _COLUMNAS = (
 MOTIVO_OBLIGATORIA_NO_DISPONIBLE = "MAGNITUD_OBLIGATORIA_NO_DISPONIBLE"
 
 _COLUMNAS_MAGNITUD = (
+    "asociacion_id",
     "magnitud_id",
     "nombre",
     "obligatoria",
@@ -71,7 +77,7 @@ def _magnitudes_por_categoria(sesion: SesionMotor) -> dict[uuid.UUID, dict[str, 
     capturable (mismo criterio fail-closed que C07)."""
     with sesion.conexion.cursor() as cur:
         cur.execute(
-            "SELECT cm.categoria_id, cm.obligatoria, cm.orden, m.id, m.nombre, m.enabled, "
+            "SELECT cm.categoria_id, cm.id, cm.obligatoria, cm.orden, m.id, m.nombre, m.enabled, "
             "m.unidad_default, m.precision_decimales, m.row_version "
             "FROM gapto.categoria_magnitudes cm "
             "JOIN gapto.categorias_financieras c ON c.id = cm.categoria_id "
@@ -81,7 +87,7 @@ def _magnitudes_por_categoria(sesion: SesionMotor) -> dict[uuid.UUID, dict[str, 
         )
         filas = cur.fetchall()
     salida: dict[uuid.UUID, dict[str, Any]] = {}
-    for cat, obligatoria, orden, mid, nombre, enabled, unidad, precision, version in filas:
+    for cat, asociacion, obligatoria, orden, mid, nombre, enabled, unidad, precision, version in filas:
         nodo = salida.setdefault(cat, {"magnitudes": [], "capturable": True})
         if mid is None or not enabled:
             if obligatoria:
@@ -89,7 +95,7 @@ def _magnitudes_por_categoria(sesion: SesionMotor) -> dict[uuid.UUID, dict[str, 
             if mid is None:
                 continue
         nodo["magnitudes"].append(
-            dict(zip(_COLUMNAS_MAGNITUD, (mid, nombre, obligatoria, orden, enabled, unidad, precision, version)))
+            dict(zip(_COLUMNAS_MAGNITUD, (asociacion, mid, nombre, obligatoria, orden, enabled, unidad, precision, version)))
         )
     return salida
 
