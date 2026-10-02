@@ -15,7 +15,10 @@
 #   lleva SIEMPRE `categoria`; por defecto la decision explicita
 #   {estado: SIN_CATEGORIA} (sobrescribible). Un test que necesite el payload
 #   sin `categoria` la elimina expresamente.
-# Version: 0.3.0
+#   v0.4.0 (F05-01 S7-MAG (F05-D020)): helpers de fixtures y lectura de
+#   magnitudes y asociaciones compartidos por test_162..164 (crear como
+#   gapto_owner, estado persistido de las asociaciones, auditorias S7-MAG).
+# Version: 0.4.0
 # ============================================================
 
 from __future__ import annotations
@@ -158,3 +161,43 @@ def intencion(cuenta: uuid.UUID, **cambios) -> dict:
     base.setdefault("financiacion", propuesta_self_100(base["importe"]))
     base.setdefault("categoria", {"estado": "SIN_CATEGORIA"})
     return base
+
+
+
+# ------------------------------------------------------------------ S7-MAG (F05-D020)
+def crear_magnitud(owner: uuid.UUID, nombre: str | None = None, *, unidad: str = "l", precision: int = 2,
+                   enabled: bool = True) -> uuid.UUID:
+    mid = uuid.uuid4()
+    como_owner(owner, "INSERT INTO gapto.magnitudes (id, owner_user_id, nombre, unidad_default, precision_decimales, "
+                      "enabled) VALUES (%s,%s,%s,%s,%s,%s)",
+               (mid, owner, nombre or f"Mag {mid.hex[:8]}", unidad, precision, enabled))
+    return mid
+
+
+def crear_asociacion(owner: uuid.UUID, categoria: uuid.UUID, magnitud: uuid.UUID, *, obligatoria: bool,
+                     orden: int = 0) -> uuid.UUID:
+    aid = uuid.uuid4()
+    como_owner(owner, "INSERT INTO gapto.categoria_magnitudes (id, categoria_id, magnitud_id, obligatoria, orden) "
+                      "VALUES (%s,%s,%s,%s,%s)", (aid, categoria, magnitud, obligatoria, orden))
+    return aid
+
+
+def asociaciones_persistidas(owner: uuid.UUID, categoria: uuid.UUID) -> list[tuple]:
+    """[(asociacion_id, magnitud_id, obligatoria, orden)] en orden persistido."""
+    return leer(owner, "SELECT id, magnitud_id, obligatoria, orden FROM gapto.categoria_magnitudes "
+                       "WHERE categoria_id=%s ORDER BY orden, id", (categoria,))
+
+
+def magnitud_persistida(owner: uuid.UUID, magnitud: uuid.UUID) -> tuple | None:
+    filas = leer(owner, "SELECT nombre, unidad_default, precision_decimales, enabled, row_version "
+                        "FROM gapto.magnitudes WHERE id=%s", (magnitud,))
+    return filas[0] if filas else None
+
+
+def auditorias_mag(owner: uuid.UUID) -> list[tuple]:
+    """Auditorias S7-MAG del tenant: (tabla, registro_id, accion, motivo, request_id, antes, despues).
+    Las filas de un mismo comando comparten created_at (now() de la transaccion) y la tabla no tiene
+    secuencia: dentro de una transaccion el orden es (tabla, accion, motivo, registro_id)."""
+    return leer(owner, "SELECT tabla, registro_id, accion, motivo, request_id, datos_antes, datos_despues "
+                       "FROM gapto.auditoria WHERE motivo LIKE 'F05-01 MAG_%%' "
+                       "ORDER BY created_at, tabla, accion, motivo, registro_id")

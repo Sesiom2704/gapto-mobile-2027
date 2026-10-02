@@ -53,7 +53,17 @@
 #   ACTUALIZAR "F05-01 REORDENAR" por fila modificada (mismo request_id).
 #   Todas las validaciones preceden a la primera escritura. Sin cambios: el
 #   orden persistido ya es el pedido -> idempotente, sin escritura.
-# Version: 0.4.0
+#
+#   v0.5.0 (F05-01 S7-MAG (F05-D020 D-MAG-10 B5; cierre de F05-01-R20)):
+#   `desactivar` ejecuta TODAS sus escrituras y auditorias (uno o varios
+#   nodos en RAMA) dentro de UN savepoint de alcance de comando. Un rechazo
+#   fisico traducido en la escritura k > 1 sale del savepoint como
+#   _AbortarComando (ROLLBACK TO SAVEPOINT revierte las k-1 anteriores y sus
+#   auditorias) y se devuelve el Rechazo con CERO mutaciones; antes se
+#   devolvia el Rechazo y la UdT confirmaba las anteriores (confirmacion
+#   parcial). Un fallo no reconocido sigue propagandose (rollback total). Sin
+#   cambios de API, codigos, status ni orden del comando.
+# Version: 0.5.0
 # ============================================================
 
 from __future__ import annotations
@@ -139,6 +149,14 @@ _TRIGGERS_DIFERIDOS = (
 class Rechazo:
     codigo: str
     detalle: dict[str, Any] | None = None
+
+
+class _AbortarComando(Exception):
+    """Sale del savepoint de comando de `desactivar` con un rechazo traducido (B5)."""
+
+    def __init__(self, rechazo: Rechazo) -> None:
+        super().__init__(rechazo.codigo)
+        self.rechazo = rechazo
 
 
 @dataclass(frozen=True)
@@ -365,12 +383,16 @@ def desactivar(sesion: SesionMotor, *, categoria_id, modo: str, row_version: int
     objetivo = ([categoria_id] if nodo["enabled"] else []) + sorted(activos)
     if not objetivo:
         return Resultado(categoria=nodo, idempotente=True)
-    for cid in objetivo:
-        antes = repo.snapshot(sesion, cid)
-        rechazo = _escribir(sesion, lambda cid=cid: repo.actualizar(sesion, cid, {"enabled": False}))
-        if rechazo is not None:
-            return rechazo
-        _auditar(sesion, cid, operacion, antes)
+    try:
+        with sesion.conexion.transaction():  # savepoint de alcance de comando (D-MAG-10 B5)
+            for cid in objetivo:
+                antes = repo.snapshot(sesion, cid)
+                rechazo = _escribir(sesion, lambda cid=cid: repo.actualizar(sesion, cid, {"enabled": False}))
+                if rechazo is not None:
+                    raise _AbortarComando(rechazo)
+                _auditar(sesion, cid, operacion, antes)
+    except _AbortarComando as abortado:
+        return abortado.rechazo
     return _resultado(sesion, categoria_id, modificadas=tuple(objetivo))
 
 

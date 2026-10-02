@@ -42,7 +42,19 @@
 #   CONJUNTO_HERMANOS_DESFASADO (409: el conjunto de hermanos persistido no
 #   coincide con el enviado; no distingue falta, sobra, inexistente, ajena u
 #   otro padre).
-# Version: 0.7.0
+#
+#   v0.8.0 (F05-01 S7-MAG (F05-D020 D-MAG-09)): `rechazo_magnitud` traduce los
+#   rechazos de los comandos de magnitudes. Codigos F05 nuevos (409, sin
+#   escritura previa): MAGNITUD_NOMBRE_DUPLICADO (detalle: magnitud_id y
+#   enabled de la existente del owner), ASOCIACION_YA_EXISTE,
+#   ASOCIACION_NO_EXISTE, CONJUNTO_MAGNITUDES_DESFASADO y
+#   MAGNITUD_DESHABILITAR_REQUIERE_CONFIRMACION (detalle:
+#   categorias_no_capturables calculadas bajo lock). Reutilizados:
+#   MAGNITUD_NO_ADMITIDA (409), AGREGADO_NO_ENCONTRADO (404),
+#   VERSION_DESFASADA (409), IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION (409) y
+#   ENTRADA_INVALIDA (422). Mensajes fijos; el detalle solo para los dos
+#   codigos que lo definen.
+# Version: 0.8.0
 # ============================================================
 
 from __future__ import annotations
@@ -171,5 +183,29 @@ def rechazo_categoria(codigo: str, detalle: dict | None = None) -> tuple[int, di
     status, mensaje = _RECHAZOS_CATEGORIA[codigo]
     cuerpo = {"codigo": codigo, "mensaje": mensaje, "reintentable": False}
     if codigo == "CAMBIO_AMBITO_REQUIERE_CONFIRMACION" and detalle is not None:
+        cuerpo["detalle"] = detalle
+    return status, cuerpo
+
+
+_RECHAZOS_MAGNITUD: dict[str, tuple[int, str]] = {
+    "MAGNITUD_NOMBRE_DUPLICADO": (409, "Ya tienes una magnitud con ese nombre. Puedes usar la existente."),
+    "ASOCIACION_YA_EXISTE": (409, "Esa magnitud ya está en esta categoría con otra configuración. Vuelve a cargarla."),
+    "ASOCIACION_NO_EXISTE": (409, "Las magnitudes de esta categoría han cambiado. Vuelve a cargarlas."),
+    "CONJUNTO_MAGNITUDES_DESFASADO": (409, "Las magnitudes de esta categoría han cambiado. Vuelve a cargarlas."),
+    "MAGNITUD_DESHABILITAR_REQUIERE_CONFIRMACION": (
+        409, "Deshabilitarla afecta a categorías que la piden como obligatoria. Revísalas y confirma."),
+    "MAGNITUD_NO_ADMITIDA": (409, "Esa magnitud no está disponible."),
+    "AGREGADO_NO_ENCONTRADO": (404, "No encontrado."),
+    "VERSION_DESFASADA": (409, "La magnitud ha cambiado desde que la abriste. Vuelve a cargarla."),
+    "IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION": (409, "Este registro ya existe con otros datos. No se ha guardado nada nuevo."),
+    "ENTRADA_INVALIDA": (422, "Revisa los datos."),
+}
+_CON_DETALLE_MAGNITUD = frozenset({"MAGNITUD_NOMBRE_DUPLICADO", "MAGNITUD_DESHABILITAR_REQUIERE_CONFIRMACION"})
+
+
+def rechazo_magnitud(codigo: str, detalle: dict | None = None) -> tuple[int, dict]:
+    status, mensaje = _RECHAZOS_MAGNITUD[codigo]
+    cuerpo = {"codigo": codigo, "mensaje": mensaje, "reintentable": False}
+    if codigo in _CON_DETALLE_MAGNITUD and detalle is not None:
         cuerpo["detalle"] = detalle
     return status, cuerpo

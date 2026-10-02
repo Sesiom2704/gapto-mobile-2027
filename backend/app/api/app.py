@@ -49,7 +49,18 @@
 #   v0.8.0 (F05-01 S7-MAG (F05-D020 D-MAG-04), commit 1): GET /v1/categorias
 #   responde con ArbolCategoriasMagnitudes (dto_magnitudes.py): cada magnitud
 #   asociada anade `asociacion_id`. Campo aditivo; sin rutas nuevas.
-# Version: 0.8.0
+#
+#   v0.9.0 (F05-01 S7-MAG (F05-D020), commit 2): rutas de magnitudes, cada
+#   comando en UNA transaccion de la unidad de trabajo (magnitudes/servicio.py):
+#     POST /v1/categorias/{id}/magnitudes                       asociar (EXISTENTE | NUEVA)
+#     POST /v1/categorias/{id}/magnitudes/{asociacion}/obligatoria
+#     POST /v1/categorias/{id}/magnitudes/{asociacion}/retirar
+#     POST /v1/categorias/{id}/magnitudes/reordenar
+#     POST /v1/magnitudes/{id}/renombrar | deshabilitar | rehabilitar
+#     GET  /v1/magnitudes                                       catalogo del owner
+#   Sin DELETE HTTP: retirar una asociacion es un POST por accion. Sin cambio
+#   de unidad ni precision (R17).
+# Version: 0.9.0
 # ============================================================
 
 from __future__ import annotations
@@ -63,7 +74,7 @@ from contextlib import contextmanager
 from typing import Callable, Iterator
 
 import psycopg
-from fastapi import Depends, FastAPI, Query, Request
+from fastapi import Body, Depends, FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -91,7 +102,21 @@ from app.api.dto_categorias import (
     ResultadoReordenar,
     UsoCategoria,
 )
-from app.api.dto_magnitudes import ArbolCategoriasMagnitudes
+from app.api.dto_magnitudes import (
+    ArbolCategoriasMagnitudes,
+    AsociarMagnitud,
+    AsociarNueva,
+    CatalogoMagnitudes,
+    DeshabilitarMagnitud,
+    ObligatoriaAsociacion,
+    RehabilitarMagnitud,
+    RenombrarMagnitud,
+    ReordenarMagnitudes,
+    ResultadoAsociacionesMagnitud,
+    ResultadoAsociacionMagnitud,
+    ResultadoComandoMagnitud,
+    RetirarAsociacion,
+)
 from app.api.dto_vs01 import (
     GastoMesVs01,
     IntencionGastoPagado,
@@ -101,6 +126,8 @@ from app.api.dto_vs01 import (
 from app.api.ejecucion_gasto_pagado import RechazoIntegracion, registrar_gasto_pagado
 from app.categorias import lecturas as lect_cat
 from app.categorias import servicio as serv_cat
+from app.magnitudes import lecturas as lect_mag
+from app.magnitudes import servicio as serv_mag
 from app.core.contexto import ContextoOperacion
 from app.core.errores import ErrorMotor
 from app.core.unidad_trabajo import UnidadDeTrabajo
@@ -302,6 +329,80 @@ def create_app(
     def icono_categoria(categoria_id: uuid.UUID, c: IconoCategoria):
         return _comando("icono", lambda s: serv_cat.cambiar_icono(
             s, categoria_id=categoria_id, icon_key=c.icon_key, row_version=c.row_version))
+
+    # ------------------------------------------------------------ S7-MAG
+    def _comando_magnitudes(nombre_op: str, operacion, convertir) -> dict | JSONResponse:
+        salida = unidad.ejecutar(contexto(), operacion, nombre=f"F05-01 {nombre_op}")
+        if isinstance(salida, serv_cat.Rechazo):
+            status, cuerpo = eh.rechazo_magnitud(salida.codigo, salida.detalle)
+            return JSONResponse(cuerpo, status_code=status)
+        return {**convertir(salida), "idempotente": salida.idempotente, "modificadas": list(salida.modificadas)}
+
+    def _asociacion(r: serv_mag.ResultadoAsociacion) -> dict:
+        return {"categoria_id": r.categoria_id, "asociacion": r.asociacion, "magnitud": r.magnitud}
+
+    def _asociaciones(r: serv_mag.ResultadoAsociaciones) -> dict:
+        return {"categoria_id": r.categoria_id, "asociaciones": list(r.asociaciones)}
+
+    def _ficha(r: serv_mag.ResultadoMagnitud) -> dict:
+        return {"magnitud": r.magnitud}
+
+    _RA = {"response_model": ResultadoAsociacionMagnitud, "dependencies": [Depends(autorizar)]}
+    _RL = {"response_model": ResultadoAsociacionesMagnitud, "dependencies": [Depends(autorizar)]}
+    _RM = {"response_model": ResultadoComandoMagnitud, "dependencies": [Depends(autorizar)]}
+
+    @app.get("/v1/magnitudes", response_model=CatalogoMagnitudes, dependencies=[Depends(autorizar)])
+    def magnitudes() -> dict:
+        return {"magnitudes": unidad.ejecutar(contexto(), lect_mag.catalogo, nombre="F05-01 catalogo_magnitudes")}
+
+    @app.post("/v1/categorias/{categoria_id}/magnitudes", **_RA)
+    def asociar_magnitud(categoria_id: uuid.UUID, c: AsociarMagnitud = Body(...)):
+        if isinstance(c, AsociarNueva):
+            nueva = {"magnitud_id": c.magnitud.magnitud_id, "nombre": c.magnitud.nombre,
+                     "unidad_default": c.magnitud.unidad_default,
+                     "precision_decimales": c.magnitud.precision_decimales}
+            op = lambda s: serv_mag.asociar(s, categoria_id=categoria_id, obligatoria=c.obligatoria,  # noqa: E731
+                                            nueva=nueva)
+        else:
+            op = lambda s: serv_mag.asociar(s, categoria_id=categoria_id, obligatoria=c.obligatoria,  # noqa: E731
+                                            magnitud_id=c.magnitud_id)
+        return _comando_magnitudes("mag_asociar", op, _asociacion)
+
+    # Ruta literal antes de la parametrizada: /reordenar no es un asociacion_id.
+    @app.post("/v1/categorias/{categoria_id}/magnitudes/reordenar", **_RL)
+    def reordenar_magnitudes(categoria_id: uuid.UUID, c: ReordenarMagnitudes):
+        return _comando_magnitudes("mag_reordenar", lambda s: serv_mag.reordenar(
+            s, categoria_id=categoria_id,
+            asociaciones=[(a.asociacion_id, a.magnitud_id, a.orden, a.obligatoria) for a in c.asociaciones]),
+            _asociaciones)
+
+    @app.post("/v1/categorias/{categoria_id}/magnitudes/{asociacion_id}/obligatoria", **_RA)
+    def obligatoria_magnitud(categoria_id: uuid.UUID, asociacion_id: uuid.UUID, c: ObligatoriaAsociacion):
+        return _comando_magnitudes("mag_obligatoria", lambda s: serv_mag.cambiar_obligatoria(
+            s, categoria_id=categoria_id, asociacion_id=asociacion_id, magnitud_id=c.magnitud_id,
+            obligatoria_actual=c.obligatoria_actual, obligatoria=c.obligatoria), _asociacion)
+
+    @app.post("/v1/categorias/{categoria_id}/magnitudes/{asociacion_id}/retirar", **_RL)
+    def retirar_magnitud(categoria_id: uuid.UUID, asociacion_id: uuid.UUID, c: RetirarAsociacion):
+        return _comando_magnitudes("mag_retirar", lambda s: serv_mag.retirar(
+            s, categoria_id=categoria_id, asociacion_id=asociacion_id, magnitud_id=c.magnitud_id,
+            obligatoria_actual=c.obligatoria_actual), _asociaciones)
+
+    @app.post("/v1/magnitudes/{magnitud_id}/renombrar", **_RM)
+    def renombrar_magnitud(magnitud_id: uuid.UUID, c: RenombrarMagnitud):
+        return _comando_magnitudes("mag_renombrar", lambda s: serv_mag.renombrar(
+            s, magnitud_id=magnitud_id, nombre=c.nombre, row_version=c.row_version), _ficha)
+
+    @app.post("/v1/magnitudes/{magnitud_id}/deshabilitar", **_RM)
+    def deshabilitar_magnitud(magnitud_id: uuid.UUID, c: DeshabilitarMagnitud):
+        return _comando_magnitudes("mag_deshabilitar", lambda s: serv_mag.deshabilitar(
+            s, magnitud_id=magnitud_id, row_version=c.row_version,
+            confirmacion_impacto=c.confirmacion_impacto), _ficha)
+
+    @app.post("/v1/magnitudes/{magnitud_id}/rehabilitar", **_RM)
+    def rehabilitar_magnitud(magnitud_id: uuid.UUID, c: RehabilitarMagnitud):
+        return _comando_magnitudes("mag_rehabilitar", lambda s: serv_mag.rehabilitar(
+            s, magnitud_id=magnitud_id, row_version=c.row_version), _ficha)
 
     @app.post(
         "/v1/intenciones/gasto-pagado",

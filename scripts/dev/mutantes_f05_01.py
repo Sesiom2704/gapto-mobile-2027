@@ -103,7 +103,22 @@
 #   Discriminante: test_150 (test de contrato: Literal del DTO, enum OpenAPI
 #   y respuesta real). Censo vigente: 100 + W03 = 101 mutantes. Equivalentes
 #   documentados vigentes: E01, E02 y E03.
-# Version: 0.9.0
+#
+#   v0.10.0 (F05-01 S7-MAG (F05-D020)): serie MG01..MG18 del catalogo de
+#   magnitudes (D27 del mandato S7-MAG backend: el prefijo M ya lo usa la
+#   serie C07 M01..M23). Mecanismos: advisory, FOR NO KEY UPDATE de la
+#   categoria (R16), identidad de la asociacion, conjunto de reordenar por
+#   cardinalidad, savepoint de comando en magnitudes y en desactivar(RAMA)
+#   (D-MAG-10 B5), compactacion al retirar, normalizacion y su alcance a las
+#   deshabilitadas, limite 80, confirmacion de impacto, auditoria ELIMINAR,
+#   42501 fuera del punto prevalidado (R19), n_hechos, posicion n al asociar,
+#   escritura de filas sin cambio de orden e idempotencias de asociar.
+#   Discriminantes nuevos (preflight incluido): test_162, test_163, test_164.
+#   Censo vigente (corrige de paso AJ-S6ORDEN-01, F05 §32: la serie O es
+#   O01..O11): C01..C17 sin C07 (16), S01..S21 con S10b (22), M01..M23 (23),
+#   I01..I24 (24), L01..L02 (2), O01..O11 (11), W01..W03 (3) = 101; mas
+#   MG01..MG18 (18) = 119 mutantes. Equivalentes documentados: E01, E02, E03.
+# Version: 0.10.0
 # ============================================================
 
 from __future__ import annotations
@@ -129,6 +144,12 @@ T158 = "tests/api/test_158_f05_01_c07_magnitudes.py"
 T159 = "tests/api/test_159_f05_01_icono_categoria.py"
 T160 = "tests/api/test_160_f05_01_traduccion_locale.py"
 T161 = "tests/api/test_161_f05_01_reordenar_hermanos.py"
+T162 = "tests/api/test_162_f05_01_magnitudes_comandos.py"
+T163 = "tests/api/test_163_f05_01_magnitudes_concurrencia.py"
+T164 = "tests/api/test_164_f05_01_magnitudes_atomicidad.py"
+MSERV = "backend/app/magnitudes/servicio.py"
+MLECT = "backend/app/magnitudes/lecturas.py"
+MNORM = "backend/app/magnitudes/normalizacion.py"
 ICON = "backend/app/categorias/iconos.py"
 DTOC = "backend/app/api/dto_categorias.py"
 ERRH = "backend/app/api/errores_http.py"
@@ -432,6 +453,60 @@ MUTANTES = [
     ("W03", "la respuesta admite el estado retirado NO_CAPTURADA_LEGACY (ex E04)",
      [(DTO, '    estado_categorial: Literal["CATEGORIA", "SIN_CATEGORIA"]\n',
        '    estado_categorial: Literal["CATEGORIA", "SIN_CATEGORIA", "NO_CAPTURADA_LEGACY"]\n')], [T150]),
+    # ---------------------------------------------------------------- S7-MAG (F05-D020)
+    ("MG01", "asociar sin advisory (CATEGORIAS, owner)",
+     [(MSERV, '    unidad_default, precision_decimales}): alta rapida + asociacion atomicas."""\n'
+              "    repo_cat.tomar_advisory(sesion)\n",
+       '    unidad_default, precision_decimales}): alta rapida + asociacion atomicas."""\n')], [T154, T163]),
+    ("MG02", "categoria leida sin FOR NO KEY UPDATE (R16)",
+     [(MSERV, "    return repo_cat.leer(sesion, categoria_id, bloquear=True) is not None\n",
+       "    return repo_cat.leer(sesion, categoria_id, bloquear=False) is not None\n")], [T163]),
+    ("MG03", "identidad de la asociacion sin comparar magnitud ni obligatoria_actual",
+     [(MSERV, '    if a is None or a["magnitud_id"] != magnitud_id or a["obligatoria"] != obligatoria_actual:\n',
+       "    if a is None:\n")], [T162]),
+    ("MG04", "conjunto de reordenar comparado por cardinalidad",
+     [(MSERV, "    if len(set(ids)) != len(ids) or set(esperado) != real:\n",
+       "    if len(set(ids)) != len(ids) or len(esperado) != len(real):\n")], [T162]),
+    ("MG05", "comandos de magnitudes sin savepoint de alcance de comando",
+     [(MSERV, "        with sesion.conexion.transaction():  # savepoint de alcance de comando (D-MAG-10)\n",
+       "        if True:  # savepoint de alcance de comando (D-MAG-10)\n")], [T164]),
+    ("MG06", "retirar sin compactar las restantes",
+     [(MSERV, '        modificadas.extend(_escribir_orden(sesion, restantes, [x["asociacion_id"] for x in restantes]))\n',
+       "")], [T162]),
+    ("MG07", "colision de nombre sin normalizar (literal)",
+     [(MSERV, "        if mid != excluir and normalizar(existente) == clave:\n",
+       "        if mid != excluir and existente == nombre:\n")], [T162]),
+    ("MG08", "colision de nombre solo contra magnitudes habilitadas",
+     [(MSERV, "        if mid != excluir and normalizar(existente) == clave:\n",
+       "        if mid != excluir and enabled and normalizar(existente) == clave:\n")], [T162]),
+    ("MG09", "limite del nombre de magnitud 80 -> 100",
+     [(MNORM, "LONGITUD_NOMBRE = 80\n", "LONGITUD_NOMBRE = 100\n")], [T162]),
+    ("MG10", "confirmacion de impacto no revalidada contra el conjunto vigente",
+     [(MSERV, '    if set(confirmacion_impacto or ()) != {c["categoria_id"] for c in impacto}:\n',
+       "    if confirmacion_impacto is None and impacto:\n")], [T162, T163]),
+    ("MG11", "retirar sin auditoria ELIMINAR",
+     [(MSERV, '        _auditar_asociacion(sesion, asociacion_id, "RETIRAR", antes)\n', "        pass\n")], [T162]),
+    ("MG12", "42501 traducido fuera del punto prevalidado (R19)",
+     [(MSERV, "        return MAGNITUD_NO_ADMITIDA if rls_prevalidado else None\n",
+       "        return MAGNITUD_NO_ADMITIDA\n")], [T164]),
+    ("MG13", "n_hechos como recuento de asociaciones",
+     [(MLECT, '         "n_hechos": hechos.get(mid, 0)}\n',
+       '         "n_hechos": len(por_magnitud.get(mid, []))}\n')], [T162]),
+    ("MG14", "desactivar(RAMA) sin savepoint de alcance de comando (B5)",
+     [(SERV, "        with sesion.conexion.transaction():  # savepoint de alcance de comando (D-MAG-10 B5)\n",
+       "        if True:  # savepoint de alcance de comando (D-MAG-10 B5)\n")], [T164]),
+    ("MG15", "nueva asociacion en la posicion 0 en vez de n",
+     [(MSERV, "            obligatoria=obligatoria, orden=len(persistidas)), rls_prevalidado=True)\n",
+       "            obligatoria=obligatoria, orden=0), rls_prevalidado=True)\n")], [T162]),
+    ("MG16", "escribe tambien las asociaciones cuyo orden no cambia",
+     [(MSERV, "    cambian = [(aid, pos) for pos, aid in enumerate(objetivo) if actual[aid] != pos]\n",
+       "    cambian = [(aid, pos) for pos, aid in enumerate(objetivo)]\n")], [T162]),
+    ("MG17", "alta rapida idempotente sin comparar la obligatoriedad de la asociacion",
+     [(MSERV, '                and existente is not None and existente["obligatoria"] == obligatoria\n',
+       "                and existente is not None\n")], [T162]),
+    ("MG18", "asociar existente idempotente aunque cambie la obligatoriedad",
+     [(MSERV, '        if existente["obligatoria"] != obligatoria:\n            return Rechazo(ASOCIACION_YA_EXISTE)\n',
+       "        if False:\n            return Rechazo(ASOCIACION_YA_EXISTE)\n")], [T162]),
 ]
 
 
@@ -462,7 +537,7 @@ def main() -> None:
         sys.exit("Falta GAPTO_TEST_DATABASE_URL (base local desechable).")
     if recuperar_si_pendiente():
         sys.exit("Habia un mutante pendiente: restaurado y verificado. Resultado NO-PASS; relanzar.")
-    if correr([T150, T152, T153, T154, T155, T156, T157, T158, T159, T160, T161]) != 0:
+    if correr([T150, T152, T153, T154, T155, T156, T157, T158, T159, T160, T161, T162, T163, T164]) != 0:
         sys.exit("PREFLIGHT ROJO: no se muta nada.")
     veredictos = []
     for mid, desc, cambios, tests in MUTANTES:

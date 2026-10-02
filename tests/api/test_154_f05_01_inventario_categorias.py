@@ -88,7 +88,32 @@
 #   desarrollo. I7 pasa de «cero menciones» a REGISTRO CERRADO de menciones del
 #   cliente movil (fail-closed en ambos sentidos): S6-WIRE obliga al cliente a
 #   sellar `categoria_id` en el wire de §28.2 y a leer el uso de una categoria.
-# Version: 0.6.0
+#
+#   v0.7.0 (F05-01 S7-MAG (F05-D020 D-MAG-08)): el paquete backend/app/magnitudes
+#   entra en la frontera F05 (clase CATALOGO).
+#   I1  registra las rutas, DTO, lecturas, repositorio y comandos nuevos que
+#       mencionan `categoria_id`.
+#   I9  pasa de CERO escritores runtime a un REGISTRO CERRADO por tabla y
+#       operacion: `magnitudes` INSERT/UPDATE solo en
+#       backend/app/magnitudes/repositorio.py (insertar_magnitud,
+#       actualizar_magnitud), DELETE runtime = 0; `categoria_magnitudes`
+#       INSERT/UPDATE/DELETE solo en ese mismo fichero (insertar_asociacion,
+#       actualizar_asociacion, eliminar_asociacion); mas los SEED_DEV ya
+#       registrados. Un DELETE de asociaciones no autoriza borrar magnitudes.
+#       Propiedades estaticas: R17 (ningun UPDATE de magnitudes con
+#       unidad_default ni precision_decimales; COLUMNAS_EDITABLES_MAGNITUD =
+#       {nombre, enabled}) y el modulo de magnitudes no escribe
+#       categorias_financieras.
+#   I8  se extiende al servicio de magnitudes: toda funcion publica mutadora
+#       toma el advisory como PRIMERA llamada (tras la docstring); solo los
+#       comandos (con sus funciones anidadas) y los helpers internos de
+#       escritura, a su vez llamados solo desde comandos, invocan primitivas;
+#       las primitivas de magnitudes solo se invocan desde
+#       magnitudes/servicio.py; de categorias/repositorio.py el servicio de
+#       magnitudes solo usa `tomar_advisory` y `leer` con bloquear=True.
+#   Ninguna prohibicion estatica se presenta como revocacion de permisos
+#   PostgreSQL (D-MAG-08).
+# Version: 0.7.0
 # ============================================================
 
 from __future__ import annotations
@@ -105,7 +130,7 @@ if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
 APP = BACKEND / "app"
-FRONTERA = ("backend/app/api/", "backend/app/categorias/")
+FRONTERA = ("backend/app/api/", "backend/app/categorias/", "backend/app/magnitudes/")
 TOKEN = "categoria_id"
 
 # ------------------------------------------------------------------ registro
@@ -150,6 +175,21 @@ REGISTRO: dict[tuple[str, str], tuple[str, str, str]] = {
                  "cambiar_icono", "_auditar", "_nodo", "_resultado")},
     **{("backend/app/categorias/repositorio.py", n): ("CATALOGO", f"repositorio {n}", "unico escritor del catalogo (I5)")
        for n in ("leer", "snapshot", "insertar", "actualizar")},
+    # --- S7-MAG (F05-D020): catalogo de magnitudes y asociaciones
+    **{("backend/app/api/app.py", f"create_app.{n}"): ("CATALOGO", "ruta S7-MAG", "parametro de ruta del comando")
+       for n in ("asociar_magnitud", "obligatoria_magnitud", "retirar_magnitud", "reordenar_magnitudes")},
+    **{("backend/app/api/app.py", f"create_app.{n}"): ("R", "respuesta S7-MAG", "copia categoria_id a la respuesta")
+       for n in ("_asociacion", "_asociaciones")},
+    **{("backend/app/api/dto_magnitudes.py", n): ("R", "DTO S7-MAG", "declaracion de campo de respuesta")
+       for n in ("CategoriaDeMagnitud", "ResultadoAsociacionMagnitud", "ResultadoAsociacionesMagnitud")},
+    ("backend/app/magnitudes/lecturas.py", "catalogo"): (
+        "R", "GET /v1/magnitudes", "categorias asociadas a cada magnitud (AJ-S7MAG-08); no es autoridad"),
+    **{("backend/app/magnitudes/repositorio.py", n): ("CATALOGO", f"repositorio S7-MAG {n}",
+                                                      "unico escritor runtime de categoria_magnitudes (I9)")
+       for n in ("asociaciones", "categorias_obligatorias_habilitadas", "insertar_asociacion")},
+    **{("backend/app/magnitudes/servicio.py", n): ("CATALOGO", f"S7-MAG {n}", "comando de magnitudes bajo advisory (I8)")
+       for n in ("asociar", "asociar.escrituras", "cambiar_obligatoria", "retirar", "reordenar", "deshabilitar",
+                 "_categoria_bloqueada", "ResultadoAsociacion", "ResultadoAsociaciones")},
     # --- motor F04 (certificado, no se modifica)
     ("backend/app/core/modelos_efectos.py", "DatosEfecto"): ("R", "modelo", "campo del DTO interno"),
     ("backend/app/core/modelos_devolucion.py", "DatosDevolucion"): ("R", "modelo", "campo del DTO interno"),
@@ -479,29 +519,78 @@ ESCRITORES_HECHO_MAGNITUDES = {
 }
 
 
-#: Writers SQL de desarrollo (SEED_DEV, F05 §26.4): unicos escritores autorizados
-#: de magnitudes / categoria_magnitudes; ninguno en runtime (gate F05-01-R16).
+#: Writers SQL de desarrollo (SEED_DEV, F05 §26.4): escritores de desarrollo
+#: de magnitudes / categoria_magnitudes, sin valor certificador.
 ESCRITORES_SEED_DEV = {
     "magnitudes": {("scripts/dev/bootstrap_dev_db.py", "_seed_magnitudes")},
     "categoria_magnitudes": {("scripts/dev/bootstrap_dev_db.py", "_seed_asociaciones")},
 }
+#: Escritores RUNTIME (S7-MAG, D-MAG-08): exactamente el repositorio de magnitudes.
+REPO_MAGNITUDES = "backend/app/magnitudes/repositorio.py"
+ESCRITORES_RUNTIME = {
+    "magnitudes": {(REPO_MAGNITUDES, "insertar_magnitud"), (REPO_MAGNITUDES, "actualizar_magnitud")},
+    "categoria_magnitudes": {(REPO_MAGNITUDES, "insertar_asociacion"), (REPO_MAGNITUDES, "actualizar_asociacion"),
+                             (REPO_MAGNITUDES, "eliminar_asociacion")},
+}
+#: Operaciones autorizadas por (tabla, funcion): DELETE runtime de magnitudes = 0.
+OPERACIONES_RUNTIME = {
+    ("magnitudes", "insertar_magnitud"): {"INSERT"},
+    ("magnitudes", "actualizar_magnitud"): {"UPDATE"},
+    ("categoria_magnitudes", "insertar_asociacion"): {"INSERT"},
+    ("categoria_magnitudes", "actualizar_asociacion"): {"UPDATE"},
+    ("categoria_magnitudes", "eliminar_asociacion"): {"DELETE"},
+}
 
 
-def test_i9_sin_escritores_runtime_de_magnitudes_ni_asociaciones():
+def _con_escritura(ruta: str, patron: re.Pattern) -> set[tuple[str, str]]:
+    """Funciones HOJA (sin funciones anidadas) de `ruta` cuyo cuerpo escribe la tabla."""
+    texto = (RAIZ / ruta).read_bytes().decode("utf-8")
+    lineas = texto.splitlines()
+    return {(ruta, q) for q, n in _funciones(ast.parse(texto))
+            if not isinstance(n, ast.ClassDef) and patron.search("\n".join(lineas[n.lineno - 1:n.end_lineno]))
+            and not any(isinstance(h, (ast.FunctionDef, ast.AsyncFunctionDef)) for h in ast.iter_child_nodes(n))}
+
+
+def test_i9_escritores_de_magnitudes_y_asociaciones_registro_cerrado():
     for tabla in ("magnitudes", "categoria_magnitudes"):
         patron = _escritura_de(tabla)
         encontrados = sorted(_rel(p) for p, texto in _textos_productivos() if patron.search(texto))
-        autorizados = sorted({ruta for ruta, _ in ESCRITORES_SEED_DEV[tabla]})
-        assert encontrados == autorizados, f"escritor de {tabla} no autorizado (F05-01-R16): {encontrados}"
-        assert not any(r.startswith("backend/") or r.startswith("mobile/") for r in encontrados)
-        # Dentro del script de desarrollo, solo la funcion SEED_DEV registrada escribe esa tabla.
+        autorizados = sorted({ruta for ruta, _ in ESCRITORES_SEED_DEV[tabla] | ESCRITORES_RUNTIME[tabla]})
+        assert encontrados == autorizados, f"escritor de {tabla} no autorizado (D-MAG-08): {encontrados}"
+        assert not any(r.startswith("mobile/") for r in encontrados)
+        assert {r for r in encontrados if r.startswith("backend/")} == {REPO_MAGNITUDES}, tabla
         for ruta in autorizados:
-            texto = (RAIZ / ruta).read_bytes().decode("utf-8")
-            lineas = texto.splitlines()
-            con_escritura = {(ruta, q) for q, n in _funciones(ast.parse(texto))
-                             if not isinstance(n, ast.ClassDef) and patron.search("\n".join(lineas[n.lineno - 1:n.end_lineno]))
-                             and not any(isinstance(h, (ast.FunctionDef, ast.AsyncFunctionDef)) for h in ast.iter_child_nodes(n))}
-            assert con_escritura == ESCRITORES_SEED_DEV[tabla], (tabla, con_escritura)
+            esperado = {x for x in ESCRITORES_SEED_DEV[tabla] | ESCRITORES_RUNTIME[tabla] if x[0] == ruta}
+            assert _con_escritura(ruta, patron) == esperado, (tabla, ruta)
+
+
+def test_i9_operaciones_por_tabla_y_sin_delete_runtime_de_magnitudes():
+    texto = (RAIZ / REPO_MAGNITUDES).read_bytes().decode("utf-8")
+    lineas = texto.splitlines()
+    for q, n in _funciones(ast.parse(texto)):
+        cuerpo = "\n".join(lineas[n.lineno - 1:n.end_lineno])
+        for tabla in ("magnitudes", "categoria_magnitudes"):
+            ops = {m.group(1).split()[0].upper() for m in _escritura_de(tabla).finditer(cuerpo)}
+            if ops:
+                assert ops == OPERACIONES_RUNTIME[(tabla, q)], (tabla, q, ops)
+    borrado = re.compile(r"\b(DELETE\s+FROM|TRUNCATE)\s+(TABLE\s+)?(ONLY\s+)?(gapto\s*\.\s*)?\"?magnitudes\b",
+                         re.IGNORECASE)
+    for p, contenido in _textos_productivos():
+        if _rel(p).startswith("backend/"):
+            assert not borrado.search(contenido), f"DELETE runtime de magnitudes en {_rel(p)}"
+
+
+def test_i9_r17_unidad_y_precision_no_editables():
+    texto = (RAIZ / REPO_MAGNITUDES).read_bytes().decode("utf-8")
+    assert not re.search(r"UPDATE\s+gapto\.magnitudes\s+SET[^\"]*(unidad_default|precision_decimales)", texto)
+    repo = importlib.import_module("app.magnitudes.repositorio")
+    assert repo.COLUMNAS_EDITABLES_MAGNITUD == frozenset({"nombre", "enabled"})
+    assert repo.COLUMNAS_EDITABLES_ASOCIACION == frozenset({"obligatoria", "orden"})
+
+
+def test_i9_el_modulo_de_magnitudes_no_escribe_categorias_financieras():
+    for p in sorted((APP / "magnitudes").rglob("*.py")):
+        assert not _ESCRITURA.search(p.read_bytes().decode("utf-8")), _rel(p)
 
 
 def test_i9_escritores_de_hecho_magnitudes_solo_f04():
@@ -560,7 +649,80 @@ def test_i8_primitivas_de_escritura_solo_desde_el_servicio():
                 if isinstance(c.func.value, ast.Name) and c.func.value.id in ("repo", "repositorio"):
                     raise AssertionError(f"{ruta} invoca una primitiva de escritura del catalogo")
         texto = p.read_bytes().decode("utf-8")
+        if ruta == SERVICIO_MAG:
+            continue  # uso acotado de categorias/repositorio.py: test_i8_magnitudes_solo_advisory_y_lectura_de_categorias
         assert "categorias.repositorio" not in texto and "categorias import repositorio" not in texto, ruta
+
+
+SERVICIO_MAG = "backend/app/magnitudes/servicio.py"
+PRIMITIVAS_ESCRITURA_MAG = {"insertar_magnitud", "actualizar_magnitud", "insertar_asociacion",
+                            "actualizar_asociacion", "eliminar_asociacion"}
+COMANDOS_MAG = ("asociar", "cambiar_obligatoria", "retirar", "reordenar", "renombrar", "deshabilitar", "rehabilitar")
+#: Helpers internos de escritura: solo se invocan desde comandos (o entre si).
+HELPERS_ESCRITURA_MAG = {"_escribir", "_escribir_orden", "_actualizar", "_comando"}
+
+
+def _sin_docstring(fn: ast.FunctionDef) -> list[ast.stmt]:
+    cuerpo = list(fn.body)
+    if cuerpo and isinstance(cuerpo[0], ast.Expr) and isinstance(cuerpo[0].value, ast.Constant) \
+            and isinstance(cuerpo[0].value.value, str):
+        cuerpo = cuerpo[1:]
+    return cuerpo
+
+
+def test_i8_magnitudes_todo_comando_toma_el_advisory_primero():
+    for qual in COMANDOS_MAG:
+        primera = _sin_docstring(_nodo(SERVICIO_MAG, qual))[0]
+        assert (isinstance(primera, ast.Expr) and isinstance(primera.value, ast.Call)
+                and _nombre_llamada(primera.value) == "tomar_advisory"), f"{qual} no toma el advisory primero"
+
+
+def test_i8_magnitudes_solo_los_comandos_escriben():
+    arbol = ast.parse((RAIZ / SERVICIO_MAG).read_bytes().decode("utf-8"))
+    publicas = {n.name for n in arbol.body if isinstance(n, ast.FunctionDef) and not n.name.startswith("_")}
+    assert publicas == set(COMANDOS_MAG), sorted(publicas ^ set(COMANDOS_MAG))
+    for q, n in _funciones(arbol):
+        if not isinstance(n, ast.FunctionDef):
+            continue
+        llamadas = {_nombre_llamada(c) for c in ast.walk(n) if isinstance(c, ast.Call)}
+        if llamadas & (PRIMITIVAS_ESCRITURA_MAG | HELPERS_ESCRITURA_MAG):
+            raiz = q.split(".")[0]
+            assert raiz in COMANDOS_MAG or raiz in HELPERS_ESCRITURA_MAG, f"{q} escribe sin ser un comando con advisory"
+    # Los helpers de escritura solo los invocan comandos (o sus anidadas) u otros helpers.
+    for q, n in _funciones(arbol):
+        if isinstance(n, ast.FunctionDef) and q.split(".")[0] not in set(COMANDOS_MAG) | HELPERS_ESCRITURA_MAG:
+            llamadas = {_nombre_llamada(c) for c in ast.walk(n) if isinstance(c, ast.Call)}
+            assert not llamadas & HELPERS_ESCRITURA_MAG, q
+
+
+def test_i8_primitivas_de_magnitudes_solo_desde_su_servicio():
+    # F04 tiene primitivas homonimas de hecho_magnitudes (contexto_repository): el control es
+    # que ningun otro modulo importe el repositorio de magnitudes y que, dentro del paquete, solo
+    # el servicio invoque sus primitivas.
+    for p in sorted((APP / "magnitudes").rglob("*.py")):
+        ruta = _rel(p)
+        if ruta in (SERVICIO_MAG, REPO_MAGNITUDES):
+            continue
+        arbol = ast.parse(p.read_bytes().decode("utf-8"))
+        assert not any(isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)
+                       and c.func.attr in PRIMITIVAS_ESCRITURA_MAG for c in ast.walk(arbol)), ruta
+    for p in _productivos_py():
+        ruta = _rel(p)
+        if ruta in (SERVICIO_MAG, REPO_MAGNITUDES):
+            continue
+        texto = p.read_bytes().decode("utf-8")
+        assert "magnitudes.repositorio" not in texto and "magnitudes import repositorio" not in texto, ruta
+
+
+def test_i8_magnitudes_solo_advisory_y_lectura_bloqueante_de_categorias():
+    arbol = ast.parse((RAIZ / SERVICIO_MAG).read_bytes().decode("utf-8"))
+    usados = {n.attr for n in ast.walk(arbol)
+              if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == "repo_cat"}
+    assert usados == {"tomar_advisory", "leer"}, usados
+    lecturas = [c for c in ast.walk(arbol) if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)
+                and isinstance(c.func.value, ast.Name) and c.func.value.id == "repo_cat" and c.func.attr == "leer"]
+    assert lecturas and all(any(k.arg == "bloquear" and getattr(k.value, "value", None) is True for k in c.keywords)
+                            for c in lecturas), "la categoria se lee sin FOR NO KEY UPDATE (R16)"
 
 
 def test_i8_columnas_editables_incluyen_icon_key():
