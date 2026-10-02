@@ -4,6 +4,7 @@
 // Ruta: mobile/src/components/SelectorCategorias.tsx
 // Descripción: Selector jerárquico de categorías, componente del Design System (F09 §12.97.2; lámina REG-CAT v1.0 R02–R05, R08, R09). Hoja de altura completa con cabecera «Elegir categoría · Cerrar», navegación por niveles y migas («Todas › Alimentación»), opción fija de la raíz («Sin categoría» en el registro; «Raíz» al elegir ubicación en Ajustes). Tocar un nodo con hijos visibles entra en él; si ese nodo es seleccionable, el nivel hijo muestra arriba «Usar “<nombre>”»; una hoja seleccionable se elige al tocarla. Un nodo no seleccionable muestra su motivo en texto y, si tiene descendientes visibles, sigue siendo navegable. La selección vigente se marca con check Y texto («Elegida»), nunca solo con color. Estado vacío «Aún no tienes categorías». Error de carga «No hemos podido cargar tus categorías · Reintentar», separado de la acción deliberada «Continuar sin categoría»: un fallo técnico nunca selecciona nada (AJ-09). Sin alta contextual. Reutilizable: `modo` REGISTRO filtra por visibilidad en el registro; AJUSTES muestra lo que decida el llamador. Consume solo tokens semánticos.
 // Versión: 0.1.0 (F05-01 S6-WIRE+UI (este mandato))
+// Versión: 0.2.0 (F05-01 S6-WIRE+UI, correctivo AJ-S6WIREUI-09): el aviso del nivel no seleccionable y el subtítulo de fila solo afirman que las subcategorías se pueden usar si existe algún descendiente elegible (`tieneDescendienteElegible`, naturaleza GASTO del slice); si no, «Puedes entrar para ver sus subcategorías.» y «tiene subcategorías».
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -11,7 +12,7 @@ import React, { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Arbol, CategoriaNodo, ancestros, hijosDe } from '../domain/categoria';
+import { Arbol, CategoriaNodo, ancestros, hijosDe, tieneDescendienteElegible } from '../domain/categoria';
 import { glifoDe } from '../theme/iconosCategoria';
 import { useTema } from '../theme/tema';
 import { espacio, radio, TACTIL_MIN, tipo } from '../theme/tokens';
@@ -65,6 +66,8 @@ export function SelectorCategorias(p: {
   const filas = useMemo(() => visiblesDe(nivel), [arbol, nivel, p.esVisible]);
   const actual = arbol && nivel ? arbol.porId.get(nivel) ?? null : null;
   const migas = arbol && actual ? [...ancestros(arbol, actual.id), actual] : [];
+  // AJ-S6WIREUI-09: en este slice la naturaleza del registro es siempre GASTO.
+  const usables = (n: CategoriaNodo) => !!arbol && tieneDescendienteElegible(arbol, n, 'GASTO');
 
   const tocar = (n: CategoriaNodo) => {
     if (visiblesDe(n.id).length > 0) return setNivel(n.id);
@@ -148,8 +151,8 @@ export function SelectorCategorias(p: {
               <Ionicons name="information-circle-outline" size={18} color={c.textSecondary} />
               <Text style={[tipo.subheadline, { color: c.textPrimary, flexShrink: 1 }]}>
                 {p.motivo(actual) === 'Desactivada'
-                  ? `${actual.nombre} está desactivada y no se puede elegir. Sus subcategorías activas sí.`
-                  : `${actual.nombre} no se puede elegir (${p.motivo(actual)!.toLowerCase()}). Sus subcategorías sí.`}
+                  ? `${actual.nombre} está desactivada y no se puede elegir. ${usables(actual) ? 'Sus subcategorías activas sí.' : 'Puedes entrar para ver sus subcategorías.'}`
+                  : `${actual.nombre} no se puede elegir (${p.motivo(actual)!.toLowerCase()}). ${usables(actual) ? 'Sus subcategorías sí.' : 'Puedes entrar para ver sus subcategorías.'}`}
               </Text>
             </View>
           ) : null}
@@ -174,7 +177,7 @@ export function SelectorCategorias(p: {
             const conHijos = visiblesDe(n.id).length > 0;
             const sel = p.esSeleccionable(n);
             const mot = sel ? null : p.motivo(n);
-            const subtitulo = [mot, !sel && conHijos && mot ? 'tiene subcategorías que sí puedes usar' : null].filter(Boolean).join(' · ') || undefined;
+            const subtitulo = [mot, !sel && conHijos && mot ? (usables(n) ? 'tiene subcategorías que sí puedes usar' : 'tiene subcategorías') : null].filter(Boolean).join(' · ') || undefined;
             return (
               <FilaSelector
                 key={n.id}

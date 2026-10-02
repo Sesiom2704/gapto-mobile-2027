@@ -4,6 +4,7 @@
 // Ruta: mobile/__tests__/regcat.test.tsx
 // Descripción: REG-CAT (F09 §12.97.1–12.97.3; F05 §22.2 C01/C07, §28.2; lámina REG-CAT v1.0): campo «Categoría» tras «Concepto», sin preselección y bloqueante mientras esté Pendiente; selector jerárquico (raíz con «Sin categoría», «Usar…» solo en nodo elegible, hoja elegible se elige al tocar, motivo en texto en nodo no seleccionable navegable, migas, estado vacío, error de carga que NUNCA selecciona «Sin categoría»); magnitudes (obligatoria sin valor por defecto que bloquea y se nombra, opcional, valor canónico con punto en el sellado, nunca `unidad`); confirmación antes de descartar valores al cambiar de categoría o elegir «Sin categoría»; `presupuestable_default` no rellena el registro; recuperación tras rechazo definitivo de categoría (intención sellada no reenviada, árbol recargado, categoría marcada, decisiones conservadas, identidad nueva).
 // Versión: 0.1.0 (F05-01 S6-WIRE+UI (este mandato))
+// Versión: 0.2.0 (F05-01 S6-WIRE+UI, correctivo AJ-S6WIREUI-09): el selector no promete subcategorías seleccionables cuando ningún descendiente es elegible (padre no seleccionable cuyo único hijo visible no es capturable, tipo Gas); caso positivo con hijo elegible; casos de `tieneDescendienteElegible`.
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
@@ -12,7 +13,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { Raiz } from '../App';
 import type { ClienteApi, CuentaPago, Respuesta, ResultadoRegistro } from '../src/api/cliente';
-import type { CategoriaNodo } from '../src/domain/categoria';
+import { construirArbol, tieneDescendienteElegible, type CategoriaNodo } from '../src/domain/categoria';
 import type { PayloadGastoPagado } from '../src/domain/intencion';
 import { ProveedorTema } from '../src/theme/tema';
 
@@ -116,6 +117,63 @@ test('«Usar…» solo en nodo elegible; nodo no elegible navegable sin «Usar�
   expect(screen.queryByTestId('selector-categorias')).toBeNull();
   expect(texto('categoria-valor')).toBe('Gastos profesionales');
   expect(texto('categoria-ruta')).toBe('Trabajo');
+});
+
+// AJ-S6WIREUI-09: padres no seleccionables cuyo único hijo visible no es capturable (tipo Gas).
+const GAS_SOLO = (id: string, padre: string) =>
+  nodo({ id, nombre: `Gas ${padre}`, parent_id: padre, capturable: false, motivo_no_capturable: 'MAGNITUD_OBLIGATORIA_NO_DISPONIBLE', magnitudes: [mag({ magnitud_id: `m-${id}`, nombre: 'Consumo de gas', enabled: false })] });
+const LISTA_SIN_USABLES: CategoriaNodo[] = [
+  nodo({ id: 'sum', nombre: 'Suministros', ambito: 'INGRESO' }),
+  GAS_SOLO('gas1', 'sum'),
+  nodo({ id: 'casa', nombre: 'Casa vieja', enabled: false, orden: 1 }),
+  GAS_SOLO('gas2', 'casa'),
+];
+
+test('AJ-09: sin descendiente elegible el selector no promete subcategorías usables', async () => {
+  const f = fake({ arboles: [{ tipo: 'OK', datos: { categorias: LISTA_SIN_USABLES } }] });
+  await abrir(f.cliente);
+  abrirSelector();
+  expect(screen.getByText('Solo ingresos · tiene subcategorías')).toBeTruthy();
+  expect(screen.getByText('Desactivada · tiene subcategorías')).toBeTruthy();
+  expect(screen.queryByText(/sí puedes usar/)).toBeNull();
+  for (const [padre, patron] of [['cat-sum', /no se puede elegir/], ['cat-casa', /está desactivada/]] as const) {
+    fireEvent.press(screen.getByTestId(padre));
+    const aviso: string = screen.getByText(patron).props.children;
+    expect(aviso).not.toMatch(/sí puedes usar/);
+    expect(aviso).not.toMatch(/sí\.$/);
+    expect(aviso).toMatch(/Puedes entrar para ver sus subcategorías\.$/);
+    fireEvent.press(screen.getByTestId('selector-miga-todas'));
+  }
+});
+
+test('AJ-09: con un descendiente elegible el selector sí lo afirma', async () => {
+  const f = fake();
+  await abrir(f.cliente);
+  abrirSelector();
+  expect(screen.getByText('Solo ingresos · tiene subcategorías que sí puedes usar')).toBeTruthy();
+  fireEvent.press(screen.getByTestId('cat-trabajo'));
+  expect(screen.getByText(/no se puede elegir/).props.children).toMatch(/Sus subcategorías sí\.$/);
+  fireEvent.press(screen.getByTestId('selector-miga-todas'));
+  fireEvent.press(screen.getByTestId('cat-ocio'));
+  expect(screen.getByText(/está desactivada/).props.children).toMatch(/Sus subcategorías activas sí\.$/);
+});
+
+test('AJ-09: tieneDescendienteElegible recorre el subárbol (hoja o intermedio) con la naturaleza dada', () => {
+  const sin = construirArbol(LISTA_SIN_USABLES);
+  expect(tieneDescendienteElegible(sin, sin.porId.get('sum')!)).toBe(false);
+  expect(tieneDescendienteElegible(sin, sin.porId.get('casa')!)).toBe(false);
+  const con = construirArbol(LISTA);
+  expect(tieneDescendienteElegible(con, con.porId.get('trabajo')!)).toBe(true);
+  expect(tieneDescendienteElegible(con, con.porId.get('ocio')!)).toBe(true);
+  expect(tieneDescendienteElegible(con, con.porId.get('trabajo')!, 'INGRESO')).toBe(true); // Nómina
+  expect(tieneDescendienteElegible(con, con.porId.get('hogar')!, 'INGRESO')).toBe(false);
+  // Nieto elegible bajo un intermedio no elegible.
+  const nieto = construirArbol([
+    nodo({ id: 'a', nombre: 'A', ambito: 'INGRESO' }),
+    nodo({ id: 'b', nombre: 'B', ambito: 'INGRESO', parent_id: 'a' }),
+    nodo({ id: 'c', nombre: 'C', parent_id: 'b' }),
+  ]);
+  expect(tieneDescendienteElegible(nieto, nieto.porId.get('a')!)).toBe(true);
 });
 
 test('selección vigente con check Y texto («Elegida»)', async () => {

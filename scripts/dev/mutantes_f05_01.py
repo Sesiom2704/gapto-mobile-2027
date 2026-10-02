@@ -92,8 +92,18 @@
 #   estado de compatibilidad retirado» en el Literal de ResultadoGastoPagado):
 #   ningun camino productivo puede producirlo (estado_categorial es siempre
 #   categoria.estado), asi que ampliar el Literal no cambia ninguna respuesta.
+#   [E04 retirado por AJ-S6WIREUI-02: el Literal forma parte del esquema
+#   OpenAPI expuesto. Desde v0.9.0 es el mutante W03.]
 #   Censo vigente: 98 + W01..W02 = 100 mutantes.
-# Version: 0.8.0
+#
+#   v0.9.0 (F05-01 S6-WIRE+UI, correctivo AJ-S6WIREUI-02): E04 se retira de
+#   los equivalentes («retirado por AJ-S6WIREUI-02: el Literal forma parte
+#   del esquema OpenAPI expuesto») y entra como mutante real W03 (el Literal
+#   de estado_categorial de ResultadoGastoPagado admite NO_CAPTURADA_LEGACY).
+#   Discriminante: test_150 (test de contrato: Literal del DTO, enum OpenAPI
+#   y respuesta real). Censo vigente: 100 + W03 = 101 mutantes. Equivalentes
+#   documentados vigentes: E01, E02 y E03.
+# Version: 0.9.0
 # ============================================================
 
 from __future__ import annotations
@@ -419,6 +429,9 @@ MUTANTES = [
     ("W02", "SIN_CATEGORIA invoca la guarda C-a",
      [(EJEC, "            if intencion.categoria_id is not None:\n",
        '            if intencion.estado_categorial in ("CATEGORIA", "SIN_CATEGORIA"):\n')], [T152]),
+    ("W03", "la respuesta admite el estado retirado NO_CAPTURADA_LEGACY (ex E04)",
+     [(DTO, '    estado_categorial: Literal["CATEGORIA", "SIN_CATEGORIA"]\n',
+       '    estado_categorial: Literal["CATEGORIA", "SIN_CATEGORIA", "NO_CAPTURADA_LEGACY"]\n')], [T150]),
 ]
 
 

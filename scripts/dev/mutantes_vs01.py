@@ -42,7 +42,12 @@
 #   cascada en el cliente (Q4: solo el nodo). M07 conserva su ancla (el
 #   RECHAZADO del cliente ahora conserva `detalle`, fuera del ancla).
 #   Censo: 19 py + M01..M12 y U01..U10 (22 js) = 41.
-# Version: 0.5.0
+#   v0.6.0 (F05-01 S6-WIRE+UI, correctivo AJ-S6WIREUI-09): U11 (el selector
+#   siempre afirma que las subcategorias se pueden usar: `usables` devuelve
+#   true sin comprobar ningun descendiente elegible). Discriminante: suite js
+#   (regcat.test.tsx, casos AJ-09).
+#   Censo: 19 py + M01..M12 y U01..U11 (23 js) = 42.
+# Version: 0.6.0
 # ============================================================
 
 from __future__ import annotations
@@ -116,6 +121,11 @@ MUTANTES = [
      "    const r = await p.cliente.reactivarCategoria(detalle.id, { row_version: detalle.row_version });\n",
      "    const r = await p.cliente.reactivarCategoria(detalle.id, { row_version: detalle.row_version });\n"
      "    for (const d of descendientes(arbol!, detalle.id).filter((x) => !x.enabled)) await p.cliente.reactivarCategoria(d.id, { row_version: d.row_version });\n",
+     "js"),
+    # ---------------------------------------------------------------- correctivo AJ-S6WIREUI-09
+    ("U11", "mobile/src/components/SelectorCategorias.tsx",
+     "  const usables = (n: CategoriaNodo) => !!arbol && tieneDescendienteElegible(arbol, n, 'GASTO');\n",
+     "  const usables = (_n: CategoriaNodo) => true;\n",
      "js"),
 ]
 

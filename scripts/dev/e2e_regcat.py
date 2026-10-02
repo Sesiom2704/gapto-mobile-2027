@@ -33,6 +33,10 @@
 #   Con --dist <export web> arranca el servidor estatico versionado
 #   scripts/dev/servir_web_e2e.py (loopback, HTTP/1.1) y lo detiene al terminar.
 # Version: 0.1.0 (F05-01 S6-WIRE+UI (este mandato))
+# Version: 0.1.1 (F05-01 S6-WIRE+UI, correctivo AJ-S6WIREUI-05): en (c) el 409
+#   CATEGORIA_NO_ELEGIBLE se registra en el manifest como `rechazo_esperado`
+#   con la peticion que lo origina (metodo, ruta, intencion_id) y el error de
+#   consola que provoca; cualquier otro error de consola hace fallar el E2E.
 # ============================================================
 
 from __future__ import annotations
@@ -55,6 +59,7 @@ import psycopg
 from playwright.sync_api import sync_playwright
 
 ETIQUETA = "EVIDENCIA WEB/VIEWPORT — NO EVIDENCIA iOS"
+RUTA_REGISTRO = "/v1/intenciones/gasto-pagado"
 
 
 #: Servidor estatico versionado (solo loopback), localizado junto a este script.
@@ -149,8 +154,10 @@ def main() -> None:
             intenciones: list[str] = []
             page.on("request", lambda r: intenciones.append(json.loads(r.post_data)["intencion_id"])
                     if r.method == "POST" and r.url.endswith("/v1/intenciones/gasto-pagado") and r.post_data else None)
-            errores_consola: list[str] = []
-            page.on("console", lambda m: errores_consola.append(m.text) if m.type == "error" else None)
+            errores_consola: list[dict] = []
+            page.on("console", lambda m: errores_consola.append({"texto": m.text, "url": (m.location or {}).get("url", "")})
+                    if m.type == "error" else None)
+            rechazos_esperados: list[dict] = []
 
             def shot(nombre: str) -> None:
                 f = salida / f"REGCAT_{run}_{nombre}_WEB-VIEWPORT-393x852.png"
@@ -257,7 +264,15 @@ def main() -> None:
             rv = next(c["row_version"] for c in arbol if c["id"] == cat_c)
             api(a.api, "POST", f"/v1/categorias/{cat_c}/desactivar", {"modo": "SOLO_SI_SIN_HIJOS_ACTIVOS", "row_version": rv})
             n_antes = len(intenciones)
-            page.get_by_test_id("registrar").click()
+            with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith(RUTA_REGISTRO)) as resp_c:
+                page.get_by_test_id("registrar").click()
+            r409 = resp_c.value
+            cuerpo_409 = r409.json()
+            rechazos_esperados.append({"status": r409.status, "codigo": cuerpo_409.get("codigo"), "metodo": r409.request.method,
+                                       "ruta": urllib.parse.urlsplit(r409.url).path,
+                                       "intencion_id": json.loads(r409.request.post_data)["intencion_id"]})
+            comprobar(r409.status == 409 and cuerpo_409.get("codigo") == "CATEGORIA_NO_ELEGIBLE",
+                      f"(c) respuesta distinta del rechazo esperado: {r409.status} {cuerpo_409.get('codigo')}")
             page.get_by_test_id("categoria-invalida").wait_for(timeout=15000)
             comprobar(page.get_by_test_id("error-dominio").count() == 1, "(c) sin aviso de rechazo")
             comprobar(page.get_by_test_id("categoria-valor").inner_text() == "Elige otra categoría", "(c) la categoría no queda marcada")
@@ -304,11 +319,23 @@ def main() -> None:
                 page.get_by_test_id("alta-cancelar").click()
             nav.close()
 
+        # AJ-S6WIREUI-05: cada 409 esperado de (c) explica como mucho UN error de consola del navegador
+        # («Failed to load resource ... 409») sobre la ruta del registro; cualquier otro error falla el E2E.
+        pendientes = [r for r in rechazos_esperados if r["status"] == 409]
+        no_esperados: list[dict] = []
+        for e in errores_consola:
+            if pendientes and "409" in e["texto"] and urllib.parse.urlsplit(e["url"]).path == RUTA_REGISTRO:
+                pendientes.pop(0)["error_consola"] = e
+            else:
+                no_esperados.append(e)
+        comprobar(not no_esperados, f"(consola) errores no esperados: {no_esperados}")
         manifest = {"etiqueta": ETIQUETA, "run_id": run, "web": a.web, "resultado": resultado, "fallos": fallos,
-                    "recargas_por_descarga_cortada": recargas["n"],
-                    "errores_consola": errores_consola, "capturas": capturas}
+                    "recargas_por_descarga_cortada": recargas["n"], "rechazo_esperado": rechazos_esperados,
+                    "errores_consola": errores_consola, "errores_consola_no_esperados": no_esperados, "capturas": capturas}
         (salida / f"REGCAT_{run}_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(json.dumps({"run_id": run, "fallos": fallos, "capturas": len(capturas), "errores_consola": len(errores_consola)}, ensure_ascii=False))
+        print(json.dumps({"etiqueta": ETIQUETA, "run_id": run, "fallos": fallos, "capturas": len(capturas),
+                          "errores_consola": len(errores_consola), "rechazos_esperados": len(rechazos_esperados),
+                          "errores_consola_no_esperados": len(no_esperados)}, ensure_ascii=False))
         sys.exit(1 if fallos else 0)
 
 

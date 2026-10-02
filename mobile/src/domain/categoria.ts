@@ -6,6 +6,7 @@
 // Visibilidad en el registro (decisión de Moisés en sesión, contradicción F09 §12.97.2 / §12.97.3 y lámina R05): se muestra un nodo elegible, uno con algún descendiente visible, y también uno HABILITADO y de ámbito compatible pero NO capturable (no seleccionable, con motivo «Requiere un dato no disponible»). Las desactivadas y las de solo ingresos sin descendientes elegibles se ocultan.
 // Versión: 0.1.0 (F05-01 S6-WIRE+UI (este mandato))
 // Versión: 0.2.0 (F05-01 S6-WIRE+UI (este mandato), commit 2): Editar orden (D-UI-01) — `moverHermano` (subir/bajar un puesto sobre el conjunto COMPLETO de hermanos, sin salir de los extremos) y `mismoOrden` (el orden editado coincide con el cargado: no se envía nada); `subcategoriasActivas` (subárbol completo, atravesando desactivadas, como AJ-S4-02) para la N de «Desactivar también sus N subcategorías». El cliente sigue sin reordenar la lectura: solo propone el orden que el servidor aplica en una llamada.
+// Versión: 0.3.0 (F05-01 S6-WIRE+UI, correctivo AJ-S6WIREUI-09): `tieneDescendienteElegible` (algún nodo del subárbol, hoja o intermedio, es elegible con la naturaleza dada) para que el selector solo afirme que las subcategorías se pueden usar cuando es cierto.
 // ============================================================
 
 export type Ambito = 'GASTO' | 'INGRESO' | 'AMBOS';
@@ -133,6 +134,11 @@ export function descendientes(a: Arbol, id: string): CategoriaNodo[] {
     pila.push(...hijosDe(a, n.id));
   }
   return res;
+}
+
+/** AJ-S6WIREUI-09: algún descendiente (todo el subárbol, hoja o intermedio) es elegible con la naturaleza dada. */
+export function tieneDescendienteElegible(a: Arbol, n: CategoriaNodo, naturaleza: Naturaleza = 'GASTO'): boolean {
+  return descendientes(a, n.id).some((d) => elegible(d, naturaleza));
 }
 
 /** Subcategorías activas de TODO el subárbol (atraviesa las desactivadas, como el servidor en AJ-S4-02). */

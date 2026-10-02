@@ -16,18 +16,24 @@
 #   v0.3.0 (F05-01 S6-WIRE+UI (este mandato); F05 §26.2 AJ-03): `categoria`
 #   entra en los campos de decision obligatorios sin default; un payload VS-01
 #   sin `categoria` (o con `categoria: null`) es 422 ENTRADA_INVALIDA sin hecho.
-# Version: 0.3.0
+#   v0.4.0 (F05-01 S6-WIRE+UI, correctivo AJ-S6WIREUI-02): test de contrato del
+#   campo `estado_categorial` de ResultadoGastoPagado (Literal del DTO, enum
+#   del esquema OpenAPI expuesto y literales de la respuesta real); discrimina
+#   el mutante W03 de mutantes_f05_01.py.
+# Version: 0.4.0
 # ============================================================
 
 from __future__ import annotations
 
 import decimal
+import typing
 import uuid
 from contextlib import contextmanager
 
 import psycopg
 import pytest
 
+import f05_01_helpers as fh
 import vs01_api_helpers as h
 
 D = decimal.Decimal
@@ -150,6 +156,30 @@ def test_payload_vs01_sin_categoria_es_422_sin_hecho(tenant, variante):
     assert r.status_code == 422 and r.json()["codigo"] == "ENTRADA_INVALIDA", r.text
     assert "categoria" in r.json()["mensaje"]
     assert _conteos(owner, uuid.UUID(cuerpo["intencion_id"]))["hecho"] == 0
+
+
+def test_contrato_estado_categorial_literal_openapi_y_respuesta(tenant):
+    """AJ-S6WIREUI-02: el Literal forma parte del esquema OpenAPI expuesto; W03 se discrimina por contrato."""
+    from app.api.app import create_app
+    from app.api.dto_vs01 import ResultadoGastoPagado
+
+    esperado = ("CATEGORIA", "SIN_CATEGORIA")
+    # (a) Literal del DTO, exacto y en orden.
+    assert typing.get_args(ResultadoGastoPagado.model_fields["estado_categorial"].annotation) == esperado
+
+    owner, _, cuenta = tenant
+    # (b) enum del campo en el esquema OpenAPI expuesto.
+    esquema = create_app(h.configuracion(owner)).openapi()["components"]["schemas"]["ResultadoGastoPagado"]
+    assert esquema["properties"]["estado_categorial"]["enum"] == list(esperado)
+
+    # (c) la respuesta real devuelve esos literales.
+    cli = h.cliente(owner)
+    r = cli.post("/v1/intenciones/gasto-pagado", json=h.intencion(cuenta), headers=h.AUTH)
+    assert r.status_code == 200 and r.json()["estado_categorial"] == "SIN_CATEGORIA", r.text
+    cat = fh.crear_categoria(owner, "Contrato W03", "GASTO")
+    cuerpo = h.intencion(cuenta, categoria={"estado": "CATEGORIA", "categoria_id": str(cat)})
+    r = cli.post("/v1/intenciones/gasto-pagado", json=cuerpo, headers=h.AUTH)
+    assert r.status_code == 200 and r.json()["estado_categorial"] == "CATEGORIA", r.text
 
 
 @pytest.mark.parametrize("importe", ["0", "-3.50", "3.505"])
