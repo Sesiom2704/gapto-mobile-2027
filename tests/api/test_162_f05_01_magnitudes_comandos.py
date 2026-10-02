@@ -12,6 +12,13 @@
 #   (AJ-S7MAG-04). Se ejecutan bajo gapto_runtime con RLS (adaptador HTTP);
 #   los fixtures se crean como gapto_owner. Base local desechable 0001..0340.
 # Version: 0.1.0 (F05-01 S7-MAG)
+# Version: 0.2.0 (F05-01 S7-MAG correctivo AJ-S7MAGIMPL-02): identidad derivada
+#   de la asociacion del alta rapida, uuid5(magnitud_id, "asociacion:<cat>"):
+#   (a) alta -> retirar -> asociar EXISTENTE con la misma obligatoriedad ->
+#   reintento del alta = IDENTIDAD_REUTILIZADA sin mutaciones; (b) reintento
+#   inmediato idempotente con el mismo id; (c) tras cambiar la obligatoriedad
+#   -> 409; (d) tras reordenar -> idempotente (D39: el orden no cuenta); (e)
+#   EXISTENTE genera ids aleatorios; (f) el id del alta es el derivado.
 # ============================================================
 
 from __future__ import annotations
@@ -195,6 +202,73 @@ def test_alta_rapida_identidad_de_otro_owner_no_se_revela(ctx):
     assert r.status_code == 409 and r.json()["codigo"] == "IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION"
     assert "detalle" not in r.json() and h.asociaciones_persistidas(owner, cat) == []
     assert h.auditorias_mag(owner) == []
+
+
+def _derivado(mid, cat) -> str:
+    return str(uuid.uuid5(mid, f"asociacion:{cat}"))
+
+
+def test_alta_rapida_asociacion_id_derivado_y_reintento_inmediato(ctx):
+    """2.5 (b) y (f)."""
+    owner, _, cli = ctx
+    cat, mid = fh.crear_categoria(owner, "Trabajo"), uuid.uuid4()
+    r = _nueva(cli, cat, mid, "Horas")
+    assert r.status_code == 200 and r.json()["asociacion"]["asociacion_id"] == _derivado(mid, cat), r.text
+    assert [str(i) for i, *_ in h.asociaciones_persistidas(owner, cat)] == [_derivado(mid, cat)]
+    r2 = _nueva(cli, cat, mid, "Horas")
+    assert r2.status_code == 200 and r2.json()["idempotente"] is True
+    assert r2.json()["asociacion"]["asociacion_id"] == _derivado(mid, cat)
+
+
+def test_alta_rapida_reintento_tras_retirar_y_reasociar_es_reutilizada(ctx):
+    """2.5 (a): contraejemplo AJ-S7MAGIMPL-02 (A2 != A por construccion)."""
+    owner, _, cli = ctx
+    cat, mid = fh.crear_categoria(owner, "Trabajo"), uuid.uuid4()
+    assert _nueva(cli, cat, mid, "Horas", obligatoria=True).status_code == 200
+    assert _retirar(cli, cat, _derivado(mid, cat), mid, True).status_code == 200
+    r = _asociar(cli, cat, mid, True)
+    assert r.status_code == 200 and r.json()["asociacion"]["asociacion_id"] != _derivado(mid, cat)
+    antes = (h.asociaciones_persistidas(owner, cat), h.magnitud_persistida(owner, mid), len(h.auditorias_mag(owner)))
+    r = _nueva(cli, cat, mid, "Horas", obligatoria=True)
+    assert r.status_code == 409 and r.json()["codigo"] == "IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION", r.text
+    assert (h.asociaciones_persistidas(owner, cat), h.magnitud_persistida(owner, mid),
+            len(h.auditorias_mag(owner))) == antes
+
+
+def test_alta_rapida_reintento_tras_cambiar_obligatoriedad_es_reutilizada(ctx):
+    """2.5 (c)."""
+    owner, _, cli = ctx
+    cat, mid = fh.crear_categoria(owner, "Luz"), uuid.uuid4()
+    assert _nueva(cli, cat, mid, "Horas", obligatoria=False).status_code == 200
+    assert _obligatoria(cli, cat, _derivado(mid, cat), mid, False, True).status_code == 200
+    r = _nueva(cli, cat, mid, "Horas", obligatoria=False)
+    assert r.status_code == 409 and r.json()["codigo"] == "IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION"
+
+
+def test_alta_rapida_reintento_tras_reordenar_sigue_idempotente(ctx):
+    """2.5 (d): el orden no forma parte del criterio (D39)."""
+    owner, _, cli = ctx
+    cat = fh.crear_categoria(owner, "Coche")
+    otra = h.crear_magnitud(owner, "Litros")
+    a_otra = h.crear_asociacion(owner, cat, otra, obligatoria=False, orden=0)
+    mid = uuid.uuid4()
+    assert _nueva(cli, cat, mid, "Horas", obligatoria=True).status_code == 200
+    derivado = uuid.UUID(_derivado(mid, cat))
+    r = _reordenar(cli, cat, [(derivado, mid, True, 1), (a_otra, otra, False, 0)])
+    assert r.status_code == 200 and not r.json()["idempotente"], r.text
+    r = _nueva(cli, cat, mid, "Horas", obligatoria=True)
+    assert r.status_code == 200 and r.json()["idempotente"] is True, r.text
+    assert r.json()["asociacion"]["orden"] == 0
+
+
+def test_asociar_existente_genera_identidades_aleatorias(ctx):
+    """2.5 (e)."""
+    owner, _, cli = ctx
+    c1, c2 = fh.crear_categoria(owner, "Uno"), fh.crear_categoria(owner, "Dos")
+    mid = h.crear_magnitud(owner, "Compartida")
+    ids = [_asociar(cli, c, mid, False).json()["asociacion"]["asociacion_id"] for c in (c1, c2)]
+    assert ids[0] != ids[1]
+    assert ids[0] != _derivado(mid, c1) and ids[1] != _derivado(mid, c2)
 
 
 @pytest.mark.parametrize("existente_enabled", [True, False])

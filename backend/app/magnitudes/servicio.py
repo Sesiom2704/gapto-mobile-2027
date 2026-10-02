@@ -76,10 +76,28 @@
 #   revierte datos y auditoria) y se captura fuera: se devuelve el Rechazo con
 #   CERO mutaciones. Un fallo no reconocido se propaga hasta la UdT (rollback
 #   total). No se modifica core/unidad_trabajo.py ni F04.
-#   Traduccion fisica por IDENTIDAD (diag.constraint_name). `42501` (RLS WITH
-#   CHECK, F5) -> MAGNITUD_NO_ADMITIDA SOLO en escrituras de asociaciones cuya
-#   magnitud ya se prevalido bajo lock; en cualquier otro punto se propaga
-#   como error tecnico (R19).
+#   Traduccion fisica SOLO por IDENTIDAD (diag.constraint_name) de las
+#   constraints conocidas (_CONSTRAINTS). `42501` NUNCA se traduce (R19; D32
+#   ajustada por la revisora, AJ-S7MAGIMPL-01): la traduccion de 42501 no puede
+#   basarse unicamente en que el error ocurra dentro de la primitiva de
+#   asociacion; tras la prevalidacion bajo FOR NO KEY UPDATE de la categoria y
+#   de la magnitud (el owner de una fila no cambia), un 42501 en cualquier
+#   escritura solo puede ser un error de privilegios o de configuracion RLS y
+#   debe seguir siendo un error tecnico observable: no se reconoce, sale del
+#   savepoint de comando (rollback total) y la UdT lo clasifica (500).
+#   MAGNITUD_NO_ADMITIDA solo lo produce la prevalidacion.
+#
+#   IDENTIDAD DE LA ASOCIACION (D-MAG-04; AJ-S7MAGIMPL-02). En el alta rapida
+#   (NUEVA) el asociacion_id se DERIVA de la identidad de la intencion del
+#   cliente: uuid5(magnitud_id, "asociacion:<categoria_id>") (mismo patron que
+#   AJ-C07-03); en EXISTENTE es aleatorio (uuid4). Una asociacion retirada y
+#   recreada como EXISTENTE tiene siempre otra identidad que la creada por el
+#   alta. El reintento NUEVA es idempotente solo si la magnitud sigue como la
+#   dejo el alta (row_version 1, enabled, nombre, unidad y precision) Y existe
+#   la asociacion con EXACTAMENTE el id derivado, la misma categoria, magnitud
+#   y obligatoria; el `orden` NO forma parte del criterio (D39: lo alteran
+#   comandos ajenos a la intencion -compactar, reordenar- y la intencion no
+#   fija posicion). Cualquier otra combinacion -> IDENTIDAD_REUTILIZADA.
 #
 #   AUDITORIA (D-MAG-09): auditoria.registrar con tabla `magnitudes` (CREAR en
 #   la alta rapida; ACTUALIZAR en renombrar/deshabilitar/rehabilitar) y tabla
@@ -89,6 +107,9 @@
 #   auditoria_repository.py no se modifica. Motivos cerrados «F05-01 MAG_*».
 #   Todas las filas de un comando comparten el request_id de la transaccion.
 # Version: 0.1.0 (F05-01 S7-MAG)
+# Version: 0.2.0 (F05-01 S7-MAG correctivo AJ-S7MAGIMPL-01/02): 42501 nunca se
+#   traduce (se retira `rls_prevalidado`); asociacion_id derivado en NUEVA y
+#   criterio de idempotencia por ese id (D39: sin `orden`).
 # ============================================================
 
 from __future__ import annotations
@@ -153,7 +174,6 @@ _CONSTRAINTS = {
     "ck_magnitudes__precision_decimales": ENTRADA_INVALIDA,
     "ck_categoria_magnitudes__orden_no_negativo": ENTRADA_INVALIDA,
 }
-_SQLSTATE_RLS = "42501"
 
 
 @dataclass(frozen=True)
@@ -189,22 +209,19 @@ class _AbortarComando(Exception):
 
 
 # ------------------------------------------------------------------ atomicidad
-def _traducir(exc: psycopg.Error, *, rls_prevalidado: bool) -> str | None:
-    if exc.sqlstate == _SQLSTATE_RLS:
-        # R19: solo una referencia ya prevalidada bajo lock puede producir 42501
-        # como carrera o defensa fisica; fuera de ahi es un error tecnico.
-        return MAGNITUD_NO_ADMITIDA if rls_prevalidado else None
+def _traducir(exc: psycopg.Error) -> str | None:
+    """Solo identidades fisicas conocidas. 42501 (y cualquier otra) -> None (R19)."""
     return _CONSTRAINTS.get(exc.diag.constraint_name)
 
 
-def _escribir(sesion: SesionMotor, accion: Callable[[], None], *, rls_prevalidado: bool = False) -> None:
+def _escribir(sesion: SesionMotor, accion: Callable[[], None]) -> None:
     """Una escritura en su propio savepoint. Fallo traducible -> _AbortarComando
     (sale del savepoint de comando); no reconocido -> se propaga a la UdT."""
     try:
         with sesion.conexion.transaction():
             accion()
     except psycopg.Error as exc:
-        codigo = _traducir(exc, rls_prevalidado=rls_prevalidado)
+        codigo = _traducir(exc)
         if codigo is None:
             raise
         raise _AbortarComando(Rechazo(codigo)) from exc
@@ -287,6 +304,11 @@ def _identidad_valida(persistidas: list[dict[str, Any]], asociacion_id, magnitud
     return a
 
 
+def _asociacion_id_del_alta(magnitud_id: uuid.UUID, categoria_id: uuid.UUID) -> uuid.UUID:
+    """Identidad derivada de la asociacion creada por el alta rapida (AJ-S7MAGIMPL-02)."""
+    return uuid.uuid5(magnitud_id, f"asociacion:{categoria_id}")
+
+
 def _vista(a: dict[str, Any]) -> dict[str, Any]:
     return {k: a[k] for k in ("asociacion_id", "magnitud_id", "obligatoria", "orden")}
 
@@ -316,15 +338,19 @@ def asociar(sesion: SesionMotor, *, categoria_id: uuid.UUID, obligatoria: bool,
         magnitud = repo.leer_magnitud(sesion, mid, bloquear=True)
     persistidas = repo.asociaciones(sesion, categoria_id)
     existente = next((a for a in persistidas if a["magnitud_id"] == mid), None)
+    # NUEVA: identidad derivada de la intencion; EXISTENTE: aleatoria (AJ-S7MAGIMPL-02).
+    asociacion_id = _asociacion_id_del_alta(mid, categoria_id) if nueva is not None else uuid.uuid4()
     if nueva is not None:
         if magnitud is not None:
             # AJ-S4-05: la identidad de intencion ya se uso; idempotente solo si
-            # magnitud y asociacion siguen EXACTAMENTE como las dejo la alta.
+            # la magnitud y LA asociacion creada por el alta (id derivado) siguen
+            # como las dejo; el orden no cuenta (D39).
             igual = (
                 magnitud["row_version"] == 1 and magnitud["nombre"] == visible
                 and magnitud["unidad_default"] == unidad
                 and magnitud["precision_decimales"] == nueva["precision_decimales"] and magnitud["enabled"]
-                and existente is not None and existente["obligatoria"] == obligatoria
+                and existente is not None and existente["asociacion_id"] == asociacion_id
+                and existente["obligatoria"] == obligatoria
             )
             if not igual:
                 return Rechazo(IDENTIDAD_REUTILIZADA)
@@ -339,7 +365,6 @@ def asociar(sesion: SesionMotor, *, categoria_id: uuid.UUID, obligatoria: bool,
     if len(persistidas) > ORDEN_MAXIMO:
         return Rechazo(ENTRADA_INVALIDA)
 
-    asociacion_id = uuid.uuid4()
     modificadas: list[uuid.UUID] = []
 
     def escrituras() -> None:
@@ -352,7 +377,7 @@ def asociar(sesion: SesionMotor, *, categoria_id: uuid.UUID, obligatoria: bool,
         modificadas.extend(_escribir_orden(sesion, persistidas, [a["asociacion_id"] for a in persistidas]))
         _escribir(sesion, lambda: repo.insertar_asociacion(
             sesion, asociacion_id=asociacion_id, categoria_id=categoria_id, magnitud_id=mid,
-            obligatoria=obligatoria, orden=len(persistidas)), rls_prevalidado=True)
+            obligatoria=obligatoria, orden=len(persistidas)))
         _auditar_asociacion(sesion, asociacion_id, "ASOCIAR", None)
         modificadas.append(asociacion_id)
 

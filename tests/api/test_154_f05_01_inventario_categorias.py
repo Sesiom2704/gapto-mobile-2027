@@ -113,7 +113,11 @@
 #       magnitudes solo usa `tomar_advisory` y `leer` con bloquear=True.
 #   Ninguna prohibicion estatica se presenta como revocacion de permisos
 #   PostgreSQL (D-MAG-08).
-# Version: 0.7.0
+#
+#   v0.7.1 (F05-01 S7-MAG correctivo AJ-S7MAGIMPL-02): I1 registra
+#   `_asociacion_id_del_alta` (deriva el asociacion_id del alta rapida de
+#   magnitud_id y categoria_id; sin SQL ni escritura). Ninguna regla cambia.
+# Version: 0.7.1
 # ============================================================
 
 from __future__ import annotations
@@ -189,7 +193,7 @@ REGISTRO: dict[tuple[str, str], tuple[str, str, str]] = {
        for n in ("asociaciones", "categorias_obligatorias_habilitadas", "insertar_asociacion")},
     **{("backend/app/magnitudes/servicio.py", n): ("CATALOGO", f"S7-MAG {n}", "comando de magnitudes bajo advisory (I8)")
        for n in ("asociar", "asociar.escrituras", "cambiar_obligatoria", "retirar", "reordenar", "deshabilitar",
-                 "_categoria_bloqueada", "ResultadoAsociacion", "ResultadoAsociaciones")},
+                 "_categoria_bloqueada", "_asociacion_id_del_alta", "ResultadoAsociacion", "ResultadoAsociaciones")},
     # --- motor F04 (certificado, no se modifica)
     ("backend/app/core/modelos_efectos.py", "DatosEfecto"): ("R", "modelo", "campo del DTO interno"),
     ("backend/app/core/modelos_devolucion.py", "DatosDevolucion"): ("R", "modelo", "campo del DTO interno"),

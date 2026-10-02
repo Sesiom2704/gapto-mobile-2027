@@ -118,7 +118,18 @@
 #   O01..O11): C01..C17 sin C07 (16), S01..S21 con S10b (22), M01..M23 (23),
 #   I01..I24 (24), L01..L02 (2), O01..O11 (11), W01..W03 (3) = 101; mas
 #   MG01..MG18 (18) = 119 mutantes. Equivalentes documentados: E01, E02, E03.
-# Version: 0.10.0
+#
+#   v0.11.0 (F05-01 S7-MAG correctivo AJ-S7MAGIMPL-01/02): MG12 cambia de
+#   significado y de texto («traduce 42501 a MAGNITUD_NO_ADMITIDA en cualquier
+#   punto»; el servicio ya no traduce 42501 en ninguno, D32 ajustada);
+#   discriminante test_164. MG17 y MG15 se reanclan con la MISMA semantica
+#   (MG17: la condicion de idempotencia del alta compara ahora tambien el
+#   asociacion_id derivado; MG15: la llamada a insertar_asociacion ya no lleva
+#   el argumento retirado `rls_prevalidado`). Nuevos: MG19 (asociacion_id aleatorio tambien en NUEVA) y MG20
+#   (idempotencia del alta sin comparar el asociacion_id), discriminante
+#   test_162. Censo vigente: 101 + MG01..MG20 (20) = 121 mutantes.
+#   Equivalentes documentados: E01, E02, E03.
+# Version: 0.11.0
 # ============================================================
 
 from __future__ import annotations
@@ -486,9 +497,10 @@ MUTANTES = [
        "    if confirmacion_impacto is None and impacto:\n")], [T162, T163]),
     ("MG11", "retirar sin auditoria ELIMINAR",
      [(MSERV, '        _auditar_asociacion(sesion, asociacion_id, "RETIRAR", antes)\n', "        pass\n")], [T162]),
-    ("MG12", "42501 traducido fuera del punto prevalidado (R19)",
-     [(MSERV, "        return MAGNITUD_NO_ADMITIDA if rls_prevalidado else None\n",
-       "        return MAGNITUD_NO_ADMITIDA\n")], [T164]),
+    ("MG12", "traduce 42501 a MAGNITUD_NO_ADMITIDA en cualquier punto (R19, D32 ajustada)",
+     [(MSERV, "    return _CONSTRAINTS.get(exc.diag.constraint_name)\n",
+       '    return MAGNITUD_NO_ADMITIDA if exc.sqlstate == "42501" else _CONSTRAINTS.get(exc.diag.constraint_name)\n')],
+     [T164]),
     ("MG13", "n_hechos como recuento de asociaciones",
      [(MLECT, '         "n_hechos": hechos.get(mid, 0)}\n',
        '         "n_hechos": len(por_magnitud.get(mid, []))}\n')], [T162]),
@@ -496,17 +508,22 @@ MUTANTES = [
      [(SERV, "        with sesion.conexion.transaction():  # savepoint de alcance de comando (D-MAG-10 B5)\n",
        "        if True:  # savepoint de alcance de comando (D-MAG-10 B5)\n")], [T164]),
     ("MG15", "nueva asociacion en la posicion 0 en vez de n",
-     [(MSERV, "            obligatoria=obligatoria, orden=len(persistidas)), rls_prevalidado=True)\n",
-       "            obligatoria=obligatoria, orden=0), rls_prevalidado=True)\n")], [T162]),
+     [(MSERV, "            obligatoria=obligatoria, orden=len(persistidas)))\n",
+       "            obligatoria=obligatoria, orden=0))\n")], [T162]),
     ("MG16", "escribe tambien las asociaciones cuyo orden no cambia",
      [(MSERV, "    cambian = [(aid, pos) for pos, aid in enumerate(objetivo) if actual[aid] != pos]\n",
        "    cambian = [(aid, pos) for pos, aid in enumerate(objetivo)]\n")], [T162]),
     ("MG17", "alta rapida idempotente sin comparar la obligatoriedad de la asociacion",
-     [(MSERV, '                and existente is not None and existente["obligatoria"] == obligatoria\n',
-       "                and existente is not None\n")], [T162]),
+     [(MSERV, '                and existente["obligatoria"] == obligatoria\n', "")], [T162]),
     ("MG18", "asociar existente idempotente aunque cambie la obligatoriedad",
      [(MSERV, '        if existente["obligatoria"] != obligatoria:\n            return Rechazo(ASOCIACION_YA_EXISTE)\n',
        "        if False:\n            return Rechazo(ASOCIACION_YA_EXISTE)\n")], [T162]),
+    ("MG19", "asociacion_id aleatorio tambien en el alta rapida (NUEVA)",
+     [(MSERV, "    asociacion_id = _asociacion_id_del_alta(mid, categoria_id) if nueva is not None else uuid.uuid4()\n",
+       "    asociacion_id = uuid.uuid4()\n")], [T162]),
+    ("MG20", "idempotencia del alta rapida sin comparar el asociacion_id derivado",
+     [(MSERV, '                and existente is not None and existente["asociacion_id"] == asociacion_id\n',
+       "                and existente is not None\n")], [T162]),
 ]
 
 

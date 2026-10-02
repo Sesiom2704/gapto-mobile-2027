@@ -12,12 +12,17 @@
 #     - no traducible (NOT NULL sin constraint conocida): error interno
 #       (VIOLACION_INVARIANTE_FISICA, 500) y rollback total.
 #   Comandos: alta rapida + asociacion, reordenar, retirar con compactacion y
-#   desactivar(RAMA) de categorias (B5). Ademas, la traduccion acotada de
-#   `42501` (R19): violacion de la RLS WITH CHECK en la escritura prevalidada
-#   de la asociacion -> MAGNITUD_NO_ADMITIDA sin mutaciones; un 42501 por
-#   privilegio fuera de ese punto -> error tecnico (no se enmascara).
+#   desactivar(RAMA) de categorias (B5). Ademas, R19: un `42501` en cualquier
+#   escritura es un error tecnico observable (500) con rollback total, nunca
+#   MAGNITUD_NO_ADMITIDA.
 #   Base local desechable 0001..0340.
 # Version: 0.1.0 (F05-01 S7-MAG)
+# Version: 0.2.0 (F05-01 S7-MAG correctivo AJ-S7MAGIMPL-01; D32 ajustada): 42501
+#   real (privilegio o RLS WITH CHECK) inyectado en insertar_asociacion, flujos
+#   EXISTENTE y NUEVA, y en insertar_magnitud (NUEVA): 500 tecnico, nunca
+#   MAGNITUD_NO_ADMITIDA, huella de datos y auditoria identica (en NUEVA la
+#   magnitud recien insertada tambien se revierte). La referencia ajena o
+#   inexistente -> MAGNITUD_NO_ADMITIDA por prevalidacion sigue en test_162.
 # ============================================================
 
 from __future__ import annotations
@@ -181,25 +186,45 @@ def test_desactivar_rama_atomico_b5(ctx, monkeypatch, tipo):
 
 
 # ------------------------------------------------------------------ 42501 acotado (R19)
-def test_rls_en_la_asociacion_prevalidada_es_magnitud_no_admitida_sin_mutaciones(ctx, monkeypatch):
+def _privilegio(sesion, **_):
+    # 42501 de privilegio real: gapto_runtime no tiene DELETE sobre la realidad financiera (0200).
+    return sesion.uno("DELETE FROM gapto.hechos_financieros WHERE false")
+
+
+def _rls_ajena(magnitud_ajena):
+    original = repo_mag.insertar_asociacion
+
+    def con_magnitud_ajena(sesion, **kw):
+        # 42501 por la RLS WITH CHECK de categoria_magnitudes (F5).
+        return original(sesion, **{**kw, "magnitud_id": magnitud_ajena})
+    return con_magnitud_ajena
+
+
+@pytest.mark.parametrize("flujo,primitiva,origen", [
+    ("EXISTENTE", "insertar_asociacion", "PRIVILEGIO"),
+    ("EXISTENTE", "insertar_asociacion", "RLS"),
+    ("NUEVA", "insertar_asociacion", "PRIVILEGIO"),
+    ("NUEVA", "insertar_asociacion", "RLS"),
+    ("NUEVA", "insertar_magnitud", "PRIVILEGIO"),
+])
+def test_42501_en_cualquier_escritura_es_error_tecnico_sin_mutaciones(ctx, monkeypatch, flujo, primitiva, origen):
+    """AJ-S7MAGIMPL-01: 42501 nunca se traduce; sale como error tecnico con rollback total."""
     owner, cli = ctx
     otro, _ = h.crear_tenant()
     ajena = h.crear_magnitud(otro, "Ajena")
     cat = fh.crear_categoria(owner, "Propia")
+    propia = h.crear_magnitud(owner, "Propia")
     antes = _huella(owner)
-    original = repo_mag.insertar_asociacion
-
-    def con_magnitud_ajena(sesion, **kw):
-        # Carrera simulada: la referencia prevalidada deja de cumplir la RLS WITH CHECK (F5).
-        return original(sesion, **{**kw, "magnitud_id": ajena})
-
-    monkeypatch.setattr(repo_mag, "insertar_asociacion", con_magnitud_ajena)
-    r = cli.post(f"/v1/categorias/{cat}/magnitudes", headers=h.AUTH, json={
-        "origen": "NUEVA", "obligatoria": False,
-        "magnitud": {"magnitud_id": str(uuid.uuid4()), "nombre": "Horas", "unidad_default": "h",
-                     "precision_decimales": 0}})
-    assert r.status_code == 409 and r.json()["codigo"] == "MAGNITUD_NO_ADMITIDA", r.text
-    assert _huella(owner) == antes  # tampoco queda la magnitud de la primera escritura
+    monkeypatch.setattr(repo_mag, primitiva, _privilegio if origen == "PRIVILEGIO" else _rls_ajena(ajena))
+    if flujo == "EXISTENTE":
+        cuerpo = {"origen": "EXISTENTE", "magnitud_id": str(propia), "obligatoria": True}
+    else:
+        cuerpo = {"origen": "NUEVA", "obligatoria": False,
+                  "magnitud": {"magnitud_id": str(uuid.uuid4()), "nombre": "Horas", "unidad_default": "h",
+                               "precision_decimales": 0}}
+    r = cli.post(f"/v1/categorias/{cat}/magnitudes", headers=h.AUTH, json=cuerpo)
+    assert r.status_code == 500 and r.json()["codigo"] != "MAGNITUD_NO_ADMITIDA", r.text
+    assert _huella(owner) == antes  # en NUEVA tampoco queda la magnitud de la primera escritura
 
 
 def test_42501_por_privilegio_fuera_del_punto_prevalidado_no_se_enmascara(ctx, monkeypatch):
