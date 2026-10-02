@@ -6,11 +6,13 @@
 // v0.2.0 (F05-D003): cuentas-pago por fecha del pago con propuesta de financiación; resultado con la financiación sellada.
 // v0.3.0 (F05-01 S6-WIRE+UI (este mandato)): lectura del árbol y del uso de una categoría y comandos de Ajustes › Categorías (alta, icono, renombrar, mover, desactivar, reactivar, ámbito y reordenar), todos con la clasificación OK / RECHAZADO(codigo) / INDETERMINADO vigente. La reordenación usa SOLO la ruta atómica /v1/categorias/reordenar (F05 §26.3): el cliente no invoca el comando por nodo. El resultado del registro informa el estado categorial.
 // v0.4.0 (F05-01 S6-WIRE+UI (este mandato), commit 2): un RECHAZADO conserva el `detalle` del servidor cuando lo trae (CAMBIO_AMBITO_REQUIERE_CONFIRMACION devuelve el uso vigente `efectos_activos`, que la UI vuelve a mostrar y confirmar).
-// Versión: 0.4.0
+// v0.5.0 (F05-01 S7-MAG UI; F05-D020): catálogo GET /v1/magnitudes y los comandos de magnitudes (asociar EXISTENTE/NUEVA, obligatoriedad, retirar, reordenar el conjunto COMPLETO de asociaciones por la ruta atómica de la categoría, renombrar, deshabilitar con confirmación de impacto y rehabilitar), con la clasificación OK / RECHAZADO(codigo, detalle) / INDETERMINADO vigente. `detalle` tipado para MAGNITUD_NOMBRE_DUPLICADO y MAGNITUD_DESHABILITAR_REQUIERE_CONFIRMACION.
+// Versión: 0.5.0
 // ============================================================
 
 import type { Ambito, CategoriaNodo } from '../domain/categoria';
 import type { PayloadGastoPagado } from '../domain/intencion';
+import type { MagnitudCatalogo } from '../domain/magnitud';
 
 export interface ConfigApi {
   baseUrl: string;
@@ -56,6 +58,76 @@ export interface AltaCategoria {
   ambito: Ambito;
   presupuestable_default: boolean;
   icon_key: string | null;
+}
+
+// ------------------------------------------------------------------ S7-MAG (F05-D020)
+export interface FichaMagnitud {
+  id: string;
+  nombre: string;
+  unidad_default: string;
+  precision_decimales: number;
+  enabled: boolean;
+  row_version: number;
+}
+
+export interface AsociacionMagnitud {
+  asociacion_id: string;
+  magnitud_id: string;
+  obligatoria: boolean;
+  orden: number;
+}
+
+export interface ResultadoAsociacionMagnitud {
+  categoria_id: string;
+  asociacion: AsociacionMagnitud;
+  magnitud: FichaMagnitud;
+  idempotente: boolean;
+  modificadas: string[];
+}
+
+export interface ResultadoAsociacionesMagnitud {
+  categoria_id: string;
+  asociaciones: AsociacionMagnitud[];
+  idempotente: boolean;
+  modificadas: string[];
+}
+
+export interface ResultadoComandoMagnitud {
+  magnitud: FichaMagnitud;
+  idempotente: boolean;
+  modificadas: string[];
+}
+
+export interface NuevaMagnitudPayload {
+  magnitud_id: string;
+  nombre: string;
+  unidad_default: string;
+  precision_decimales: number;
+}
+
+export type AsociarMagnitudPayload =
+  | { origen: 'EXISTENTE'; magnitud_id: string; obligatoria: boolean }
+  | { origen: 'NUEVA'; magnitud: NuevaMagnitudPayload; obligatoria: boolean };
+
+/** `detalle` de MAGNITUD_NOMBRE_DUPLICADO (solo si la existente es del owner; puede faltar: colisión física residual). */
+export interface DetalleNombreDuplicado {
+  magnitud_id: string;
+  enabled: boolean;
+}
+
+/** `detalle` de MAGNITUD_DESHABILITAR_REQUIERE_CONFIRMACION: categorías habilitadas con asociación obligatoria, bajo lock. */
+export interface DetalleImpacto {
+  categorias_no_capturables: { categoria_id: string; nombre: string; obligatoria: boolean }[];
+}
+
+export function detalleNombreDuplicado(r: { detalle?: Record<string, unknown> }): DetalleNombreDuplicado | null {
+  const d = r.detalle;
+  return d && typeof d.magnitud_id === 'string' && typeof d.enabled === 'boolean' ? { magnitud_id: d.magnitud_id, enabled: d.enabled } : null;
+}
+
+export function detalleImpacto(r: { detalle?: Record<string, unknown> }): { id: string; nombre: string; obligatoria: boolean }[] | null {
+  const lista = (r.detalle as Partial<DetalleImpacto> | undefined)?.categorias_no_capturables;
+  return Array.isArray(lista) ? lista.map((c) => ({ id: c.categoria_id, nombre: c.nombre, obligatoria: c.obligatoria })) : null;
 }
 
 export interface CuentaPago {
@@ -107,9 +179,33 @@ export interface ClienteApi {
     parent_id: string | null;
     hermanos: { id: string; row_version: number }[];
   }): Promise<Respuesta<ResultadoReordenar>>;
+  catalogoMagnitudes(): Promise<Respuesta<{ magnitudes: MagnitudCatalogo[] }>>;
+  asociarMagnitud(categoriaId: string, c: AsociarMagnitudPayload): Promise<Respuesta<ResultadoAsociacionMagnitud>>;
+  obligatoriaMagnitud(
+    categoriaId: string,
+    asociacionId: string,
+    c: { magnitud_id: string; obligatoria_actual: boolean; obligatoria: boolean },
+  ): Promise<Respuesta<ResultadoAsociacionMagnitud>>;
+  retirarMagnitud(
+    categoriaId: string,
+    asociacionId: string,
+    c: { magnitud_id: string; obligatoria_actual: boolean },
+  ): Promise<Respuesta<ResultadoAsociacionesMagnitud>>;
+  reordenarMagnitudes(
+    categoriaId: string,
+    c: { asociaciones: { asociacion_id: string; magnitud_id: string; orden: number; obligatoria: boolean }[] },
+  ): Promise<Respuesta<ResultadoAsociacionesMagnitud>>;
+  renombrarMagnitud(id: string, c: { nombre: string; row_version: number }): Promise<Respuesta<ResultadoComandoMagnitud>>;
+  deshabilitarMagnitud(
+    id: string,
+    c: { row_version: number; confirmacion_impacto: string[] | null },
+  ): Promise<Respuesta<ResultadoComandoMagnitud>>;
+  rehabilitarMagnitud(id: string, c: { row_version: number }): Promise<Respuesta<ResultadoComandoMagnitud>>;
 }
 
 const CAT = '/v1/categorias';
+const MAG = '/v1/magnitudes';
+const asoc = (cat: string, a?: string) => `${CAT}/${encodeURIComponent(cat)}/magnitudes${a ? `/${encodeURIComponent(a)}` : ''}`;
 const post = (cuerpo: unknown): RequestInit => ({ method: 'POST', body: JSON.stringify(cuerpo) });
 
 export function crearCliente(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): ClienteApi {
@@ -158,5 +254,13 @@ export function crearCliente(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): C
     reactivarCategoria: (id, c) => llamar(`${CAT}/${encodeURIComponent(id)}/reactivar`, post(c), 'CAMBIO'),
     cambiarAmbitoCategoria: (id, c) => llamar(`${CAT}/${encodeURIComponent(id)}/ambito`, post(c), 'CAMBIO'),
     reordenarCategorias: (c) => llamar(`${CAT}/reordenar`, post(c), 'CAMBIO'),
+    catalogoMagnitudes: () => llamar(MAG, { method: 'GET' }, false),
+    asociarMagnitud: (cat, c) => llamar(asoc(cat), post(c), 'CAMBIO'),
+    obligatoriaMagnitud: (cat, a, c) => llamar(`${asoc(cat, a)}/obligatoria`, post(c), 'CAMBIO'),
+    retirarMagnitud: (cat, a, c) => llamar(`${asoc(cat, a)}/retirar`, post(c), 'CAMBIO'),
+    reordenarMagnitudes: (cat, c) => llamar(`${asoc(cat)}/reordenar`, post(c), 'CAMBIO'),
+    renombrarMagnitud: (id, c) => llamar(`${MAG}/${encodeURIComponent(id)}/renombrar`, post(c), 'CAMBIO'),
+    deshabilitarMagnitud: (id, c) => llamar(`${MAG}/${encodeURIComponent(id)}/deshabilitar`, post(c), 'CAMBIO'),
+    rehabilitarMagnitud: (id, c) => llamar(`${MAG}/${encodeURIComponent(id)}/rehabilitar`, post(c), 'CAMBIO'),
   };
 }

@@ -117,7 +117,14 @@
 #   v0.7.1 (F05-01 S7-MAG correctivo AJ-S7MAGIMPL-02): I1 registra
 #   `_asociacion_id_del_alta` (deriva el asociacion_id del alta rapida de
 #   magnitud_id y categoria_id; sin SQL ni escritura). Ninguna regla cambia.
-# Version: 0.7.1
+#
+#   v0.7.2 (F05-01 S7-MAG UI, hito 1): I7 registra la mencion del cliente movil
+#   en mobile/src/domain/magnitud.ts (tipo del catalogo GET /v1/magnitudes y su
+#   conversion a una vista neutra; lectura, nunca escritura) y amplia la
+#   justificacion de mobile/src/api/cliente.ts (detalle de impacto de
+#   deshabilitar). La reordenacion de magnitudes usa su propia ruta atomica
+#   /v1/categorias/{id}/magnitudes/reordenar, que no es la ruta por nodo de I11.
+# Version: 0.7.2
 # ============================================================
 
 from __future__ import annotations
@@ -815,7 +822,8 @@ def test_exclusiones_cerradas_y_existentes():
 #: Nunca escribe categorias_financieras (eso es I5, que sigue sin el cliente).
 MENCIONES_CLIENTE: dict[str, str] = {
     "mobile/src/domain/intencion.ts": "sella {estado:'CATEGORIA', categoria_id, magnitudes} (A_FRONTERA via VS-01; C-a en servidor)",
-    "mobile/src/api/cliente.ts": "tipo de lectura de GET /v1/categorias/{id}/uso (R)",
+    "mobile/src/api/cliente.ts": "tipo de lectura de GET /v1/categorias/{id}/uso y detalle de impacto de deshabilitar magnitud (R)",
+    "mobile/src/domain/magnitud.ts": "tipo del catalogo GET /v1/magnitudes (categorias de cada magnitud) y su vista neutra (R)",
 }
 
 

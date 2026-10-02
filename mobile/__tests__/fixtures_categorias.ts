@@ -4,13 +4,14 @@
 // Ruta: mobile/__tests__/fixtures_categorias.ts
 // Descripción: Fixtures sintéticos del árbol de categorías para los tests del cliente (no es un fichero de test: no casa con testMatch). Incluye el estado «padre desactivado con hijo activo», inalcanzable por la API (AJ-S4-03) y cubierto aquí por fixture (F05 §26.4).
 // Versión: 0.1.0 (F05-01 S6-WIRE+UI (este mandato))
+// Versión: 0.2.0 (F05-01 S7-MAG UI): `mag()` rellena `asociacion_id` (por defecto `a-<magnitud_id>`); el stub incluye el catálogo (vacío por defecto) y los comandos de magnitudes (no esperados por defecto).
 // ============================================================
 
 import type { ClienteApi, Respuesta } from '../src/api/cliente';
 import type { CategoriaNodo, MagnitudCategoria } from '../src/domain/categoria';
 
 export function mag(p: Partial<MagnitudCategoria> & { magnitud_id: string }): MagnitudCategoria {
-  return { nombre: 'Consumo', obligatoria: true, orden: 0, enabled: true, unidad_default: 'kWh', precision_decimales: 2, row_version: 1, ...p };
+  return { asociacion_id: `a-${p.magnitud_id}`, nombre: 'Consumo', obligatoria: true, orden: 0, enabled: true, unidad_default: 'kWh', precision_decimales: 2, row_version: 1, ...p };
 }
 
 export function nodo(p: Partial<CategoriaNodo> & { id: string; nombre: string }): CategoriaNodo {
@@ -50,5 +51,13 @@ export function clienteCategoriasStub(
     reactivarCategoria: noEsperado('reactivarCategoria'),
     cambiarAmbitoCategoria: noEsperado('cambiarAmbitoCategoria'),
     reordenarCategorias: noEsperado('reordenarCategorias'),
+    catalogoMagnitudes: jest.fn(async () => ({ tipo: 'OK', datos: { magnitudes: [] } }) as Respuesta<{ magnitudes: never[] }>),
+    asociarMagnitud: noEsperado('asociarMagnitud'),
+    obligatoriaMagnitud: noEsperado('obligatoriaMagnitud'),
+    retirarMagnitud: noEsperado('retirarMagnitud'),
+    reordenarMagnitudes: noEsperado('reordenarMagnitudes'),
+    renombrarMagnitud: noEsperado('renombrarMagnitud'),
+    deshabilitarMagnitud: noEsperado('deshabilitarMagnitud'),
+    rehabilitarMagnitud: noEsperado('rehabilitarMagnitud'),
   };
 }

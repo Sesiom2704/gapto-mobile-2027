@@ -4,6 +4,7 @@
 // Ruta: mobile/src/components/HojasCategoria.tsx
 // Descripción: Hojas inferiores de las acciones EDIT-* de Ajustes › Categorías (F09 §12.97.4; lámina SET-CAT v1.0 S04 «Cambiar ámbito», S05 «Desactivar con subcategorías»; mandato F05-01 S6-WIRE+UI §5). Solo presentación: no llaman al cliente; la pantalla decide el comando y trata los rechazos. Renombrar (con la microcopy de que corrige la etiqueta también en la historia y el error de colisión junto al nombre), Cambiar ámbito (uso por naturaleza visible antes de confirmar; si el servidor devuelve un uso distinto, la hoja muestra el nuevo y pide confirmar otra vez), Desactivar (con subcategorías activas: «Desactivar también sus N subcategorías» o Cancelar; sin ellas, confirmación simple) y Reactivar (sin cascada). Velo con tokens y opacidad (sin rgba). Consume solo tokens semánticos.
 // Versión: 0.1.0 (F05-01 S6-WIRE+UI (este mandato))
+// Versión: 0.2.0 (F05-01 S7-MAG UI): `Hoja`, `Aviso` y `BotonCritico` se exportan para reutilizarlos en las hojas de magnitudes (HojasMagnitud.tsx); sin cambios de presentación.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -31,7 +32,7 @@ export function enumerar(nombres: string[]): string {
   return `${nombres.slice(0, -1).join(', ')} y ${nombres[nombres.length - 1]}`;
 }
 
-function Hoja(p: { titulo: string; testID: string; children: React.ReactNode }) {
+export function Hoja(p: { titulo: string; testID: string; children: React.ReactNode }) {
   const { c } = useTema();
   const inset = useSafeAreaInsets();
   return (
@@ -52,7 +53,7 @@ function Hoja(p: { titulo: string; testID: string; children: React.ReactNode }) 
   );
 }
 
-function Aviso(p: { texto: string; testID: string }) {
+export function Aviso(p: { texto: string; testID: string }) {
   const { c } = useTema();
   return (
     <View testID={p.testID} accessibilityRole="alert" style={[s.aviso, { backgroundColor: c.partialSurface }]}>
@@ -63,7 +64,7 @@ function Aviso(p: { texto: string; testID: string }) {
 }
 
 /** Acción destructiva de la hoja (lámina S05): superficie crítica con texto sobre acento. */
-function BotonCritico(p: { titulo: string; onPress: () => void; testID: string; deshabilitado?: boolean }) {
+export function BotonCritico(p: { titulo: string; onPress: () => void; testID: string; deshabilitado?: boolean }) {
   const { c } = useTema();
   return (
     <Pressable

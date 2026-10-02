@@ -5,6 +5,7 @@
 // Descripción: Ajustes › Categorías (F09 §12.97.4; lámina SET-CAT v1.0 S01, S03, I01). Lista con el mismo patrón de niveles y migas que el selector y filtro Activas / Todas (Activas por defecto: decisión de ejecución). Las desactivadas se muestran con tratamiento `inactive` (texto secundario) Y el texto «Desactivada», nunca solo con color. Hueco de icono reservado en cada fila (reserva para NULL o clave desconocida). Un nodo con subcategorías entra en su nivel; dentro del nivel, «Ver detalle de “<nombre>”» abre su detalle; una hoja abre su detalle al tocarla. Detalle: ámbito, estado, presupuesto por defecto e icono; la fila «Icono» abre el selector de iconos y guarda con el `row_version` vigente (permitido en desactivadas). Conflicto de versión: se recarga y se muestra el estado actual, sin reintento automático. Indeterminado: se recarga antes de cualquier repetición. El alta (CREATE-M) y los selectores son tareas inmersivas: ocultan la barra inferior.
 // Versión: 0.1.0 (F05-01 S6-WIRE+UI (este mandato))
 // Versión: 0.2.0 (F05-01 S6-WIRE+UI (este mandato), commit 2): acciones EDIT-* en el detalle (lámina SET-CAT S03–S05; mandato §5) y Editar orden en la lista (S06; D-UI-01). Cada comando usa el `row_version` del estado cargado. Conflicto (VERSION_DESFASADA, CONJUNTO_HERMANOS_DESFASADO): se recarga y se muestra el estado actual, nunca se reintenta solo. INDETERMINADO: se recarga antes de cualquier repetición; nunca se duplica. Renombrar: colisión junto al nombre. Mover: selector en modo AJUSTES sin el propio subárbol ni padres desactivados; elegir la ubicación actual no envía nada. Cambiar ámbito: GET /uso antes de confirmar y `confirmacion_uso` igual a ese uso; ante CAMBIO_AMBITO_REQUIERE_CONFIRMACION se muestra el uso nuevo (`detalle.efectos_activos`) y se pide confirmar otra vez; sin coherencia padre/hijo (Q3). Desactivar: con subcategorías activas (N del árbol cargado, subárbol completo) solo RAMA o Cancelar; sin ellas confirmación simple SOLO_SI_SIN_HIJOS_ACTIVOS; si aun así llega CATEGORIA_TIENE_HIJOS_ACTIVOS se recarga y se ofrece RAMA. Reactivar: solo este nodo (sin cascada). Editar orden: conjunto COMPLETO de hermanos (activos y desactivados) y UNA llamada a POST /v1/categorias/reordenar; sin cambios no se envía nada («Sin cambios», decisión de ejecución); nunca /{id}/orden.
+// Versión: 0.3.0 (F05-01 S7-MAG UI, hito 1; F09 §12.97.10, lámina SET-MAG v0.1): sección plegada «Magnitudes · N» entre «Icono» y «Acciones» (también en desactivadas, P1) con su selector del catálogo y su ficha (MagnitudesCategoria.tsx). El árbol se puede recargar en SILENCIO (sin pasar por «cargando») para que la ficha o la sección no parpadeen tras un comando de magnitudes; si esa recarga falla, se conserva el árbol mostrado y el aviso de la sección lo explica. El selector y las hojas de magnitudes son tareas inmersivas.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -16,6 +17,7 @@ import type { ClienteApi } from '../api/cliente';
 import type { Respuesta } from '../api/cliente';
 import { BotonPrimario, CabeceraNavegacion, EstadoDato, Segmentado } from '../components/Basicos';
 import { HojaAmbito, HojaDesactivar, HojaReactivar, HojaRenombrar, UsoCarga } from '../components/HojasCategoria';
+import { useMagnitudesCategoria } from '../components/MagnitudesCategoria';
 import { BotonSecundario, CargaArbol, IconoCategoriaVista, SelectorCategorias } from '../components/SelectorCategorias';
 import { SelectorIconos } from '../components/SelectorIconos';
 import { Ambito, CategoriaNodo, ancestros, construirArbol, descendientes, hijosDe, mismoOrden, subcategoriasActivas } from '../domain/categoria';
@@ -84,23 +86,27 @@ export function CategoriasAjustesScreen(p: {
   const [uso, setUso] = useState<UsoCarga>({ fase: 'CARGANDO' });
   const [usoCambiado, setUsoCambiado] = useState(false);
 
-  const cargar = useCallback(async () => {
-    setCarga({ fase: 'CARGANDO' });
+  const cargar = useCallback(async (silencioso = false) => {
+    if (!silencioso) setCarga({ fase: 'CARGANDO' });
     const r = await p.cliente.arbolCategorias();
-    if (r.tipo !== 'OK') return setCarga({ fase: 'ERROR' });
+    if (r.tipo !== 'OK') {
+      if (!silencioso) setCarga({ fase: 'ERROR' });
+      return;
+    }
     setCarga({ fase: 'OK', arbol: construirArbol(r.datos.categorias) });
   }, [p.cliente]);
   useEffect(() => {
     void cargar();
   }, [cargar]);
-  useEffect(() => {
-    p.onInmersiva(tarea !== null);
-  }, [tarea]);
 
   const arbol = carga.fase === 'OK' ? carga.arbol : null;
   const visible = (n: CategoriaNodo) => filtro === 'TODAS' || n.enabled;
   const hijosVisibles = (id: string | null) => (arbol ? hijosDe(arbol, id).filter(visible) : []);
   const detalle = arbol && detalleId ? arbol.porId.get(detalleId) ?? null : null;
+  const mag = useMagnitudesCategoria({ cliente: p.cliente, categoria: detalle, recargarArbol: () => cargar(true) });
+  useEffect(() => {
+    p.onInmersiva(tarea !== null || mag.inmersiva);
+  }, [tarea, mag.inmersiva]);
   const nodoNivel = arbol && nivel ? arbol.porId.get(nivel) ?? null : null;
   // Mover: destino habilitado y fuera del propio subárbol (los desactivados y su rama no se listan).
   const excluidos = new Set(arbol && detalle ? [detalle.id, ...descendientes(arbol, detalle.id).map((n) => n.id)] : []);
@@ -257,6 +263,10 @@ export function CategoriasAjustesScreen(p: {
   }
 
   // ------------------------------------------------------------------ detalle
+  if (detalle && arbol && mag.pantalla) {
+    return <View style={{ flex: 1, backgroundColor: c.background }}>{mag.pantalla}</View>;
+  }
+
   if (detalle && arbol) {
     const padre = detalle.parent_id ? arbol.porId.get(detalle.parent_id) : undefined;
     const ruta = [...ancestros(arbol, detalle.id), detalle].map((n) => n.nombre).join(' › ');
@@ -297,6 +307,7 @@ export function CategoriasAjustesScreen(p: {
             <Text style={[tipo.body, { color: c.textPrimary }]}>{icono?.etiqueta ?? 'Sin asignar'}</Text>
             <Ionicons name="chevron-forward" size={18} color={c.textSecondary} />
           </Pressable>
+          {mag.seccion}
           <Text accessibilityRole="header" style={[tipo.footnote, s.seccion, { color: c.textSecondary }]}>Acciones</Text>
           <FilaAccion testID="accion-renombrar" titulo="Renombrar" onPress={() => { setErrorNombre(null); setTarea({ tipo: 'RENOMBRAR' }); }} />
           <FilaAccion testID="accion-mover" titulo="Mover a otra categoría" onPress={() => setTarea({ tipo: 'MOVER' })} />
