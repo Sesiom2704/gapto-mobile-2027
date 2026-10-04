@@ -5,6 +5,7 @@
 // Descripción: Sección «Magnitudes» del detalle de Ajustes › Categorías (F05-D020; F09 §12.97.10; lámina SET-MAG v0.1), hito 1: sección plegada (M01) y desplegada (M02) con el catálogo cargado al desplegar, disponible en desactivadas (P1); vacío (M04) distinto del error de carga (M05) con reintento; «No usable en registros nuevos» (M03); selector del catálogo (M06) con secciones y búsqueda, tarea inmersiva; añadir una existente con la obligatoriedad elegida sin preselección y aviso previo si está deshabilitada (M09); obligatoriedad (M11) y quitar con N registros (M12) con la identidad cargada; conflicto e indeterminado: recarga y aviso, UNA sola llamada (sin reintento automático, M16).
 // Versión: 0.1.0 (F05-01 S7-MAG UI, hito 1)
 // Versión: 0.2.0 (F05-01 S7-MAG UI, hito 2): alta NUEVA con acción desactivada hasta completar y «Para crear falta: …», envío exacto, identidad reutilizada en el reintento indeterminado y renovada al editar, IDENTIDAD_REUTILIZADA, colisión con detalle (usar / rehabilitar y usar: segunda llamada solo si la primera confirma) y sin detalle (genérico + recargar catálogo); Editar orden con UNA llamada y el conjunto completo, «Sin cambios» sin envío; ficha global (M13); renombrar con colisión junto al nombre; deshabilitar sin impacto (una llamada), con impacto en dos pasos (M14) e impacto cambiado (M15) sin reenvío automático; rehabilitar.
+// Versión: 0.3.0 (F05-01 S7-MAG UI, D59): deshabilitar sin impacto pide confirmación simple («Cancelar» no envía nada; «Deshabilitar» envía UNA llamada sin confirmación de impacto); con impacto visible se mantiene M14.
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
@@ -14,7 +15,14 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Raiz } from '../App';
 import type { ClienteApi } from '../src/api/cliente';
 import { NOTA_R17, TEXTO_HISTORICOS } from '../src/components/FichaMagnitud';
-import { AVISO_DESHABILITADA, IMPACTO_CAMBIADO, NOTA_DESHABILITAR, textoQuitar, TEXTO_HACER_OBLIGATORIA } from '../src/components/HojasMagnitud';
+import {
+  AVISO_DESHABILITADA,
+  IMPACTO_CAMBIADO,
+  NOTA_DESHABILITAR,
+  TEXTO_CONFIRMAR_DESHABILITAR,
+  textoQuitar,
+  TEXTO_HACER_OBLIGATORIA,
+} from '../src/components/HojasMagnitud';
 import {
   AVISO_CAMBIADAS,
   AVISO_INDETERMINADO,
@@ -432,14 +440,35 @@ test('renombrar: payload con row_version y colisión junto al nombre sin cerrar 
   expect(screen.getByTestId('hoja-renombrar-magnitud')).toBeTruthy();
 });
 
-test('deshabilitar SIN impacto: la primera llamada confirma directamente', async () => {
+test('deshabilitar SIN impacto (D59): confirmación simple antes de enviar; Cancelar no envía nada', async () => {
   const f = fakeMag();
   f.cliente.deshabilitarMagnitud = jest.fn(async () => ({ tipo: 'OK' as const, datos: { magnitud: { ...CATALOGO[4], enabled: false, row_version: 2 }, idempotente: false, modificadas: ['pot'] } }));
   await abrirFicha(f, 'a-pot');
   await act(async () => fireEvent.press(screen.getByTestId('bloque-deshabilitar')));
+  await screen.findByTestId('hoja-confirmar-deshabilitar');
+  expect(screen.getByText('¿Deshabilitar «Potencia contratada»?')).toBeTruthy();
+  expect(screen.getByText(TEXTO_CONFIRMAR_DESHABILITAR)).toBeTruthy();
+  expect(f.cliente.deshabilitarMagnitud).not.toHaveBeenCalled();
+  fireEvent.press(screen.getByTestId('confirmar-deshabilitar-cancelar'));
+  expect(screen.queryByTestId('hoja-confirmar-deshabilitar')).toBeNull();
+  expect(f.cliente.deshabilitarMagnitud).not.toHaveBeenCalled();
+  await act(async () => fireEvent.press(screen.getByTestId('bloque-deshabilitar')));
+  await act(async () => fireEvent.press(screen.getByTestId('confirmar-deshabilitar')));
   expect(f.cliente.deshabilitarMagnitud).toHaveBeenCalledTimes(1);
   expect(f.cliente.deshabilitarMagnitud).toHaveBeenCalledWith('pot', { row_version: 1, confirmacion_impacto: null });
+  await waitFor(() => expect(screen.queryByTestId('hoja-confirmar-deshabilitar')).toBeNull());
   expect(screen.queryByTestId('hoja-deshabilitar')).toBeNull();
+});
+
+test('deshabilitar con impacto visible en el catálogo: sin confirmación simple, directo al detalle del servidor (M14)', async () => {
+  const f = fakeMag();
+  f.cliente.deshabilitarMagnitud = jest.fn(async () =>
+    rechazo('MAGNITUD_DESHABILITAR_REQUIERE_CONFIRMACION', { categorias_no_capturables: [{ categoria_id: 'luz', nombre: 'Luz', obligatoria: true }] }));
+  await abrirFicha(f, 'a-kwh');
+  await act(async () => fireEvent.press(screen.getByTestId('bloque-deshabilitar')));
+  expect(screen.queryByTestId('hoja-confirmar-deshabilitar')).toBeNull();
+  await screen.findByTestId('hoja-deshabilitar');
+  expect(f.cliente.deshabilitarMagnitud).toHaveBeenCalledTimes(1);
 });
 
 test('deshabilitar con impacto (M14) y con impacto cambiado (M15): cada envío lo confirma el usuario', async () => {

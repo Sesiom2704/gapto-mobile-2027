@@ -5,6 +5,7 @@
 // Descripción: Controlador de las magnitudes de una categoría en Ajustes › Categorías (F05-D020; F09 §12.97.10; lámina SET-MAG v0.1). Hook `useMagnitudesCategoria` que la pantalla de detalle llama siempre: devuelve la SECCIÓN (para el ScrollView del detalle), la PANTALLA a mostrar en lugar del detalle (selector del catálogo o ficha) y si la tarea es inmersiva (oculta la barra inferior). Las asociaciones se leen del árbol (GET /v1/categorias, con `asociacion_id`); el catálogo (GET /v1/magnitudes) se carga al desplegar la sección y aporta `n_hechos` y las categorías de cada magnitud. Cada comando usa la identidad cargada (asociacion_id + magnitud_id + obligatoria_actual; row_version de la magnitud) y, tras confirmar, recarga árbol y catálogo. Conflictos (VERSION_DESFASADA, ASOCIACION_YA_EXISTE, ASOCIACION_NO_EXISTE, CONJUNTO_MAGNITUDES_DESFASADO): se cierra la tarea, se recarga y se avisa «Las magnitudes de <categoría> han cambiado…» (M16), sin reintento automático. INDETERMINADO: se recarga antes de cualquier repetición; nunca se duplica.
 // Versión: 0.1.0 (F05-01 S7-MAG UI, hito 1: sección, añadir existente, obligatoriedad, quitar y conflictos)
 // Versión: 0.2.0 (F05-01 S7-MAG UI, hito 2): alta NUEVA (M07) con la identidad del formulario reutilizada en el reintento (indeterminado: aviso y recarga, mismo `magnitud_id`) y colisión de nombre (M08: usar la existente o rehabilitarla y usarla, dos llamadas encadenadas y la segunda solo si la primera confirma; sin `detalle`, mensaje genérico y recarga del catálogo; IDENTIDAD_REUTILIZADA: aviso, identidad nueva solo si el usuario edita); Editar orden (M10: conjunto COMPLETO en UNA llamada; sin cambios no se envía nada); ficha global (M13) con renombrar (colisión junto al nombre), deshabilitar en dos pasos con el impacto que calcula el servidor (M14) y, si el conjunto cambia entre la consulta y la confirmación, «El impacto ha cambiado» con la lista nueva y otra confirmación (M15), nunca un reenvío automático; rehabilitar con confirmación simple.
+// Versión: 0.3.0 (F05-01 S7-MAG UI, D59 aprobada por Moisés): «Deshabilitar» sin impacto visible en el catálogo (ninguna categoría habilitada la tiene como obligatoria) abre antes una confirmación simple y solo entonces envía la primera llamada; con impacto visible se mantiene el flujo M14/M15 (el servidor sigue siendo la autoridad: si devuelve impacto, se muestra M14).
 // ============================================================
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -16,6 +17,7 @@ import { EditarOrdenMagnitudes } from './EditarOrdenMagnitudes';
 import { BloqueMagnitud, FichaMagnitud } from './FichaMagnitud';
 import {
   HojaAnadirExistente,
+  HojaConfirmarDeshabilitar,
   HojaDeshabilitar,
   HojaObligatoriedad,
   HojaQuitar,
@@ -49,6 +51,7 @@ type HojaAbierta =
   | { tipo: 'OBLIGATORIEDAD' }
   | { tipo: 'QUITAR' }
   | { tipo: 'RENOMBRAR' }
+  | { tipo: 'CONFIRMAR_DESHABILITAR' }
   | { tipo: 'DESHABILITAR'; afectadas: { id: string; nombre: string }[]; previas: string[] | null; cambiado: boolean }
   | { tipo: 'REHABILITAR' };
 export type AvisoMagnitudes = { titulo: string; texto: string } | null;
@@ -339,7 +342,12 @@ export function useMagnitudesCategoria(p: {
             categoriaActual={cat.id}
             ruta={p.ruta}
             onRenombrar={() => { setErrorNombre(null); setHoja({ tipo: 'RENOMBRAR' }); }}
-            onDeshabilitar={() => m && void deshabilitar(m)}
+            onDeshabilitar={() => {
+              if (!m) return;
+              // D59: sin impacto visible, confirmación simple antes de enviar; con impacto, el servidor lo detalla (M14).
+              if (usosDe(m).some((u) => u.obligatoria && u.enabled)) void deshabilitar(m);
+              else setHoja({ tipo: 'CONFIRMAR_DESHABILITAR' });
+            }}
             onRehabilitar={() => setHoja({ tipo: 'REHABILITAR' })}
             onReintentar={() => void cargarCatalogo()}
           />
@@ -373,6 +381,9 @@ export function useMagnitudesCategoria(p: {
             onGuardar={(n) => void renombrar(m, n)}
             onCancelar={() => setHoja(null)}
           />
+        ) : null}
+        {hoja?.tipo === 'CONFIRMAR_DESHABILITAR' && m ? (
+          <HojaConfirmarDeshabilitar magnitud={m.nombre} guardando={guardando} onDeshabilitar={() => void deshabilitar(m)} onCancelar={() => setHoja(null)} />
         ) : null}
         {hoja?.tipo === 'DESHABILITAR' && m ? (
           <HojaDeshabilitar

@@ -5,6 +5,7 @@
 // Descripción: Hojas y piezas de presentación de las magnitudes de una categoría (F09 §12.97.10; lámina SET-MAG v0.1; F05-D020). Solo presentación: no llaman al cliente; el controlador (MagnitudesCategoria.tsx) decide el comando y trata los rechazos. Píldoras de estado con TEXTO («Obligatoria», «Opcional», «Deshabilitada»), nunca solo color. Hito 1: añadir una magnitud existente (M09: aviso previo si está deshabilitada, «Añadir de todos modos»; la obligatoriedad se elige siempre, sin preselección), cambiar obligatoriedad (M11, guarda prospectiva) y quitar de la categoría (M12, mensaje seguro de AJ-S7MAG-06 con N = registros históricos de la magnitud). Consume solo tokens semánticos.
 // Versión: 0.1.0 (F05-01 S7-MAG UI, hito 1)
 // Versión: 0.2.0 (F05-01 S7-MAG UI, hito 2): renombrar la magnitud (microcopy de M13; colisión junto al nombre), deshabilitar con impacto calculado por el servidor bajo lock (M14) y «El impacto ha cambiado» con la lista nueva (M15), y rehabilitar con confirmación simple.
+// Versión: 0.3.0 (F05-01 S7-MAG UI, D59 aprobada por Moisés): deshabilitar SIN impacto pide una confirmación simple «¿Deshabilitar «X»?» antes de enviar.
 // ============================================================
 
 import React, { useState } from 'react';
@@ -212,6 +213,20 @@ export function HojaDeshabilitar(p: {
       <Text style={[tipo.footnote, { color: c.textSecondary }]}>{NOTA_DESHABILITAR}</Text>
       <BotonCritico testID="deshabilitar-confirmar" titulo="Deshabilitar de todos modos" deshabilitado={p.guardando} onPress={p.onDeshabilitar} />
       <BotonSecundario testID="deshabilitar-cancelar" titulo="Cancelar" onPress={p.onCancelar} />
+    </Hoja>
+  );
+}
+
+// ------------------------------------------------------------------ Deshabilitar sin impacto (D59)
+export const TEXTO_CONFIRMAR_DESHABILITAR = 'Dejará de poder pedirse en registros nuevos. Lo ya registrado no cambia.';
+
+export function HojaConfirmarDeshabilitar(p: { magnitud: string; guardando: boolean; onDeshabilitar: () => void; onCancelar: () => void }) {
+  const { c } = useTema();
+  return (
+    <Hoja titulo={`¿Deshabilitar «${p.magnitud}»?`} testID="hoja-confirmar-deshabilitar">
+      <Text style={[tipo.body, { color: c.textPrimary }]}>{TEXTO_CONFIRMAR_DESHABILITAR}</Text>
+      <BotonCritico testID="confirmar-deshabilitar" titulo="Deshabilitar" deshabilitado={p.guardando} onPress={p.onDeshabilitar} />
+      <BotonSecundario testID="confirmar-deshabilitar-cancelar" titulo="Cancelar" onPress={p.onCancelar} />
     </Hoja>
   );
 }
