@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-01 S7-MAG UI, hito 1: sección, añadir existente, obligatoriedad, quitar y conflictos)
 // Versión: 0.2.0 (F05-01 S7-MAG UI, hito 2): alta NUEVA (M07) con la identidad del formulario reutilizada en el reintento (indeterminado: aviso y recarga, mismo `magnitud_id`) y colisión de nombre (M08: usar la existente o rehabilitarla y usarla, dos llamadas encadenadas y la segunda solo si la primera confirma; sin `detalle`, mensaje genérico y recarga del catálogo; IDENTIDAD_REUTILIZADA: aviso, identidad nueva solo si el usuario edita); Editar orden (M10: conjunto COMPLETO en UNA llamada; sin cambios no se envía nada); ficha global (M13) con renombrar (colisión junto al nombre), deshabilitar en dos pasos con el impacto que calcula el servidor (M14) y, si el conjunto cambia entre la consulta y la confirmación, «El impacto ha cambiado» con la lista nueva y otra confirmación (M15), nunca un reenvío automático; rehabilitar con confirmación simple.
 // Versión: 0.3.0 (F05-01 S7-MAG UI, D59 aprobada por Moisés): «Deshabilitar» sin impacto visible en el catálogo (ninguna categoría habilitada la tiene como obligatoria) abre antes una confirmación simple y solo entonces envía la primera llamada; con impacto visible se mantiene el flujo M14/M15 (el servidor sigue siendo la autoridad: si devuelve impacto, se muestra M14).
+// Versión: 0.4.0 (F05-01 S7-MAG UI correctivo AJ-S7MAGUI-02/03/08): (02, D54 corregida) la recarga tras un comando sigue siendo silenciosa (árbol y catálogo conservan lo mostrado si fallan) pero se comprueba el resultado de LAS DOS lecturas: si alguna falla, el aviso identifica lo mostrado como posiblemente desfasado y ofrece «Reintentar» (solo lecturas); nunca se afirma «Se ha recargado el estado actual» sin verificarlo y nunca se reenvía la operación. (03, D59 corregida) deshabilitar exige SIEMPRE una confirmación previa: sin impacto visible, hoja simple y POST con `confirmacion_impacto: null` (si el servidor ve impacto, M15); con impacto visible, hoja informada M14 construida con el catálogo ANTES de cualquier POST y POST con ese conjunto; si el servidor devuelve otro (incluido vacío), M15 y nueva confirmación. (08) «Rehabilitar y usar»: si la rehabilitación confirma y la asociación no, hoja «ya está rehabilitada, pero no se ha podido añadir» que reintenta SOLO la asociación.
 // ============================================================
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -17,6 +18,7 @@ import { EditarOrdenMagnitudes } from './EditarOrdenMagnitudes';
 import { BloqueMagnitud, FichaMagnitud } from './FichaMagnitud';
 import {
   HojaAnadirExistente,
+  HojaAsociarPendiente,
   HojaConfirmarDeshabilitar,
   HojaDeshabilitar,
   HojaObligatoriedad,
@@ -25,7 +27,7 @@ import {
   HojaRenombrarMagnitud,
 } from './HojasMagnitud';
 import { Colision, EnvioNueva, NuevaMagnitud } from './NuevaMagnitud';
-import { FaseCatalogo, SeccionMagnitudes } from './SeccionMagnitudes';
+import { AvisoMagnitudes as PintarAviso, FaseCatalogo, SeccionMagnitudes } from './SeccionMagnitudes';
 import { SelectorMagnitudes } from './SelectorMagnitudes';
 
 export const CONFLICTOS_MAGNITUDES = new Set(['VERSION_DESFASADA', 'ASOCIACION_YA_EXISTE', 'ASOCIACION_NO_EXISTE', 'CONJUNTO_MAGNITUDES_DESFASADO']);
@@ -37,6 +39,9 @@ export const AVISO_INDETERMINADO = {
   titulo: 'No se ha podido confirmar el cambio',
   texto: 'Se ha recargado el estado actual. Revísalo antes de repetir la acción: nunca se duplica.',
 };
+/** AJ-S7MAGUI-02: alguna lectura tras el comando falló; lo mostrado se conserva y puede estar desfasado. */
+export const TEXTO_DESFASADO = (cat: string) => `No se ha podido comprobar el estado actual de ${cat}. Lo que ves puede estar desfasado.`;
+export const TITULO_GUARDADO = 'Cambio guardado';
 export const AVISO_SIN_CAMBIOS_ORDEN = { titulo: 'Sin cambios', texto: 'El orden ya era ese: no se ha enviado nada.' };
 export const AVISO_NUEVA_INDETERMINADO = 'No se ha podido confirmar la creación. Puedes volver a pulsar «Crear»: no se duplicará.';
 export const AVISO_NUEVA_REUTILIZADA = 'Ya se envió esta magnitud con otros datos. Cambia algún dato antes de volver a crearla.';
@@ -53,8 +58,9 @@ type HojaAbierta =
   | { tipo: 'RENOMBRAR' }
   | { tipo: 'CONFIRMAR_DESHABILITAR' }
   | { tipo: 'DESHABILITAR'; afectadas: { id: string; nombre: string }[]; previas: string[] | null; cambiado: boolean }
-  | { tipo: 'REHABILITAR' };
-export type AvisoMagnitudes = { titulo: string; texto: string } | null;
+  | { tipo: 'REHABILITAR' }
+  | { tipo: 'ASOCIAR_PENDIENTE'; magnitud: MagnitudCatalogo; obligatoria: boolean };
+export type AvisoMagnitudes = { titulo: string; texto: string; reintentar?: boolean } | null;
 
 export function useMagnitudesCategoria(p: {
   cliente: ClienteApi;
@@ -62,14 +68,16 @@ export function useMagnitudesCategoria(p: {
   nuevoId: () => string;
   /** Ruta visible de una categoría («Hogar › Luz»); `nombre` si no está en el árbol cargado. */
   ruta: (id: string, nombre: string) => string;
-  /** Recarga el árbol SIN pasar por «cargando» (la vista no parpadea). */
-  recargarArbol: () => Promise<void>;
+  /** Recarga el árbol SIN pasar por «cargando» (la vista no parpadea); devuelve si la lectura fue OK. */
+  recargarArbol: () => Promise<boolean>;
 }) {
   const [abierta, setAbierta] = useState(false);
   const [catalogo, setCatalogo] = useState<CargaCatalogo>({ fase: 'CARGANDO' });
   const [vista, setVista] = useState<Vista>(null);
   const [hoja, setHoja] = useState<HojaAbierta>(null);
   const [aviso, setAviso] = useState<AvisoMagnitudes>(null);
+  // Aviso que corresponde mostrar cuando las lecturas se verifiquen (tras «Reintentar»).
+  const [avisoVerificado, setAvisoVerificado] = useState<AvisoMagnitudes>(null);
   const [guardando, setGuardando] = useState(false);
   const [colision, setColision] = useState<Colision>(null);
   const [avisoNueva, setAvisoNueva] = useState<string | null>(null);
@@ -84,10 +92,12 @@ export function useMagnitudesCategoria(p: {
     setAviso(null);
   }, [catId]);
 
-  const cargarCatalogo = useCallback(async (): Promise<MagnitudCatalogo[] | null> => {
-    setCatalogo({ fase: 'CARGANDO' });
+  /** En silencio no pasa por «cargando» y, si falla, conserva el catálogo mostrado (quien recarga lo comunica). */
+  const cargarCatalogo = useCallback(async (silencioso = false): Promise<MagnitudCatalogo[] | null> => {
+    if (!silencioso) setCatalogo({ fase: 'CARGANDO' });
     const r = await p.cliente.catalogoMagnitudes();
-    setCatalogo(r.tipo === 'OK' ? { fase: 'OK', magnitudes: r.datos.magnitudes } : { fase: 'ERROR' });
+    if (r.tipo === 'OK') setCatalogo({ fase: 'OK', magnitudes: r.datos.magnitudes });
+    else setCatalogo((previo) => (silencioso && previo.fase === 'OK' ? previo : { fase: 'ERROR' }));
     return r.tipo === 'OK' ? r.datos.magnitudes : null;
   }, [p.cliente]);
 
@@ -98,8 +108,22 @@ export function useMagnitudesCategoria(p: {
     if (necesitaCatalogo) void cargarCatalogo();
   }, [necesitaCatalogo, catId]);
 
-  const recargarTodo = async () => {
-    await Promise.all([p.recargarArbol(), cargarCatalogo()]);
+  /** Relee árbol y catálogo en silencio; true solo si LAS DOS lecturas fueron OK. */
+  const recargarTodo = async (): Promise<boolean> => {
+    const [arbolOk, lista] = await Promise.all([p.recargarArbol(), cargarCatalogo(true)]);
+    return arbolOk && lista !== null;
+  };
+
+  /** Tras un comando: muestra `siVerificado` solo si las lecturas se verifican; si no, estado posiblemente desfasado. */
+  const finalizar = async (siVerificado: AvisoMagnitudes) => {
+    const verificado = await recargarTodo();
+    if (verificado) {
+      setAvisoVerificado(null);
+      setAviso(siVerificado);
+      return;
+    }
+    setAvisoVerificado(siVerificado);
+    setAviso({ titulo: siVerificado?.titulo ?? TITULO_GUARDADO, texto: TEXTO_DESFASADO(cat?.nombre ?? ''), reintentar: true });
   };
 
   const cerrar = () => {
@@ -114,15 +138,15 @@ export function useMagnitudesCategoria(p: {
     if (r.tipo === 'OK') {
       alOk();
       setAviso(null);
-      await recargarTodo();
+      await finalizar(null);
       return;
     }
     cerrar();
     setAbierta(true);
-    if (r.tipo === 'INDETERMINADO') setAviso(AVISO_INDETERMINADO);
-    else if (CONFLICTOS_MAGNITUDES.has(r.codigo)) setAviso(AVISO_CAMBIADAS(cat?.nombre ?? ''));
-    else setAviso({ titulo: 'No se ha podido completar la acción', texto: r.mensaje || 'Se ha recargado el estado actual.' });
-    await recargarTodo();
+    setAviso(null);
+    if (r.tipo === 'INDETERMINADO') await finalizar(AVISO_INDETERMINADO);
+    else if (CONFLICTOS_MAGNITUDES.has(r.codigo)) await finalizar(AVISO_CAMBIADAS(cat?.nombre ?? ''));
+    else await finalizar({ titulo: 'No se ha podido completar la acción', texto: r.mensaje || 'Se ha recargado el estado actual.' });
   };
 
   const conGuardado = async (accion: () => Promise<void>) => {
@@ -134,6 +158,15 @@ export function useMagnitudesCategoria(p: {
       setGuardando(false);
     }
   };
+
+  /** «Reintentar» del aviso: relanza SOLO las lecturas; nunca la operación original. */
+  const reintentarLecturas = () =>
+    conGuardado(async () => {
+      const ok = await recargarTodo();
+      if (!ok) return;
+      setAviso(avisoVerificado);
+      setAvisoVerificado(null);
+    });
 
   const magnitudesCatalogo = catalogo.fase === 'OK' ? catalogo.magnitudes : [];
   const delCatalogo = (id: string) => magnitudesCatalogo.find((m) => m.id === id) ?? null;
@@ -179,7 +212,17 @@ export function useMagnitudesCategoria(p: {
       const r1 = await p.cliente.rehabilitarMagnitud(m.id, { row_version: m.row_version });
       if (r1.tipo !== 'OK') return tratar(r1, cerrar);
       const r2 = await p.cliente.asociarMagnitud(cat.id, { origen: 'EXISTENTE', magnitud_id: m.id, obligatoria });
-      await tratar(r2, cerrar);
+      if (r2.tipo === 'OK') return tratar(r2, cerrar);
+      // Dos comandos, no uno atómico: la rehabilitación YA confirmó. Se ofrece reintentar SOLO la asociación.
+      await recargarTodo();
+      setHoja({ tipo: 'ASOCIAR_PENDIENTE', magnitud: m, obligatoria });
+    });
+
+  const reintentarAsociar = (m: MagnitudCatalogo, obligatoria: boolean) =>
+    conGuardado(async () => {
+      if (!cat) return;
+      const r = await p.cliente.asociarMagnitud(cat.id, { origen: 'EXISTENTE', magnitud_id: m.id, obligatoria });
+      if (r.tipo === 'OK') await tratar(r, cerrar);
     });
 
   const guardarOrden = (orden: MagnitudCategoria[]) =>
@@ -231,12 +274,13 @@ export function useMagnitudesCategoria(p: {
       await tratar(r, () => setHoja(null));
     });
 
+  /** Solo tras la hoja simple (sin impacto visible, ya confirmada por el usuario). */
   const deshabilitar = (m: MagnitudCatalogo) =>
     conGuardado(async () => {
-      // Primera llamada sin confirmación: si no hay impacto, confirma directamente.
       const r = await p.cliente.deshabilitarMagnitud(m.id, { row_version: m.row_version, confirmacion_impacto: null });
       const afectadas = r.tipo === 'RECHAZADO' && r.codigo === 'MAGNITUD_DESHABILITAR_REQUIERE_CONFIRMACION' ? detalleImpacto(r) : null;
-      if (afectadas) return setHoja({ tipo: 'DESHABILITAR', afectadas, previas: null, cambiado: false });
+      // El usuario confirmó «sin impacto» y el servidor sí lo ve: el impacto ha cambiado (M15) y se confirma otra vez.
+      if (afectadas) return setHoja({ tipo: 'DESHABILITAR', afectadas, previas: [], cambiado: true });
       await tratar(r, () => setHoja(null));
     });
 
@@ -266,6 +310,7 @@ export function useMagnitudesCategoria(p: {
       abierta={abierta}
       fase={fase}
       aviso={aviso}
+      onReintentarAviso={() => void reintentarLecturas()}
       onAlternar={() => setAbierta((x) => !x)}
       onFila={(m) => { setAviso(null); setVista({ tipo: 'FICHA', asociacionId: m.asociacion_id }); }}
       onAnadir={() => { setAviso(null); setVista({ tipo: 'SELECTOR' }); }}
@@ -315,6 +360,21 @@ export function useMagnitudesCategoria(p: {
         onCancelar={cerrar}
       />
     );
+    if (hoja?.tipo === 'ASOCIAR_PENDIENTE') {
+      const h = hoja;
+      pantalla = (
+        <>
+          {pantalla}
+          <HojaAsociarPendiente
+            magnitud={h.magnitud.nombre}
+            categoria={cat.nombre}
+            guardando={guardando}
+            onAnadir={() => void reintentarAsociar(h.magnitud, h.obligatoria)}
+            onAhoraNo={cerrar}
+          />
+        </>
+      );
+    }
   } else if (cat && vista?.tipo === 'ORDEN') {
     pantalla = (
       <EditarOrdenMagnitudes
@@ -332,6 +392,7 @@ export function useMagnitudesCategoria(p: {
         <FichaMagnitud
           categoria={cat.nombre}
           asociacion={asociacion}
+          aviso={aviso ? <PintarAviso aviso={aviso} onReintentar={() => void reintentarLecturas()} /> : null}
           onAtras={cerrar}
           onObligatoriedad={() => setHoja({ tipo: 'OBLIGATORIEDAD' })}
           onQuitar={() => setHoja({ tipo: 'QUITAR' })}
@@ -344,9 +405,10 @@ export function useMagnitudesCategoria(p: {
             onRenombrar={() => { setErrorNombre(null); setHoja({ tipo: 'RENOMBRAR' }); }}
             onDeshabilitar={() => {
               if (!m) return;
-              // D59: sin impacto visible, confirmación simple antes de enviar; con impacto, el servidor lo detalla (M14).
-              if (usosDe(m).some((u) => u.obligatoria && u.enabled)) void deshabilitar(m);
-              else setHoja({ tipo: 'CONFIRMAR_DESHABILITAR' });
+              // D59 corregida: SIEMPRE una confirmación antes de cualquier POST. Impacto visible = categorías habilitadas que la piden como obligatoria.
+              const visibles = usosDe(m).filter((u) => u.obligatoria && u.enabled).map((u) => ({ id: u.id, nombre: u.nombre }));
+              if (visibles.length === 0) setHoja({ tipo: 'CONFIRMAR_DESHABILITAR' });
+              else setHoja({ tipo: 'DESHABILITAR', afectadas: visibles, previas: null, cambiado: false });
             }}
             onRehabilitar={() => setHoja({ tipo: 'REHABILITAR' })}
             onReintentar={() => void cargarCatalogo()}
@@ -390,6 +452,7 @@ export function useMagnitudesCategoria(p: {
             magnitud={m.nombre}
             filas={filasImpacto(hoja.afectadas, usosDe(m), hoja.previas, p.ruta)}
             cambiado={hoja.cambiado}
+            ampliado={hoja.previas !== null && hoja.afectadas.some((a) => !hoja.previas!.includes(a.id))}
             guardando={guardando}
             onDeshabilitar={() => void confirmarDeshabilitar(m, hoja.afectadas)}
             onCancelar={() => setHoja(null)}

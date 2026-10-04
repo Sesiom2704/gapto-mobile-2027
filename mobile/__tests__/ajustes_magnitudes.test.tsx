@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-01 S7-MAG UI, hito 1)
 // Versión: 0.2.0 (F05-01 S7-MAG UI, hito 2): alta NUEVA con acción desactivada hasta completar y «Para crear falta: …», envío exacto, identidad reutilizada en el reintento indeterminado y renovada al editar, IDENTIDAD_REUTILIZADA, colisión con detalle (usar / rehabilitar y usar: segunda llamada solo si la primera confirma) y sin detalle (genérico + recargar catálogo); Editar orden con UNA llamada y el conjunto completo, «Sin cambios» sin envío; ficha global (M13); renombrar con colisión junto al nombre; deshabilitar sin impacto (una llamada), con impacto en dos pasos (M14) e impacto cambiado (M15) sin reenvío automático; rehabilitar.
 // Versión: 0.3.0 (F05-01 S7-MAG UI, D59): deshabilitar sin impacto pide confirmación simple («Cancelar» no envía nada; «Deshabilitar» envía UNA llamada sin confirmación de impacto); con impacto visible se mantiene M14.
+// Versión: 0.4.0 (F05-01 S7-MAG UI correctivo AJ-S7MAGUI-01/02/03/08): M09 con el aviso según la obligatoriedad elegida (sin elección, obligatoria, opcional; cambia con la elección); recarga tras un comando con alguna lectura fallida (árbol o catálogo): estado posiblemente desfasado con «Reintentar» (solo lecturas), nunca «Se ha recargado el estado actual»; deshabilitar con impacto visible: hoja M14 ANTES de cualquier POST y POST con el conjunto del catálogo; servidor con impacto vacío o distinto: M15 y nueva confirmación; sin impacto con impacto en el servidor: M15; rehabilitar y usar con fallo del segundo comando: hoja que reintenta solo la asociación.
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
@@ -18,6 +19,7 @@ import { NOTA_R17, TEXTO_HISTORICOS } from '../src/components/FichaMagnitud';
 import {
   AVISO_DESHABILITADA,
   IMPACTO_CAMBIADO,
+  TEXTO_ASOCIAR_PENDIENTE,
   NOTA_DESHABILITAR,
   TEXTO_CONFIRMAR_DESHABILITAR,
   textoQuitar,
@@ -30,6 +32,8 @@ import {
   AVISO_NUEVA_REUTILIZADA,
   AVISO_SIN_CAMBIOS_ORDEN,
   MSG_RENOMBRAR_DUPLICADO,
+  TEXTO_DESFASADO,
+  TITULO_GUARDADO,
 } from '../src/components/MagnitudesCategoria';
 import { COLISION_GENERICA } from '../src/components/NuevaMagnitud';
 import { NOTA_SECCION, TEXTO_ERROR, TEXTO_VACIO, TITULO_NO_USABLE, TITULO_VACIO } from '../src/components/SeccionMagnitudes';
@@ -176,15 +180,42 @@ test('añadir existente: obligatoriedad sin preselección, una llamada EXISTENTE
   expect(screen.getByText('Magnitudes · 3')).toBeTruthy();
 });
 
-test('añadir una deshabilitada (M09): aviso previo y «Añadir de todos modos»; no la rehabilita', async () => {
+test('añadir una deshabilitada (M09) SIN elegir obligatoriedad: texto neutro, sin afirmar el efecto', async () => {
+  const f = fakeMag();
+  await abrirSelector(f);
+  fireEvent.press(screen.getByTestId('selmag-kwhgas'));
+  await screen.findByTestId('hoja-anadir-magnitud');
+  expect(screen.getByText('Esta magnitud está deshabilitada. Elige si será obligatoria u opcional para ver el efecto.')).toBeTruthy();
+  expect(screen.queryByText(AVISO_DESHABILITADA.OBLIGATORIA)).toBeNull();
+  expect(screen.queryByText(AVISO_DESHABILITADA.OPCIONAL)).toBeNull();
+  expect(screen.getByText('Añadir de todos modos')).toBeTruthy();
+});
+
+test('añadir una deshabilitada como OPCIONAL (M09, C07): no impide utilizar la categoría; el aviso cambia con la elección', async () => {
+  const f = fakeMag();
+  await abrirSelector(f);
+  fireEvent.press(screen.getByTestId('selmag-kwhgas'));
+  await screen.findByTestId('hoja-anadir-magnitud');
+  fireEvent.press(screen.getByTestId('anadir-obligatoria-false'));
+  expect(screen.getByText('Esta magnitud está deshabilitada y no podrá informarse en registros nuevos mientras siga así. Añadirla como opcional no impide utilizar la categoría. Añadirla no la rehabilita.')).toBeTruthy();
+  expect(screen.queryByText(AVISO_DESHABILITADA.OBLIGATORIA)).toBeNull();
+  fireEvent.press(screen.getByTestId('anadir-obligatoria-true'));
+  expect(screen.getByText(AVISO_DESHABILITADA.OBLIGATORIA)).toBeTruthy();
+  expect(screen.queryByText(AVISO_DESHABILITADA.OPCIONAL)).toBeNull();
+  fireEvent.press(screen.getByTestId('anadir-obligatoria-false'));
+  expect(screen.getByText(AVISO_DESHABILITADA.OPCIONAL)).toBeTruthy();
+  expect(screen.getByText('Añadir de todos modos')).toBeTruthy();
+});
+
+test('añadir una deshabilitada como OBLIGATORIA (M09): la categoría no podrá utilizarse; «Añadir de todos modos»; no la rehabilita', async () => {
   const f = fakeMag();
   f.cliente.asociarMagnitud = jest.fn(async () => ({ tipo: 'INDETERMINADO' as const, mensaje: '' }));
   await abrirSelector(f);
   fireEvent.press(screen.getByTestId('selmag-kwhgas'));
   await screen.findByTestId('hoja-anadir-magnitud');
-  expect(screen.getByText(AVISO_DESHABILITADA('Luz', 'Consumo de gas'))).toBeTruthy();
-  expect(screen.getByText('Añadir de todos modos')).toBeTruthy();
   fireEvent.press(screen.getByTestId('anadir-obligatoria-true'));
+  expect(screen.getByText('Esta categoría no podrá utilizarse en registros nuevos mientras esta magnitud siga deshabilitada. Añadirla no la rehabilita.')).toBeTruthy();
+  expect(screen.getByText('Añadir de todos modos')).toBeTruthy();
   await act(async () => fireEvent.press(screen.getByTestId('anadir-confirmar')));
   expect(f.cliente.asociarMagnitud).toHaveBeenCalledWith('luz', { origen: 'EXISTENTE', magnitud_id: 'kwhgas', obligatoria: true });
   expect(f.cliente.rehabilitarMagnitud).not.toHaveBeenCalled();
@@ -253,6 +284,81 @@ test('conflicto (M16): ASOCIACION_NO_EXISTE recarga, avisa y no reintenta', asyn
   expect(f.cliente.retirarMagnitud).toHaveBeenCalledTimes(1);
   expect((f.cliente.arbolCategorias as jest.Mock).mock.calls.length).toBe(arboles + 1);
   expect(screen.queryByTestId('ficha-magnitud')).toBeNull();
+});
+
+// ------------------------------------------------------------------ AJ-S7MAGUI-02: recarga tras un comando con lecturas fallidas
+const FALLO = { tipo: 'INDETERMINADO' as const, mensaje: '' };
+
+async function conflictoObligatoriedad(f: ReturnType<typeof fakeMag>, fallos: { arbol?: boolean; catalogo?: boolean }) {
+  f.cliente.obligatoriaMagnitud = jest.fn(async () => rechazo('VERSION_DESFASADA'));
+  await abrirFicha(f, 'a-pot');
+  fireEvent.press(screen.getByTestId('ficha-obligatoriedad'));
+  await screen.findByTestId('hoja-obligatoriedad');
+  if (fallos.arbol) (f.cliente.arbolCategorias as jest.Mock).mockResolvedValueOnce(FALLO);
+  if (fallos.catalogo) (f.cliente.catalogoMagnitudes as jest.Mock).mockResolvedValueOnce(FALLO);
+  await act(async () => fireEvent.press(screen.getByTestId('obligatoriedad-confirmar')));
+  await screen.findByTestId('magnitudes-aviso');
+}
+
+test('conflicto VERSION_DESFASADA y fallo del ÁRBOL al recargar: estado posiblemente desfasado con «Reintentar»; nunca «Se ha recargado»', async () => {
+  const f = fakeMag();
+  await conflictoObligatoriedad(f, { arbol: true });
+  expect(screen.getByText(AVISO_CAMBIADAS('Luz').titulo)).toBeTruthy();
+  expect(screen.getByText('No se ha podido comprobar el estado actual de Luz. Lo que ves puede estar desfasado.')).toBeTruthy();
+  expect(screen.queryByText(AVISO_CAMBIADAS('Luz').texto)).toBeNull();
+  expect(screen.queryByText(/Se ha recargado el estado actual/)).toBeNull();
+  expect(screen.getByText('Magnitudes · 2')).toBeTruthy(); // se conserva lo mostrado
+  // Reintentar relanza SOLO las lecturas; con ambas OK, ya puede afirmarse la recarga.
+  const arboles = (f.cliente.arbolCategorias as jest.Mock).mock.calls.length;
+  const catalogos = (f.cliente.catalogoMagnitudes as jest.Mock).mock.calls.length;
+  await act(async () => fireEvent.press(screen.getByTestId('magnitudes-aviso-reintentar')));
+  expect((f.cliente.arbolCategorias as jest.Mock).mock.calls.length).toBe(arboles + 1);
+  expect((f.cliente.catalogoMagnitudes as jest.Mock).mock.calls.length).toBe(catalogos + 1);
+  expect(f.cliente.obligatoriaMagnitud).toHaveBeenCalledTimes(1);
+  expect(screen.getByText(AVISO_CAMBIADAS('Luz').texto)).toBeTruthy();
+  expect(screen.queryByTestId('magnitudes-aviso-reintentar')).toBeNull();
+});
+
+test('conflicto VERSION_DESFASADA y fallo del CATÁLOGO al recargar: estado posiblemente desfasado; el catálogo mostrado se conserva', async () => {
+  const f = fakeMag();
+  await conflictoObligatoriedad(f, { catalogo: true });
+  expect(screen.getByText('No se ha podido comprobar el estado actual de Luz. Lo que ves puede estar desfasado.')).toBeTruthy();
+  expect(screen.queryByText(/Se ha recargado el estado actual/)).toBeNull();
+  expect(screen.getByTestId('magnitudes-aviso-reintentar')).toBeTruthy();
+  expect(screen.queryByTestId('magnitudes-error')).toBeNull(); // no se presenta como error de carga
+  expect(screen.getByTestId('magnitud-fila-a-kwh')).toBeTruthy();
+  // Reintentar que vuelve a fallar: el aviso sigue identificando el estado como desfasado.
+  (f.cliente.catalogoMagnitudes as jest.Mock).mockResolvedValueOnce(FALLO);
+  await act(async () => fireEvent.press(screen.getByTestId('magnitudes-aviso-reintentar')));
+  expect(screen.getByText(TEXTO_DESFASADO('Luz'))).toBeTruthy();
+  expect(f.cliente.obligatoriaMagnitud).toHaveBeenCalledTimes(1);
+});
+
+test('conflicto VERSION_DESFASADA con las dos lecturas OK: aviso de recarga correcto, sin «Reintentar»', async () => {
+  const f = fakeMag();
+  await conflictoObligatoriedad(f, {});
+  expect(screen.getByText(AVISO_CAMBIADAS('Luz').texto)).toBeTruthy();
+  expect(screen.queryByText(TEXTO_DESFASADO('Luz'))).toBeNull();
+  expect(screen.queryByTestId('magnitudes-aviso-reintentar')).toBeNull();
+});
+
+test('comando OK y fallo de la recarga con la ficha abierta: «Cambio guardado» y estado posiblemente desfasado en la ficha', async () => {
+  const f = fakeMag();
+  f.cliente.obligatoriaMagnitud = jest.fn(async () => ({
+    tipo: 'OK' as const,
+    datos: { categoria_id: 'luz', asociacion: { asociacion_id: 'a-pot', magnitud_id: 'pot', obligatoria: true, orden: 1 }, magnitud: { ...CATALOGO[4] }, idempotente: false, modificadas: ['a-pot'] },
+  }));
+  await abrirFicha(f, 'a-pot');
+  fireEvent.press(screen.getByTestId('ficha-obligatoriedad'));
+  (f.cliente.arbolCategorias as jest.Mock).mockResolvedValueOnce(FALLO);
+  await act(async () => fireEvent.press(screen.getByTestId('obligatoriedad-confirmar')));
+  expect(screen.getByTestId('ficha-magnitud')).toBeTruthy();
+  expect(screen.getByText('Cambio guardado')).toBeTruthy();
+  expect(screen.getByText('No se ha podido comprobar el estado actual de Luz. Lo que ves puede estar desfasado.')).toBeTruthy();
+  expect(screen.getByText(TITULO_GUARDADO)).toBeTruthy();
+  await act(async () => fireEvent.press(screen.getByTestId('magnitudes-aviso-reintentar')));
+  expect(screen.queryByTestId('magnitudes-aviso')).toBeNull();
+  expect(f.cliente.obligatoriaMagnitud).toHaveBeenCalledTimes(1);
 });
 
 test.each(['VERSION_DESFASADA', 'ASOCIACION_YA_EXISTE', 'CONJUNTO_MAGNITUDES_DESFASADO'])('conflicto %s al añadir: recarga y aviso M16', async (codigo) => {
@@ -369,6 +475,51 @@ test('colisión con una deshabilitada: «Rehabilitar y usarla» encadena dos lla
   expect(screen.getByText(AVISO_CAMBIADAS('Luz').titulo)).toBeTruthy();
 });
 
+test('rehabilitar y usar (AJ-08): la rehabilitación confirma y la asociación falla: hoja que reintenta SOLO la asociación', async () => {
+  const f = fakeMag();
+  const respuestas = [
+    rechazo('MAGNITUD_NOMBRE_DUPLICADO', { magnitud_id: 'kwhgas', enabled: false }),
+    { tipo: 'INDETERMINADO' as const, mensaje: '' },
+    okAsociacion('a-kwhgas', 'kwhgas', true),
+  ];
+  f.cliente.asociarMagnitud = jest.fn(async () => respuestas.shift()!);
+  f.cliente.rehabilitarMagnitud = jest.fn(async () => ({ tipo: 'OK' as const, datos: { magnitud: { ...CATALOGO[2], enabled: true, row_version: 2 }, idempotente: false, modificadas: ['kwhgas'] } }));
+  await abrirNueva(f);
+  rellenar('consumo de gas', 'kWh', '2', true);
+  await act(async () => fireEvent.press(screen.getByTestId('nuevamag-crear')));
+  await screen.findByTestId('nuevamag-colision');
+  await act(async () => fireEvent.press(screen.getByTestId('nuevamag-rehabilitar')));
+  await screen.findByTestId('hoja-asociar-pendiente');
+  expect(screen.getByText('“Consumo de gas” ya está rehabilitada, pero no se ha podido añadir a Luz.')).toBeTruthy();
+  expect(screen.getByText(TEXTO_ASOCIAR_PENDIENTE('Consumo de gas', 'Luz'))).toBeTruthy();
+  expect(screen.getByText('Añadir a Luz')).toBeTruthy();
+  expect(screen.getByText('Ahora no')).toBeTruthy();
+  expect(f.cliente.rehabilitarMagnitud).toHaveBeenCalledTimes(1);
+  expect(f.cliente.asociarMagnitud).toHaveBeenCalledTimes(2);
+  await act(async () => fireEvent.press(screen.getByTestId('pendiente-anadir')));
+  expect(f.cliente.asociarMagnitud).toHaveBeenCalledTimes(3);
+  expect((f.cliente.asociarMagnitud as jest.Mock).mock.calls[2][1]).toEqual({ origen: 'EXISTENTE', magnitud_id: 'kwhgas', obligatoria: true });
+  expect(f.cliente.rehabilitarMagnitud).toHaveBeenCalledTimes(1); // nunca se repite la rehabilitación
+  await screen.findByTestId('detalle-categoria');
+});
+
+test('rehabilitar y usar (AJ-08): «Ahora no» cierra sin más llamadas', async () => {
+  const f = fakeMag();
+  const respuestas = [rechazo('MAGNITUD_NOMBRE_DUPLICADO', { magnitud_id: 'kwhgas', enabled: false }), rechazo('ASOCIACION_YA_EXISTE')];
+  f.cliente.asociarMagnitud = jest.fn(async () => respuestas.shift()!);
+  f.cliente.rehabilitarMagnitud = jest.fn(async () => ({ tipo: 'OK' as const, datos: { magnitud: { ...CATALOGO[2], enabled: true, row_version: 2 }, idempotente: false, modificadas: ['kwhgas'] } }));
+  await abrirNueva(f);
+  rellenar('consumo de gas', 'kWh', '2', false);
+  await act(async () => fireEvent.press(screen.getByTestId('nuevamag-crear')));
+  await screen.findByTestId('nuevamag-colision');
+  await act(async () => fireEvent.press(screen.getByTestId('nuevamag-rehabilitar')));
+  await screen.findByTestId('hoja-asociar-pendiente');
+  fireEvent.press(screen.getByTestId('pendiente-ahora-no'));
+  await screen.findByTestId('detalle-categoria');
+  expect(f.cliente.asociarMagnitud).toHaveBeenCalledTimes(2);
+  expect(f.cliente.rehabilitarMagnitud).toHaveBeenCalledTimes(1);
+});
+
 test('colisión SIN detalle (residual): mensaje genérico y «Recargar catálogo»; nunca crea otra', async () => {
   const f = fakeMag();
   f.cliente.asociarMagnitud = jest.fn(async () => rechazo('MAGNITUD_NOMBRE_DUPLICADO'));
@@ -460,21 +611,58 @@ test('deshabilitar SIN impacto (D59): confirmación simple antes de enviar; Canc
   expect(screen.queryByTestId('hoja-deshabilitar')).toBeNull();
 });
 
-test('deshabilitar con impacto visible en el catálogo: sin confirmación simple, directo al detalle del servidor (M14)', async () => {
+test('deshabilitar con impacto visible (D59 corregida): hoja M14 con el impacto del catálogo ANTES de cualquier POST; Cancelar no envía nada', async () => {
   const f = fakeMag();
-  f.cliente.deshabilitarMagnitud = jest.fn(async () =>
-    rechazo('MAGNITUD_DESHABILITAR_REQUIERE_CONFIRMACION', { categorias_no_capturables: [{ categoria_id: 'luz', nombre: 'Luz', obligatoria: true }] }));
   await abrirFicha(f, 'a-kwh');
   await act(async () => fireEvent.press(screen.getByTestId('bloque-deshabilitar')));
-  expect(screen.queryByTestId('hoja-confirmar-deshabilitar')).toBeNull();
   await screen.findByTestId('hoja-deshabilitar');
-  expect(f.cliente.deshabilitarMagnitud).toHaveBeenCalledTimes(1);
+  expect(screen.queryByTestId('hoja-confirmar-deshabilitar')).toBeNull();
+  expect(screen.getByTestId('impacto-luz').props.accessibilityLabel).toBe('Hogar › Luz: obligatoria');
+  expect(screen.getByText(NOTA_DESHABILITAR)).toBeTruthy();
+  expect(screen.queryByTestId('deshabilitar-cambiado')).toBeNull();
+  expect(f.cliente.deshabilitarMagnitud).not.toHaveBeenCalled();
+  fireEvent.press(screen.getByTestId('deshabilitar-cancelar'));
+  expect(screen.queryByTestId('hoja-deshabilitar')).toBeNull();
+  expect(f.cliente.deshabilitarMagnitud).not.toHaveBeenCalled();
 });
 
-test('deshabilitar con impacto (M14) y con impacto cambiado (M15): cada envío lo confirma el usuario', async () => {
+test('deshabilitar con impacto visible y coincidente: UNA confirmación y UN POST con ese conjunto', async () => {
+  const f = fakeMag();
+  f.cliente.deshabilitarMagnitud = jest.fn(async () => ({ tipo: 'OK' as const, datos: { magnitud: { ...CATALOGO[1], enabled: false, row_version: 2 }, idempotente: false, modificadas: ['kwh'] } }));
+  await abrirFicha(f, 'a-kwh');
+  await act(async () => fireEvent.press(screen.getByTestId('bloque-deshabilitar')));
+  await act(async () => fireEvent.press(screen.getByTestId('deshabilitar-confirmar')));
+  expect(f.cliente.deshabilitarMagnitud).toHaveBeenCalledTimes(1);
+  expect(f.cliente.deshabilitarMagnitud).toHaveBeenCalledWith('kwh', { row_version: 1, confirmacion_impacto: ['luz'] });
+  await waitFor(() => expect(screen.queryByTestId('hoja-deshabilitar')).toBeNull());
+});
+
+test('deshabilitar con impacto visible y el servidor con impacto VACÍO: nunca se deshabilita sin pasar por M14 y, tras el 409, por M15', async () => {
   const f = fakeMag();
   const respuestas = [
-    rechazo('MAGNITUD_DESHABILITAR_REQUIERE_CONFIRMACION', { categorias_no_capturables: [{ categoria_id: 'luz', nombre: 'Luz', obligatoria: true }] }),
+    rechazo('MAGNITUD_DESHABILITAR_REQUIERE_CONFIRMACION', { categorias_no_capturables: [] }),
+    { tipo: 'OK' as const, datos: { magnitud: { ...CATALOGO[1], enabled: false, row_version: 2 }, idempotente: false, modificadas: ['kwh'] } },
+  ];
+  f.cliente.deshabilitarMagnitud = jest.fn(async () => respuestas.shift()!);
+  await abrirFicha(f, 'a-kwh');
+  await act(async () => fireEvent.press(screen.getByTestId('bloque-deshabilitar')));
+  await screen.findByTestId('hoja-deshabilitar');
+  expect(f.cliente.deshabilitarMagnitud).not.toHaveBeenCalled();
+  await act(async () => fireEvent.press(screen.getByTestId('deshabilitar-confirmar')));
+  expect((f.cliente.deshabilitarMagnitud as jest.Mock).mock.calls[0][1]).toEqual({ row_version: 1, confirmacion_impacto: ['luz'] });
+  await screen.findByTestId('deshabilitar-cambiado');
+  expect(screen.getByText(IMPACTO_CAMBIADO.titulo)).toBeTruthy();
+  expect(screen.getByText(IMPACTO_CAMBIADO.textoNeutro)).toBeTruthy();
+  expect(screen.queryByTestId('impacto-luz')).toBeNull();
+  expect(f.cliente.deshabilitarMagnitud).toHaveBeenCalledTimes(1); // sin reenvío automático
+  await act(async () => fireEvent.press(screen.getByTestId('deshabilitar-confirmar')));
+  expect((f.cliente.deshabilitarMagnitud as jest.Mock).mock.calls[1][1]).toEqual({ row_version: 1, confirmacion_impacto: [] });
+  await waitFor(() => expect(screen.queryByTestId('hoja-deshabilitar')).toBeNull());
+});
+
+test('deshabilitar con impacto (M14) y con impacto ampliado (M15): cada envío lo confirma el usuario', async () => {
+  const f = fakeMag();
+  const respuestas = [
     rechazo('MAGNITUD_DESHABILITAR_REQUIERE_CONFIRMACION', { categorias_no_capturables: [
       { categoria_id: 'luz', nombre: 'Luz', obligatoria: true }, { categoria_id: 'agua', nombre: 'Agua', obligatoria: true }] }),
     { tipo: 'OK' as const, datos: { magnitud: { ...CATALOGO[1], enabled: false, row_version: 2 }, idempotente: false, modificadas: ['kwh'] } },
@@ -483,19 +671,31 @@ test('deshabilitar con impacto (M14) y con impacto cambiado (M15): cada envío l
   await abrirFicha(f, 'a-kwh');
   await act(async () => fireEvent.press(screen.getByTestId('bloque-deshabilitar')));
   await screen.findByTestId('hoja-deshabilitar');
-  expect(screen.getByTestId('impacto-luz').props.accessibilityLabel).toBe('Hogar › Luz: obligatoria');
-  expect(screen.getByText(NOTA_DESHABILITAR)).toBeTruthy();
-  expect(screen.queryByTestId('deshabilitar-cambiado')).toBeNull();
   await act(async () => fireEvent.press(screen.getByTestId('deshabilitar-confirmar')));
-  expect((f.cliente.deshabilitarMagnitud as jest.Mock).mock.calls[1][1]).toEqual({ row_version: 1, confirmacion_impacto: ['luz'] });
+  expect((f.cliente.deshabilitarMagnitud as jest.Mock).mock.calls[0][1]).toEqual({ row_version: 1, confirmacion_impacto: ['luz'] });
   // M15: el conjunto cambió; se muestra y NO se reenvía solo.
   await screen.findByTestId('deshabilitar-cambiado');
   expect(screen.getByText(IMPACTO_CAMBIADO.titulo)).toBeTruthy();
+  expect(screen.getByText(IMPACTO_CAMBIADO.texto)).toBeTruthy();
   expect(screen.getByTestId('impacto-agua').props.accessibilityLabel).toBe('Hogar › Agua: obligatoria · nueva');
-  expect(f.cliente.deshabilitarMagnitud).toHaveBeenCalledTimes(2);
+  expect(f.cliente.deshabilitarMagnitud).toHaveBeenCalledTimes(1);
   await act(async () => fireEvent.press(screen.getByTestId('deshabilitar-confirmar')));
-  expect((f.cliente.deshabilitarMagnitud as jest.Mock).mock.calls[2][1]).toEqual({ row_version: 1, confirmacion_impacto: ['luz', 'agua'] });
+  expect((f.cliente.deshabilitarMagnitud as jest.Mock).mock.calls[1][1]).toEqual({ row_version: 1, confirmacion_impacto: ['luz', 'agua'] });
   await waitFor(() => expect(screen.queryByTestId('hoja-deshabilitar')).toBeNull());
+});
+
+test('deshabilitar SIN impacto visible y el servidor CON impacto: M15 (el usuario confirmó «sin impacto») y nueva confirmación', async () => {
+  const f = fakeMag();
+  f.cliente.deshabilitarMagnitud = jest.fn(async () =>
+    rechazo('MAGNITUD_DESHABILITAR_REQUIERE_CONFIRMACION', { categorias_no_capturables: [{ categoria_id: 'luz', nombre: 'Luz', obligatoria: true }] }));
+  await abrirFicha(f, 'a-pot');
+  await act(async () => fireEvent.press(screen.getByTestId('bloque-deshabilitar')));
+  await act(async () => fireEvent.press(screen.getByTestId('confirmar-deshabilitar')));
+  expect(f.cliente.deshabilitarMagnitud).toHaveBeenCalledWith('pot', { row_version: 1, confirmacion_impacto: null });
+  await screen.findByTestId('deshabilitar-cambiado');
+  expect(screen.getByText(IMPACTO_CAMBIADO.texto)).toBeTruthy();
+  expect(screen.getByTestId('impacto-luz').props.accessibilityLabel).toBe('Hogar › Luz: obligatoria · nueva');
+  expect(f.cliente.deshabilitarMagnitud).toHaveBeenCalledTimes(1);
 });
 
 test('rehabilitar: confirmación simple con row_version', async () => {

@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-01 S7-MAG UI, hito 1)
 // Versión: 0.2.0 (F05-01 S7-MAG UI, hito 2): renombrar la magnitud (microcopy de M13; colisión junto al nombre), deshabilitar con impacto calculado por el servidor bajo lock (M14) y «El impacto ha cambiado» con la lista nueva (M15), y rehabilitar con confirmación simple.
 // Versión: 0.3.0 (F05-01 S7-MAG UI, D59 aprobada por Moisés): deshabilitar SIN impacto pide una confirmación simple «¿Deshabilitar «X»?» antes de enviar.
+// Versión: 0.4.0 (F05-01 S7-MAG UI correctivo AJ-S7MAGUI-01/03): el aviso al añadir una magnitud deshabilitada depende de la obligatoriedad elegida (texto neutro sin elección; OBLIGATORIA: la categoría no podrá utilizarse; OPCIONAL: no impide utilizarla); M15 distingue un conjunto que AÑADE categorías (texto de la lámina) de uno que se reduce o queda vacío (texto neutro, D67). AJ-S7MAGUI-08: hoja «“X” ya está rehabilitada, pero no se ha podido añadir a <cat>.» con «Añadir a <cat>» y «Ahora no».
 // ============================================================
 
 import React, { useState } from 'react';
@@ -21,8 +22,16 @@ import { BotonSecundario } from './SelectorCategorias';
 /** Ayuda de obligatoriedad (lámina M07, reutilizada al asociar una existente: D46). */
 export const AYUDA_OBLIGATORIEDAD = (cat: string) =>
   `Afecta solo a registros nuevos de ${cat}. Una obligatoria bloquea el registro hasta informarla.`;
-export const AVISO_DESHABILITADA = (cat: string, mag: string) =>
-  `Esta magnitud está deshabilitada. ${cat} no podrá usarse en registros nuevos mientras «${mag}» siga deshabilitada. Añadirla no la rehabilita.`;
+/** Aviso al asociar una magnitud DESHABILITADA (AJ-S7MAGUI-01): depende de la obligatoriedad ELEGIDA (C07: una opcional deshabilitada no bloquea). */
+export const AVISO_DESHABILITADA = {
+  SIN_ELEGIR: 'Esta magnitud está deshabilitada. Elige si será obligatoria u opcional para ver el efecto.',
+  OBLIGATORIA: 'Esta categoría no podrá utilizarse en registros nuevos mientras esta magnitud siga deshabilitada. Añadirla no la rehabilita.',
+  OPCIONAL:
+    'Esta magnitud está deshabilitada y no podrá informarse en registros nuevos mientras siga así. Añadirla como opcional no impide utilizar la categoría. Añadirla no la rehabilita.',
+};
+export function avisoDeshabilitada(obligatoria: boolean | null): string {
+  return obligatoria === null ? AVISO_DESHABILITADA.SIN_ELEGIR : obligatoria ? AVISO_DESHABILITADA.OBLIGATORIA : AVISO_DESHABILITADA.OPCIONAL;
+}
 export const TEXTO_HACER_OBLIGATORIA = (cat: string, mag: string) =>
   `A partir de ahora, registrar en ${cat} exigirá informar «${mag}». Los registros anteriores no cambian ni se revisan.`;
 export const TEXTO_HACER_OPCIONAL = (cat: string, mag: string) =>
@@ -62,7 +71,7 @@ export function HojaAnadirExistente(p: {
   return (
     <Hoja titulo={`Añadir «${p.magnitud.nombre}» a ${p.categoria}`} testID="hoja-anadir-magnitud">
       {p.magnitud.enabled ? null : (
-        <Aviso testID="anadir-aviso-deshabilitada" texto={AVISO_DESHABILITADA(p.categoria, p.magnitud.nombre)} />
+        <Aviso testID="anadir-aviso-deshabilitada" texto={avisoDeshabilitada(obligatoria)} />
       )}
       <Text style={[tipo.footnote, { color: c.textSecondary }]}>{`En ${p.categoria}`}</Text>
       <Segmentado<boolean>
@@ -181,12 +190,16 @@ export const NOTA_DESHABILITAR = 'Nada de lo ya registrado cambia. No se quita d
 export const IMPACTO_CAMBIADO = {
   titulo: 'El impacto ha cambiado',
   texto: 'Mientras confirmabas, otra categoría ha empezado a usar esta magnitud. Revisa la lista y confirma de nuevo.',
+  /** D67: el conjunto del servidor no añade categorías (se reduce o queda vacío). */
+  textoNeutro: 'Mientras confirmabas, han cambiado las categorías que la piden como obligatoria. Revisa la lista y confirma de nuevo.',
 };
 
 export function HojaDeshabilitar(p: {
   magnitud: string;
   filas: FilaImpacto[];
   cambiado: boolean;
+  /** M15: el conjunto nuevo incluye alguna categoría que no estaba en el confirmado. */
+  ampliado?: boolean;
   guardando: boolean;
   onDeshabilitar: () => void;
   onCancelar: () => void;
@@ -197,7 +210,7 @@ export function HojaDeshabilitar(p: {
       {p.cambiado ? (
         <View testID="deshabilitar-cambiado" accessibilityRole="alert" style={[s.aviso, { backgroundColor: c.partialSurface }]}>
           <Text style={[tipo.subheadline, { color: c.textPrimary, fontWeight: '600' }]}>{IMPACTO_CAMBIADO.titulo}</Text>
-          <Text style={[tipo.footnote, { color: c.textPrimary }]}>{IMPACTO_CAMBIADO.texto}</Text>
+          <Text style={[tipo.footnote, { color: c.textPrimary }]}>{p.ampliado ? IMPACTO_CAMBIADO.texto : IMPACTO_CAMBIADO.textoNeutro}</Text>
         </View>
       ) : (
         <Text style={[tipo.body, { color: c.textPrimary }]}>{TEXTO_DESHABILITAR}</Text>
@@ -227,6 +240,25 @@ export function HojaConfirmarDeshabilitar(p: { magnitud: string; guardando: bool
       <Text style={[tipo.body, { color: c.textPrimary }]}>{TEXTO_CONFIRMAR_DESHABILITAR}</Text>
       <BotonCritico testID="confirmar-deshabilitar" titulo="Deshabilitar" deshabilitado={p.guardando} onPress={p.onDeshabilitar} />
       <BotonSecundario testID="confirmar-deshabilitar-cancelar" titulo="Cancelar" onPress={p.onCancelar} />
+    </Hoja>
+  );
+}
+
+// ------------------------------------------------------------------ Rehabilitar y usar: falta el segundo comando (AJ-S7MAGUI-08)
+/** Son dos comandos: rehabilitar ya confirmó y asociar no. Nunca se promete atomicidad ni se repite la rehabilitación. */
+export const TEXTO_ASOCIAR_PENDIENTE = (mag: string, cat: string) => `“${mag}” ya está rehabilitada, pero no se ha podido añadir a ${cat}.`;
+
+export function HojaAsociarPendiente(p: { magnitud: string; categoria: string; guardando: boolean; onAnadir: () => void; onAhoraNo: () => void }) {
+  return (
+    <Hoja titulo={TEXTO_ASOCIAR_PENDIENTE(p.magnitud, p.categoria)} testID="hoja-asociar-pendiente">
+      <BotonPrimario
+        testID="pendiente-anadir"
+        titulo={`Añadir a ${p.categoria}`}
+        cargando={p.guardando}
+        deshabilitado={p.guardando}
+        onPress={p.onAnadir}
+      />
+      <BotonSecundario testID="pendiente-ahora-no" titulo="Ahora no" onPress={p.onAhoraNo} />
     </Hoja>
   );
 }

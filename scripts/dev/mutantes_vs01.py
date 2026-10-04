@@ -54,7 +54,14 @@
 #   cambiado en lugar de pedir otra confirmacion, M15). Discriminante: suite
 #   js (ajustes_magnitudes.test.tsx).
 #   Censo: 19 py + M01..M12 y U01..U14 (26 js) = 45.
-# Version: 0.7.0
+#   v0.8.0 (F05-01 S7-MAG UI correctivo AJ-S7MAGUI-02/03): U15 (ignora el
+#   resultado de la recarga tras un comando y muestra el aviso de estado
+#   actualizado aunque una lectura haya fallado) y U16 (con impacto visible
+#   envia el primer POST con `confirmacion_impacto: null` sin hoja previa: el
+#   servidor deshabilitaria sin confirmacion si el impacto desaparece).
+#   Discriminante: suite js (ajustes_magnitudes.test.tsx).
+#   Censo: 19 py + M01..M12 y U01..U16 (28 js) = 47.
+# Version: 0.8.0
 # ============================================================
 
 from __future__ import annotations
@@ -146,6 +153,14 @@ MUTANTES = [
     ("U14", "mobile/src/components/MagnitudesCategoria.tsx",
      "      if (nuevas) return setHoja({ tipo: 'DESHABILITAR', afectadas: nuevas, previas: confirmadas, cambiado: true });\n",
      "      if (nuevas) { await p.cliente.deshabilitarMagnitud(m.id, { row_version: m.row_version, confirmacion_impacto: nuevas.map((a) => a.id) }); return setHoja(null); }\n",
+     "js"),
+    ("U15", "mobile/src/components/MagnitudesCategoria.tsx",
+     "    const verificado = await recargarTodo();\n",
+     "    await recargarTodo(); const verificado = true;\n",
+     "js"),
+    ("U16", "mobile/src/components/MagnitudesCategoria.tsx",
+     "              else setHoja({ tipo: 'DESHABILITAR', afectadas: visibles, previas: null, cambiado: false });\n",
+     "              else void deshabilitar(m);\n",
      "js"),
 ]
 

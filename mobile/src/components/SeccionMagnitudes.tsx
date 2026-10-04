@@ -4,6 +4,7 @@
 // Ruta: mobile/src/components/SeccionMagnitudes.tsx
 // Descripción: Sección plegable «Magnitudes · N» del detalle de categoría de Ajustes › Categorías, entre la fila «Icono» y «Acciones» (F09 §12.97.10; lámina SET-MAG v0.1 M01–M05, M16). Plegada: total y resumen «N obligatorias, M opcionales» (y «No usable en registros nuevos» si alguna obligatoria está deshabilitada). Desplegada: asociaciones en su `orden` con «unidad · decimales» y píldoras de TEXTO (Obligatoria / Opcional / Deshabilitada); tocar una fila abre su ficha; «+ Añadir magnitud» (y «Editar orden» si se ofrece y hay más de una); nota de alcance; estado «No usable en registros nuevos» con su motivo y las tres salidas (M03); vacío (M04) distinto del error de carga (M05, «Reintentar», «Nada se ha cambiado»). Disponible también en categorías desactivadas (P1). Aviso de conflicto con recarga (M16). Solo presentación. Consume solo tokens semánticos.
 // Versión: 0.1.0 (F05-01 S7-MAG UI, hito 1)
+// Versión: 0.2.0 (F05-01 S7-MAG UI correctivo AJ-S7MAGUI-02): el aviso se extrae a `AvisoMagnitudes` (también lo pinta la ficha) y, si es de estado sin comprobar, ofrece «Reintentar», que relanza solo las lecturas.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -26,12 +27,29 @@ export const TEXTO_ERROR = 'No es que no haya: el servidor no ha respondido. Nad
 
 export type FaseCatalogo = 'CARGANDO' | 'OK' | 'ERROR';
 
+/** Aviso de la sección o de la ficha (M16 y estado sin comprobar). Tratamiento neutro: no es un error del usuario. */
+export function AvisoMagnitudes(p: { aviso: { titulo: string; texto: string; reintentar?: boolean }; onReintentar: () => void }) {
+  const { c } = useTema();
+  return (
+    <View testID="magnitudes-aviso" accessibilityRole="alert" style={[s.aviso, { backgroundColor: c.unknownSurface }]}>
+      <Ionicons name="refresh" size={18} color={c.textSecondary} />
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text style={[tipo.subheadline, { color: c.textPrimary, fontWeight: '600' }]}>{p.aviso.titulo}</Text>
+        <Text style={[tipo.footnote, { color: c.textPrimary }]}>{p.aviso.texto}</Text>
+        {p.aviso.reintentar ? <BotonTexto testID="magnitudes-aviso-reintentar" titulo="Reintentar" onPress={p.onReintentar} /> : null}
+      </View>
+    </View>
+  );
+}
+
 export function SeccionMagnitudes(p: {
   categoria: string;
   magnitudes: MagnitudCategoria[];
   abierta: boolean;
   fase: FaseCatalogo;
-  aviso: { titulo: string; texto: string } | null;
+  aviso: { titulo: string; texto: string; reintentar?: boolean } | null;
+  /** Relanza SOLO las lecturas (árbol y catálogo) cuando el aviso es de estado sin comprobar (AJ-S7MAGUI-02). */
+  onReintentarAviso: () => void;
   onAlternar: () => void;
   onFila: (m: MagnitudCategoria) => void;
   onAnadir: () => void;
@@ -50,15 +68,7 @@ export function SeccionMagnitudes(p: {
         .join(' · ') || null;
   return (
     <View testID="seccion-magnitudes">
-      {p.aviso ? (
-        <View testID="magnitudes-aviso" accessibilityRole="alert" style={[s.aviso, { backgroundColor: c.unknownSurface }]}>
-          <Ionicons name="refresh" size={18} color={c.textSecondary} />
-          <View style={{ flex: 1, gap: 2 }}>
-            <Text style={[tipo.subheadline, { color: c.textPrimary, fontWeight: '600' }]}>{p.aviso.titulo}</Text>
-            <Text style={[tipo.footnote, { color: c.textPrimary }]}>{p.aviso.texto}</Text>
-          </View>
-        </View>
-      ) : null}
+      {p.aviso ? <AvisoMagnitudes aviso={p.aviso} onReintentar={p.onReintentarAviso} /> : null}
       <View style={[s.tarjeta, { borderColor: c.borderStandard, backgroundColor: c.surfacePrimary }]}>
         <Pressable
           testID="magnitudes-cabecera"

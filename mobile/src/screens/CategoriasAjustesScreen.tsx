@@ -7,6 +7,7 @@
 // Versión: 0.2.0 (F05-01 S6-WIRE+UI (este mandato), commit 2): acciones EDIT-* en el detalle (lámina SET-CAT S03–S05; mandato §5) y Editar orden en la lista (S06; D-UI-01). Cada comando usa el `row_version` del estado cargado. Conflicto (VERSION_DESFASADA, CONJUNTO_HERMANOS_DESFASADO): se recarga y se muestra el estado actual, nunca se reintenta solo. INDETERMINADO: se recarga antes de cualquier repetición; nunca se duplica. Renombrar: colisión junto al nombre. Mover: selector en modo AJUSTES sin el propio subárbol ni padres desactivados; elegir la ubicación actual no envía nada. Cambiar ámbito: GET /uso antes de confirmar y `confirmacion_uso` igual a ese uso; ante CAMBIO_AMBITO_REQUIERE_CONFIRMACION se muestra el uso nuevo (`detalle.efectos_activos`) y se pide confirmar otra vez; sin coherencia padre/hijo (Q3). Desactivar: con subcategorías activas (N del árbol cargado, subárbol completo) solo RAMA o Cancelar; sin ellas confirmación simple SOLO_SI_SIN_HIJOS_ACTIVOS; si aun así llega CATEGORIA_TIENE_HIJOS_ACTIVOS se recarga y se ofrece RAMA. Reactivar: solo este nodo (sin cascada). Editar orden: conjunto COMPLETO de hermanos (activos y desactivados) y UNA llamada a POST /v1/categorias/reordenar; sin cambios no se envía nada («Sin cambios», decisión de ejecución); nunca /{id}/orden.
 // Versión: 0.3.0 (F05-01 S7-MAG UI, hito 1; F09 §12.97.10, lámina SET-MAG v0.1): sección plegada «Magnitudes · N» entre «Icono» y «Acciones» (también en desactivadas, P1) con su selector del catálogo y su ficha (MagnitudesCategoria.tsx). El árbol se puede recargar en SILENCIO (sin pasar por «cargando») para que la ficha o la sección no parpadeen tras un comando de magnitudes; si esa recarga falla, se conserva el árbol mostrado y el aviso de la sección lo explica. El selector y las hojas de magnitudes son tareas inmersivas.
 // Versión: 0.4.0 (F05-01 S7-MAG UI, hito 2): el controlador de magnitudes recibe `nuevoId` (identidad del alta rápida) y la ruta visible de cada categoría («Hogar › Luz») para la ficha y el impacto de deshabilitar.
+// Versión: 0.5.0 (F05-01 S7-MAG UI correctivo AJ-S7MAGUI-02): `cargar(true)` devuelve si la lectura del árbol fue OK; en silencio, un fallo conserva el árbol mostrado y el controlador de magnitudes lo identifica como posiblemente desfasado (nunca «estado actualizado» sin verificarlo).
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -87,14 +88,16 @@ export function CategoriasAjustesScreen(p: {
   const [uso, setUso] = useState<UsoCarga>({ fase: 'CARGANDO' });
   const [usoCambiado, setUsoCambiado] = useState(false);
 
-  const cargar = useCallback(async (silencioso = false) => {
+  /** Devuelve si la lectura fue OK: en silencio, un fallo conserva el árbol mostrado y quien recarga lo comunica (AJ-S7MAGUI-02). */
+  const cargar = useCallback(async (silencioso = false): Promise<boolean> => {
     if (!silencioso) setCarga({ fase: 'CARGANDO' });
     const r = await p.cliente.arbolCategorias();
     if (r.tipo !== 'OK') {
       if (!silencioso) setCarga({ fase: 'ERROR' });
-      return;
+      return false;
     }
     setCarga({ fase: 'OK', arbol: construirArbol(r.datos.categorias) });
+    return true;
   }, [p.cliente]);
   useEffect(() => {
     void cargar();
@@ -241,7 +244,7 @@ export function CategoriasAjustesScreen(p: {
         nuevoId={p.nuevoId}
         arbol={arbol}
         padreInicial={tarea.padre}
-        onRecargarArbol={cargar}
+        onRecargarArbol={async () => { await cargar(); }}
         onCancelar={() => setTarea(null)}
         onCreada={(padre) => {
           setTarea(null);

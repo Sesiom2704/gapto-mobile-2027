@@ -5,6 +5,7 @@
 // Descripción: Ficha de una magnitud abierta desde una fila de la sección «Magnitudes» de una categoría (F09 §12.97.10; lámina SET-MAG v0.1 M11–M13). Cabecera «‹ <categoría> · <magnitud>» con nombre, «unidad · decimales» y píldoras de TEXTO. Bloque «En <categoría>» con las acciones de la ASOCIACIÓN: «Hacer obligatoria» / «Hacer opcional» (M11) y «Quitar de <categoría>» (M12, crítica). Las hojas las pinta el controlador encima. Solo presentación. Consume solo tokens semánticos.
 // Versión: 0.1.0 (F05-01 S7-MAG UI, hito 1: bloque de la asociación)
 // Versión: 0.2.0 (F05-01 S7-MAG UI, hito 2): `BloqueMagnitud` (M13), bloque global «Magnitud · afecta a todas sus categorías»: unidad, decimales y estado; nota de que unidad y decimales no se editan (R17); «Usada en» con la ruta de cada categoría, «esta categoría» marcada y su obligatoriedad en texto; «Aparece en N registros históricos.»; acciones Renombrar y Deshabilitar (crítica) o Rehabilitar, con la microcopy de renombrar. Estados de carga y error del catálogo distintos.
+// Versión: 0.3.0 (F05-01 S7-MAG UI correctivo AJ-S7MAGUI-02): la ficha pinta arriba el aviso de estado sin comprobar (con «Reintentar») cuando la recarga tras un comando falla.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -25,6 +26,8 @@ export function FichaMagnitud(p: {
   onAtras: () => void;
   onObligatoriedad: () => void;
   onQuitar: () => void;
+  /** Aviso de estado sin comprobar tras un comando (AJ-S7MAGUI-02), encima de todo. */
+  aviso?: React.ReactNode;
   /** Bloque global de la magnitud (hito 2), debajo del bloque de la asociación. */
   children?: React.ReactNode;
 }) {
@@ -35,6 +38,7 @@ export function FichaMagnitud(p: {
     <View testID="ficha-magnitud" style={{ flex: 1, backgroundColor: c.background }}>
       <CabeceraNavegacion titulo={a.nombre} atras={{ etiqueta: p.categoria, onPress: p.onAtras }} testIDAtras="ficha-atras" />
       <ScrollView contentContainerStyle={{ paddingBottom: inset.bottom + espacio.xl }}>
+        {p.aviso}
         <View style={s.cabecera}>
           <View style={{ flex: 1, gap: 2 }}>
             <Text style={[tipo.titleMedium, { color: a.enabled ? c.textPrimary : c.textSecondary }]}>{a.nombre}</Text>
