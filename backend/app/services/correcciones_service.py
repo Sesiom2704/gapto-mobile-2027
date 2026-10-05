@@ -33,6 +33,15 @@
 #   D-080 · ADVISORY PRIMERO. Si la correccion toca superficies de inversion,
 #   el advisory (INVERSIONES, owner) se toma ANTES de cualquier row lock. Los
 #   locks genericos no lo sustituyen.
+# Version: 0.9.0
+#   0.9.0 (F04-D052 enmienda E1): frontera economica por ARQUETIPO sobre los
+#   hechos de reduccion, con los helpers compartidos de efectos_service:
+#   al crear (I1 CONDONACION sin GASTO/INGRESO; I6 REEMBOLSO sin INGRESO ni
+#   GASTO negativo), al mutar un efecto (I2 sin reclasificar hacia/desde
+#   GASTO/INGRESO en CONDONACION; I6) y sobre el estado final de un hecho
+#   CONDONACION (I3/I5 el declarado no supera lo condonado; I4 uno como
+#   maximo). Se evalua antes de las guardas presupuestaria y territorial,
+#   con codigo propio. Ninguna otra regla de OP-21 cambia.
 # Version: 0.8.0
 #   0.8.0 (F04-D048 R3 · A18 §12 + pronunciamiento R3-01/02/04): OP-21 corrige
 #   tambien las cuatro dimensiones contextuales, SOLO con las operaciones
@@ -110,7 +119,13 @@ from app.core.unidad_trabajo import SesionMotor, Traza, UnidadDeTrabajo
 from app.repositories import auditoria_repository as auditoria
 from app.repositories import correcciones_repository as repo_corr
 from app.repositories import efectos_repository as repo_efectos
-from app.services.efectos_service import EfectosService
+from app.services.efectos_service import (
+    ARQUETIPO_CONDONACION,
+    EfectosService,
+    exigir_creacion_e1,
+    exigir_estado_final_condonacion,
+    exigir_mutacion_e1,
+)
 
 TABLA_ATRIBUCIONES = repo_efectos.TABLA_ATRIBUCIONES
 from app.repositories import hechos_repository as repo_hechos
@@ -307,13 +322,25 @@ class CorreccionesService:
                     "El hecho indicado no existe o no es accesible.",
                 )
 
-            actualizados = self._actualizar_efectos(sesion, datos)
+            # F04-D052 E1: frontera economica por arquetipo (I1, I6 al crear).
+            arquetipo = repo_corr.tipo_de_hecho(sesion, datos.hecho_id)
+            for efecto in datos.efectos_a_crear:
+                exigir_creacion_e1(
+                    sesion, datos.hecho_id, arquetipo, efecto.tipo_efecto,
+                    efecto.importe_delta,
+                )
+
+            actualizados = self._actualizar_efectos(sesion, datos, arquetipo=arquetipo)
             # 3. Las aportaciones se retiran ANTES que su conciliacion: al
             #    reves quedarian apuntando al vacio (D-169).
             conciliaciones = self._eliminar_conciliaciones(sesion, datos)
             eliminados = self._eliminar_efectos(sesion, datos)
             relaciones = self._eliminar_relaciones(sesion, datos)
             creados = self._crear_efectos(sesion, datos)
+            # F04-D052 E1 (I3, I4, I5): estado final de los efectos de un hecho
+            # CONDONACION, antes de las guardas presupuestaria y territorial.
+            if arquetipo == ARQUETIPO_CONDONACION:
+                exigir_estado_final_condonacion(sesion, datos.hecho_id)
 
             # 3bis. F04-D039. Las atribuciones se mutan DESPUES de los efectos
             #     para que un CREATE pueda colgar de un efecto de reemplazo
@@ -615,7 +642,11 @@ class CorreccionesService:
                 )
 
     def _actualizar_efectos(
-        self, sesion: SesionMotor, datos: DatosCorreccion
+        self,
+        sesion: SesionMotor,
+        datos: DatosCorreccion,
+        *,
+        arquetipo: str | None = None,
     ) -> int:
         total = 0
         for efecto_id, cambios in datos.efectos_a_actualizar.items():
@@ -626,6 +657,12 @@ class CorreccionesService:
                     "Alguno de los efectos a corregir no existe o no es "
                     "accesible.",
                 )
+            # F04-D052 E1 (I2, I6): la mutacion se juzga sobre antes/despues.
+            exigir_mutacion_e1(
+                arquetipo,
+                json.loads(resultado[0], parse_float=decimal.Decimal),
+                json.loads(resultado[1], parse_float=decimal.Decimal),
+            )
             auditoria.registrar(
                 sesion,
                 tabla=repo_corr.TABLA_EFECTOS,

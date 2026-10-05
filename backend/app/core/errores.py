@@ -15,6 +15,13 @@
 #   operacion y reintentar no la hara posible". Fusionarlos haria que la UX
 #   reintentase indefinidamente algo imposible, o que abandonase algo que solo
 #   necesitaba otro intento.
+# Version: 0.18.0
+#   0.18.0 (F04-D052 enmienda E1): `CONDONACION_EFECTO_NO_PERMITIDO`
+#   (I1-I5: OP-04/OP-21 no crean ni reclasifican GASTO/INGRESO en un hecho
+#   CONDONACION; el efecto declarado no supera lo condonado y es unico) y
+#   `REEMBOLSO_EFECTO_NO_PERMITIDO` (I6: INGRESO o GASTO negativo en un hecho
+#   REEMBOLSO, INV-12 via 1). Distintos de ENTRADA_INVALIDA de localizacion a
+#   proposito: el rechazo es economico, no territorial.
 # Version: 0.17.0
 #   0.17.0 (F04-D052 B2, D5): causa de reduccion de posiciones genericas.
 #   Nuevos `CAUSA_REDUCCION_INVALIDA` (causa ausente, desconocida o que no
@@ -222,6 +229,10 @@ class CodigoError(str, enum.Enum):
     CAUSA_REDUCCION_INVALIDA = "CAUSA_REDUCCION_INVALIDA"
     CUENTA_GAPTO_REQUERIDA = "CUENTA_GAPTO_REQUERIDA"
     PAGO_POR_TERCERO_FUERA_DE_ALCANCE = "PAGO_POR_TERCERO_FUERA_DE_ALCANCE"
+    # F04-D052 E1. Frontera de OP-04/OP-21 sobre hechos de reduccion: lo que
+    # PosicionesService garantiza no puede eludirse por las vias genericas.
+    CONDONACION_EFECTO_NO_PERMITIDO = "CONDONACION_EFECTO_NO_PERMITIDO"
+    REEMBOLSO_EFECTO_NO_PERMITIDO = "REEMBOLSO_EFECTO_NO_PERMITIDO"
 
     # --- F04-05 · reglas y versionado -------------------------------------
     REGLA_NO_ENCONTRADA = "REGLA_NO_ENCONTRADA"

@@ -21,9 +21,16 @@
 #   con movimiento (M2), pago por tercero (M5), subtipo de financiacion (M6),
 #   tope de INGRESO (M7), INGRESO duplicado (M9), NO_APLICA con INGRESO
 #   (M18), §9 saldo indeterminado (M19) y motivo_cierre <-> causa (M12).
+#
+#   Enmienda E1 (frontera OP-04/OP-21 por arquetipo; discriminantes en
+#   test_145): I1 (M20), I4 (M21), I2 (M22), I3/I5 (M23, una sola comprobacion
+#   fisica sobre el estado final), I6 al crear (M24) e I6 al mutar (M25).
 # Uso:
 #   python scripts/mutantes/f04_d052.py            # todos
 #   python scripts/mutantes/f04_d052.py D052-M3    # subconjunto
+# Version: 0.2.0
+#   0.2.0 (F04-D052 enmienda E1): suite test_144 + test_145 y mutantes
+#   D052-M20..M25 sobre las guardas I1-I6 de OP-04/OP-21.
 # Version: 0.1.0
 # ============================================================
 from __future__ import annotations
@@ -35,8 +42,12 @@ import sys
 from dataclasses import dataclass
 
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
-SUITE = ("tests/backend/test_144_f04_d052_causas_reduccion.py",)
+SUITE = (
+    "tests/backend/test_144_f04_d052_causas_reduccion.py",
+    "tests/backend/test_145_f04_d052_e1_op04_op21.py",
+)
 POS = "backend/app/services/posiciones_service.py"
+EFE = "backend/app/services/efectos_service.py"
 REPO = "backend/app/repositories/posiciones_repository.py"
 MARCADOR = RAIZ / ".mutante_f04_d052_en_curso"
 
@@ -215,6 +226,54 @@ MUTANTES = (
         "            if saldo.conocido and importe > saldo.importe:\n",
         "            if importe > saldo.importe:\n",
         "test_4_condonacion_saldo_indeterminado_sin_validar_importe",
+    ),
+    Mutante(
+        "D052-M20", "E1-I1: OP-04/OP-21 no crean GASTO/INGRESO en un hecho CONDONACION",
+        EFE,
+        "        raise ErrorMotor(\n"
+        "            CodigoError.CONDONACION_EFECTO_NO_PERMITIDO,\n"
+        "            \"I1: ",
+        "        if False: raise ErrorMotor(\n"
+        "            CodigoError.CONDONACION_EFECTO_NO_PERMITIDO,\n"
+        "            \"I1: ",
+        "test_i1_op04_no_crea_gasto_ni_ingreso_en_condonacion",
+    ),
+    Mutante(
+        "D052-M21", "E1-I4: como maximo un efecto declarado por hecho CONDONACION",
+        EFE,
+        "        if _declarados_de(sesion, hecho_id):\n",
+        "        if False:\n",
+        "test_i4_op04_segundo_ingreso_declarado",
+    ),
+    Mutante(
+        "D052-M22", "E1-I2: sin reclasificar hacia/desde GASTO/INGRESO en CONDONACION",
+        EFE,
+        "        arquetipo == ARQUETIPO_CONDONACION\n"
+        "        and tipo_antes != tipo_despues\n",
+        "        False\n"
+        "        and tipo_antes != tipo_despues\n",
+        "test_i2_op21_no_cambia_la_naturaleza_del_declarado",
+    ),
+    Mutante(
+        "D052-M23", "E1-I3/I5: el declarado no supera lo condonado (estado final)",
+        EFE,
+        "    if decimal.Decimal(declarados[0][\"neto\"]) > condonado:\n",
+        "    if False:\n",
+        "test_i5_op21_reducir_lo_condonado_por_debajo_del_declarado",
+    ),
+    Mutante(
+        "D052-M24", "E1-I6: REEMBOLSO sin INGRESO ni GASTO negativo al crear",
+        EFE,
+        "    if arquetipo == ARQUETIPO_REEMBOLSO and (\n",
+        "    if False and (\n",
+        "test_i6_op04_reembolso_sin_ingreso_ni_gasto_negativo",
+    ),
+    Mutante(
+        "D052-M25", "E1-I6: REEMBOLSO sin INGRESO ni GASTO negativo al mutar",
+        EFE,
+        "        if muta and (\n",
+        "        if False and (\n",
+        "test_i6_regresion_gasto_positivo_admitido_y_no_mutable_a_negativo",
     ),
 )
 

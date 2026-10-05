@@ -29,6 +29,25 @@
 #   `hechos_financieros.row_version`; ni `hecho_efectos` ni
 #   `efecto_atribuciones` tienen el suyo. Toda operacion con exito incrementa
 #   esa version UNA sola vez, con la guarda en SQL.
+#
+#   F04-D052 ENMIENDA E1 · Frontera economica de los hechos de reduccion. Lo
+#   que PosicionesService garantiza al escribir una condonacion o un
+#   reembolso no puede eludirse por las vias genericas OP-04/OP-21:
+#     I1 OP-04/OP-21 no crean GASTO/INGRESO en un hecho CONDONACION.
+#     I2 OP-21 no reclasifica hacia ni desde GASTO/INGRESO en CONDONACION.
+#     I3 el efecto declarado no supera |efecto de posicion negativo| del hecho.
+#     I4 como maximo un efecto declarado por hecho CONDONACION.
+#     I5 corregir el efecto de posicion no puede dejar lo condonado por debajo
+#        del efecto declarado.
+#     I6 un hecho REEMBOLSO no admite INGRESO ni GASTO negativo (INV-12 via 1).
+#   Se juzga por ARQUETIPO del hecho, antes de la frontera territorial, con
+#   codigos propios. GENERACION_DERECHO_OBLIGACION (historico/migrado) no se
+#   toca. Los helpers viven aqui y OP-21 los reutiliza.
+# Version: 0.5.0
+#   0.5.0 (F04-D052 enmienda E1): guardas I1 e I6 en OP-04 por arquetipo, y
+#   helpers `exigir_creacion_e1`, `exigir_mutacion_e1` y
+#   `exigir_estado_final_condonacion` compartidos con OP-21. Ninguna otra
+#   regla de OP-04 cambia.
 # Version: 0.4.0
 #   0.4.0 (F04-D046 R2 · mandato R1+R2 v0.3 §5/§9 + E01): frontera
 #   presupuestaria y territorial de OP-04. `presupuestable` esta INACTIVO
@@ -80,11 +99,17 @@ from app.core.modelos_efectos import (
 )
 from app.core.unidad_trabajo import SesionMotor, Traza, UnidadDeTrabajo
 from app.repositories import auditoria_repository as auditoria
+from app.repositories import correcciones_repository as repo_corr
 from app.repositories import efectos_repository as repo_efectos
 from app.repositories import hechos_repository as repo_hechos
 from app.repositories import relaciones_repository as repo_rel
 
 CERO = decimal.Decimal("0")
+
+# F04-D052 E1. Arquetipos de reduccion protegidos y naturalezas de posicion.
+ARQUETIPO_CONDONACION = "CONDONACION"
+ARQUETIPO_REEMBOLSO = "REEMBOLSO"
+NATURALEZAS_DE_POSICION = ("DEUDA", "DERECHO_COBRO")
 
 # F04-D046 R2 · A08-bis (INV-11). Naturalezas con efecto presupuestario.
 NATURALEZAS_PRESUPUESTABLES = frozenset({"GASTO", "INGRESO"})
@@ -96,6 +121,119 @@ MOTIVO_ACTIVACION_PRESUPUESTABLE = (
 
 def _a_dict(snapshot_json: str) -> dict[str, Any]:
     return json.loads(snapshot_json, parse_float=decimal.Decimal)
+
+
+# ==================================================================
+# F04-D052 E1 · guardas por arquetipo (compartidas con OP-21)
+# ==================================================================
+def _declarados_de(sesion: SesionMotor, hecho_id: uuid.UUID) -> list[dict[str, Any]]:
+    """Capacidad de las naturalezas declarables (GASTO/INGRESO) del hecho."""
+    return [
+        c
+        for c in (
+            repo_rel.capacidad_por_naturaleza(sesion, hecho_id, naturaleza)
+            for naturaleza in NATURALEZAS_PRESUPUESTABLES
+        )
+        if c is not None
+    ]
+
+
+def exigir_creacion_e1(
+    sesion: SesionMotor,
+    hecho_id: uuid.UUID,
+    arquetipo: str | None,
+    tipo_efecto: str,
+    importe_delta: Any,
+) -> None:
+    """I4 / I1 / I6 al CREAR un efecto por OP-04 u OP-21.
+
+    I4 se evalua ANTES que I1: si el hecho CONDONACION ya tiene su efecto
+    declarado, el rechazo es "segundo declarado" (I4) y no la regla general.
+    """
+    if arquetipo == ARQUETIPO_CONDONACION and tipo_efecto in NATURALEZAS_PRESUPUESTABLES:
+        if _declarados_de(sesion, hecho_id):
+            raise ErrorMotor(
+                CodigoError.CONDONACION_EFECTO_NO_PERMITIDO,
+                "I4: el hecho CONDONACION ya tiene su efecto declarado; no "
+                "admite un segundo por ninguna via.",
+            )
+        raise ErrorMotor(
+            CodigoError.CONDONACION_EFECTO_NO_PERMITIDO,
+            "I1: un hecho CONDONACION no admite crear GASTO ni INGRESO por "
+            "OP-04/OP-21; el efecto declarado solo nace con la propia "
+            "condonacion.",
+        )
+    if arquetipo == ARQUETIPO_REEMBOLSO and (
+        tipo_efecto == "INGRESO"
+        or (tipo_efecto == "GASTO" and decimal.Decimal(importe_delta) < CERO)
+    ):
+        raise ErrorMotor(
+            CodigoError.REEMBOLSO_EFECTO_NO_PERMITIDO,
+            "I6: un hecho REEMBOLSO no admite INGRESO ni GASTO negativo: "
+            "cobrar o pagar no es ganar ni deshacer un gasto (INV-12).",
+        )
+
+
+def exigir_mutacion_e1(
+    arquetipo: str | None, antes: dict[str, Any], despues: dict[str, Any]
+) -> None:
+    """I2 / I6 al MUTAR un efecto existente por OP-21 (snapshots antes/despues)."""
+    tipo_antes, tipo_despues = antes.get("tipo_efecto"), despues.get("tipo_efecto")
+    if (
+        arquetipo == ARQUETIPO_CONDONACION
+        and tipo_antes != tipo_despues
+        and (
+            tipo_antes in NATURALEZAS_PRESUPUESTABLES
+            or tipo_despues in NATURALEZAS_PRESUPUESTABLES
+        )
+    ):
+        raise ErrorMotor(
+            CodigoError.CONDONACION_EFECTO_NO_PERMITIDO,
+            "I2: en un hecho CONDONACION no se reclasifica un efecto hacia ni "
+            "desde GASTO/INGRESO.",
+        )
+    if arquetipo == ARQUETIPO_REEMBOLSO:
+        importe = decimal.Decimal(str(despues.get("importe_delta")))
+        muta = tipo_antes != tipo_despues or decimal.Decimal(
+            str(antes.get("importe_delta"))
+        ) != importe
+        if muta and (
+            tipo_despues == "INGRESO" or (tipo_despues == "GASTO" and importe < CERO)
+        ):
+            raise ErrorMotor(
+                CodigoError.REEMBOLSO_EFECTO_NO_PERMITIDO,
+                "I6: la correccion dejaria INGRESO o GASTO negativo en un hecho "
+                "REEMBOLSO (INV-12).",
+            )
+
+
+def exigir_estado_final_condonacion(sesion: SesionMotor, hecho_id: uuid.UUID) -> None:
+    """I3 / I4 / I5 sobre el ESTADO FINAL de un hecho CONDONACION.
+
+    Lo condonado es |efecto de posicion negativo| del MISMO hecho (no un
+    importe de referencia). El efecto declarado (INGRESO en obligacion, GASTO
+    en derecho) es unico y no lo supera.
+    """
+    declarados = _declarados_de(sesion, hecho_id)
+    if not declarados:
+        return
+    if sum(c["efectos"] for c in declarados) > 1:
+        # Defensa en profundidad de I4 sobre el estado final.
+        raise ErrorMotor(
+            CodigoError.CONDONACION_EFECTO_NO_PERMITIDO,
+            "I4: un hecho CONDONACION admite como maximo un efecto declarado.",
+        )
+    condonado = CERO
+    for naturaleza in NATURALEZAS_DE_POSICION:
+        posicion = repo_rel.capacidad_por_naturaleza(sesion, hecho_id, naturaleza)
+        if posicion is not None and decimal.Decimal(posicion["neto"]) < CERO:
+            condonado += -decimal.Decimal(posicion["neto"])
+    if decimal.Decimal(declarados[0]["neto"]) > condonado:
+        raise ErrorMotor(
+            CodigoError.CONDONACION_EFECTO_NO_PERMITIDO,
+            "I3/I5: el efecto declarado no puede superar lo condonado en el "
+            "mismo hecho.",
+        )
 
 
 def _signo(valor: decimal.Decimal) -> int:
@@ -193,6 +331,14 @@ class EfectosService:
                     CodigoError.IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION,
                     "Alguno de los identificadores reservados ya esta en uso "
                     "con otra intencion.",
+                )
+
+            # F04-D052 E1 (I1, I6): frontera economica por arquetipo, ANTES de
+            # la territorial, para que el rechazo sea el economico.
+            arquetipo = repo_corr.tipo_de_hecho(sesion, hecho_id)
+            for efecto in efectos:
+                exigir_creacion_e1(
+                    sesion, hecho_id, arquetipo, efecto.tipo_efecto, efecto.importe_delta
                 )
 
             nueva_version = self._frontera_y_toque_raiz(
