@@ -57,6 +57,10 @@
 #     python scripts/dev/bootstrap_dev_db.py --seed-categorias \
 #       --dev-dsn "host=127.0.0.1 port=5434 dbname=gapto2027_dev user=<rol>" \
 #       --api-url http://192.168.1.10:8027
+# Version: 0.7.0  -- D-201 (B1 0350): HEAD_AUTORIZADO_ENVDEV pasa de "0340" a
+#                   "0350" tras la evidencia de 0350 (replica local D-189, Neon
+#                   test, PASS_BASE_CLEANROOM_F03_0002_0350, mutation gate 8/8 y
+#                   recertificacion RV3 diferencial). ENV-DEV no certifica.
 # Version: 0.6.0  -- F05-01 S7-MAG, decision de ejecucion D33 (Moises, 2026-10-02):
 #                   el seed GARANTIZA EXISTENCIA, NO ESTADO. Paso (2): antes de
 #                   cada POST de categoria se comprueba por su UUID determinista
@@ -117,7 +121,7 @@ HOSTS_LOCALES = {"localhost", "127.0.0.1", "::1"}
 
 # Head maximo que ENV-DEV puede materializar. Cambiarlo es una decision
 # revisada (commit propio), nunca un efecto lateral de publicar migrations.
-HEAD_AUTORIZADO_ENVDEV = "0340"
+HEAD_AUTORIZADO_ENVDEV = "0350"
 PATRON_MIGRATION = re.compile(r"^(\d{4})_[a-z0-9_]+\.sql$")
 
 

@@ -6,15 +6,18 @@
 #              de datos que bootstrap_dev_db.py no puede materializar en
 #              ENV-DEV una migration posterior al head autorizado solo porque
 #              este publicada en main:
-#                - el head autorizado vigente es 0340 (D-197); cambiarlo exige
+#                - el head autorizado vigente es 0350 (D-201); cambiarlo exige
 #                  editar este test: es deliberado;
-#                - sobre el repositorio real, la cadena termina en 0340 y lo
+#                - sobre el repositorio real, la cadena termina en 0350 y lo
 #                  posterior queda omitido y listado;
 #                - cadena incoherente (head ausente, numero duplicado, nombre
 #                  fuera de patron) = abortar;
 #                - la validacion ocurre ANTES de crear o destruir la base.
 #              Discrimina: quitar el techo, poner el techo tras _crear_base o
 #              subir la constante sin revision hacen fallar al menos un caso.
+# Version: 0.3.0  -- D-201 (B1 0350): el head autorizado de ENV-DEV pasa a 0350.
+#                   Sobre el repositorio real la cadena debe terminar EXACTAMENTE
+#                   en 0350; cualquier migration posterior publicada queda omitida.
 # Version: 0.2.0  -- D-197: el head autorizado de ENV-DEV pasa a 0340. Sobre el
 #                   repositorio real la cadena debe terminar EXACTAMENTE en 0340;
 #                   cualquier migration posterior publicada queda omitida.
@@ -49,8 +52,8 @@ def _p(*nombres: str) -> list[pathlib.Path]:
     return [pathlib.Path("migrations") / n for n in nombres]
 
 
-def test_head_autorizado_vigente_es_0340() -> None:
-    assert B.HEAD_AUTORIZADO_ENVDEV == "0340"
+def test_head_autorizado_vigente_es_0350() -> None:
+    assert B.HEAD_AUTORIZADO_ENVDEV == "0350"
 
 
 def test_repositorio_real_se_corta_en_el_head_autorizado() -> None:
@@ -60,7 +63,7 @@ def test_repositorio_real_se_corta_en_el_head_autorizado() -> None:
     assert all(f.name[:4] <= B.HEAD_AUTORIZADO_ENVDEV for f in a_aplicar)
     assert all(f.name[:4] > B.HEAD_AUTORIZADO_ENVDEV for f in omitidas)
     assert len(a_aplicar) + len(omitidas) == len(reales)
-    assert a_aplicar[-1].name == "0340_f03_05_categoria_icon_key.sql"
+    assert a_aplicar[-1].name == "0350_f03_06_tipo_hecho_condonacion.sql"
 
 
 def test_sintetico_omite_lo_posterior() -> None:
