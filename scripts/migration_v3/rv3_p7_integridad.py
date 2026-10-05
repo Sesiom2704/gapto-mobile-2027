@@ -16,6 +16,15 @@
 #                   run_clean_room.py (p. ej. 0340). Por defecto "0330": el
 #                   comportamiento historico de RV3-GATE no cambia. Una referencia
 #                   pendiente (None) aborta: fail-closed.
+# Versión: 0.3.0  -- F03-06 / D-201 / 0350 (B1). Las semillas de sistema dejan
+#                   de aceptarse por count(*) dinamico: se fijan por head en
+#                   SEMILLAS_SISTEMA_POR_HEAD (0330 y 0340: 10 = 7 tipos_hecho
+#                   de 0150 + 3 metricas_definicion; 0350: 11 = 8 tipos_hecho,
+#                   con CONDONACION, + 3 metricas). Cualquier otro recuento es
+#                   violacion y un head sin semillas declaradas falla cerrado.
+#                   check_sin_cambios y auditar reciben el head (por defecto
+#                   "0330", igual que main): las llamadas actuales no cambian
+#                   de comportamiento. La semantica RV3 no cambia.
 # Versión: 0.1.0
 # ============================================================
 from __future__ import annotations
@@ -241,9 +250,12 @@ def check_invariantes(c, esq) -> dict:
 
 SEMILLAS_0330 = {"tipos_hecho": None, "metricas_definicion": ("AHORRO_NETO_PYL", "APORTACION_INVERSION_NETA",
                                                           "TRANSFERENCIA_AHORRO_NETA")}
+# Recuento EXACTO de semillas de sistema (tipos_hecho + metricas_definicion contractuales) por head. Conjunto
+# cerrado: un head ausente falla cerrado (D-201; mismo criterio que run_clean_room con heads no declarados).
+SEMILLAS_SISTEMA_POR_HEAD = {"0330": 10, "0340": 10, "0350": 11}
 
 
-def check_sin_cambios(c, esq, xid_carga: int) -> dict:
+def check_sin_cambios(c, esq, xid_carga: int, head: str = "0330") -> dict:
     """Toda fila visible nace en la transaccion de carga, salvo las semillas contractuales de 0330. Una fila
     actualizada despues de la carga tendria xmin posterior; una borrada ya no seria visible y el recuento
     discriminante la delataria. xmax en filas visibles solo puede ser un bloqueo o una transaccion abortada."""
@@ -271,8 +283,14 @@ def check_sin_cambios(c, esq, xid_carga: int) -> dict:
         viol["filas_con_xmin_posterior_a_la_carga"] = posteriores
     if ajenas != semillas or fuera_semillas:
         viol["filas_ajenas_a_carga_y_semillas"] = {"ajenas": ajenas, "semillas": semillas, "tablas": fuera_semillas}
+    esperadas = SEMILLAS_SISTEMA_POR_HEAD.get(head)
+    if esperadas is None:
+        viol["head_sin_semillas_declaradas"] = head
+    elif semillas != esperadas:
+        viol["semillas_de_sistema"] = {"head": head, "esperadas": esperadas, "obtenidas": semillas}
     return {"xid_carga": xid_carga, "siguiente_xid": siguiente, "filas_fuera_de_la_carga": otros,
-            "semillas_0330": semillas, "xmax_no_carga_informativo": xmax_info,
+            "semillas_0330": semillas, "head": head, "semillas_esperadas": esperadas,
+            "xmax_no_carga_informativo": xmax_info,
             "pg_statistic_posterior": {"filas": stats[0], "xid_min": stats[1], "xid_max": stats[2]},
             "violaciones": viol}
 
@@ -392,7 +410,8 @@ def check_trazabilidad(c, esq, esperado: dict) -> dict:
     return {**r, "violaciones": viol}
 
 
-def auditar(dsn: str, esq: str, xid_carga: int, esperado: dict, referencia: dict | None) -> dict:
+def auditar(dsn: str, esq: str, xid_carga: int, esperado: dict, referencia: dict | None,
+            head: str = "0330") -> dict:
     import psycopg
     res = {"inicio_utc": _dt.datetime.now(_dt.timezone.utc).isoformat()}
     with psycopg.connect(dsn) as c:
@@ -411,7 +430,7 @@ def auditar(dsn: str, esq: str, xid_carga: int, esperado: dict, referencia: dict
         res["check"] = check_check(c, esq)
         res["exclude"] = check_exclude(c, esq)
         res["invariantes_triggers"] = check_invariantes(c, esq)
-        res["sin_cambios"] = check_sin_cambios(c, esq, xid_carga)
+        res["sin_cambios"] = check_sin_cambios(c, esq, xid_carga, head)
         res["referencias_sin_fk"] = check_referencias_sin_fk(c, esq)
         res["polimorficos"] = check_polimorficos(c, esq)
         res["trazabilidad"] = check_trazabilidad(c, esq, esperado)
@@ -445,7 +464,7 @@ def main(argv=None) -> int:
         return 2
     res = auditar(a.dsn_auditoria, a.esquema, a.xid_carga,
                   {"mapeos": a.mapeos, "hechos": a.hechos, "registros_origen": a.registros_origen},
-                  referencia)
+                  referencia, a.head)
     a.salida.mkdir(parents=True, exist_ok=True)
     (a.salida / "rv3_p7_integridad.json").write_text(json.dumps(res, ensure_ascii=False, indent=1, default=str),
                                                      encoding="utf-8")

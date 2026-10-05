@@ -10,6 +10,15 @@
 #              TASA_AHORRO) NO están presentes -- su ausencia es una
 #              decisión documentada, no un olvido.
 # Versión: 0.1.0
+# Versión: 0.2.0  -- F03-06 / D-201 / 0350. El conjunto de tipos_hecho era
+#                   igualdad exacta con los 7 códigos de 0150 y 0350 siembra
+#                   CONDONACION. Se aceptan EXACTAMENTE dos estados nombrados
+#                   (D-073 refinado por D-187 / Working Method §12C.12, mismo
+#                   patrón que test_002 con 0340): seed de 0150 (7 códigos,
+#                   heads 0150..0340) o seed de 0150 + CONDONACION (8 códigos,
+#                   head 0350). Cualquier otro conjunto sigue siendo drift. La
+#                   regla UUIDv5 se aplica a TODAS las filas, CONDONACION
+#                   incluida, y no se debilita.
 # ============================================================
 
 from __future__ import annotations
@@ -22,6 +31,12 @@ TIPOS_HECHO_ESPERADOS = {
 }
 TIPOS_HECHO_DESCARTADOS = {"SALDO_APERTURA", "AJUSTE_SALDO"}
 
+# Estados autorizados de tipos_hecho por head. Conjunto EXPLICITO y FINITO.
+TIPOS_HECHO_POR_HEAD = {
+    "0150..0340": TIPOS_HECHO_ESPERADOS,
+    "0350": TIPOS_HECHO_ESPERADOS | {"CONDONACION"},
+}
+
 METRICAS_ESPERADAS = {
     "APORTACION_INVERSION_NETA", "TRANSFERENCIA_AHORRO_NETA", "AHORRO_NETO_PYL",
 }
@@ -29,10 +44,13 @@ METRICAS_DESCARTADAS = {"AHORRO_TOTAL_MES", "TASA_AHORRO"}
 
 
 def test_tipos_hecho_exactly_7_expected_codes(db: psycopg.Connection) -> None:
+    """7 códigos de 0150 (hasta 0340) o esos 7 + CONDONACION (0350); nada más."""
     with db.cursor() as cursor:
         cursor.execute("SELECT codigo FROM gapto.tipos_hecho")
-        found = {r[0] for r in cursor.fetchall()}
-    assert found == TIPOS_HECHO_ESPERADOS
+        codigos = [r[0] for r in cursor.fetchall()]
+    found = set(codigos)
+    assert len(codigos) == len(found)
+    assert found in TIPOS_HECHO_POR_HEAD.values(), f"tipos_hecho fuera de los estados autorizados: {sorted(found)}"
 
 
 def test_tipos_hecho_discarded_candidates_absent(db: psycopg.Connection) -> None:
