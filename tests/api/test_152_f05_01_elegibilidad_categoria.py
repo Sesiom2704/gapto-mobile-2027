@@ -29,12 +29,23 @@
 #   v0.3.0 (F05-01 S6-WIRE+UI (este mandato); F05 §26.2 AJ-03): la ausencia de
 #   `categoria` deja de derivar un estado de compatibilidad: 422 sin hecho,
 #   igual que `null`. El literal del estado retirado sigue sin ser enviable.
-# Version: 0.3.0
+#
+#   v0.4.0 (F05-01 P7 · HP7-01, decision de Moises; F05 §22.2 C04, §22.5
+#   viñeta 4): el registro NO toma el advisory (CATEGORIAS, owner). Una sesion
+#   del mismo owner lo retiene con la MISMA primitiva de los comandos del
+#   catalogo (`tomar_advisory`) en una transaccion abierta; un registro con
+#   categoria y otro «Sin categoría» completan sin esperar (ninguna sesion
+#   bloqueada por el retenedor segun pg_blocking_pids y respuesta dentro de
+#   un timeout acotado), con el advisory aun retenido. Discriminante del
+#   mutante P04 (mutantes_f05_01.py). WM 12C.2: la propiedad ya se cumple en
+#   c06d219 (test de composicion); P04 lo discrimina.
+# Version: 0.4.0
 # ============================================================
 
 from __future__ import annotations
 
 import threading
+import time
 import uuid
 
 import psycopg
@@ -317,3 +328,65 @@ def test_orden_2_registro_primero_catalogo_espera(tenant, mutacion):
     b.execute("COMMIT")
     b.close()
     assert fh.categoria_del_efecto(owner, _hid(cuerpo)) == [(cat,)]
+
+
+# ------------------------------------------------------------------ HP7-01: el registro no toma el advisory
+class _SesionDeCatalogo:
+    """Adaptador minimo (`uno`) para invocar la primitiva real `tomar_advisory`
+    de los comandos del catalogo sobre una conexion con transaccion abierta."""
+
+    def __init__(self, conexion: psycopg.Connection) -> None:
+        self.conexion = conexion
+
+    def uno(self, sql: str, params: tuple | None = None):
+        return self.conexion.execute(sql, params).fetchone()
+
+
+def _bloqueados_por(retenedor: int) -> list[int]:
+    with psycopg.connect(h.dsn(), autocommit=True) as mon:
+        filas = mon.execute(
+            "SELECT pid FROM pg_stat_activity WHERE datname = current_database() "
+            "AND %s = ANY(pg_blocking_pids(pid))", (retenedor,)).fetchall()
+    return [f[0] for f in filas]
+
+
+@pytest.mark.parametrize("seleccion", ["CATEGORIA", "SIN_CATEGORIA"])
+def test_el_registro_no_toma_el_advisory_del_catalogo(tenant, seleccion):
+    """HP7-01 (§22.5 viñeta 4; C04): con el advisory (CATEGORIAS, owner)
+    retenido por otra sesion del mismo owner, el registro completa sin esperar."""
+    from app.categorias.repositorio import tomar_advisory
+
+    owner, _, cuenta = tenant
+    cat = fh.crear_categoria(owner, f"Sin advisory {seleccion}", "GASTO")
+    cuerpo = _con_categoria(cuenta, cat) if seleccion == "CATEGORIA" else h.intencion(cuenta)
+    retenedor = fh.sesion_owner(owner)
+    salida: dict = {}
+    hilo = None
+    try:
+        tomar_advisory(_SesionDeCatalogo(retenedor))
+        pid_r = fh.pid_servidor(retenedor)
+        concedido = retenedor.execute(
+            "SELECT count(*) FROM pg_locks WHERE pid = pg_backend_pid() AND locktype = 'advisory' AND granted"
+        ).fetchone()[0]
+        assert concedido == 1, "el retenedor no tiene el advisory del catalogo"
+        cli = h.cliente(owner)
+        hilo = threading.Thread(target=lambda: salida.update(r=cli.post(URL, json=cuerpo, headers=h.AUTH)))
+        hilo.start()
+        fin = time.monotonic() + 10.0
+        esperando: list[int] = []
+        while hilo.is_alive() and time.monotonic() < fin and not esperando:
+            esperando = _bloqueados_por(pid_r)
+            time.sleep(0.05)
+        assert esperando == [], f"el registro espera al advisory del catalogo (pids {esperando})"
+        hilo.join(timeout=max(0.0, fin - time.monotonic()))
+        assert not hilo.is_alive(), "el registro no respondio con el advisory retenido"
+        assert retenedor.execute("SELECT count(*) FROM pg_locks WHERE pid = pg_backend_pid() "
+                                 "AND locktype = 'advisory' AND granted").fetchone()[0] == 1
+    finally:
+        retenedor.execute("ROLLBACK")
+        retenedor.close()
+        if hilo is not None:
+            hilo.join(timeout=15)
+    assert salida["r"].status_code == 200, salida["r"].text
+    esperado = [(cat,)] if seleccion == "CATEGORIA" else [(None,)]
+    assert fh.categoria_del_efecto(owner, _hid(cuerpo)) == esperado

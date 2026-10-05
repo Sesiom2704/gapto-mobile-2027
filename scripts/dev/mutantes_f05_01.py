@@ -142,7 +142,13 @@
 #         PENDIENTE pasa al primer nodo elegible:
 #         test_154::test_i13_b_estado_categorial_solo_por_eleccion_explicita (I13b).
 #   test_166 entra en el preflight. Censo vigente: 121 + P01..P03 (3) = 124.
-# Version: 0.12.0
+#
+#   v0.13.0 (F05-01 P7 · HP7-01, decision de Moises): P04, el registro toma el
+#   advisory (CATEGORIAS, owner) con `tomar_advisory` antes de bloquear la
+#   cuenta; discriminante
+#   test_152::test_el_registro_no_toma_el_advisory_del_catalogo (muere por la
+#   asercion de espera, no por excepcion). Censo vigente: 124 + P04 = 125.
+# Version: 0.13.0
 # ============================================================
 
 from __future__ import annotations
@@ -554,6 +560,12 @@ MUTANTES = [
        "    if (primero) setB((x) => (x.categoria.estado === 'PENDIENTE' ? { ...x, categoria: { estado: 'CATEGORIA', "
        "id: primero.id, nombre: primero.nombre, ruta: '', icon_key: primero.icon_key, magnitudes: magnitudesPedibles(primero) } } : x));\n")],
      [f"{T154}::test_i13_b_estado_categorial_solo_por_eleccion_explicita"]),
+    ("P04", "el registro toma el advisory (CATEGORIAS, owner) antes de bloquear la cuenta (HP7-01)",
+     [(EJEC, "        # 1. Lock contractual de la cuenta.\n        bloquear_cuenta(sesion, intencion.cuenta_id)\n",
+       "        # 1. Lock contractual de la cuenta.\n"
+       "        __import__('app.categorias.repositorio', fromlist=['x']).tomar_advisory(sesion)\n"
+       "        bloquear_cuenta(sesion, intencion.cuenta_id)\n")],
+     [f"{T152}::test_el_registro_no_toma_el_advisory_del_catalogo"]),
 ]
 
 
