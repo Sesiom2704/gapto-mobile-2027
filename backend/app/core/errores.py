@@ -15,6 +15,15 @@
 #   operacion y reintentar no la hara posible". Fusionarlos haria que la UX
 #   reintentase indefinidamente algo imposible, o que abandonase algo que solo
 #   necesitaba otro intento.
+# Version: 0.17.0
+#   0.17.0 (F04-D052 B2, D5): causa de reduccion de posiciones genericas.
+#   Nuevos `CAUSA_REDUCCION_INVALIDA` (causa ausente, desconocida o que no
+#   corresponde a la operacion), `CUENTA_GAPTO_REQUERIDA` (pago o cobro propio
+#   sin movimiento en cuenta Gapto) y `PAGO_POR_TERCERO_FUERA_DE_ALCANCE`
+#   (R-F04-038). Se RETIRA `CONDONACION_OBLIGACION_NO_SOPORTADA`: la
+#   condonacion de obligacion deja de estar en STOP (F04-D052 supera F04-D015
+#   §8) y `condonar_derecho` sobre una obligacion es NATURALEZA_INCOMPATIBLE.
+#   `INGRESO_NO_PERMITIDO` se reutiliza para el INGRESO declarado invalido.
 # Version: 0.16.0
 #   0.16.0 (F04-D048 R3 · pronunciamiento R3-03): `OWNERSHIP_F07`. La
 #   intencion requiere mutar una superficie cuya propiedad funcional es de F07
@@ -205,7 +214,14 @@ class CodigoError(str, enum.Enum):
     # --- F04-04 · fronteras economicas ------------------------------------
     INGRESO_NO_PERMITIDO = "INGRESO_NO_PERMITIDO"
     GASTO_DUPLICADO = "GASTO_DUPLICADO"
-    CONDONACION_OBLIGACION_NO_SOPORTADA = "CONDONACION_OBLIGACION_NO_SOPORTADA"
+
+    # --- F04-D052 · causa de reduccion de posiciones genericas ------------
+    # La causa no se persiste como columna: la determinan arquetipo y
+    # movimiento. Por eso el motor la exige en la entrada y rechaza cualquier
+    # desajuste con la forma fisica de la operacion antes de escribir nada.
+    CAUSA_REDUCCION_INVALIDA = "CAUSA_REDUCCION_INVALIDA"
+    CUENTA_GAPTO_REQUERIDA = "CUENTA_GAPTO_REQUERIDA"
+    PAGO_POR_TERCERO_FUERA_DE_ALCANCE = "PAGO_POR_TERCERO_FUERA_DE_ALCANCE"
 
     # --- F04-05 · reglas y versionado -------------------------------------
     REGLA_NO_ENCONTRADA = "REGLA_NO_ENCONTRADA"

@@ -25,6 +25,15 @@
 #   Todas las identidades llegan reservadas por el llamante, antes del primer
 #   intento: es lo que permite reintentar una operacion compuesta —hecho,
 #   efecto, vinculo, movimiento, conciliacion, relacion— sin duplicar realidad.
+# Version: 0.3.0
+#   0.3.0 (F04-D052 B2): causa de reduccion obligatoria. `CausaReduccion`
+#   {PAGO, COBRO, CONDONACION} sustituye al antiguo `motivo` libre de
+#   `DatosDeltaPosicion`, que ningun write-path leia (R-F04-037). La causa NO
+#   se persiste: la determinan arquetipo y movimiento, y en lectura se
+#   reconstruye con `CAUSA_NO_DETERMINABLE` para las reducciones con
+#   `GENERACION_DERECHO_OBLIGACION` (historicas o migradas). Nuevos
+#   `TIPO_HECHO_CONDONACION` (D-201) y `DatosCondonacionObligacion` (INGRESO
+#   solo declarado, F04-D052).
 # Version: 0.2.0
 #   0.2.0 (mandato F04 R1+R2 v0.3 §8 + E01, SOLO `DatosCondonacion`): cuando
 #   la condonacion declara el GASTO soportado, el hecho resultante contiene
@@ -39,6 +48,7 @@ from __future__ import annotations
 
 import datetime as dt
 import decimal
+import enum
 import uuid
 from dataclasses import dataclass
 from typing import Final
@@ -81,6 +91,31 @@ RELACION_HECHO_REEMBOLSO_DE: Final = "REEMBOLSO_DE"
 
 TIPO_HECHO_POSICION: Final = "GENERACION_DERECHO_OBLIGACION"
 TIPO_HECHO_REEMBOLSO: Final = "REEMBOLSO"
+# D-201 (migration 0350). Solo lo escriben las condonaciones posteriores a
+# F04-D052: ningun dato anterior ni migrado puede tenerlo.
+TIPO_HECHO_CONDONACION: Final = "CONDONACION"
+
+
+class CausaReduccion(str, enum.Enum):
+    """Vocabulario CERRADO de causas de reduccion (F04-D052).
+
+    Cada causa tiene una sola forma fisica:
+      PAGO        obligacion -> REEMBOLSO + movimiento en cuenta Gapto
+      COBRO       derecho    -> REEMBOLSO + movimiento en cuenta Gapto
+      CONDONACION ambos      -> CONDONACION sin movimiento
+    Cada operacion acepta solo la suya. No hay causa mixta: pago y
+    condonacion de una misma realidad son operaciones separadas.
+    """
+
+    PAGO = "PAGO"
+    COBRO = "COBRO"
+    CONDONACION = "CONDONACION"
+
+
+# Lectura (F04-D052, CC4). Una reduccion con GENERACION_DERECHO_OBLIGACION se
+# lee asi. Es una condicion de LECTURA: no se persiste en ningun sitio y no se
+# usan la fecha ni la procedencia de importacion para afinarla.
+CAUSA_NO_DETERMINABLE: Final = "NO_DETERMINABLE"
 
 
 class SaldoIndeterminado(Exception):
@@ -166,6 +201,10 @@ class DatosDeltaPosicion:
     `importe` es SIEMPRE magnitud positiva. El signo lo pone el write-path
     segun la operacion, porque el significado financiero vive en el efecto
     firmado y no en lo que teclee el llamante.
+
+    `causa` es obligatoria (F04-D052): sin ella, o con una que no sea la de
+    la operacion, el motor rechaza antes de escribir. No tiene valor por
+    defecto util a proposito: None significa "no declarada" y es STOP.
     """
 
     hecho_id: uuid.UUID
@@ -174,17 +213,20 @@ class DatosDeltaPosicion:
     importe: decimal.Decimal | None
     fecha_hecho: dt.date | None
     concepto: str | None = None
-    motivo: str | None = None
+    causa: CausaReduccion | None = None
     cierre: DatosCierre | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class DatosTesoreriaReembolso:
-    """Tesoreria del reembolso: crear movimiento, o consumir uno existente.
+    """Tesoreria de un pago (OP-12B) o cobro (OP-14) propio: crear el
+    movimiento en una cuenta Gapto, o consumir uno ACTIVO existente.
 
     Nunca se elige el movimiento automaticamente por importe, fecha, cuenta o
-    contraparte: la decision es del llamante. Y si el cobro ocurrio fuera de
-    cuentas registradas, simplemente no hay movimiento.
+    contraparte: la decision es del llamante. Desde F04-D052 un pago o cobro
+    propio sin cuenta Gapto ya no se admite (EFECTIVO es una cuenta valida):
+    la rama "fuera de cuentas registradas" de F04-D015 §4 queda superada para
+    operaciones nuevas y el motor no fabrica movimientos.
     """
 
     conciliacion_id: uuid.UUID
@@ -231,6 +273,41 @@ class DatosCondonacion:
     presupuestable: bool | None = None
     estado_localizacion: str | None = None
     localidad_id: uuid.UUID | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class DatosCondonacionObligacion:
+    """Entrada de la condonacion de una OBLIGACION_PAGO (F04-D052).
+
+    Arquetipo CONDONACION y sin tesoreria. INGRESO por defecto CERO: solo
+    existe si el llamante declara `importe_ingreso` en ESTA misma operacion,
+    mayor que cero y no superior a lo condonado. Como maximo uno por hecho de
+    condonacion; no hay via para anadirlo despues. Con INGRESO el hecho deja
+    de ser puramente posicional y rige el mismo contrato que el GASTO
+    declarado de `DatosCondonacion` (R1+R2 v0.3 §8 + E01): `presupuestable`
+    explicito y localizacion aplicable (NO_APLICA invalido).
+    """
+
+    delta: DatosDeltaPosicion
+    importe_ingreso: decimal.Decimal | None = None
+    efecto_ingreso_id: uuid.UUID | None = None
+    presupuestable: bool | None = None
+    estado_localizacion: str | None = None
+    localidad_id: uuid.UUID | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CausaLeida:
+    """Causa reconstruida en lectura de una reduccion de posicion.
+
+    `causa` es un valor de `CausaReduccion` o `CAUSA_NO_DETERMINABLE`. Nunca
+    se persiste: sale de arquetipo + presencia de movimiento.
+    """
+
+    hecho_id: uuid.UUID
+    tipo_hecho: str
+    con_movimiento: bool
+    causa: str
 
 
 @dataclass(frozen=True, slots=True)

@@ -12,6 +12,11 @@
 #   El precedente es reciente y caro: F04-07 descubrio que un efecto con
 #   reparto COMPLETA tenia el importe inmutable. Ni F04-02 ni F04-06 fallaban
 #   por separado. El hueco vivia entre ambas.
+# Version: 0.4.0
+#   0.4.0 (F04-D052 B2): toda reduccion declara causa con su forma fisica.
+#   X-02 cobra con causa COBRO; X-03 paga cada cuota con causa PAGO y
+#   movimiento en cuenta Gapto (la deuda es una posicion GENERICA, ambito de
+#   F04-D052). Oraculos intactos.
 # Version: 0.3.0
 #   0.3.0 (mandato F04 R1+R2 v0.3 + E01): OP-04 aporta `presupuestable` en la
 #   transicion al primer GASTO/INGRESO (A08-bis generalizada); fixtures de
@@ -38,6 +43,7 @@ from app.core.errores import CodigoError, ErrorMotor
 from app.core.modelos import CamposCorreccion
 from app.core.modelos_devolucion import DatosDevolucion
 from app.core.modelos_posicion import (
+    CausaReduccion,
     DatosAltaPosicion,
     DatosDeltaPosicion,
     DatosReembolso,
@@ -103,13 +109,14 @@ def _posicion(motor: Motor, contexto, *, tipo, contraparte, importe, concepto):
     return datos, motor.posiciones.crear_posicion(contexto, datos)
 
 
-def _delta(importe, fecha=dt.date(2026, 7, 1)) -> DatosDeltaPosicion:
+def _delta(importe, causa, fecha=dt.date(2026, 7, 1)) -> DatosDeltaPosicion:
     return DatosDeltaPosicion(
         hecho_id=uuid.uuid4(),
         efecto_id=uuid.uuid4(),
         vinculo_id=uuid.uuid4(),
         importe=importe,
         fecha_hecho=fecha,
+        causa=causa,
     )
 
 
@@ -247,7 +254,7 @@ def test_x02_reembolso_parcial_deja_saldo_vivo(
         entidad_id=posicion.entidad_id,
         entidad_row_version_esperada=alta.entidad_row_version,
         datos=DatosReembolso(
-            delta=_delta(cobrado),
+            delta=_delta(cobrado, CausaReduccion.COBRO),
             tesoreria=DatosTesoreriaReembolso(
                 conciliacion_id=uuid.uuid4(),
                 movimiento_id=uuid.uuid4(),
@@ -313,12 +320,19 @@ def test_x03_compra_financiada_y_pagos_sucesivos(
 
     version = alta.entidad_row_version
     for numero in range(3):
-        pago = _delta(cuota, fecha=dt.date(2026, 7, 1 + numero))
+        pago = _delta(cuota, CausaReduccion.PAGO, fecha=dt.date(2026, 7, 1 + numero))
         resultado = motor.posiciones.reducir_obligacion(
             contexto,
             entidad_id=posicion.entidad_id,
             entidad_row_version_esperada=version,
             delta=pago,
+            # F04-D052: cada cuota es un PAGO propio en cuenta Gapto.
+            movimiento=DatosTesoreriaReembolso(
+                conciliacion_id=uuid.uuid4(),
+                movimiento_id=uuid.uuid4(),
+                cuenta_id=cuenta,
+                fecha_movimiento=dt.date(2026, 7, 1 + numero),
+            ),
         )
         version = resultado.entidad_row_version
         sin_naturaleza(admin, contexto.owner_user_id, pago.hecho_id, "GASTO")

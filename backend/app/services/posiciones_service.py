@@ -44,6 +44,28 @@
 #   puntos que le pertenecen: el unico writer del vinculo (`_crear_delta`) y
 #   el calculo de saldo, que falla cerrado antes que devolver un numero
 #   derivado de un estado invalido.
+#
+#   F04-D052 · CAUSA DE REDUCCION. Toda reduccion nueva declara su causa del
+#   vocabulario cerrado `CausaReduccion` y tiene una sola forma fisica:
+#     PAGO (OP-12B)        REEMBOLSO + movimiento en cuenta Gapto
+#     COBRO (OP-14)        REEMBOLSO + movimiento en cuenta Gapto
+#     CONDONACION          CONDONACION (D-201) sin movimiento
+#   La causa no se persiste como columna: la determinan arquetipo y
+#   movimiento, y `causas_de_reduccion` la reconstruye en lectura. Una
+#   reduccion con GENERACION_DERECHO_OBLIGACION (historica o migrada) se lee
+#   como NO_DETERMINABLE, sin fecha ni procedencia como discriminante.
+#   GENERACION_DERECHO_OBLIGACION queda para la creacion e incremento.
+# Version: 0.4.0
+#   0.4.0 (F04-D052 B2): causa obligatoria y validada antes de escribir en
+#   `_aplicar_delta`; OP-12B y OP-14 exigen cuenta Gapto (supera F04-D015 §4
+#   para operaciones nuevas) y OP-12B pasa a REEMBOLSO; pago por tercero en
+#   OP-12B -> STOP (R-F04-038); `condonar_derecho` pasa a CONDONACION y una
+#   obligacion es NATURALEZA_INCOMPATIBLE (se retira el STOP de F04-D015 §8);
+#   nueva `condonar_obligacion` (CONDONACION, sin movimiento, INGRESO solo
+#   declarado con el contrato de E01); en una reduccion con cierre declarado
+#   el motivo corresponde a la causa (LIQUIDADA / CONDONADA); lectura
+#   `causas_de_reduccion`. Las financiaciones formales quedan fuera por
+#   construccion: `leer_posicion` solo lee el subtipo de posicion generica.
 # Version: 0.3.0
 #   0.3.0 (mandato F04 R1+R2 v0.3 §8/§9 + E01, SOLO `condonar_derecho` y
 #   soporte privado inseparable): con GASTO declarado la condonacion exige
@@ -73,15 +95,21 @@ from app.core.contexto import ContextoOperacion
 from app.core.errores import CodigoError, ErrorMotor
 from app.core.modelos import DatosCreacionHecho, ESTADO_ACTIVO, ESTADOS_LOCALIZACION
 from app.core.modelos_posicion import (
+    CAUSA_NO_DETERMINABLE,
     CERO,
+    CausaLeida,
+    CausaReduccion,
     DatosAltaPosicion,
     DatosCierre,
     DatosCondonacion,
+    DatosCondonacionObligacion,
     DatosDeltaPosicion,
     DatosReembolso,
     EFECTO_DE_POSICION,
     ESTADO_CERRADA,
     JUSTIFICACIONES,
+    MOTIVO_CONDONADA,
+    MOTIVO_LIQUIDADA,
     MOTIVOS_CIERRE,
     RELACION_ENTIDAD_GENERADO_POR,
     RELACION_HECHO_REEMBOLSO_DE,
@@ -89,6 +117,7 @@ from app.core.modelos_posicion import (
     Saldo,
     TIPO_DERECHO,
     TIPO_ENTIDAD_POSICION,
+    TIPO_HECHO_CONDONACION,
     TIPO_HECHO_POSICION,
     TIPO_HECHO_REEMBOLSO,
     TIPO_OBLIGACION,
@@ -115,6 +144,15 @@ PRESUPUESTABLE_POSICION = False
 # economicamente la porcion es una dimension distinta (F04-02) y no se inventa
 # aqui. OP-05 puede enriquecerla despues.
 ATRIBUCION_INICIAL = "NO_DISPONIBLE"
+
+# F04-D052. Motivo de cierre que corresponde a cada causa cuando la reduccion
+# declara cierre: un pago o cobro liquida, una condonacion condona. Cerrar
+# una condonacion como LIQUIDADA (o al reves) contradiria su forma fisica.
+MOTIVO_CIERRE_DE_CAUSA = {
+    CausaReduccion.PAGO: MOTIVO_LIQUIDADA,
+    CausaReduccion.COBRO: MOTIVO_LIQUIDADA,
+    CausaReduccion.CONDONACION: MOTIVO_CONDONADA,
+}
 
 
 class PosicionesService:
@@ -212,23 +250,35 @@ class PosicionesService:
         entidad_row_version_esperada: int,
         delta: DatosDeltaPosicion,
         movimiento: Any | None = None,
+        pagado_por_tercero: bool = False,
     ) -> ResultadoPosicion:
-        """Pago o reduccion explicita de una obligacion generica.
+        """PAGO propio de una obligacion generica (F04-D052).
 
-        Materializa un efecto DEUDA negativo. NO crea GASTO por el principal:
-        el gasto, si existio, se reconocio cuando nacio la obligacion, y
-        volverlo a reconocer al pagar seria doble conteo (INV-12).
+        Arquetipo REEMBOLSO + movimiento en una cuenta Gapto (crear uno o
+        consumir uno ACTIVO existente). Materializa un efecto DEUDA negativo.
+        NO crea GASTO por el principal: el gasto, si existio, se reconocio
+        cuando nacio la obligacion, y volverlo a reconocer al pagar seria
+        doble conteo (INV-12). Una obligacion pagada por un tercero no es pago
+        propio ni condonacion: STOP sin escribir nada (R-F04-038).
         """
+        if pagado_por_tercero is not False:
+            raise ErrorMotor(
+                CodigoError.PAGO_POR_TERCERO_FUERA_DE_ALCANCE,
+                "El pago de una obligacion propia por un tercero esta fuera de "
+                "alcance: no es pago propio ni condonacion.",
+            )
         return self._aplicar_delta(
             contexto,
             entidad_id=entidad_id,
             entidad_row_version_esperada=entidad_row_version_esperada,
             delta=delta,
             tipo_esperado=TIPO_OBLIGACION,
-            tipo_hecho_codigo=TIPO_HECHO_POSICION,
+            tipo_hecho_codigo=TIPO_HECHO_REEMBOLSO,
             codigo_exceso=CodigoError.EXCEDE_SALDO_POSICION,
             nombre_operacion="OP-12B reducir_obligacion",
+            causa_esperada=CausaReduccion.PAGO,
             tesoreria=movimiento,
+            exige_tesoreria=True,
             signo_movimiento=-1,
         )
 
@@ -243,7 +293,7 @@ class PosicionesService:
         entidad_row_version_esperada: int,
         datos: DatosReembolso,
     ) -> ResultadoPosicion:
-        """Cobro de un DERECHO_COBRO.
+        """COBRO propio de un DERECHO_COBRO.
 
         Persiste `DERECHO_COBRO` NEGATIVO. Nunca INGRESO, nunca GASTO negativo,
         nunca DEUDA: el dinero que vuelve de un derecho no es un ingreso nuevo,
@@ -252,6 +302,10 @@ class PosicionesService:
         Si no existe la posicion previa, SIN_DERECHO_PREVIO. No se crea un
         derecho retroactivo porque haya llegado dinero: eso fabricaria el
         origen a partir del efecto.
+
+        F04-D052: exige causa COBRO y movimiento en una cuenta Gapto
+        (EFECTIVO incluida). La rama "sin cuenta registrada" de F04-D015 §4
+        deja de admitirse para cobros nuevos; §1-3 y §5 no cambian.
         """
         return self._aplicar_delta(
             contexto,
@@ -262,7 +316,9 @@ class PosicionesService:
             tipo_hecho_codigo=TIPO_HECHO_REEMBOLSO,
             codigo_exceso=CodigoError.EXCEDE_SALDO_DEL_DERECHO,
             nombre_operacion="OP-14 reembolsar",
+            causa_esperada=CausaReduccion.COBRO,
             tesoreria=datos.tesoreria,
+            exige_tesoreria=True,
             signo_movimiento=1,
             no_encontrada=CodigoError.SIN_DERECHO_PREVIO,
             relacion=(datos.hecho_causal_id, datos.relacion_id),
@@ -285,6 +341,11 @@ class PosicionesService:
         condonada NO es automatico: exige que el llamante declare las DOS cosas
         —que pasa a soportarlo economicamente y que ese coste no estaba ya
         reconocido—. Si falta cualquiera, cero efecto GASTO.
+
+        F04-D052: causa CONDONACION y arquetipo CONDONACION (D-201), de modo
+        que un cobro y una condonacion son fisicamente distinguibles. El resto
+        de F04-D015 §6, §7 y §9 no cambia. Sobre una obligacion es
+        NATURALEZA_INCOMPATIBLE: su condonacion es `condonar_obligacion`.
         """
 
         hecho_con_gasto = bool(
@@ -333,9 +394,10 @@ class PosicionesService:
             entidad_row_version_esperada=entidad_row_version_esperada,
             delta=datos.delta,
             tipo_esperado=TIPO_DERECHO,
-            tipo_hecho_codigo=TIPO_HECHO_POSICION,
+            tipo_hecho_codigo=TIPO_HECHO_CONDONACION,
             codigo_exceso=CodigoError.EXCEDE_SALDO_DEL_DERECHO,
             nombre_operacion="condonar_derecho",
+            causa_esperada=CausaReduccion.CONDONACION,
             extra=extra,
             artefactos_extra=(
                 []
@@ -343,37 +405,138 @@ class PosicionesService:
                 else [("hecho_efectos", datos.efecto_gasto_id)]
             ),
             **decision_hecho,
-            tipo_no_soportado=(
-                TIPO_OBLIGACION,
-                CodigoError.CONDONACION_OBLIGACION_NO_SOPORTADA,
+        )
+
+    # ==================================================================
+    # CONDONACION DE OBLIGACION (F04-D052)
+    # ==================================================================
+    def condonar_obligacion(
+        self,
+        contexto: ContextoOperacion,
+        *,
+        entidad_id: uuid.UUID,
+        entidad_row_version_esperada: int,
+        datos: DatosCondonacionObligacion,
+    ) -> ResultadoPosicion:
+        """Renuncia del acreedor a una porcion de una OBLIGACION_PAGO.
+
+        Arquetipo CONDONACION, efecto DEUDA negativo y SIN tesoreria. La
+        parcial deja la posicion ACTIVA; la total con saldo conocido cierra
+        solo si el llamante declara el cierre (CONDONADA); con saldo
+        indeterminado se registra el importe observado, el saldo sigue
+        indeterminado y el cierre total es una declaracion explicita del
+        llamante, sin residual fabricado (F04-D015 §9, igual que el derecho).
+
+        INGRESO por defecto CERO. Solo si el llamante declara
+        `importe_ingreso` en esta misma operacion: mayor que cero, no
+        superior a lo condonado y como maximo uno por hecho. Nunca se infiere
+        de la condonacion, de la ausencia de movimiento ni del arquetipo. Con
+        INGRESO rige el contrato del GASTO declarado de la condonacion de
+        derecho (E01): `presupuestable` explicito y localizacion aplicable.
+        Simetria semantica explicita: no se reutiliza `condonar_derecho`.
+        """
+        con_ingreso = datos.importe_ingreso is not None
+        if con_ingreso:
+            importe_ingreso = decimal.Decimal(datos.importe_ingreso)
+            if importe_ingreso <= CERO:
+                raise ErrorMotor(
+                    CodigoError.INGRESO_NO_PERMITIDO,
+                    "El INGRESO declarado de una condonacion debe ser mayor "
+                    "que cero.",
+                )
+            if datos.delta.importe is not None and importe_ingreso > decimal.Decimal(
+                datos.delta.importe
+            ):
+                raise ErrorMotor(
+                    CodigoError.INGRESO_NO_PERMITIDO,
+                    "El INGRESO declarado excede el importe condonado en esta "
+                    "operacion.",
+                )
+            if datos.efecto_ingreso_id is None:
+                raise ErrorMotor(
+                    CodigoError.ENTRADA_INVALIDA,
+                    "Un INGRESO declarado exige su identidad reservada.",
+                )
+        elif datos.efecto_ingreso_id is not None:
+            raise ErrorMotor(
+                CodigoError.ENTRADA_INVALIDA,
+                "Sin INGRESO declarado no se reserva identidad de INGRESO.",
+            )
+        decision_hecho = self._decision_hecho_condonacion(datos, con_ingreso)
+
+        def extra(sesion: SesionMotor, contexto_delta: dict[str, Any]) -> None:
+            if not con_ingreso:
+                return
+            creado = repo_efectos.insertar_efecto_si_no_existe(
+                sesion,
+                contexto_delta["hecho_id"],
+                efecto_id=datos.efecto_ingreso_id,
+                tipo_efecto="INGRESO",
+                importe_delta=decimal.Decimal(datos.importe_ingreso),
+                estado_atribucion=ATRIBUCION_INICIAL,
+                categoria_id=None,
+                descripcion=None,
+            )
+            if creado is None:
+                raise self._conflicto_identidad()
+            auditoria.registrar(
+                sesion,
+                tabla=repo_efectos.TABLA_EFECTOS,
+                registro_id=datos.efecto_ingreso_id,
+                accion=auditoria.ACCION_CREAR,
+                datos_despues_json=creado[1],
+                motivo="INGRESO declarado por el usuario en la condonacion",
+            )
+
+        return self._aplicar_delta(
+            contexto,
+            entidad_id=entidad_id,
+            entidad_row_version_esperada=entidad_row_version_esperada,
+            delta=datos.delta,
+            tipo_esperado=TIPO_OBLIGACION,
+            tipo_hecho_codigo=TIPO_HECHO_CONDONACION,
+            codigo_exceso=CodigoError.EXCEDE_SALDO_POSICION,
+            nombre_operacion="condonar_obligacion",
+            causa_esperada=CausaReduccion.CONDONACION,
+            extra=extra,
+            artefactos_extra=(
+                []
+                if datos.efecto_ingreso_id is None
+                else [("hecho_efectos", datos.efecto_ingreso_id)]
             ),
+            **decision_hecho,
         )
 
     @staticmethod
     def _decision_hecho_condonacion(
-        datos: DatosCondonacion, hecho_con_gasto: bool
+        datos: DatosCondonacion | DatosCondonacionObligacion,
+        hecho_con_naturaleza: bool,
     ) -> dict[str, Any]:
         """Mandato F04 R1+R2 v0.3 §8/§9 + E01. Raiz del hecho de condonacion.
 
-        Sin GASTO el hecho es puramente posicional y conserva EXACTAMENTE los
-        valores de siempre (defaults de `_aplicar_delta`); aportar decision o
+        Sin GASTO (derecho) ni INGRESO (obligacion, F04-D052) declarado el
+        hecho es puramente posicional y conserva EXACTAMENTE los valores de
+        siempre (defaults de `_aplicar_delta`); aportar decision o
         localizacion en ese caso no tendria significado y se rechaza. Con
-        GASTO, `presupuestable` es decision explicita sin default y la
-        localizacion es aplicable: sin dato -> DESCONOCIDA, con localidad y sin
-        estado -> CONOCIDA, NO_APLICA -> ENTRADA_INVALIDA. La coherencia
-        estado/localidad la juzga el CHECK fisico de 0040.
+        GASTO o INGRESO, `presupuestable` es decision explicita sin default y
+        la localizacion es aplicable: sin dato -> DESCONOCIDA, con localidad y
+        sin estado -> CONOCIDA, NO_APLICA -> ENTRADA_INVALIDA. La coherencia
+        estado/localidad la juzga el CHECK fisico de 0040. Es el mismo camino
+        para las dos naturalezas: el INGRESO declarado no tiene contrato
+        propio.
         """
         declarados = (
             datos.presupuestable is not None
             or datos.estado_localizacion is not None
             or datos.localidad_id is not None
         )
-        if not hecho_con_gasto:
+        if not hecho_con_naturaleza:
             if declarados:
                 raise ErrorMotor(
                     CodigoError.ENTRADA_INVALIDA,
-                    "Sin GASTO declarado el hecho de condonacion es puramente "
-                    "posicional: presupuestable y localizacion no se aportan.",
+                    "Sin GASTO ni INGRESO declarado el hecho de condonacion es "
+                    "puramente posicional: presupuestable y localizacion no se "
+                    "aportan.",
                 )
             return {}
         if datos.presupuestable is None or not isinstance(
@@ -381,7 +544,7 @@ class PosicionesService:
         ):
             raise ErrorMotor(
                 CodigoError.ENTRADA_INVALIDA,
-                "Una condonacion que genera GASTO exige decidir "
+                "Una condonacion que genera GASTO o INGRESO exige decidir "
                 "`presupuestable`: el motor no lo deriva.",
             )
         if datos.estado_localizacion is None:
@@ -396,8 +559,9 @@ class PosicionesService:
             if datos.estado_localizacion == LOCALIZACION_POSICION:
                 raise ErrorMotor(
                     CodigoError.ENTRADA_INVALIDA,
-                    "Con GASTO la localizacion es aplicable: NO_APLICA no es "
-                    "valido. Si no se conoce la localidad, es DESCONOCIDA.",
+                    "Con GASTO o INGRESO la localizacion es aplicable: "
+                    "NO_APLICA no es valido. Si no se conoce la localidad, es "
+                    "DESCONOCIDA.",
                 )
             estado = datos.estado_localizacion
         return {
@@ -453,6 +617,45 @@ class PosicionesService:
 
         return self._ejecutar(contexto, operacion, "leer_saldo")
 
+    def causas_de_reduccion(
+        self, contexto: ContextoOperacion, entidad_id: uuid.UUID
+    ) -> list[CausaLeida]:
+        """F04-D052 (CC4). Causa de cada reduccion, reconstruida en LECTURA.
+
+        REEMBOLSO -> PAGO (obligacion) o COBRO (derecho); CONDONACION ->
+        CONDONACION; cualquier otro arquetipo -en la practica
+        GENERACION_DERECHO_OBLIGACION, historico o migrado- -> NO_DETERMINABLE.
+        Nada se persiste ni se reclasifica, y ni la fecha ni la procedencia de
+        importacion intervienen.
+        """
+
+        def operacion(sesion: SesionMotor) -> list[CausaLeida]:
+            repo_hechos.exigir_contexto(sesion)
+            posicion = self._exigir_posicion(sesion, entidad_id)
+            causa_reembolso = (
+                CausaReduccion.PAGO
+                if posicion["tipo"] == TIPO_OBLIGACION
+                else CausaReduccion.COBRO
+            )
+            leidas = []
+            for hecho_id, codigo, con_movimiento in repo_pos.reducciones_de_posicion(
+                sesion, entidad_id, EFECTO_DE_POSICION[posicion["tipo"]]
+            ):
+                if codigo == TIPO_HECHO_REEMBOLSO:
+                    causa = causa_reembolso.value
+                elif codigo == TIPO_HECHO_CONDONACION:
+                    causa = CausaReduccion.CONDONACION.value
+                else:
+                    causa = CAUSA_NO_DETERMINABLE
+                leidas.append(CausaLeida(hecho_id, codigo, con_movimiento, causa))
+            return leidas
+
+        resultado = self._unidad.ejecutar_con_traza(
+            contexto, operacion, nombre="leer_causas_de_reduccion"
+        )
+        self.ultima_traza = resultado.traza
+        return resultado.valor
+
     # ==================================================================
     # Nucleo comun de los deltas
     # ==================================================================
@@ -467,24 +670,41 @@ class PosicionesService:
         tipo_hecho_codigo: str,
         codigo_exceso: CodigoError,
         nombre_operacion: str,
+        causa_esperada: CausaReduccion,
         tesoreria: Any | None = None,
+        exige_tesoreria: bool = False,
         signo_movimiento: int = 0,
         no_encontrada: CodigoError = CodigoError.AGREGADO_NO_ENCONTRADO,
         relacion: tuple[uuid.UUID | None, uuid.UUID | None] = (None, None),
         extra: Callable[[SesionMotor, dict[str, Any]], None] | None = None,
         artefactos_extra: Sequence[tuple[str, uuid.UUID]] = (),
-        tipo_no_soportado: tuple[str, CodigoError] | None = None,
         presupuestable_hecho: bool = PRESUPUESTABLE_POSICION,
         estado_localizacion_hecho: str = LOCALIZACION_POSICION,
         localidad_id_hecho: uuid.UUID | None = None,
         verificar_hecho_en_replay: bool = False,
     ) -> ResultadoPosicion:
-        # Los cuatro ultimos parametros solo los pasa `condonar_derecho`
-        # (mandato F04 R1+R2 v0.3 + E01); sus defaults reproducen el
-        # comportamiento previo del resto de operaciones.
+        # Los cuatro ultimos parametros solo los pasan las condonaciones
+        # (mandato F04 R1+R2 v0.3 + E01; F04-D052 para el INGRESO); sus
+        # defaults reproducen el comportamiento previo del resto.
         self._validar_delta(delta)
+        # F04-D052. Toda la frontera de causa se juzga ANTES de abrir la
+        # transaccion: un rechazo aqui no deja ni hecho, ni efecto, ni
+        # movimiento, ni posicion.
+        self._validar_causa(delta, causa_esperada)
+        if exige_tesoreria and tesoreria is None:
+            raise ErrorMotor(
+                CodigoError.CUENTA_GAPTO_REQUERIDA,
+                "Un pago o cobro propio pasa por una cuenta Gapto (EFECTIVO "
+                "incluida): el motor no fabrica el movimiento.",
+            )
         if delta.cierre is not None:
             self._validar_cierre(delta.cierre)
+            if delta.cierre.motivo_cierre != MOTIVO_CIERRE_DE_CAUSA[causa_esperada]:
+                raise ErrorMotor(
+                    CodigoError.CAUSA_REDUCCION_INVALIDA,
+                    "El motivo de cierre no corresponde a la causa de la "
+                    "reduccion.",
+                )
         importe = decimal.Decimal(delta.importe)
 
         def operacion(sesion: SesionMotor) -> ResultadoPosicion:
@@ -514,15 +734,6 @@ class PosicionesService:
                 raise ErrorMotor(
                     no_encontrada,
                     "La posicion indicada no existe o no es accesible.",
-                )
-            if (
-                tipo_no_soportado is not None
-                and posicion["tipo"] == tipo_no_soportado[0]
-            ):
-                raise ErrorMotor(
-                    tipo_no_soportado[1],
-                    "El tratamiento economico de esa extincion no esta "
-                    "cerrado; F04-04 no lo improvisa.",
                 )
             if posicion["tipo"] != tipo_esperado:
                 raise ErrorMotor(
@@ -1191,6 +1402,23 @@ class PosicionesService:
             raise ErrorMotor(
                 CodigoError.FECHA_ECONOMICA_AUSENTE,
                 "El hecho exige fecha economica.",
+            )
+
+    @staticmethod
+    def _validar_causa(
+        delta: DatosDeltaPosicion, causa_esperada: CausaReduccion
+    ) -> None:
+        """F04-D052. Causa obligatoria, del vocabulario cerrado y la de ESTA
+        operacion. Ausente, desconocida o ajena -> STOP. Nunca se infiere:
+        ni por diferencia de importes ni por la presencia de movimiento."""
+        if (
+            not isinstance(delta.causa, CausaReduccion)
+            or delta.causa is not causa_esperada
+        ):
+            raise ErrorMotor(
+                CodigoError.CAUSA_REDUCCION_INVALIDA,
+                "La reduccion exige declarar su causa y debe ser la de la "
+                "operacion: PAGO, COBRO o CONDONACION.",
             )
 
     @staticmethod

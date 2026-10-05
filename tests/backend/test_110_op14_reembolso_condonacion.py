@@ -9,6 +9,14 @@
 #   la misma contraparte conviven aunque su neto calculado sea cero. No se
 #   extinguen, no se reescriben importes y no nace ningun hecho de
 #   compensacion. El neteo es lectura, nunca realidad persistida.
+# Version: 0.3.0
+#   0.3.0 (F04-D052 B2): toda reduccion declara su causa con su forma fisica.
+#   Los cobros (OP-14) llevan movimiento en cuenta Gapto (helper `reembolso`
+#   con cuenta); el caso "sin cuenta registrada" pasa a esperar STOP
+#   CUENTA_GAPTO_REQUERIDA sin escrituras; las condonaciones declaran causa
+#   CONDONACION; el antiguo fail-closed de condonacion de obligacion pasa a
+#   esperar exito por `condonar_obligacion` (D5), y `condonar_derecho` sobre
+#   una obligacion es NATURALEZA_INCOMPATIBLE.
 # Version: 0.2.0
 #   0.2.0 (mandato F04 R1+R2 v0.3 + E01): las condonaciones que declaran GASTO
 #   aportan `presupuestable` (E01), preservando el discriminante
@@ -32,6 +40,7 @@ from app.core.errores import CodigoError, ErrorMotor
 from app.core.modelos_posicion import (
     DatosCierre,
     DatosCondonacion,
+    DatosCondonacionObligacion,
     DatosReembolso,
     DatosTesoreriaReembolso,
     TIPO_OBLIGACION,
@@ -40,7 +49,14 @@ from app.core.modelos_tesoreria import DatosMovimiento
 from app.services.posiciones_service import PosicionesService
 from app.services.tesoreria_service import TesoreriaService
 from conftest import leer_fila
-from test_109_op12_posiciones import alta, delta
+from test_109_op12_posiciones import (
+    COBRO,
+    CONDONACION,
+    PAGO,
+    alta,
+    delta,
+    tesoreria_nueva,
+)
 
 D = decimal.Decimal
 FECHA = dt.date(2026, 6, 15)
@@ -62,8 +78,11 @@ def derecho_indeterminado(
     return datos.entidad_id, resultado
 
 
-def reembolso(importe: str, **extra) -> DatosReembolso:
-    return DatosReembolso(delta=delta(importe), **extra)
+def reembolso(importe: str, cuenta: uuid.UUID, **extra) -> DatosReembolso:
+    """COBRO propio con movimiento nuevo en cuenta Gapto (F04-D052)."""
+    return DatosReembolso(
+        delta=delta(importe, causa=COBRO), tesoreria=tesoreria_nueva(cuenta), **extra
+    )
 
 
 # ==================================================================
@@ -75,9 +94,10 @@ def test_reembolso_parcial(
     contexto: ContextoOperacion,
     admin: psycopg.Connection,
     derecho,
+    cuenta: uuid.UUID,
 ) -> None:
     entidad_id, creada, _ = derecho
-    datos = reembolso("40.0000")
+    datos = reembolso("40.0000", cuenta)
     resultado = servicio_posiciones.reembolsar(
         contexto,
         entidad_id=entidad_id,
@@ -97,14 +117,14 @@ def test_reembolso_parcial(
 
 
 def test_reembolso_total_no_cierra_solo(
-    servicio_posiciones: PosicionesService, contexto, derecho
+    servicio_posiciones: PosicionesService, contexto, derecho, cuenta
 ) -> None:
     entidad_id, creada, _ = derecho
     resultado = servicio_posiciones.reembolsar(
         contexto,
         entidad_id=entidad_id,
         entidad_row_version_esperada=creada.entidad_row_version,
-        datos=reembolso("100.0000"),
+        datos=reembolso("100.0000", cuenta),
     )
     assert resultado.saldo.importe == D("0.0000")
     assert resultado.estado == "ACTIVA"
@@ -115,15 +135,18 @@ def test_reembolso_total_con_cierre_declarado(
     contexto: ContextoOperacion,
     admin: psycopg.Connection,
     derecho,
+    cuenta: uuid.UUID,
 ) -> None:
     entidad_id, creada, _ = derecho
     datos = DatosReembolso(
         delta=delta(
             "100.0000",
+            causa=COBRO,
             cierre=DatosCierre(
                 motivo_cierre="LIQUIDADA", fecha_cierre=dt.date(2026, 7, 1)
             ),
-        )
+        ),
+        tesoreria=tesoreria_nueva(cuenta),
     )
     resultado = servicio_posiciones.reembolsar(
         contexto,
@@ -147,10 +170,11 @@ def test_reembolso_nunca_es_ingreso_ni_gasto_negativo(
     contexto: ContextoOperacion,
     admin: psycopg.Connection,
     derecho,
+    cuenta: uuid.UUID,
 ) -> None:
     """El dinero que vuelve de un derecho no es un ingreso nuevo."""
     entidad_id, creada, _ = derecho
-    datos = reembolso("40.0000")
+    datos = reembolso("40.0000", cuenta)
     servicio_posiciones.reembolsar(
         contexto,
         entidad_id=entidad_id,
@@ -168,7 +192,7 @@ def test_reembolso_nunca_es_ingreso_ni_gasto_negativo(
 
 
 def test_exceso_sobre_saldo_conocido(
-    servicio_posiciones: PosicionesService, contexto, derecho
+    servicio_posiciones: PosicionesService, contexto, derecho, cuenta
 ) -> None:
     entidad_id, creada, _ = derecho
     with pytest.raises(ErrorMotor) as excinfo:
@@ -176,13 +200,13 @@ def test_exceso_sobre_saldo_conocido(
             contexto,
             entidad_id=entidad_id,
             entidad_row_version_esperada=creada.entidad_row_version,
-            datos=reembolso("101.0000"),
+            datos=reembolso("101.0000", cuenta),
         )
     assert excinfo.value.codigo is CodigoError.EXCEDE_SALDO_DEL_DERECHO
 
 
 def test_saldo_indeterminado_sigue_indeterminado(
-    servicio_posiciones: PosicionesService, contexto, derecho_indeterminado
+    servicio_posiciones: PosicionesService, contexto, derecho_indeterminado, cuenta
 ) -> None:
     """Se registra el importe cobrado; el saldo NO se vuelve conocido."""
     entidad_id, creada = derecho_indeterminado
@@ -190,13 +214,13 @@ def test_saldo_indeterminado_sigue_indeterminado(
         contexto,
         entidad_id=entidad_id,
         entidad_row_version_esperada=creada.entidad_row_version,
-        datos=reembolso("20.0000"),
+        datos=reembolso("20.0000", cuenta),
     )
     assert resultado.saldo.conocido is False
 
 
 def test_sin_derecho_previo(
-    servicio_posiciones: PosicionesService, contexto
+    servicio_posiciones: PosicionesService, contexto, cuenta
 ) -> None:
     """No se crea un derecho retroactivo porque haya llegado dinero."""
     with pytest.raises(ErrorMotor) as excinfo:
@@ -204,13 +228,13 @@ def test_sin_derecho_previo(
             contexto,
             entidad_id=uuid.uuid4(),
             entidad_row_version_esperada=1,
-            datos=reembolso("10.0000"),
+            datos=reembolso("10.0000", cuenta),
         )
     assert excinfo.value.codigo is CodigoError.SIN_DERECHO_PREVIO
 
 
 def test_reembolso_sobre_obligacion_rechazado(
-    servicio_posiciones: PosicionesService, contexto, contraparte
+    servicio_posiciones: PosicionesService, contexto, contraparte, cuenta
 ) -> None:
     creada = servicio_posiciones.crear_posicion(
         contexto, alta(contraparte, tipo=TIPO_OBLIGACION)
@@ -220,7 +244,7 @@ def test_reembolso_sobre_obligacion_rechazado(
             contexto,
             entidad_id=creada.entidad_id,
             entidad_row_version_esperada=creada.entidad_row_version,
-            datos=reembolso("10.0000"),
+            datos=reembolso("10.0000", cuenta),
         )
     assert excinfo.value.codigo is CodigoError.NATURALEZA_INCOMPATIBLE
 
@@ -247,7 +271,7 @@ def test_reembolso_con_movimiento_nuevo(
         contexto,
         entidad_id=entidad_id,
         entidad_row_version_esperada=creada.entidad_row_version,
-        datos=DatosReembolso(delta=delta("40.0000"), tesoreria=tesoreria),
+        datos=DatosReembolso(delta=delta("40.0000", causa=COBRO), tesoreria=tesoreria),
     )
     assert resultado.movimiento_row_version == 1
     fila = leer_fila(
@@ -297,7 +321,7 @@ def test_reembolso_consumiendo_movimiento_existente(
         contexto,
         entidad_id=entidad_id,
         entidad_row_version_esperada=creada.entidad_row_version,
-        datos=DatosReembolso(delta=delta("40.0000"), tesoreria=tesoreria),
+        datos=DatosReembolso(delta=delta("40.0000", causa=COBRO), tesoreria=tesoreria),
     )
     fila = leer_fila(
         admin,
@@ -333,7 +357,7 @@ def test_reembolso_con_movimiento_negativo_rechazado(
             entidad_id=entidad_id,
             entidad_row_version_esperada=creada.entidad_row_version,
             datos=DatosReembolso(
-                delta=delta("40.0000"),
+                delta=delta("40.0000", causa=COBRO),
                 tesoreria=DatosTesoreriaReembolso(
                     conciliacion_id=uuid.uuid4(),
                     movimiento_id=movimiento_id,
@@ -350,14 +374,25 @@ def test_sin_cuenta_registrada_no_se_inventa_movimiento(
     admin: psycopg.Connection,
     derecho,
 ) -> None:
+    """F04-D052 (CC11) supera F04-D015 §4 para cobros nuevos: sin cuenta
+    Gapto el cobro es STOP. Sigue sin inventarse movimiento: no se escribe
+    nada."""
     entidad_id, creada, _ = derecho
-    datos = reembolso("40.0000")
-    servicio_posiciones.reembolsar(
-        contexto,
-        entidad_id=entidad_id,
-        entidad_row_version_esperada=creada.entidad_row_version,
-        datos=datos,
-    )
+    datos = DatosReembolso(delta=delta("40.0000", causa=COBRO))
+    with pytest.raises(ErrorMotor) as excinfo:
+        servicio_posiciones.reembolsar(
+            contexto,
+            entidad_id=entidad_id,
+            entidad_row_version_esperada=creada.entidad_row_version,
+            datos=datos,
+        )
+    assert excinfo.value.codigo is CodigoError.CUENTA_GAPTO_REQUERIDA
+    assert leer_fila(
+        admin,
+        contexto.owner_user_id,
+        "SELECT count(*) FROM gapto.hechos_financieros WHERE id = %s",
+        (datos.delta.hecho_id,),
+    ) == (0,)
     fila = leer_fila(
         admin,
         contexto.owner_user_id,
@@ -376,11 +411,13 @@ def test_relacion_reembolso_de(
     contexto: ContextoOperacion,
     admin: psycopg.Connection,
     derecho,
+    cuenta: uuid.UUID,
 ) -> None:
     entidad_id, creada, datos_alta = derecho
     relacion_id = uuid.uuid4()
     datos = DatosReembolso(
-        delta=delta("40.0000"),
+        delta=delta("40.0000", causa=COBRO),
+        tesoreria=tesoreria_nueva(cuenta),
         hecho_causal_id=datos_alta.hecho_id,
         relacion_id=relacion_id,
     )
@@ -410,9 +447,10 @@ def test_origen_desconocido_no_inventa_relacion(
     contexto: ContextoOperacion,
     admin: psycopg.Connection,
     derecho_indeterminado,
+    cuenta: uuid.UUID,
 ) -> None:
     entidad_id, creada = derecho_indeterminado
-    datos = reembolso("20.0000")
+    datos = reembolso("20.0000", cuenta)
     servicio_posiciones.reembolsar(
         contexto,
         entidad_id=entidad_id,
@@ -437,6 +475,7 @@ def test_retry_tras_commit_incierto_con_version_antigua(
     contexto: ContextoOperacion,
     admin: psycopg.Connection,
     derecho,
+    cuenta: uuid.UUID,
 ) -> None:
     """Mandato 32: el reintento exacto se reconoce ANTES de mirar la version.
 
@@ -446,7 +485,7 @@ def test_retry_tras_commit_incierto_con_version_antigua(
     nuevos.
     """
     entidad_id, creada, _ = derecho
-    datos = reembolso("40.0000")
+    datos = reembolso("40.0000", cuenta)
     primero = servicio_posiciones.reembolsar(
         contexto,
         entidad_id=entidad_id,
@@ -471,7 +510,7 @@ def test_retry_tras_commit_incierto_con_version_antigua(
 
 
 def test_version_desfasada_con_uuid_nuevos(
-    servicio_posiciones: PosicionesService, contexto, derecho
+    servicio_posiciones: PosicionesService, contexto, derecho, cuenta
 ) -> None:
     """Si los UUID NO son los originales, una version vieja si es conflicto."""
     entidad_id, creada, _ = derecho
@@ -479,23 +518,23 @@ def test_version_desfasada_con_uuid_nuevos(
         contexto,
         entidad_id=entidad_id,
         entidad_row_version_esperada=creada.entidad_row_version,
-        datos=reembolso("40.0000"),
+        datos=reembolso("40.0000", cuenta),
     )
     with pytest.raises(ErrorMotor) as excinfo:
         servicio_posiciones.reembolsar(
             contexto,
             entidad_id=entidad_id,
             entidad_row_version_esperada=creada.entidad_row_version,
-            datos=reembolso("10.0000"),
+            datos=reembolso("10.0000", cuenta),
         )
     assert excinfo.value.codigo is CodigoError.VERSION_DESFASADA
 
 
 def test_lote_parcialmente_preexistente_es_conflicto(
-    servicio_posiciones: PosicionesService, contexto, derecho
+    servicio_posiciones: PosicionesService, contexto, derecho, cuenta
 ) -> None:
     entidad_id, creada, _ = derecho
-    datos = reembolso("40.0000")
+    datos = reembolso("40.0000", cuenta)
     servicio_posiciones.reembolsar(
         contexto,
         entidad_id=entidad_id,
@@ -509,7 +548,9 @@ def test_lote_parcialmente_preexistente_es_conflicto(
             vinculo_id=uuid.uuid4(),
             importe=D("40.0000"),
             fecha_hecho=datos.delta.fecha_hecho,
-        )
+            causa=COBRO,
+        ),
+        tesoreria=tesoreria_nueva(cuenta),
     )
     with pytest.raises(ErrorMotor) as excinfo:
         servicio_posiciones.reembolsar(
@@ -562,7 +603,7 @@ def test_condonacion_parcial(
     derecho,
 ) -> None:
     entidad_id, creada, _ = derecho
-    datos = DatosCondonacion(delta=delta("30.0000"))
+    datos = DatosCondonacion(delta=delta("30.0000", causa=CONDONACION))
     resultado = servicio_posiciones.condonar_derecho(
         contexto,
         entidad_id=entidad_id,
@@ -594,6 +635,7 @@ def test_condonacion_total_con_cierre(
         datos=DatosCondonacion(
             delta=delta(
                 "100.0000",
+                causa=CONDONACION,
                 cierre=DatosCierre(
                     motivo_cierre="CONDONADA", fecha_cierre=dt.date(2026, 7, 1)
                 ),
@@ -619,7 +661,7 @@ def test_condonacion_no_genera_ingreso(
     derecho,
 ) -> None:
     entidad_id, creada, _ = derecho
-    datos = DatosCondonacion(delta=delta("30.0000"))
+    datos = DatosCondonacion(delta=delta("30.0000", causa=CONDONACION))
     servicio_posiciones.condonar_derecho(
         contexto,
         entidad_id=entidad_id,
@@ -651,7 +693,7 @@ def test_sin_las_dos_declaraciones_no_hay_gasto(
     """El GASTO exige AMBAS declaraciones; con una sola, cero efecto."""
     entidad_id, creada, _ = derecho
     datos = DatosCondonacion(
-        delta=delta("30.0000"),
+        delta=delta("30.0000", causa=CONDONACION),
         declara_gasto_soportado=soportado,
         declara_coste_no_reconocido=no_reconocido,
         efecto_gasto_id=uuid.uuid4(),
@@ -681,7 +723,7 @@ def test_gasto_explicito_permitido(
     entidad_id, creada, _ = derecho
     efecto_gasto_id = uuid.uuid4()
     datos = DatosCondonacion(
-        delta=delta("30.0000"),
+        delta=delta("30.0000", causa=CONDONACION),
         declara_gasto_soportado=True,
         declara_coste_no_reconocido=True,
         presupuestable=True,  # mandato v0.3 §8: GASTO declarado
@@ -712,7 +754,7 @@ def test_doble_gasto_rechazado(
         entidad_id=entidad_id,
         entidad_row_version_esperada=creada.entidad_row_version,
         datos=DatosCondonacion(
-            delta=delta("30.0000"),
+            delta=delta("30.0000", causa=CONDONACION),
             declara_gasto_soportado=True,
             declara_coste_no_reconocido=True,
             presupuestable=True,  # mandato v0.3 §8: GASTO declarado
@@ -725,7 +767,7 @@ def test_doble_gasto_rechazado(
             entidad_id=entidad_id,
             entidad_row_version_esperada=primera.entidad_row_version,
             datos=DatosCondonacion(
-                delta=delta("20.0000"),
+                delta=delta("20.0000", causa=CONDONACION),
                 declara_gasto_soportado=True,
                 declara_coste_no_reconocido=True,
                 presupuestable=True,  # mandato v0.3 §8: GASTO declarado
@@ -743,15 +785,22 @@ def test_condonacion_sobre_saldo_indeterminado(
         contexto,
         entidad_id=entidad_id,
         entidad_row_version_esperada=creada.entidad_row_version,
-        datos=DatosCondonacion(delta=delta("20.0000")),
+        datos=DatosCondonacion(delta=delta("20.0000", causa=CONDONACION)),
     )
     assert resultado.saldo.conocido is False
 
 
 def test_condonacion_de_obligacion_fail_closed(
-    servicio_posiciones: PosicionesService, contexto, contraparte
+    servicio_posiciones: PosicionesService,
+    contexto: ContextoOperacion,
+    admin: psycopg.Connection,
+    contraparte,
 ) -> None:
-    """Fuera de alcance: no se improvisa si la extincion supone INGRESO."""
+    """F04-D052 supera F04-D015 §8: la condonacion de obligacion deja de ser
+    STOP y pasa a ESPERAR EXITO por su operacion propia (D5), con arquetipo
+    CONDONACION, sin movimiento y sin INGRESO. La simetria no es automatica:
+    `condonar_derecho` sobre una obligacion sigue rechazada, ahora como
+    NATURALEZA_INCOMPATIBLE."""
     creada = servicio_posiciones.crear_posicion(
         contexto, alta(contraparte, tipo=TIPO_OBLIGACION)
     )
@@ -760,9 +809,33 @@ def test_condonacion_de_obligacion_fail_closed(
             contexto,
             entidad_id=creada.entidad_id,
             entidad_row_version_esperada=creada.entidad_row_version,
-            datos=DatosCondonacion(delta=delta("10.0000")),
+            datos=DatosCondonacion(delta=delta("10.0000", causa=CONDONACION)),
         )
-    assert excinfo.value.codigo is CodigoError.CONDONACION_OBLIGACION_NO_SOPORTADA
+    assert excinfo.value.codigo is CodigoError.NATURALEZA_INCOMPATIBLE
+
+    condonacion = DatosCondonacionObligacion(
+        delta=delta("10.0000", causa=CONDONACION)
+    )
+    resultado = servicio_posiciones.condonar_obligacion(
+        contexto,
+        entidad_id=creada.entidad_id,
+        entidad_row_version_esperada=creada.entidad_row_version,
+        datos=condonacion,
+    )
+    assert resultado.saldo.importe == D("90.0000")
+    assert resultado.estado == "ACTIVA"
+    assert leer_fila(
+        admin,
+        contexto.owner_user_id,
+        "SELECT th.codigo, "
+        "(SELECT count(*) FROM gapto.hecho_movimientos_tesoreria c "
+        " WHERE c.hecho_id = h.id), "
+        "(SELECT count(*) FROM gapto.hecho_efectos e "
+        " WHERE e.hecho_id = h.id AND e.tipo_efecto = 'INGRESO') "
+        "FROM gapto.hechos_financieros h "
+        "JOIN gapto.tipos_hecho th ON th.id = h.tipo_hecho_id WHERE h.id = %s",
+        (condonacion.delta.hecho_id,),
+    ) == ("CONDONACION", 0, 0)
 
 
 def test_no_reclamar_no_cambia_la_posicion(
@@ -810,7 +883,7 @@ def test_c03_gasoil_reembolsable(
         fecha_movimiento=FECHA,
     )
     datos = DatosReembolso(
-        delta=delta("60.0000"),
+        delta=delta("60.0000", causa=COBRO),
         tesoreria=tesoreria,
         hecho_causal_id=datos_alta.hecho_id,
         relacion_id=uuid.uuid4(),
@@ -974,6 +1047,7 @@ def test_c1_dos_reembolsos_concurrentes_de_setenta(
     contexto: ContextoOperacion,
     admin: psycopg.Connection,
     derecho,
+    cuenta: uuid.UUID,
 ) -> None:
     """Derecho 100. Dos reembolsos de 70 a la vez. Solo uno confirma.
 
@@ -981,7 +1055,7 @@ def test_c1_dos_reembolsos_concurrentes_de_setenta(
     impide es la guarda SQL de `entidades.row_version`.
     """
     entidad_id, creada, _ = derecho
-    intentos = [reembolso("70.0000"), reembolso("70.0000")]
+    intentos = [reembolso("70.0000", cuenta), reembolso("70.0000", cuenta)]
 
     def intentar(indice: int) -> None:
         servicio_posiciones.reembolsar(
@@ -1012,18 +1086,23 @@ def test_c2_dos_pagos_concurrentes_de_obligacion(
     contexto: ContextoOperacion,
     admin: psycopg.Connection,
     contraparte: uuid.UUID,
+    cuenta: uuid.UUID,
 ) -> None:
     creada = servicio_posiciones.crear_posicion(
         contexto, alta(contraparte, tipo=TIPO_OBLIGACION)
     )
-    intentos = [delta("70.0000"), delta("70.0000")]
+    intentos = [
+        (delta("70.0000", causa=PAGO), tesoreria_nueva(cuenta)),
+        (delta("70.0000", causa=PAGO), tesoreria_nueva(cuenta)),
+    ]
 
     def intentar(indice: int) -> None:
         servicio_posiciones.reducir_obligacion(
             ContextoOperacion.de_usuario(contexto.owner_user_id),
             entidad_id=creada.entidad_id,
             entidad_row_version_esperada=creada.entidad_row_version,
-            delta=intentos[indice],
+            delta=intentos[indice][0],
+            movimiento=intentos[indice][1],
         )
 
     resultados = _competir(intentar)
@@ -1038,10 +1117,11 @@ def test_c3_cierre_frente_a_delta_concurrente(
     contexto: ContextoOperacion,
     admin: psycopg.Connection,
     derecho,
+    cuenta: uuid.UUID,
 ) -> None:
     """Cerrar y anadir delta sobre la MISMA version: no confirman las dos."""
     entidad_id, creada, _ = derecho
-    datos = reembolso("10.0000")
+    datos = reembolso("10.0000", cuenta)
 
     def intentar(indice: int) -> None:
         contexto_propio = ContextoOperacion.de_usuario(contexto.owner_user_id)
@@ -1079,10 +1159,11 @@ def test_c4_retry_concurrente_no_duplica_deltas_ni_auditoria(
     contexto: ContextoOperacion,
     admin: psycopg.Connection,
     derecho,
+    cuenta: uuid.UUID,
 ) -> None:
     """Dos reintentos simultaneos con LOS MISMOS UUID no duplican nada."""
     entidad_id, creada, _ = derecho
-    datos = reembolso("40.0000")
+    datos = reembolso("40.0000", cuenta)
 
     def intentar(indice: int) -> None:
         servicio_posiciones.reembolsar(

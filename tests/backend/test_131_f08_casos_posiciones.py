@@ -16,6 +16,14 @@
 #   deuda, cobrar un derecho, materializar una prevision y reconocer una
 #   compra financiada son las cuatro situaciones donde el motor podria contar
 #   dos veces la misma realidad. Cada oraculo lo comprueba explicitamente.
+# Version: 0.4.0
+#   0.4.0 (F04-D052 B2): toda reduccion declara causa con su forma fisica.
+#   C-03 cobra con causa COBRO. C-06 y C-08 pagan la cuota de capital con
+#   causa PAGO y movimiento en cuenta Gapto (en C-06 el pago CONSUME el
+#   movimiento de la cuota que ya existia en el caso, que concilia capital e
+#   intereses); las deudas de C-06/C-08 son posiciones GENERICAS (no
+#   financiaciones formales) y caen en el ambito de F04-D052. Oraculos
+#   intactos.
 # Version: 0.3.0
 #   0.3.0 (mandato F04 R1+R2 v0.3 + E01): OP-04 aporta `presupuestable` en la
 #   transicion al primer GASTO/INGRESO (A08-bis generalizada); fixtures de
@@ -42,6 +50,7 @@ from app.core.contexto import ContextoOperacion
 from app.core.errores import CodigoError, ErrorMotor
 from app.core.modelos_devolucion import DatosDevolucion
 from app.core.modelos_posicion import (
+    CausaReduccion,
     DatosAltaPosicion,
     DatosDeltaPosicion,
     DatosReembolso,
@@ -106,13 +115,14 @@ def _alta_posicion(
     return datos, motor.posiciones.crear_posicion(contexto, datos)
 
 
-def _delta(importe: decimal.Decimal) -> DatosDeltaPosicion:
+def _delta(importe: decimal.Decimal, causa: CausaReduccion) -> DatosDeltaPosicion:
     return DatosDeltaPosicion(
         hecho_id=uuid.uuid4(),
         efecto_id=uuid.uuid4(),
         vinculo_id=uuid.uuid4(),
         importe=importe,
         fecha_hecho=dt.date(2026, 7, 1),
+        causa=causa,
     )
 
 
@@ -255,7 +265,7 @@ def test_c03_gasoil_reembolsable(
     )
     assert alta.saldo.conocido and alta.saldo.importe == total
 
-    cobro = _delta(total)
+    cobro = _delta(total, CausaReduccion.COBRO)
     resultado = motor.posiciones.reembolsar(
         contexto,
         entidad_id=posicion.entidad_id,
@@ -387,12 +397,22 @@ def test_c06_hipoteca_cuota_separa_capital_e_intereses(
         concepto="hipoteca",
     )
 
-    pago = _delta(capital)
+    # F04-D052: el capital es un PAGO propio y CONSUME el movimiento real de
+    # la cuota en cuenta Gapto (capital + intereses).
+    pieza = movimiento(cuenta, -(capital + intereses), descripcion="cuota hipoteca")
+    mov = motor.tesoreria.registrar_movimiento(contexto, pieza)
+
+    pago = _delta(capital, CausaReduccion.PAGO)
     resultado = motor.posiciones.reducir_obligacion(
         contexto,
         entidad_id=posicion.entidad_id,
         entidad_row_version_esperada=alta.entidad_row_version,
         delta=pago,
+        movimiento=DatosTesoreriaReembolso(
+            conciliacion_id=uuid.uuid4(),
+            movimiento_id=pieza.movimiento_id,
+            movimiento_row_version_esperada=mov.row_version,
+        ),
     )
     assert resultado.saldo.importe == principal - capital
     sin_naturaleza(admin, contexto.owner_user_id, pago.hecho_id, "GASTO")
@@ -406,13 +426,11 @@ def test_c06_hipoteca_cuota_separa_capital_e_intereses(
         efectos=[efecto("GASTO", intereses)],
         presupuestable=True,  # F04-D046 A08-bis: primer GASTO/INGRESO
     ).row_version
-    pieza = movimiento(cuenta, -(capital + intereses), descripcion="cuota hipoteca")
-    mov = motor.tesoreria.registrar_movimiento(contexto, pieza)
     motor.tesoreria.conciliar(
         contexto,
         conciliacion(datos.hecho_id, pieza.movimiento_id, -intereses),
         hecho_row_version_esperada=version,
-        movimiento_row_version_esperada=mov.row_version,
+        movimiento_row_version_esperada=resultado.movimiento_row_version,
     )
 
     assert efectos_de(admin, contexto.owner_user_id, datos.hecho_id) == {
@@ -462,12 +480,19 @@ def test_c08_compra_financiada_reconoce_el_gasto_una_sola_vez(
         concepto="financiacion del movil",
     )
 
-    pago = _delta(cuota)
+    pago = _delta(cuota, CausaReduccion.PAGO)
     resultado = motor.posiciones.reducir_obligacion(
         contexto,
         entidad_id=posicion.entidad_id,
         entidad_row_version_esperada=alta.entidad_row_version,
         delta=pago,
+        # F04-D052: la cuota es un PAGO propio con movimiento en cuenta Gapto.
+        movimiento=DatosTesoreriaReembolso(
+            conciliacion_id=uuid.uuid4(),
+            movimiento_id=uuid.uuid4(),
+            cuenta_id=cuenta,
+            fecha_movimiento=dt.date(2026, 7, 1),
+        ),
     )
 
     assert resultado.saldo.importe == total - cuota

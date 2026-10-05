@@ -8,6 +8,12 @@
 #   El nucleo de esta suite es INV-17: saldo CONOCIDO frente a INDETERMINADO.
 #   No son un numero y su ausencia, son dos estados distintos, y la diferencia
 #   se pierde en cuanto alguien trata el NULL como cero.
+# Version: 0.2.0
+#   0.2.0 (F04-D052 B2): toda reduccion declara causa explicita con su forma
+#   fisica. OP-12B es PAGO con movimiento en cuenta Gapto y OP-14 COBRO con
+#   movimiento; los casos que reducian sin causa ni cuenta conservan sus
+#   aserciones aportando esa forma, y la reduccion 100 -> 60 SIN cuenta pasa a
+#   un caso propio que espera STOP sin escrituras. Helper `tesoreria_nueva`.
 # Version: 0.1.0
 # ============================================================
 
@@ -23,6 +29,7 @@ import pytest
 from app.core.contexto import ContextoOperacion
 from app.core.errores import CodigoError, ErrorMotor
 from app.core.modelos_posicion import (
+    CausaReduccion,
     DatosAltaPosicion,
     DatosCierre,
     DatosDeltaPosicion,
@@ -70,6 +77,21 @@ def delta(importe: str, **extra) -> DatosDeltaPosicion:
     }
     base.update(extra)
     return DatosDeltaPosicion(**base)
+
+
+def tesoreria_nueva(cuenta: uuid.UUID) -> DatosTesoreriaReembolso:
+    """Movimiento creado en la propia operacion sobre una cuenta Gapto
+    (F04-D052). El signo lo pone el motor segun la operacion."""
+    return DatosTesoreriaReembolso(
+        conciliacion_id=uuid.uuid4(),
+        movimiento_id=uuid.uuid4(),
+        cuenta_id=cuenta,
+    )
+
+
+PAGO = CausaReduccion.PAGO
+COBRO = CausaReduccion.COBRO
+CONDONACION = CausaReduccion.CONDONACION
 
 
 @pytest.fixture()
@@ -348,16 +370,48 @@ def test_apertura_veinte_mas_treinta(
 
 
 def test_obligacion_cien_menos_pago_cuarenta(
-    servicio_posiciones: PosicionesService, contexto, obligacion
+    servicio_posiciones: PosicionesService, contexto, obligacion, cuenta
 ) -> None:
+    """F04-D052: el pago de 40 es PAGO explicito con movimiento en cuenta
+    Gapto; la aritmetica 100 - 40 = 60 no cambia."""
     entidad_id, creada = obligacion
     resultado = servicio_posiciones.reducir_obligacion(
         contexto,
         entidad_id=entidad_id,
         entidad_row_version_esperada=creada.entidad_row_version,
-        delta=delta("40.0000"),
+        delta=delta("40.0000", causa=PAGO),
+        movimiento=tesoreria_nueva(cuenta),
     )
     assert resultado.saldo.importe == D("60.0000")
+
+
+def test_obligacion_cien_menos_cuarenta_sin_cuenta_es_stop(
+    servicio_posiciones: PosicionesService,
+    contexto: ContextoOperacion,
+    admin: psycopg.Connection,
+    obligacion,
+) -> None:
+    """F04-D052 (R-F04-037, CC11). La reduccion 100 -> 60 sin movimiento que
+    antes se aceptaba es ahora STOP: sin hecho, sin efecto y saldo intacto."""
+    entidad_id, creada = obligacion
+    reduccion = delta("40.0000", causa=PAGO)
+    with pytest.raises(ErrorMotor) as excinfo:
+        servicio_posiciones.reducir_obligacion(
+            contexto,
+            entidad_id=entidad_id,
+            entidad_row_version_esperada=creada.entidad_row_version,
+            delta=reduccion,
+        )
+    assert excinfo.value.codigo is CodigoError.CUENTA_GAPTO_REQUERIDA
+    assert leer_fila(
+        admin,
+        contexto.owner_user_id,
+        "SELECT count(*) FROM gapto.hechos_financieros WHERE id = %s",
+        (reduccion.hecho_id,),
+    ) == (0,)
+    assert servicio_posiciones.saldo(contexto, entidad_id).saldo.importe == D(
+        "100.0000"
+    )
 
 
 def test_hecho_anulado_no_participa_en_el_saldo(
@@ -368,16 +422,20 @@ def test_hecho_anulado_no_participa_en_el_saldo(
     derecho,
 ) -> None:
     entidad_id, creada = derecho
-    reduccion = delta("30.0000")
+    reduccion = delta("30.0000", causa=CONDONACION)
     servicio_posiciones.reducir_obligacion  # noqa: B018 - referencia intencionada
-    # Se usa la via de derecho: un reembolso reduce el saldo a 70.
-    from app.core.modelos_posicion import DatosReembolso
+    # Se usa la via de derecho: una reduccion de 30 deja el saldo en 70.
+    # F04-D052: un cobro lleva SIEMPRE conciliacion y OP-03 no anula un hecho
+    # con realidad asociada, de modo que la reduccion anulable es una
+    # condonacion (sin tesoreria). La propiedad probada no cambia: el delta
+    # de un hecho ANULADO deja de contar en el saldo.
+    from app.core.modelos_posicion import DatosCondonacion
 
-    tras = servicio_posiciones.reembolsar(
+    tras = servicio_posiciones.condonar_derecho(
         contexto,
         entidad_id=entidad_id,
         entidad_row_version_esperada=creada.entidad_row_version,
-        datos=DatosReembolso(delta=reduccion),
+        datos=DatosCondonacion(delta=reduccion),
     )
     assert tras.saldo.importe == D("70.0000")
 
@@ -427,7 +485,7 @@ def test_saldo_indeterminado_con_apertura_nula(
 
 
 def test_saldo_cero_no_cierra_la_posicion(
-    servicio_posiciones: PosicionesService, contexto, derecho
+    servicio_posiciones: PosicionesService, contexto, derecho, cuenta
 ) -> None:
     from app.core.modelos_posicion import DatosReembolso
 
@@ -436,7 +494,10 @@ def test_saldo_cero_no_cierra_la_posicion(
         contexto,
         entidad_id=entidad_id,
         entidad_row_version_esperada=creada.entidad_row_version,
-        datos=DatosReembolso(delta=delta("100.0000")),
+        datos=DatosReembolso(
+            delta=delta("100.0000", causa=COBRO),
+            tesoreria=tesoreria_nueva(cuenta),
+        ),
     )
     assert resultado.saldo.importe == D("0.0000")
     assert resultado.estado == "ACTIVA"
@@ -451,16 +512,18 @@ def test_reduccion_de_obligacion_no_crea_gasto_ni_ingreso(
     contexto: ContextoOperacion,
     admin: psycopg.Connection,
     obligacion,
+    cuenta: uuid.UUID,
 ) -> None:
     """El gasto se reconocio al nacer la obligacion; repetirlo seria doble
     conteo (INV-12)."""
     entidad_id, creada = obligacion
-    reduccion = delta("40.0000")
+    reduccion = delta("40.0000", causa=PAGO)
     servicio_posiciones.reducir_obligacion(
         contexto,
         entidad_id=entidad_id,
         entidad_row_version_esperada=creada.entidad_row_version,
         delta=reduccion,
+        movimiento=tesoreria_nueva(cuenta),
     )
     fila = leer_fila(
         admin,
@@ -501,7 +564,7 @@ def test_pago_de_obligacion_con_movimiento_negativo(
         contexto,
         entidad_id=entidad_id,
         entidad_row_version_esperada=creada.entidad_row_version,
-        delta=delta("40.0000"),
+        delta=delta("40.0000", causa=PAGO),
         movimiento=tesoreria,
     )
     assert resultado.saldo.importe == D("60.0000")
@@ -539,7 +602,7 @@ def test_pago_de_obligacion_con_movimiento_positivo_rechazado(
             contexto,
             entidad_id=entidad_id,
             entidad_row_version_esperada=creada.entidad_row_version,
-            delta=delta("40.0000"),
+            delta=delta("40.0000", causa=PAGO),
             movimiento=DatosTesoreriaReembolso(
                 conciliacion_id=uuid.uuid4(),
                 movimiento_id=movimiento_id,
@@ -550,7 +613,7 @@ def test_pago_de_obligacion_con_movimiento_positivo_rechazado(
 
 
 def test_exceso_conocido_sobre_obligacion(
-    servicio_posiciones: PosicionesService, contexto, obligacion
+    servicio_posiciones: PosicionesService, contexto, obligacion, cuenta
 ) -> None:
     entidad_id, creada = obligacion
     with pytest.raises(ErrorMotor) as excinfo:
@@ -558,7 +621,8 @@ def test_exceso_conocido_sobre_obligacion(
             contexto,
             entidad_id=entidad_id,
             entidad_row_version_esperada=creada.entidad_row_version,
-            delta=delta("101.0000"),
+            delta=delta("101.0000", causa=PAGO),
+            movimiento=tesoreria_nueva(cuenta),
         )
     assert excinfo.value.codigo is CodigoError.EXCEDE_SALDO_POSICION
 
@@ -567,6 +631,7 @@ def test_reduccion_sobre_saldo_indeterminado_se_registra_sin_validar(
     servicio_posiciones: PosicionesService,
     contexto: ContextoOperacion,
     contraparte: uuid.UUID,
+    cuenta: uuid.UUID,
 ) -> None:
     creada = servicio_posiciones.crear_posicion(
         contexto,
@@ -581,13 +646,14 @@ def test_reduccion_sobre_saldo_indeterminado_se_registra_sin_validar(
         contexto,
         entidad_id=creada.entidad_id,
         entidad_row_version_esperada=creada.entidad_row_version,
-        delta=delta("9999.0000"),
+        delta=delta("9999.0000", causa=PAGO),
+        movimiento=tesoreria_nueva(cuenta),
     )
     assert resultado.saldo.conocido is False
 
 
 def test_naturaleza_incompatible(
-    servicio_posiciones: PosicionesService, contexto, derecho
+    servicio_posiciones: PosicionesService, contexto, derecho, cuenta
 ) -> None:
     entidad_id, creada = derecho
     with pytest.raises(ErrorMotor) as excinfo:
@@ -595,7 +661,8 @@ def test_naturaleza_incompatible(
             contexto,
             entidad_id=entidad_id,
             entidad_row_version_esperada=creada.entidad_row_version,
-            delta=delta("10.0000"),
+            delta=delta("10.0000", causa=PAGO),
+            movimiento=tesoreria_nueva(cuenta),
         )
     assert excinfo.value.codigo is CodigoError.NATURALEZA_INCOMPATIBLE
 
@@ -644,7 +711,7 @@ def test_cierre_sin_motivo_valido(
 
 
 def test_posicion_cerrada_no_admite_deltas(
-    servicio_posiciones: PosicionesService, contexto, derecho
+    servicio_posiciones: PosicionesService, contexto, derecho, cuenta
 ) -> None:
     from app.core.modelos_posicion import DatosReembolso
 
@@ -660,7 +727,10 @@ def test_posicion_cerrada_no_admite_deltas(
             contexto,
             entidad_id=entidad_id,
             entidad_row_version_esperada=cerrada.entidad_row_version,
-            datos=DatosReembolso(delta=delta("10.0000")),
+            datos=DatosReembolso(
+                delta=delta("10.0000", causa=COBRO),
+                tesoreria=tesoreria_nueva(cuenta),
+            ),
         )
     assert excinfo.value.codigo is CodigoError.POSICION_CERRADA
 

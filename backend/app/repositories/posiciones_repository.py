@@ -24,6 +24,11 @@
 #   F04-D036 anade las lecturas de coherencia posicion <-> efecto. Viven
 #   aqui, y no en el servicio, porque son SQL: el servicio decide que hacer
 #   con el resultado, no como obtenerlo.
+# Version: 0.4.0
+#   0.4.0 (F04-D052 B2): `reducciones_de_posicion`, lectura de las
+#   reducciones de una posicion con su arquetipo y la presencia de
+#   conciliacion. Es la base fisica de la causa leida: la causa no se
+#   persiste en ninguna columna, la determinan arquetipo y movimiento.
 # Version: 0.3.0
 #   0.3.0 (F04-D038 §20): `posiciones_para_neto`, la lectura de OP-20. Es UNA
 #   sola sentencia a proposito: construir un neto con varias consultas
@@ -277,6 +282,42 @@ def saldo_deltas(
         (entidad_id, tipo_efecto),
     )
     return 0 if fila is None else fila[0]
+
+
+def reducciones_de_posicion(
+    sesion: SesionMotor, entidad_id: uuid.UUID, tipo_efecto: str
+) -> list[tuple[uuid.UUID, str, bool]]:
+    """(hecho_id, codigo de tipo_hecho, con_movimiento) de cada reduccion.
+
+    Reduccion = delta NEGATIVO de la naturaleza compatible vinculado a la
+    posicion en un hecho ACTIVO. `con_movimiento` es True si el hecho tiene
+    al menos una conciliacion con un movimiento ACTIVO. Orden estable por
+    fecha economica e identidad.
+    """
+    with sesion.conexion.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT h.id, th.codigo,
+                   EXISTS (
+                       SELECT 1
+                         FROM gapto.hecho_movimientos_tesoreria c
+                         JOIN gapto.movimientos_tesoreria m
+                           ON m.id = c.movimiento_tesoreria_id
+                        WHERE c.hecho_id = h.id
+                          AND m.estado = 'ACTIVO')
+              FROM gapto.hecho_entidades v
+              JOIN gapto.hecho_efectos ef ON ef.id = v.efecto_id
+              JOIN gapto.hechos_financieros h ON h.id = ef.hecho_id
+              JOIN gapto.tipos_hecho th ON th.id = h.tipo_hecho_id
+             WHERE v.entidad_id = %s::uuid
+               AND ef.tipo_efecto = %s::varchar
+               AND ef.importe_delta < 0
+               AND h.estado = 'ACTIVO'
+             ORDER BY h.fecha_hecho, h.id
+            """,
+            (entidad_id, tipo_efecto),
+        )
+        return [(f[0], f[1], bool(f[2])) for f in cursor.fetchall()]
 
 
 def existe_gasto_vinculado(sesion: SesionMotor, entidad_id: uuid.UUID) -> bool:

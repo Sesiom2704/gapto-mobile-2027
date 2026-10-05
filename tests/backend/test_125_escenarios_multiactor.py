@@ -9,6 +9,10 @@
 #   sus suites— sino que la combinacion no produzca una conclusion que nadie
 #   decidio: una atribucion nacida de un porcentaje de cuenta, una deuda
 #   nacida de una diferencia, un residual completado para cuadrar.
+# Version: 0.4.0
+#   0.4.0 (F04-D052 B2, D1 autorizado, desviacion de alcance declarada): A11
+#   cobra con causa COBRO y movimiento en cuenta Gapto; solo se anaden cuenta,
+#   movimiento y causa, sin tocar ninguna asercion.
 # Version: 0.3.0
 #   0.3.0 (mandato F04 R1+R2 v0.3 + E01): OP-04 aporta `presupuestable` en la
 #   transicion al primer GASTO/INGRESO (A08-bis generalizada); fixtures de
@@ -733,14 +737,14 @@ def test_a10_devolucion_posterior_sobre_gasto_compartido(
 
 
 def test_a11_reembolso_parcial_deja_saldo_vivo(
-    servicio_posiciones, servicio_neto, contexto, contraparte, admin
+    servicio_posiciones, servicio_neto, contexto, contraparte, admin, cuenta
 ) -> None:
     """A11. Me devuelven 40 de los 100 que me debian: quedan 60 vivos.
 
     El derecho NO se cierra solo, y el neto lo refleja de inmediato porque es
     derivado: nadie tiene que acordarse de actualizar un total.
     """
-    from test_109_op12_posiciones import alta, delta
+    from test_109_op12_posiciones import COBRO, alta, delta, tesoreria_nueva
     from app.core.modelos_posicion import DatosReembolso
 
     datos = alta(contraparte)
@@ -750,7 +754,9 @@ def test_a11_reembolso_parcial_deja_saldo_vivo(
         contexto,
         entidad_id=datos.entidad_id,
         entidad_row_version_esperada=creada.entidad_row_version,
-        datos=DatosReembolso(delta=delta("40.0000")),
+        datos=DatosReembolso(
+            delta=delta("40.0000", causa=COBRO), tesoreria=tesoreria_nueva(cuenta)
+        ),
     )
     assert resultado.saldo.importe == D("60.0000")
     assert leer_fila(

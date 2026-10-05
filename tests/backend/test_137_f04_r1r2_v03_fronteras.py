@@ -21,6 +21,12 @@
 #   Cada prueba nombra en su docstring el numero de la bateria v0.3 (1..24) o
 #   de E01 §7 (25..31) y el contrato exacto que discrimina. Las guardas son de
 #   frontera hacia adelante: ninguna prueba recorre historico.
+# Version: 0.2.0
+#   0.2.0 (F04-D052 B2, D1 autorizado, desviacion de alcance declarada): las
+#   condonaciones 22..30 declaran causa CONDONACION (su arquetipo pasa a ser
+#   CONDONACION; estos casos no aseveran el arquetipo, lo cubre test_144) y
+#   test_31 cobra con causa COBRO y movimiento en cuenta Gapto. Solo se
+#   anaden cuenta, movimiento y causa; ninguna asercion se borra ni se relaja.
 # Version: 0.1.0
 # ============================================================
 from __future__ import annotations
@@ -46,7 +52,7 @@ from app.services.compartidos_service import (
 )
 from app.services.correcciones_service import DatosCorreccion
 from conftest import leer_fila
-from test_109_op12_posiciones import alta, delta
+from test_109_op12_posiciones import COBRO, CONDONACION, alta, delta, tesoreria_nueva
 
 D = decimal.Decimal
 F = dt.date.fromisoformat
@@ -477,7 +483,7 @@ def derecho(servicio_posiciones, contexto, contraparte):
 def _condonar(servicio_posiciones, contexto, derecho, **extra):
     entidad_id, creada = derecho
     datos = DatosCondonacion(
-        delta=delta("30.0000"),
+        delta=delta("30.0000", causa=CONDONACION),
         declara_gasto_soportado=True,
         declara_coste_no_reconocido=True,
         efecto_gasto_id=uuid.uuid4(),
@@ -509,7 +515,7 @@ def test_22_27_condonacion_con_gasto_sin_decision_se_rechaza(
     """#22 / #27 · E01 §3. Sin decision: rechazo, sin hecho ni efectos."""
     entidad_id, creada = derecho
     datos = DatosCondonacion(
-        delta=delta("30.0000"), declara_gasto_soportado=True,
+        delta=delta("30.0000", causa=CONDONACION), declara_gasto_soportado=True,
         declara_coste_no_reconocido=True, efecto_gasto_id=uuid.uuid4(),
     )
     _rechazo(lambda: servicio_posiciones.condonar_derecho(
@@ -525,7 +531,7 @@ def test_23_28_condonacion_con_gasto_y_no_aplica_se_rechaza(
     """#23 / #28 · v0.3 §9 + E01 §3."""
     entidad_id, creada = derecho
     datos = DatosCondonacion(
-        delta=delta("30.0000"), declara_gasto_soportado=True,
+        delta=delta("30.0000", causa=CONDONACION), declara_gasto_soportado=True,
         declara_coste_no_reconocido=True, efecto_gasto_id=uuid.uuid4(),
         presupuestable=True, estado_localizacion="NO_APLICA",
     )
@@ -554,7 +560,7 @@ def test_30b_condonacion_localidad_incoherente_no_confirma_nada(
     CHECK fisico de 0040 y no queda nada confirmado."""
     entidad_id, creada = derecho
     datos = DatosCondonacion(
-        delta=delta("30.0000"), declara_gasto_soportado=True,
+        delta=delta("30.0000", causa=CONDONACION), declara_gasto_soportado=True,
         declara_coste_no_reconocido=True, efecto_gasto_id=uuid.uuid4(),
         presupuestable=True, estado_localizacion="DESCONOCIDA",
         localidad_id=localidad,
@@ -573,7 +579,7 @@ def test_condonacion_sin_gasto_no_admite_decision_ni_localizacion(
     """E01 §2/§3. Sin GASTO declarado el hecho es puramente posicional."""
     entidad_id, creada = derecho
     for extra in ({"presupuestable": False}, {"estado_localizacion": "DESCONOCIDA"}):
-        datos = DatosCondonacion(delta=delta("30.0000"), **extra)
+        datos = DatosCondonacion(delta=delta("30.0000", causa=CONDONACION), **extra)
         _rechazo(lambda: servicio_posiciones.condonar_derecho(
             contexto, entidad_id=entidad_id,
             entidad_row_version_esperada=creada.entidad_row_version, datos=datos,
@@ -587,7 +593,7 @@ def test_condonacion_reintento_con_otra_decision_es_otra_intencion(
     mismos UUID es otra intencion."""
     entidad_id, creada = derecho
     datos = DatosCondonacion(
-        delta=delta("30.0000"), declara_gasto_soportado=True,
+        delta=delta("30.0000", causa=CONDONACION), declara_gasto_soportado=True,
         declara_coste_no_reconocido=True, efecto_gasto_id=uuid.uuid4(),
         presupuestable=True,
     )
@@ -607,17 +613,19 @@ def test_condonacion_reintento_con_otra_decision_es_otra_intencion(
 
 
 def test_31_resto_de_operaciones_de_posiciones_sin_cambio_observable(
-    servicio_posiciones, contexto, admin, derecho
+    servicio_posiciones, contexto, admin, derecho, cuenta
 ) -> None:
     """#31 · E01 §2. Alta, reembolso y condonacion SIN GASTO atraviesan los
     mismos helpers parametrizados y conservan exactamente false/NO_APLICA."""
     entidad_id, creada = derecho
-    reembolso = DatosReembolso(delta=delta("10.0000"))
+    reembolso = DatosReembolso(
+        delta=delta("10.0000", causa=COBRO), tesoreria=tesoreria_nueva(cuenta)
+    )
     tras_reembolso = servicio_posiciones.reembolsar(
         contexto, entidad_id=entidad_id,
         entidad_row_version_esperada=creada.entidad_row_version, datos=reembolso,
     )
-    condonacion = DatosCondonacion(delta=delta("10.0000"))
+    condonacion = DatosCondonacion(delta=delta("10.0000", causa=CONDONACION))
     servicio_posiciones.condonar_derecho(
         contexto, entidad_id=entidad_id,
         entidad_row_version_esperada=tras_reembolso.entidad_row_version,

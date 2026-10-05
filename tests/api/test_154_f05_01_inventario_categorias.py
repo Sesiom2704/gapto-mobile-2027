@@ -154,7 +154,16 @@
 #   Discriminante del mutante P03 (mutantes_f05_01.py): I13b.
 #   I1 registra ademas `preparar_p7` de scripts/dev/e2e_regcat.py 0.2.0 (R:
 #   lee categoria_id del detalle de impacto para confirmar por la API).
-# Version: 0.8.0
+#
+#   v0.8.1 (F04-D052 B2, D2 condicionado y autorizado): I1 registra UNA
+#   entrada R, `PosicionesService.condonar_obligacion.extra`: el INGRESO
+#   declarado de la condonacion de obligacion, con categoria_id=None fijo.
+#   Sigue el contrato del GASTO declarado de `condonar_derecho` (F04-D015 §7
+#   + E01: presupuestable explicito, localizacion aplicable) reutilizando
+#   `_decision_hecho_condonacion`; la funcion es nueva porque cambian la
+#   naturaleza, el importe (declarado <= condonado) y el ambito del duplicado
+#   (por hecho). Ninguna regla cambia.
+# Version: 0.8.1
 # ============================================================
 
 from __future__ import annotations
@@ -264,6 +273,8 @@ REGISTRO: dict[tuple[str, str], tuple[str, str, str]] = {
         "P", "OP-21 UPDATE", "puede conservar referencia historica (C04) o elegir otra; superficie F05-06"),
     ("backend/app/services/posiciones_service.py", "PosicionesService.condonar_derecho.extra"): (
         "R", "OP-12/condonacion", "categoria_id=None fijo"),
+    ("backend/app/services/posiciones_service.py", "PosicionesService.condonar_obligacion.extra"): (
+        "R", "condonacion de obligacion (F04-D052)", "INGRESO declarado, categoria_id=None fijo"),
     ("backend/app/services/posiciones_service.py", "PosicionesService._crear_delta"): (
         "R", "OP-12 delta", "categoria_id=None fijo"),
     ("backend/app/services/reglas_service.py", "ReglasService._insertar_version"): (
