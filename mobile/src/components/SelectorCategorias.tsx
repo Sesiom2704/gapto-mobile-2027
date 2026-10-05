@@ -5,6 +5,7 @@
 // Descripción: Selector jerárquico de categorías, componente del Design System (F09 §12.97.2; lámina REG-CAT v1.0 R02–R05, R08, R09). Hoja de altura completa con cabecera «Elegir categoría · Cerrar», navegación por niveles y migas («Todas › Alimentación»), opción fija de la raíz («Sin categoría» en el registro; «Raíz» al elegir ubicación en Ajustes). Tocar un nodo con hijos visibles entra en él; si ese nodo es seleccionable, el nivel hijo muestra arriba «Usar “<nombre>”»; una hoja seleccionable se elige al tocarla. Un nodo no seleccionable muestra su motivo en texto y, si tiene descendientes visibles, sigue siendo navegable. La selección vigente se marca con check Y texto («Elegida»), nunca solo con color. Estado vacío «Aún no tienes categorías». Error de carga «No hemos podido cargar tus categorías · Reintentar», separado de la acción deliberada «Continuar sin categoría»: un fallo técnico nunca selecciona nada (AJ-09). Sin alta contextual. Reutilizable: `modo` REGISTRO filtra por visibilidad en el registro; AJUSTES muestra lo que decida el llamador. Consume solo tokens semánticos.
 // Versión: 0.1.0 (F05-01 S6-WIRE+UI (este mandato))
 // Versión: 0.2.0 (F05-01 S6-WIRE+UI, correctivo AJ-S6WIREUI-09): el aviso del nivel no seleccionable y el subtítulo de fila solo afirman que las subcategorías se pueden usar si existe algún descendiente elegible (`tieneDescendienteElegible`, naturaleza GASTO del slice); si no, «Puedes entrar para ver sus subcategorías.» y «tiene subcategorías».
+// Versión: 0.3.0 (F05-01 P7 · N3, Moisés D-P7-05, microcopy AJ-S6WIREUI-09): solo las ramas con usables = false. Aviso de nivel «… Sus subcategorías tampoco se pueden elegir ahora. Elige otra categoría o registra sin categoría.» (motivo «Desactivada» y resto de motivos) y subtítulo de fila «sus subcategorías tampoco se pueden usar». Ramas usables = true y lógica `usables` sin cambios.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -151,8 +152,8 @@ export function SelectorCategorias(p: {
               <Ionicons name="information-circle-outline" size={18} color={c.textSecondary} />
               <Text style={[tipo.subheadline, { color: c.textPrimary, flexShrink: 1 }]}>
                 {p.motivo(actual) === 'Desactivada'
-                  ? `${actual.nombre} está desactivada y no se puede elegir. ${usables(actual) ? 'Sus subcategorías activas sí.' : 'Puedes entrar para ver sus subcategorías.'}`
-                  : `${actual.nombre} no se puede elegir (${p.motivo(actual)!.toLowerCase()}). ${usables(actual) ? 'Sus subcategorías sí.' : 'Puedes entrar para ver sus subcategorías.'}`}
+                  ? `${actual.nombre} está desactivada y no se puede elegir. ${usables(actual) ? 'Sus subcategorías activas sí.' : 'Sus subcategorías tampoco se pueden elegir ahora. Elige otra categoría o registra sin categoría.'}`
+                  : `${actual.nombre} no se puede elegir (${p.motivo(actual)!.toLowerCase()}). ${usables(actual) ? 'Sus subcategorías sí.' : 'Sus subcategorías tampoco se pueden elegir ahora. Elige otra categoría o registra sin categoría.'}`}
               </Text>
             </View>
           ) : null}
@@ -177,7 +178,7 @@ export function SelectorCategorias(p: {
             const conHijos = visiblesDe(n.id).length > 0;
             const sel = p.esSeleccionable(n);
             const mot = sel ? null : p.motivo(n);
-            const subtitulo = [mot, !sel && conHijos && mot ? (usables(n) ? 'tiene subcategorías que sí puedes usar' : 'tiene subcategorías') : null].filter(Boolean).join(' · ') || undefined;
+            const subtitulo = [mot, !sel && conHijos && mot ? (usables(n) ? 'tiene subcategorías que sí puedes usar' : 'sus subcategorías tampoco se pueden usar') : null].filter(Boolean).join(' · ') || undefined;
             return (
               <FilaSelector
                 key={n.id}

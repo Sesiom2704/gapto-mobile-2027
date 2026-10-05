@@ -5,10 +5,12 @@
 // Descripción: REG-CAT (F09 §12.97.1–12.97.3; F05 §22.2 C01/C07, §28.2; lámina REG-CAT v1.0): campo «Categoría» tras «Concepto», sin preselección y bloqueante mientras esté Pendiente; selector jerárquico (raíz con «Sin categoría», «Usar…» solo en nodo elegible, hoja elegible se elige al tocar, motivo en texto en nodo no seleccionable navegable, migas, estado vacío, error de carga que NUNCA selecciona «Sin categoría»); magnitudes (obligatoria sin valor por defecto que bloquea y se nombra, opcional, valor canónico con punto en el sellado, nunca `unidad`); confirmación antes de descartar valores al cambiar de categoría o elegir «Sin categoría»; `presupuestable_default` no rellena el registro; recuperación tras rechazo definitivo de categoría (intención sellada no reenviada, árbol recargado, categoría marcada, decisiones conservadas, identidad nueva).
 // Versión: 0.1.0 (F05-01 S6-WIRE+UI (este mandato))
 // Versión: 0.2.0 (F05-01 S6-WIRE+UI, correctivo AJ-S6WIREUI-09): el selector no promete subcategorías seleccionables cuando ningún descendiente es elegible (padre no seleccionable cuyo único hijo visible no es capturable, tipo Gas); caso positivo con hijo elegible; casos de `tieneDescendienteElegible`.
+// Versión: 0.3.0 (F05-01 P7 · N3, Moisés D-P7-05, AJ-P7BAT-12): los tests AJ-09 afirman el literal exacto del aviso de nivel en las cuatro combinaciones {Desactivada, Solo ingresos} × {usables false, true} (las de «Desactivada» con fixture de cliente, PR-01) y del subtítulo de fila en las dos; el de «Solo ingresos» sin descendiente elegible es el discriminante de U17.
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import React from 'react';
+import { Text } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { Raiz } from '../App';
@@ -129,33 +131,60 @@ const LISTA_SIN_USABLES: CategoriaNodo[] = [
   GAS_SOLO('gas2', 'casa'),
 ];
 
-test('AJ-09: sin descendiente elegible el selector no promete subcategorías usables', async () => {
+// Literales congelados por Moisés D-P7-05 (N3): idénticos carácter a carácter en el componente y en U17.
+const NEGATIVO = 'Sus subcategorías tampoco se pueden elegir ahora. Elige otra categoría o registra sin categoría.';
+const avisoNivel = (): string => {
+  const textos = screen.getByTestId('selector-aviso-nivel').findAllByType(Text).filter((t: { props: { children: unknown } }) => typeof t.props.children === 'string' && t.props.children.includes('se puede elegir'));
+  expect(textos).toHaveLength(1);
+  return textos[0].props.children;
+};
+
+test('AJ-09 N3: subtítulo de fila con y sin descendiente elegible (literal exacto)', async () => {
+  const sin = fake({ arboles: [{ tipo: 'OK', datos: { categorias: LISTA_SIN_USABLES } }] });
+  await abrir(sin.cliente);
+  abrirSelector();
+  expect(screen.getByText('Solo ingresos · sus subcategorías tampoco se pueden usar')).toBeTruthy();
+  expect(screen.getByText('Desactivada · sus subcategorías tampoco se pueden usar')).toBeTruthy();
+  expect(screen.queryByText(/sí puedes usar/)).toBeNull();
+  screen.unmount();
+  const con = fake();
+  await abrir(con.cliente);
+  abrirSelector();
+  expect(screen.getByText('Solo ingresos · tiene subcategorías que sí puedes usar')).toBeTruthy();
+  expect(screen.getByText('Desactivada · tiene subcategorías que sí puedes usar')).toBeTruthy();
+  expect(screen.queryByText(/tampoco se pueden usar/)).toBeNull();
+});
+
+test('AJ-09 N3: aviso de nivel sin descendiente elegible, motivo «Solo ingresos» (literal exacto)', async () => {
   const f = fake({ arboles: [{ tipo: 'OK', datos: { categorias: LISTA_SIN_USABLES } }] });
   await abrir(f.cliente);
   abrirSelector();
-  expect(screen.getByText('Solo ingresos · tiene subcategorías')).toBeTruthy();
-  expect(screen.getByText('Desactivada · tiene subcategorías')).toBeTruthy();
-  expect(screen.queryByText(/sí puedes usar/)).toBeNull();
-  for (const [padre, patron] of [['cat-sum', /no se puede elegir/], ['cat-casa', /está desactivada/]] as const) {
-    fireEvent.press(screen.getByTestId(padre));
-    const aviso: string = screen.getByText(patron).props.children;
-    expect(aviso).not.toMatch(/sí puedes usar/);
-    expect(aviso).not.toMatch(/sí\.$/);
-    expect(aviso).toMatch(/Puedes entrar para ver sus subcategorías\.$/);
-    fireEvent.press(screen.getByTestId('selector-miga-todas'));
-  }
+  fireEvent.press(screen.getByTestId('cat-sum'));
+  expect(avisoNivel()).toBe(`Suministros no se puede elegir (solo ingresos). ${NEGATIVO}`);
 });
 
-test('AJ-09: con un descendiente elegible el selector sí lo afirma', async () => {
+test('AJ-09 N3: aviso de nivel sin descendiente elegible, motivo «Desactivada» (literal exacto; fixture de cliente, PR-01)', async () => {
+  const f = fake({ arboles: [{ tipo: 'OK', datos: { categorias: LISTA_SIN_USABLES } }] });
+  await abrir(f.cliente);
+  abrirSelector();
+  fireEvent.press(screen.getByTestId('cat-casa'));
+  expect(avisoNivel()).toBe(`Casa vieja está desactivada y no se puede elegir. ${NEGATIVO}`);
+});
+
+test('AJ-09 N3: aviso de nivel con descendiente elegible, motivo «Solo ingresos» (literal exacto)', async () => {
   const f = fake();
   await abrir(f.cliente);
   abrirSelector();
-  expect(screen.getByText('Solo ingresos · tiene subcategorías que sí puedes usar')).toBeTruthy();
   fireEvent.press(screen.getByTestId('cat-trabajo'));
-  expect(screen.getByText(/no se puede elegir/).props.children).toMatch(/Sus subcategorías sí\.$/);
-  fireEvent.press(screen.getByTestId('selector-miga-todas'));
+  expect(avisoNivel()).toBe('Trabajo no se puede elegir (solo ingresos). Sus subcategorías sí.');
+});
+
+test('AJ-09 N3: aviso de nivel con descendiente elegible, motivo «Desactivada» (literal exacto; fixture de cliente, PR-01)', async () => {
+  const f = fake();
+  await abrir(f.cliente);
+  abrirSelector();
   fireEvent.press(screen.getByTestId('cat-ocio'));
-  expect(screen.getByText(/está desactivada/).props.children).toMatch(/Sus subcategorías activas sí\.$/);
+  expect(avisoNivel()).toBe('Ocio está desactivada y no se puede elegir. Sus subcategorías activas sí.');
 });
 
 test('AJ-09: tieneDescendienteElegible recorre el subárbol (hoja o intermedio) con la naturaleza dada', () => {

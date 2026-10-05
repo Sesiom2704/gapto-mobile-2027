@@ -61,7 +61,14 @@
 #   servidor deshabilitaria sin confirmacion si el impacto desaparece).
 #   Discriminante: suite js (ajustes_magnitudes.test.tsx).
 #   Censo: 19 py + M01..M12 y U01..U16 (28 js) = 47.
-# Version: 0.8.0
+#   v0.9.0 (F05-01 P7 · N3, AJ-P7BAT-04/12): U17 invierte la condicion del
+#   aviso de nivel (`usables(actual) ?` -> `!usables(actual) ?`) en las dos
+#   lineas (motivo «Desactivada» y resto de motivos): sin descendiente
+#   elegible el aviso promete subcategorias usables. Discriminante: suite js;
+#   el test que lo mata por asercion de texto es regcat «AJ-09 N3: aviso de
+#   nivel sin descendiente elegible, motivo «Solo ingresos» (literal exacto)».
+#   Censo: 19 py + M01..M12 y U01..U17 (29 js) = 48.
+# Version: 0.9.0
 # ============================================================
 
 from __future__ import annotations
@@ -161,6 +168,13 @@ MUTANTES = [
     ("U16", "mobile/src/components/MagnitudesCategoria.tsx",
      "              else setHoja({ tipo: 'DESHABILITAR', afectadas: visibles, previas: null, cambiado: false });\n",
      "              else void deshabilitar(m);\n",
+     "js"),
+    # ---------------------------------------------------------------- F05-01 P7 · N3 (microcopy AJ-S6WIREUI-09)
+    ("U17", "mobile/src/components/SelectorCategorias.tsx",
+     "                  ? `${actual.nombre} está desactivada y no se puede elegir. ${usables(actual) ? 'Sus subcategorías activas sí.' : 'Sus subcategorías tampoco se pueden elegir ahora. Elige otra categoría o registra sin categoría.'}`\n"
+     "                  : `${actual.nombre} no se puede elegir (${p.motivo(actual)!.toLowerCase()}). ${usables(actual) ? 'Sus subcategorías sí.' : 'Sus subcategorías tampoco se pueden elegir ahora. Elige otra categoría o registra sin categoría.'}`}\n",
+     "                  ? `${actual.nombre} está desactivada y no se puede elegir. ${!usables(actual) ? 'Sus subcategorías activas sí.' : 'Sus subcategorías tampoco se pueden elegir ahora. Elige otra categoría o registra sin categoría.'}`\n"
+     "                  : `${actual.nombre} no se puede elegir (${p.motivo(actual)!.toLowerCase()}). ${!usables(actual) ? 'Sus subcategorías sí.' : 'Sus subcategorías tampoco se pueden elegir ahora. Elige otra categoría o registra sin categoría.'}`}\n",
      "js"),
 ]
 
