@@ -56,6 +56,19 @@
 # ROLE DRIFT, que es correcto y deliberado. En ese caso se usa --desde 0002
 # y el clean-room demuestra reproducibilidad DE LA BASE, no de la instancia.
 # Reproducir tambien la instancia exige un proyecto nuevo.
+# Versión: 0.16.0 -- F03 / D-201 (B1 0350, arquetipo tipos_hecho CONDONACION).
+#                    Se DECLARA el head 0350 y, en la misma edicion, su
+#                    referencia de huellas D-111, ya MEDIDA: replica local
+#                    17.5 (D-189, rol no superusuario; desviacion de version
+#                    autorizada) y Neon gapto2027_test (0350 aplicada sobre
+#                    0340), coincidentes. 0350 es solo DML (una fila de
+#                    catalogo): no mueve ninguna magnitud de CONTRATO ni
+#                    ninguna huella, de modo que CONTRATO_0350 y su
+#                    referencia son identicos a los de 0340. El PASS de 0350
+#                    exige ademas test_045 corrido y verde, sin saltos, que
+#                    es quien discrimina 0350 de 0340.
+#                    Sin --head el contrato por defecto pasa a ser el de 0350,
+#                    con los mismos valores que el de 0340.
 # Versión: 0.15.0 -- F03 REABIERTA / D-197. Se DECLARA la referencia de las
 #                    ocho huellas D-111 del head 0340, medida con
 #                    huellas_d111.sql de forma independiente en la replica
@@ -235,7 +248,7 @@ from pathlib import Path
 
 # Version del runner que se materializa en el manifest. Debe coincidir con la
 # primera linea "Versión:" de la cabecera; test_040 lo comprueba.
-VERSION_RUNNER = "0.15.0"
+VERSION_RUNNER = "0.16.0"
 
 try:
     import psycopg
@@ -308,16 +321,23 @@ CONTRATO_0330 = {**CONTRATO_0320}
 # TESTS_EXIGIDOS_POR_HEAD y HUELLAS_D111_POR_HEAD.
 CONTRATO_0340 = {**CONTRATO_0330}
 
+# 0350 (D-201) inserta una fila de catalogo en tipos_hecho (CONDONACION). Es
+# solo DML: no toca ninguna magnitud de este CONTRATO ni ninguna huella D-111.
+# Se declara expresamente por el mismo motivo que 0330 y 0340; la
+# discriminacion la aporta test_045 en TESTS_EXIGIDOS_POR_HEAD.
+CONTRATO_0350 = {**CONTRATO_0340}
+
 CONTRATOS_POR_HEAD = {
     "0300": CONTRATO_0300,
     "0310": CONTRATO_0310,
     "0320": CONTRATO_0320,
     "0330": CONTRATO_0330,
     "0340": CONTRATO_0340,
+    "0350": CONTRATO_0350,
 }
 
 # Head vigente de la cadena cuando no se declara --head.
-CONTRATO_POR_DEFECTO = CONTRATO_0340
+CONTRATO_POR_DEFECTO = CONTRATO_0350
 
 
 # ------------------------------------------------------------
@@ -333,11 +353,15 @@ TESTS_EXIGIDOS_POR_HEAD = {
     "0340": ("test_041_f03_04_0320_delete_correccion_agregada",
              "test_042_f03_04_0330_geolocalizacion_y_presentacion",
              "test_043_f03_05_0340_categoria_icon_key"),
+    "0350": ("test_041_f03_04_0320_delete_correccion_agregada",
+             "test_042_f03_04_0330_geolocalizacion_y_presentacion",
+             "test_043_f03_05_0340_categoria_icon_key",
+             "test_045_f03_06_0350_tipo_hecho_condonacion"),
 }
 
 # Heads cuya certificacion exige comparar las ocho huellas D-111 contra una
 # REFERENCIA aprobada. Sin referencia declarada NO hay PASS: fail-closed.
-HEADS_QUE_EXIGEN_REFERENCIA_D111 = ("0330", "0340")
+HEADS_QUE_EXIGEN_REFERENCIA_D111 = ("0330", "0340", "0350")
 
 # Referencia aprobada de las ocho huellas D-111 por head (D-187 DEC-8).
 #
@@ -375,6 +399,20 @@ HUELLAS_D111_POR_HEAD = {
     # a 0330, comprobacion positiva de que 0340 no toca indices, policies,
     # triggers, funciones, ACL ni vistas.
     "0340": {
+        "h1_columnas":    "3ee95739144438489da541401f2bda54",
+        "h2_constraints": "88c1fd66129a21c490e0235b58670cf4",
+        "h3_indices":     "aceb34183f2156348a3c58ff033c1d53",
+        "h4_policies":    "e1b1dd81a40b8e10c7f1744b25611fb1",
+        "h5_triggers":    "db650e488abe0226eb33cbd1e0f63c33",
+        "h6_funciones":   "84f053df8ccca616b88bdd9ff8ceb532",
+        "h7_grants":      "ea77c87e385e3d6ce567ea46220f63d9",
+        "h8_vistas":      "bc29f409364899f99402b8ed06f77149",
+        "recuentos":      "778/645/287/82/58/28/1031/3",
+    },
+    # D-201. Medida en replica local 17.5 (D-189) y Neon gapto2027_test
+    # (0350 aplicada sobre 0340), coincidentes. Identica a 0340 en las nueve
+    # claves: 0350 es solo DML y las huellas D-111 no miden filas de catalogo.
+    "0350": {
         "h1_columnas":    "3ee95739144438489da541401f2bda54",
         "h2_constraints": "88c1fd66129a21c490e0235b58670cf4",
         "h3_indices":     "aceb34183f2156348a3c58ff033c1d53",
