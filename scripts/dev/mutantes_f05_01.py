@@ -129,7 +129,20 @@
 #   (idempotencia del alta sin comparar el asociacion_id), discriminante
 #   test_162. Censo vigente: 101 + MG01..MG20 (20) = 121 mutantes.
 #   Equivalentes documentados: E01, E02, E03.
-# Version: 0.11.0
+#
+#   v0.12.0 (F05-01 P7 · Bateria integral; AJ-P7BAT-04/05): serie P01..P03,
+#   con discriminante por nodeid concreto:
+#     P01 `_asociaciones` (captura_magnitudes.py) devuelve lista vacia:
+#         test_166 (etapa 4, espera 409 MAGNITUD_OBLIGATORIA_AUSENTE y obtiene
+#         exito). Muta backend solo dentro del arnes y se restaura.
+#     P02 servicio.py (deshabilitar): `if impacto and set(...) != {...}`, la
+#         confirmacion de un impacto que ya no existe deshabilita:
+#         test_162::test_deshabilitar_con_confirmacion_de_un_impacto_que_ya_no_existe_be01 (N7).
+#     P03 preseleccion minima en el cliente: al cargar el arbol, la categoria
+#         PENDIENTE pasa al primer nodo elegible:
+#         test_154::test_i13_b_estado_categorial_solo_por_eleccion_explicita (I13b).
+#   test_166 entra en el preflight. Censo vigente: 121 + P01..P03 (3) = 124.
+# Version: 0.12.0
 # ============================================================
 
 from __future__ import annotations
@@ -158,6 +171,8 @@ T161 = "tests/api/test_161_f05_01_reordenar_hermanos.py"
 T162 = "tests/api/test_162_f05_01_magnitudes_comandos.py"
 T163 = "tests/api/test_163_f05_01_magnitudes_concurrencia.py"
 T164 = "tests/api/test_164_f05_01_magnitudes_atomicidad.py"
+T166 = "tests/api/test_166_f05_01_c07_extremo_a_extremo.py"
+REGISTRO_GASTO = "mobile/src/screens/RegistroGastoScreen.tsx"
 MSERV = "backend/app/magnitudes/servicio.py"
 MLECT = "backend/app/magnitudes/lecturas.py"
 MNORM = "backend/app/magnitudes/normalizacion.py"
@@ -524,6 +539,21 @@ MUTANTES = [
     ("MG20", "idempotencia del alta rapida sin comparar el asociacion_id derivado",
      [(MSERV, '                and existente is not None and existente["asociacion_id"] == asociacion_id\n',
        "                and existente is not None\n")], [T162]),
+    # ---------------------------------------------------------------- P7 · bateria integral (AJ-P7BAT-04/05)
+    ("P01", "C07 sin asociaciones: _asociaciones devuelve lista vacia (la obligatoria no se exige)",
+     [(CAP, "        return [_Asociacion(f[0], f[1]) for f in cur.fetchall()]\n", "        return []\n")],
+     [f"{T166}::test_c07_de_extremo_a_extremo_por_la_api_publica"]),
+    ("P02", "deshabilitar con un impacto confirmado que ya no existe (S7-MAG-BE-01)",
+     [(MSERV, '    if set(confirmacion_impacto or ()) != {c["categoria_id"] for c in impacto}:\n',
+       '    if impacto and set(confirmacion_impacto or ()) != {c["categoria_id"] for c in impacto}:\n')],
+     [f"{T162}::test_deshabilitar_con_confirmacion_de_un_impacto_que_ya_no_existe_be01"]),
+    ("P03", "preseleccion minima: la categoria PENDIENTE pasa al primer nodo elegible del arbol cargado",
+     [(REGISTRO_GASTO, "    setArbol({ fase: 'OK', arbol: construirArbol(r.datos.categorias) });\n",
+       "    setArbol({ fase: 'OK', arbol: construirArbol(r.datos.categorias) });\n"
+       "    const primero = r.datos.categorias.find((n) => elegibleParaGasto(n));\n"
+       "    if (primero) setB((x) => (x.categoria.estado === 'PENDIENTE' ? { ...x, categoria: { estado: 'CATEGORIA', "
+       "id: primero.id, nombre: primero.nombre, ruta: '', icon_key: primero.icon_key, magnitudes: magnitudesPedibles(primero) } } : x));\n")],
+     [f"{T154}::test_i13_b_estado_categorial_solo_por_eleccion_explicita"]),
 ]
 
 
@@ -554,7 +584,7 @@ def main() -> None:
         sys.exit("Falta GAPTO_TEST_DATABASE_URL (base local desechable).")
     if recuperar_si_pendiente():
         sys.exit("Habia un mutante pendiente: restaurado y verificado. Resultado NO-PASS; relanzar.")
-    if correr([T150, T152, T153, T154, T155, T156, T157, T158, T159, T160, T161, T162, T163, T164]) != 0:
+    if correr([T150, T152, T153, T154, T155, T156, T157, T158, T159, T160, T161, T162, T163, T164, T166]) != 0:
         sys.exit("PREFLIGHT ROJO: no se muta nada.")
     veredictos = []
     for mid, desc, cambios, tests in MUTANTES:

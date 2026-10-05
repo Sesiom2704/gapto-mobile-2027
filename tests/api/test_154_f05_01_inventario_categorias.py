@@ -124,7 +124,37 @@
 #   justificacion de mobile/src/api/cliente.ts (detalle de impacto de
 #   deshabilitar). La reordenacion de magnitudes usa su propia ruta atomica
 #   /v1/categorias/{id}/magnitudes/reordenar, que no es la ruta por nodo de I11.
-# Version: 0.7.2
+#
+#   v0.8.0 (F05-01 P7 · N4, AJ-P7BAT-05): I13, frontera C03 ESTRUCTURAL del
+#   cliente (sin preseleccion ni propuesta de categoria), fail-closed como
+#   I1..I12 y no por vocabulario:
+#   I13a Camino productivo de resolucion categorial: RegistroGastoScreen.tsx
+#        -> SelectorCategorias.tsx -> domain/categoria.ts (+ la lectura de
+#        api/cliente.ts). Registro CERRADO de imports (modulo, nombre) de
+#        esos cuatro ficheros, sin import() dinamico ni require: cualquier
+#        import nuevo, o uno registrado que desaparece, falla.
+#   I13b Estado categorial: el borrador nace con categoria
+#        { estado: 'PENDIENTE' } (borradorInicial, unica inicializacion de
+#        `b`); registro CERRADO de los sitios que escriben `categoria` y de
+#        los que construyen CATEGORIA / SIN_CATEGORIA / PENDIENTE: el reinicio
+#        a PENDIENTE tras un rechazo categorial, la eleccion explicita de un
+#        nodo (elegirNodo, solo como onElegir del selector), «Sin categoría»
+#        de la raiz y «Continuar sin categoría».
+#   I13c Orden: el arbol se presenta en el orden autoritativo de la API
+#        (ORDER BY orden, nombre, id); registro CERRADO (vacio) de llamadas
+#        de ordenacion en el camino de I13a; construirArbol conserva el orden
+#        de la lista.
+#   I13d Ningun resolver de propuesta/ranking: en el camino VS-01 del
+#        backend el categoria_id solo procede de la intencion
+#        (`intencion.categoria_id`, propiedad que devuelve el campo sellado o
+#        None); corroboracion: test_152 (ausencia -> 422, el servidor no
+#        deduce categoria).
+#   I13e Barrido textual corroborante acotado a los ficheros de I13a (nunca
+#        oraculo unico).
+#   Discriminante del mutante P03 (mutantes_f05_01.py): I13b.
+#   I1 registra ademas `preparar_p7` de scripts/dev/e2e_regcat.py 0.2.0 (R:
+#   lee categoria_id del detalle de impacto para confirmar por la API).
+# Version: 0.8.0
 # ============================================================
 
 from __future__ import annotations
@@ -154,6 +184,8 @@ REGISTRO: dict[tuple[str, str], tuple[str, str, str]] = {
     ("scripts/dev/e2e_vs01.py", "leer_bd"): ("R", "E2E VS-01 verificacion", "lee hecho_efectos.categoria_id del hecho registrado"),
     ("scripts/dev/e2e_regcat.py", "hechos_de"): ("R", "E2E REG-CAT verificacion", "lee categoria_id y hecho_magnitudes del hecho"),
     ("scripts/dev/e2e_regcat.py", "main"): ("R", "E2E REG-CAT", "compara el categoria_id leido con el esperado"),
+    ("scripts/dev/e2e_regcat.py", "preparar_p7"): (
+        "R", "E2E REG-CAT P7 fixture", "lee categoria_id del detalle de impacto para confirmar el deshabilitado por la API"),
     # --- frontera F05
     ("backend/app/api/elegibilidad_categoria.py", "validar_seleccion_categoria"): (
         "GUARDA", "F05-01 C-a", "guarda unica de elegibilidad (F05-D009 §23.3)"),
@@ -871,3 +903,211 @@ def test_i12_estado_de_compatibilidad_retirado_del_codigo_y_del_cliente():
                    if p.is_file() and p.suffix in {".py", ".ts", ".tsx", ".js", ".jsx"}
                    and ESTADO_RETIRADO in p.read_bytes().decode("utf-8")]
     assert apariciones == [], apariciones
+
+
+# ------------------------------------------------------------------ I13 (P7 · N4, AJ-P7BAT-05)
+REG = "mobile/src/screens/RegistroGastoScreen.tsx"
+SEL = "mobile/src/components/SelectorCategorias.tsx"
+DOM = "mobile/src/domain/categoria.ts"
+CLI = "mobile/src/api/cliente.ts"
+INT = "mobile/src/domain/intencion.ts"
+CAMINO_CATEGORIAL = (REG, SEL, DOM, CLI)
+
+_IMPORT = re.compile(r"^import\s+(?P<tipo>type\s+)?(?P<cl>[\s\S]*?)\s+from\s+'(?P<mod>[^']+)';", re.MULTILINE)
+_IMPORT_LINEA = re.compile(r"^import\b", re.MULTILINE)
+_IMPORT_DINAMICO = re.compile(r"\bimport\s*\(|\brequire\s*\(")
+
+
+def _texto(ruta: str) -> str:
+    return (RAIZ / ruta).read_bytes().decode("utf-8")
+
+
+def _imports_ts(texto: str) -> set[tuple[str, str]]:
+    """(modulo, nombre importado) de cada sentencia `import ... from '...'`."""
+    out: set[tuple[str, str]] = set()
+    for m in _IMPORT.finditer(texto):
+        clausula, nombres = m["cl"].strip(), []
+        llaves = re.search(r"\{([\s\S]*)\}", clausula)
+        if llaves:
+            nombres += [n.strip() for n in llaves[1].split(",") if n.strip()]
+            clausula = clausula[: llaves.start()] + clausula[llaves.end():]
+        nombres += [n.strip() for n in clausula.split(",") if n.strip()]
+        for n in nombres:
+            out.add((m["mod"], ("type " if m["tipo"] else "") + re.sub(r"\s+", " ", n)))
+    return out
+
+
+#: Registro CERRADO de imports del camino de resolucion categorial (fijado tras
+#: inspeccion de c06d219). Ninguno es un resolver de propuesta ni de ranking.
+IMPORTS_CAMINO: dict[str, set[tuple[str, str]]] = {
+    REG: {
+        ("../api/cliente", "type ClienteApi"), ("../api/cliente", "type CuentaPago"),
+        ("../components/Basicos", "BotonPrimario"), ("../components/Basicos", "BotonTexto"),
+        ("../components/Basicos", "Chip"), ("../components/Basicos", "EstadoDato"),
+        ("../components/Basicos", "Segmentado"), ("../components/Basicos", "Velo"),
+        ("../components/SelectorCategorias", "BotonSecundario"), ("../components/SelectorCategorias", "CargaArbol"),
+        ("../components/SelectorCategorias", "IconoCategoriaVista"), ("../components/SelectorCategorias", "SelectorCategorias"),
+        ("../domain/categoria", "CategoriaNodo"), ("../domain/categoria", "MagnitudCategoria"),
+        ("../domain/categoria", "construirArbol"), ("../domain/categoria", "elegibleParaGasto"),
+        ("../domain/categoria", "magnitudesPedibles"), ("../domain/categoria", "motivoNoSeleccionable"),
+        ("../domain/categoria", "rutaTexto"), ("../domain/categoria", "visibleEnRegistro"),
+        ("../domain/fechas", "ayer"), ("../domain/fechas", "ddmmaaaaAIso"), ("../domain/fechas", "fechaCortaIso"),
+        ("../domain/fechas", "isoADdmmaaaa"), ("../domain/fechas", "isoLocal"),
+        ("../domain/importe", "formatearEur"), ("../domain/importe", "parsearImporte"),
+        ("../domain/intencion", "Borrador"), ("../domain/intencion", "Errores"),
+        ("../domain/intencion", "SeleccionCategoria"), ("../domain/intencion", "borradorInicial"),
+        ("../domain/intencion", "esFechaIso"), ("../domain/intencion", "validar"),
+        ("../domain/magnitud", "conservarMagnitudes"), ("../domain/magnitud", "descartadas"),
+        ("../state/useEnvioGasto", "useEnvioGasto"), ("../theme/tema", "useTema"),
+        ("../theme/tokens", "TACTIL_MIN"), ("../theme/tokens", "espacio"), ("../theme/tokens", "importe"),
+        ("../theme/tokens", "radio"), ("../theme/tokens", "tipo"),
+        ("@expo/vector-icons", "Ionicons"),
+        ("react", "React"), ("react", "useCallback"), ("react", "useEffect"), ("react", "useMemo"),
+        ("react", "useRef"), ("react", "useState"),
+        ("react-native", "KeyboardAvoidingView"), ("react-native", "Platform"), ("react-native", "Pressable"),
+        ("react-native", "ScrollView"), ("react-native", "StyleSheet"), ("react-native", "Text"),
+        ("react-native", "TextInput"), ("react-native", "View"),
+        ("react-native-safe-area-context", "useSafeAreaInsets"),
+    },
+    SEL: {
+        ("../domain/categoria", "Arbol"), ("../domain/categoria", "CategoriaNodo"), ("../domain/categoria", "ancestros"),
+        ("../domain/categoria", "hijosDe"), ("../domain/categoria", "tieneDescendienteElegible"),
+        ("../theme/iconosCategoria", "glifoDe"), ("../theme/tema", "useTema"),
+        ("../theme/tokens", "TACTIL_MIN"), ("../theme/tokens", "espacio"), ("../theme/tokens", "radio"), ("../theme/tokens", "tipo"),
+        ("./Basicos", "BotonPrimario"), ("./Basicos", "BotonTexto"),
+        ("@expo/vector-icons", "Ionicons"),
+        ("react", "React"), ("react", "useMemo"), ("react", "useState"),
+        ("react-native", "Pressable"), ("react-native", "ScrollView"), ("react-native", "StyleSheet"),
+        ("react-native", "Text"), ("react-native", "View"),
+        ("react-native-safe-area-context", "useSafeAreaInsets"),
+    },
+    DOM: set(),  # modulo puro: sin imports
+    CLI: {
+        ("../domain/categoria", "type Ambito"), ("../domain/categoria", "type CategoriaNodo"),
+        ("../domain/intencion", "type PayloadGastoPagado"), ("../domain/magnitud", "type MagnitudCatalogo"),
+    },
+}
+
+
+def test_i13_a_imports_del_camino_categorial_registro_cerrado():
+    """I13a: cualquier import nuevo (o uno registrado que desaparece) en el
+    camino de resolucion categorial del cliente hace fallar el test."""
+    assert sorted(IMPORTS_CAMINO) == sorted(CAMINO_CATEGORIAL)
+    for ruta in CAMINO_CATEGORIAL:
+        texto = _texto(ruta)
+        assert not _IMPORT_DINAMICO.search(texto), f"import dinamico o require en {ruta}"
+        assert len(_IMPORT_LINEA.findall(texto)) == len(_IMPORT.findall(texto)), f"sentencia import no reconocida en {ruta}"
+        assert _imports_ts(texto) == IMPORTS_CAMINO[ruta], (ruta, sorted(_imports_ts(texto) ^ IMPORTS_CAMINO[ruta]))
+
+
+_ESTADO_LITERAL = re.compile(r"estado:\s*'(CATEGORIA|SIN_CATEGORIA|PENDIENTE)'")
+_CAMPO_CATEGORIA = re.compile(r"\bcategoria:\s")
+
+#: Registro CERRADO de las lineas de RegistroGastoScreen que construyen un estado
+#: categorial o escriben el campo `categoria` del borrador (fijado tras inspeccion).
+SITIOS_ESTADO_CATEGORIAL: dict[str, str] = {
+    "setB((x) => ({ ...x, categoria: { estado: 'PENDIENTE' } }));":
+        "reinicio a PENDIENTE tras rechazo categorial definitivo (se pide otra categoria)",
+    "cambiar({ categoria: destino, magnitudesTexto: conservarMagnitudes(b.magnitudesTexto, nuevas) });":
+        "aplicarCategoria: aplica el destino que eligio el usuario (directo o tras confirmar el descarte)",
+    "estado: 'CATEGORIA',":
+        "elegirNodo: el usuario toca un nodo elegible del selector (onElegir)",
+    "onPress: () => proponerCategoria({ estado: 'SIN_CATEGORIA' }),":
+        "opcion fija de la raiz «Sin categoría» del selector (decision explicita)",
+    "onContinuarSinCategoria={() => proponerCategoria({ estado: 'SIN_CATEGORIA' })}":
+        "«Continuar sin categoría» ante error de carga (decision explicita, nunca automatica)",
+    "categoria: 'categoría',":
+        "etiqueta de la lista «faltan» (R: texto, no estado)",
+}
+
+
+def _cuerpo_ts(texto: str, cabecera: str) -> str:
+    """Cuerpo (llaves equilibradas) de la funcion cuyo texto empieza por `cabecera`."""
+    k = texto.index(cabecera) + len(cabecera) - 1  # parentesis que abre los parametros
+    nivel = 0
+    for k in range(k, len(texto)):
+        nivel += {"(": 1, ")": -1}.get(texto[k], 0)
+        if nivel == 0:
+            break
+    j = texto.index("{", k)
+    nivel = 0
+    for k in range(j, len(texto)):
+        nivel += {"{": 1, "}": -1}.get(texto[k], 0)
+        if nivel == 0:
+            return texto[j: k + 1]
+    raise AssertionError(f"cuerpo sin cerrar: {cabecera}")
+
+
+def test_i13_b_estado_categorial_solo_por_eleccion_explicita():
+    """I13b: el borrador nace PENDIENTE y solo una eleccion explicita del usuario
+    (nodo, «Sin categoría», «Continuar sin categoría») lo resuelve; el unico
+    reinicio vuelve a PENDIENTE. Discriminante del mutante P03 (preseleccion)."""
+    inicial = _cuerpo_ts(_texto(INT), "export function borradorInicial(")
+    assert re.findall(r"\bcategoria:\s*(.*?),?\n", inicial) == ["{ estado: 'PENDIENTE' }"]
+    reg = _texto(REG)
+    assert reg.count("useState<Borrador>(") == 1
+    assert "const [b, setB] = useState<Borrador>(() => borradorInicial(hoyIso));" in reg
+    sitios = [linea.strip() for linea in reg.splitlines()
+              if _ESTADO_LITERAL.search(linea) or _CAMPO_CATEGORIA.search(linea)]
+    assert sorted(sitios) == sorted(SITIOS_ESTADO_CATEGORIAL), sorted(set(sitios) ^ set(SITIOS_ESTADO_CATEGORIAL))
+    # Las fuentes de CATEGORIA / SIN_CATEGORIA solo se alcanzan desde el selector.
+    assert reg.count("elegirNodo") == 2 and "onElegir={elegirNodo}" in reg
+    assert len(re.findall(r"\bproponerCategoria\(", reg)) == 3  # elegirNodo, raiz, continuar sin categoria
+    assert len(re.findall(r"\baplicarCategoria\(", reg)) == 2  # sin perdidas, y confirmar el descarte
+    assert "onPress={() => aplicarCategoria(cambioPendiente.destino)}" in reg
+
+
+_ORDENACION = re.compile(r"\.(sort|toSorted|reverse|toReversed)\s*\(|localeCompare|Intl\s*\.\s*Collator")
+
+#: Registro CERRADO de llamadas de ordenacion en el camino de I13a: ninguna.
+ORDENACIONES_CAMINO: list[tuple[str, str]] = []
+
+
+def test_i13_c_orden_autoritativo_de_la_api_sin_reordenacion_en_el_cliente():
+    """I13c: el arbol se presenta en el orden de la API (orden -> nombre -> id);
+    el cliente no reordena en el camino de resolucion categorial."""
+    halladas = [(ruta, linea.strip()) for ruta in CAMINO_CATEGORIAL
+                for linea in _texto(ruta).splitlines() if _ORDENACION.search(linea)]
+    assert halladas == ORDENACIONES_CAMINO, halladas
+    construir = _cuerpo_ts(_texto(DOM), "export function construirArbol(")
+    assert len(re.findall(r"\bfor\s*\(", construir)) == 1 and "for (const n of lista)" in construir
+    assert re.findall(r"\.(push|unshift|splice)\(", construir) == ["push"]
+    lecturas = (APP / "categorias" / "lecturas.py").read_bytes().decode("utf-8")
+    assert '"ORDER BY orden, nombre, id"' in lecturas
+
+
+def _es_intencion_categoria_id(n: ast.AST) -> bool:
+    return isinstance(n, ast.Attribute) and n.attr == TOKEN and isinstance(n.value, ast.Name) and n.value.id == "intencion"
+
+
+def test_i13_d_el_camino_vs01_del_backend_no_resuelve_categoria():
+    """I13d: en el camino VS-01 del backend el categoria_id solo procede de la
+    intencion sellada; la propiedad devuelve el campo o None. Corrobora
+    test_152 (ausencia -> 422 y nunca SIN_CATEGORIA deducido)."""
+    usos = 0
+    for ruta in ("backend/app/api/ejecucion_gasto_pagado.py", "backend/app/api/traductor_gasto_pagado.py"):
+        for nodo in ast.walk(ast.parse(_texto(ruta))):
+            if isinstance(nodo, ast.keyword) and nodo.arg == TOKEN:
+                assert _es_intencion_categoria_id(nodo.value), (ruta, ast.unparse(nodo))
+            if isinstance(nodo, ast.Attribute) and nodo.attr == TOKEN:
+                assert _es_intencion_categoria_id(nodo), (ruta, ast.unparse(nodo))
+                usos += 1
+            if isinstance(nodo, ast.Name) and nodo.id == TOKEN:
+                raise AssertionError(f"variable categoria_id local en {ruta}: origen no sellado")
+    assert usos > 0
+    prop = _nodo("backend/app/api/dto_vs01.py", "IntencionGastoPagado.categoria_id")
+    devueltos = [ast.unparse(r.value) for r in ast.walk(prop) if isinstance(r, ast.Return)]
+    assert sorted(devueltos) == ["None", "self.categoria.categoria_id"], devueltos
+    t152 = _texto("tests/api/test_152_f05_01_elegibilidad_categoria.py")
+    assert "def test_ausencia_de_categoria_es_422_y_no_sin_categoria(" in t152
+
+
+_PROPUESTA_TEXTUAL = re.compile(r"ranking|sugerenc|recomend|frecuen|m[aá]s usad", re.IGNORECASE)
+
+
+def test_i13_e_barrido_textual_corroborante():
+    """I13e: corroboracion textual acotada al codigo (no comentarios) de I13a.
+    Nunca es el oraculo: la propiedad la fijan I13a..I13d."""
+    for ruta in CAMINO_CATEGORIAL:
+        codigo = [linea for linea in _texto(ruta).splitlines() if not linea.lstrip().startswith(("//", "*", "/*"))]
+        assert not [linea for linea in codigo if _PROPUESTA_TEXTUAL.search(linea)], ruta

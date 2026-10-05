@@ -19,6 +19,13 @@
 #   inmediato idempotente con el mismo id; (c) tras cambiar la obligatoriedad
 #   -> 409; (d) tras reordenar -> idempotente (D39: el orden no cuenta); (e)
 #   EXISTENTE genera ids aleatorios; (f) el id del alta es el derivado.
+# Version: 0.3.0 (F05-01 P7 · N7, S7-MAG-BE-01; AJ-P7BAT-04, Q2): confirmacion
+#   de un impacto que ya no existe. Magnitud obligatoria en una categoria
+#   (impacto [cat]) -> se lee el impacto -> se retira la asociacion (impacto
+#   vigente []) -> deshabilitar con confirmacion_impacto=[cat] -> 409
+#   MAGNITUD_DESHABILITAR_REQUIERE_CONFIRMACION con categorias_no_capturables
+#   = [], magnitud sin cambios (enabled, row_version) y sin auditoria nueva.
+#   Discriminante del mutante P02 (mutantes_f05_01.py).
 # ============================================================
 
 from __future__ import annotations
@@ -472,6 +479,32 @@ def test_deshabilitar_exige_confirmacion_exacta_del_impacto(ctx):
     r = _post(cli, url, {"row_version": 2, "confirmacion_impacto": None})
     assert r.status_code == 200 and r.json()["idempotente"] is True
     assert [(a, mo) for _, _, a, mo, *_ in h.auditorias_mag(owner)] == [("ACTUALIZAR", "F05-01 MAG_DESHABILITAR")]
+
+
+def test_deshabilitar_con_confirmacion_de_un_impacto_que_ya_no_existe_be01(ctx):
+    """S7-MAG-BE-01 (N7): confirmar [cat] cuando el impacto vigente es [] no
+    deshabilita; se pide otra confirmacion con el impacto vigente (vacio)."""
+    owner, _, cli = ctx
+    cat = fh.crear_categoria(owner, "Taller")
+    mid = uuid.uuid4()
+    r = _nueva(cli, cat, mid, "Horas de taller", obligatoria=True)
+    assert r.status_code == 200, r.text
+    url = f"/v1/magnitudes/{mid}/deshabilitar"
+    r = _post(cli, url, {"row_version": 1, "confirmacion_impacto": None})
+    assert r.status_code == 409 and r.json()["codigo"] == "MAGNITUD_DESHABILITAR_REQUIERE_CONFIRMACION"
+    impacto = [c["categoria_id"] for c in r.json()["detalle"]["categorias_no_capturables"]]
+    assert impacto == [str(cat)]
+    [(aid, _, _, _)] = h.asociaciones_persistidas(owner, cat)
+    r = _retirar(cli, cat, aid, mid, True)
+    assert r.status_code == 200, r.text
+    antes, auditorias_antes = h.magnitud_persistida(owner, mid), h.auditorias_mag(owner)
+    r = _post(cli, url, {"row_version": 1, "confirmacion_impacto": impacto})
+    assert r.status_code == 409, r.text
+    assert r.json()["codigo"] == "MAGNITUD_DESHABILITAR_REQUIERE_CONFIRMACION"
+    assert r.json()["detalle"] == {"categorias_no_capturables": []}
+    despues = h.magnitud_persistida(owner, mid)
+    assert despues == antes and despues[3] is True and despues[4] == 1  # enabled y row_version intactos
+    assert h.auditorias_mag(owner) == auditorias_antes
 
 
 def test_deshabilitar_sin_impacto_y_rehabilitar(ctx):

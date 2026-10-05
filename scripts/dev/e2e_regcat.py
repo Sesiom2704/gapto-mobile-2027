@@ -37,6 +37,23 @@
 #   CATEGORIA_NO_ELEGIBLE se registra en el manifest como `rechazo_esperado`
 #   con la peticion que lo origina (metodo, ruta, intencion_id) y el error de
 #   consola que provoca; cualquier otro error de consola hace fallar el E2E.
+# Version: 0.2.0 (F05-01 P7 · N2, AJ-P7BAT-02/03): escenarios nuevos sobre
+#   datos sinteticos «P7-<run_id> …» creados por la API publica (ids uuid5 por
+#   run_id: preparar dos veces es idempotente). Solo base LOCAL desechable,
+#   nunca ENV-DEV.
+#     (d) C07: categoria GASTO «P7-<run_id> E2E» con magnitud NUEVA
+#         obligatoria «P7-<run_id> Km» (km, 1 decimal); registro desde la UI
+#         informando «12,5»; verificacion READ ONLY bajo gapto_runtime de
+#         hechos_financieros, hecho_efectos (categoria_id) y hecho_magnitudes
+#         (valor, unidad); la respuesta HTTP queda como evidencia auxiliar.
+#     (e) microcopy N3 (Moises D-P7-05): «P7-<run_id> Sin uso» (INGRESO) con
+#         la hija «P7-<run_id> Bloqueada» (GASTO) cuya magnitud obligatoria
+#         «P7-<run_id> Dato» se deshabilita confirmando su impacto
+#         (usables(padre) = false), y «P7-<run_id> Con uso» (INGRESO) con
+#         «P7-<run_id> Usable» (GASTO) (usables(padre) = true). Se entra en
+#         cada padre desde el selector del registro y se afirma el literal
+#         exacto del aviso de nivel y del subtitulo de fila.
+#   Ambos en Light y Dark. Nuevo argumento obligatorio --run-p7.
 # ============================================================
 
 from __future__ import annotations
@@ -51,6 +68,7 @@ import pathlib
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
@@ -121,12 +139,70 @@ def api(base: str, metodo: str, ruta: str, cuerpo: dict | None = None) -> dict:
         return json.loads(r.read().decode("utf-8"))
 
 
+def api_estado(base: str, metodo: str, ruta: str, cuerpo: dict | None = None) -> tuple[int, dict]:
+    """Como `api`, pero devuelve (status, cuerpo) tambien ante un 4xx esperado."""
+    try:
+        return 200, api(base, metodo, ruta, cuerpo)
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read().decode("utf-8") or "{}")
+
+
+#: Literales de N3 (Moises D-P7-05), identicos a los del componente, regcat y U17.
+NEGATIVO_N3 = "Sus subcategorías tampoco se pueden elegir ahora. Elige otra categoría o registra sin categoría."
+SUBTITULO_N3 = "sus subcategorías tampoco se pueden usar"
+
+
+def preparar_p7(base: str, run_p7: str) -> dict[str, str]:
+    """Fixture P7 de (d) y (e) por la API publica. Ids uuid5 por run_id: idempotente."""
+    ns = uuid.uuid5(uuid.NAMESPACE_URL, f"gapto.p7bat.{run_p7}")
+    p = f"P7-{run_p7}"
+    ids: dict[str, str] = {}
+
+    def alta(clave: str, nombre: str, padre: str | None, ambito: str) -> None:
+        ids[clave] = str(uuid.uuid5(ns, clave))
+        status, r = api_estado(base, "POST", "/v1/categorias", {"id": ids[clave], "nombre": nombre, "parent_id": padre,
+                                                                  "ambito": ambito, "presupuestable_default": False})
+        if status != 200:
+            raise SystemExit(f"FALLO: alta {clave}: HTTP {status} {r.get('codigo', '')}")
+
+    def nueva(clave: str, categoria: str, nombre: str, unidad: str, precision: int) -> None:
+        ids[clave] = str(uuid.uuid5(ns, clave))
+        # Existencia, no estado (como D33 del seed): una magnitud ya creada por su uuid5 no se vuelve
+        # a dar de alta (tras deshabilitarla, repetir el alta seria IDENTIDAD_REUTILIZADA).
+        if any(m["id"] == ids[clave] for m in api(base, "GET", "/v1/magnitudes")["magnitudes"]):
+            return
+        status, r = api_estado(base, "POST", f"/v1/categorias/{categoria}/magnitudes", {
+            "origen": "NUEVA", "obligatoria": True, "magnitud": {
+                "magnitud_id": ids[clave], "nombre": nombre, "unidad_default": unidad, "precision_decimales": precision}})
+        if status != 200:
+            raise SystemExit(f"FALLO: magnitud {clave}: HTTP {status} {r.get('codigo', '')}")
+
+    alta("e2e", f"{p} E2E", None, "GASTO")
+    nueva("e2e_km", ids["e2e"], f"{p} Km", "km", 1)
+    alta("sin_uso", f"{p} Sin uso", None, "INGRESO")
+    alta("bloqueada", f"{p} Bloqueada", ids["sin_uso"], "GASTO")
+    alta("con_uso", f"{p} Con uso", None, "INGRESO")
+    alta("usable", f"{p} Usable", ids["con_uso"], "GASTO")
+    nueva("dato", ids["bloqueada"], f"{p} Dato", "ud", 0)
+    ficha = next(m for m in api(base, "GET", "/v1/magnitudes")["magnitudes"] if m["id"] == ids["dato"])
+    if ficha["enabled"]:
+        ruta = f"/v1/magnitudes/{ids['dato']}/deshabilitar"
+        status, r = api_estado(base, "POST", ruta, {"row_version": ficha["row_version"], "confirmacion_impacto": None})
+        if status == 409 and r.get("codigo") == "MAGNITUD_DESHABILITAR_REQUIERE_CONFIRMACION":
+            impacto = [c["categoria_id"] for c in r["detalle"]["categorias_no_capturables"]]
+            status, r = api_estado(base, "POST", ruta, {"row_version": ficha["row_version"], "confirmacion_impacto": impacto})
+        if status != 200:
+            raise SystemExit(f"FALLO: deshabilitar Dato: HTTP {status} {r.get('codigo', '')}")
+    return ids
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--web", default="http://127.0.0.1:8081")
     ap.add_argument("--api", required=True)
     ap.add_argument("--salida", required=True)
     ap.add_argument("--dist", help="carpeta del export web: arranca scripts/dev/servir_web_e2e.py")
+    ap.add_argument("--run-p7", required=True, help="run_id del bloque P7 para los datos sinteticos «P7-<run_id> …»")
     a = ap.parse_args()
     with servidor_web(a.dist, a.web):
         dsn, owner = os.environ["GAPTO_DATABASE_URL"], os.environ["GAPTO_DEV_OWNER_USER_ID"]
@@ -138,6 +214,9 @@ def main() -> None:
         resultado: dict = {}
         hogar, luz = str(seed.id_categoria("hogar")), str(seed.id_categoria("luz"))
         kwh = str(seed.id_magnitud("consumo_electrico"))
+        p7 = preparar_p7(a.api, a.run_p7)
+        pref = f"P7-{a.run_p7}"
+        respuestas_d: list[dict] = []
 
         # Categoria propia del escenario (c): hoja GASTO en la raiz.
         cat_c = str(uuid.uuid4())
@@ -254,6 +333,64 @@ def main() -> None:
                           f"(b) persistencia inesperada: {bd_b}")
                 resultado[f"b_{esquema}"] = bd_b
 
+                # ---------------------------------------------------------- (d) C07 con fixture P7 por API
+                concepto_d = f"E2E P7 C07 {a.run_p7} {run[-6:]} {sufijo}"
+                abrir_formulario(concepto_d, "8,90")
+                page.get_by_test_id("campo-categoria").click()
+                page.get_by_test_id(f"cat-{p7['e2e']}").click()
+                page.get_by_test_id("datos-categoria").wait_for()
+                comprobar(page.get_by_test_id(f"magnitud-{p7['e2e_km']}").input_value() == "", "(d) la magnitud trae valor por defecto")
+                comprobar(page.get_by_test_id("registrar").get_attribute("aria-disabled") == "true", "(d) obligatoria vacía no bloquea")
+                page.get_by_test_id(f"magnitud-{p7['e2e_km']}").fill("12,5")
+                shot(f"{sufijo}08_p7_c07_informada")
+                with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith(RUTA_REGISTRO)) as resp_d:
+                    page.get_by_test_id("registrar").click()
+                respuestas_d.append({"esquema": esquema, "status": resp_d.value.status, "cuerpo": resp_d.value.json()})
+                page.get_by_test_id("registro-exito").wait_for(timeout=15000)
+                shot(f"{sufijo}09_p7_c07_exito")
+                bd_d = hechos_de(dsn, owner, concepto_d)
+                comprobar(len(bd_d) == 1, f"(d) hechos != 1: {bd_d}")
+                if bd_d:
+                    comprobar(bd_d[0]["efectos"][0][1] == p7["e2e"], f"(d) categoria_id inesperado: {bd_d[0]['efectos']}")
+                    comprobar(bd_d[0]["hecho_magnitudes"] == [[p7["e2e_km"], "12.500000", "km"]],
+                              f"(d) hecho_magnitudes inesperado: {bd_d[0]['hecho_magnitudes']}")
+                resultado[f"d_{esquema}"] = bd_d
+
+                # ---------------------------------------------------------- (e) microcopy N3 (literal exacto)
+                abrir_formulario(f"E2E P7 N3 {a.run_p7} {sufijo}", "1,00")
+                page.get_by_test_id("campo-categoria").click()
+                page.get_by_test_id("selector-sin-categoria").wait_for()
+                textos_e: dict[str, str] = {}
+                for clave, subtitulo in (("sin_uso", f"Solo ingresos · {SUBTITULO_N3}"),
+                                         ("con_uso", "Solo ingresos · tiene subcategorías que sí puedes usar")):
+                    fila = page.get_by_test_id(f"cat-{p7[clave]}")
+                    fila.scroll_into_view_if_needed()
+                    textos_e[f"fila_{clave}"] = fila.inner_text()
+                    comprobar(subtitulo in fila.inner_text(), f"(e) subtítulo de {clave} inesperado: {fila.inner_text()!r}")
+                shot(f"{sufijo}10_p7_n3_filas")
+                esperados = {
+                    "sin_uso": f"{pref} Sin uso no se puede elegir (solo ingresos). {NEGATIVO_N3}",
+                    "con_uso": f"{pref} Con uso no se puede elegir (solo ingresos). Sus subcategorías sí.",
+                }
+                for n, clave in enumerate(("sin_uso", "con_uso")):
+                    page.get_by_test_id(f"cat-{p7[clave]}").click()
+                    aviso = page.get_by_test_id("selector-aviso-nivel")
+                    aviso.wait_for()
+                    # El aviso es [icono, texto]: la primera linea es el glifo de Ionicons (uso privado).
+                    icono, _, texto_aviso = aviso.inner_text().strip().partition("\n")
+                    comprobar(len(icono) == 1 and "\ue000" <= icono <= "\uf8ff", f"(e) aviso sin el icono esperado: {icono!r}")
+                    textos_e[f"aviso_{clave}"] = texto_aviso.strip()
+                    comprobar(textos_e[f"aviso_{clave}"] == esperados[clave],
+                              f"(e) aviso de {clave} inesperado: {textos_e[f'aviso_{clave}']!r}")
+                    if clave == "sin_uso":
+                        bloq = page.get_by_test_id(f"cat-{p7['bloqueada']}")
+                        textos_e["fila_bloqueada"] = bloq.inner_text()
+                        comprobar("Requiere un dato no disponible" in bloq.inner_text() and bloq.get_attribute("aria-disabled") == "true",
+                                  f"(e) «Bloqueada» sin su motivo o seleccionable: {bloq.inner_text()!r}")
+                    shot(f"{sufijo}{11 + n}_p7_n3_aviso_{clave}")
+                    page.get_by_test_id("selector-miga-todas").click()
+                resultado[f"e_{esquema}"] = textos_e
+
             # -------------------------------------------------------------- (c) desactivada entre carga y confirmación (Light)
             page.emulate_media(color_scheme="light")
             concepto_c = f"E2E rechazo {run[-6:]}"
@@ -329,7 +466,8 @@ def main() -> None:
             else:
                 no_esperados.append(e)
         comprobar(not no_esperados, f"(consola) errores no esperados: {no_esperados}")
-        manifest = {"etiqueta": ETIQUETA, "run_id": run, "web": a.web, "resultado": resultado, "fallos": fallos,
+        manifest = {"etiqueta": ETIQUETA, "run_id": run, "run_p7": a.run_p7, "fixture_p7": p7, "respuestas_d": respuestas_d,
+                    "web": a.web, "resultado": resultado, "fallos": fallos,
                     "recargas_por_descarga_cortada": recargas["n"], "rechazo_esperado": rechazos_esperados,
                     "errores_consola": errores_consola, "errores_consola_no_esperados": no_esperados, "capturas": capturas}
         (salida / f"REGCAT_{run}_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
