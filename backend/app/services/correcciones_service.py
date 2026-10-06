@@ -33,6 +33,10 @@
 #   D-080 · ADVISORY PRIMERO. Si la correccion toca superficies de inversion,
 #   el advisory (INVERSIONES, owner) se toma ANTES de cualquier row lock. Los
 #   locks genericos no lo sustituyen.
+# Version: 0.10.0
+#   0.10.0 (F04-D053 B1 · B8): raiz de bloqueo en orden global: advisory
+#   D-080 (tambien si cambia importe_delta o tipo_efecto, D-158) -> hecho
+#   (D-171) -> posiciones que alimenta. Ninguna otra regla de OP-21 cambia.
 # Version: 0.9.0
 #   0.9.0 (F04-D052 enmienda E1): frontera economica por ARQUETIPO sobre los
 #   hechos de reduccion, con los helpers compartidos de efectos_service:
@@ -119,6 +123,7 @@ from app.core.unidad_trabajo import SesionMotor, Traza, UnidadDeTrabajo
 from app.repositories import auditoria_repository as auditoria
 from app.repositories import correcciones_repository as repo_corr
 from app.repositories import efectos_repository as repo_efectos
+from app.services import integridad_posicion
 from app.services.efectos_service import (
     ARQUETIPO_CONDONACION,
     EfectosService,
@@ -289,20 +294,25 @@ class CorreccionesService:
             owner = repo_hechos.exigir_contexto(sesion)
 
             # 1. Advisory ANTES de cualquier fila (D-080). R3-02: tambien si
-            #    la correccion va a escribir hecho_entidades.
-            if (
-                datos.toca_inversion
-                or datos.entidades_a_crear
-                or datos.entidades_a_eliminar
-            ):
-                repo_corr.tomar_advisory_inversiones(sesion, owner)
-
-            # 2. Root lock y control optimista.
-            if not repo_rel.bloquear_hechos(sesion, [datos.hecho_id]):
-                raise ErrorMotor(
-                    CodigoError.AGREGADO_NO_ENCONTRADO,
-                    "El hecho indicado no existe o no es accesible.",
-                )
+            #    la correccion va a escribir hecho_entidades. F04-D053 B8
+            #    (D-158): tambien si cambia importe_delta o tipo_efecto, que
+            #    0270/D-080 validan en el COMMIT tomando el mismo advisory.
+            # 2. Root lock del hecho (D-171) y, F04-D053 B8, de las posiciones
+            #    que alimenta, en ese orden; despues el control optimista.
+            integridad_posicion.adquirir_raiz(
+                sesion,
+                owner,
+                hechos=[datos.hecho_id],
+                advisory=bool(
+                    datos.toca_inversion
+                    or datos.entidades_a_crear
+                    or datos.entidades_a_eliminar
+                    or any(
+                        "importe_delta" in cambios or "tipo_efecto" in cambios
+                        for cambios in datos.efectos_a_actualizar.values()
+                    )
+                ),
+            )
             nueva_version = repo_hechos.tocar_raiz(
                 sesion, datos.hecho_id, datos.row_version_esperada
             )

@@ -55,6 +55,10 @@
 #   reduccion con GENERACION_DERECHO_OBLIGACION (historica o migrada) se lee
 #   como NO_DETERMINABLE, sin fecha ni procedencia como discriminante.
 #   GENERACION_DERECHO_OBLIGACION queda para la creacion e incremento.
+# Version: 0.5.0
+#   0.5.0 (F04-D053 B1 · B8): `_aplicar_delta` adquiere advisory D-080 y la
+#   raiz de la posicion ANTES de leer el saldo y de bloquear el movimiento;
+#   `cerrar_posicion` adquiere la raiz antes de leer.
 # Version: 0.4.0
 #   0.4.0 (F04-D052 B2): causa obligatoria y validada antes de escribir en
 #   `_aplicar_delta`; OP-12B y OP-14 exigen cuenta Gapto (supera F04-D015 §4
@@ -129,7 +133,7 @@ from app.repositories import auditoria_repository as auditoria
 from app.repositories import efectos_repository as repo_efectos
 from app.repositories import hechos_repository as repo_hechos
 from app.repositories import posiciones_repository as repo_pos
-from app.services import coherencia_posicion
+from app.services import coherencia_posicion, integridad_posicion
 from app.repositories import tesoreria_repository as repo_tes
 
 _MONEDA_VALIDA = re.compile(r"^[A-Z]{3}$")
@@ -591,7 +595,9 @@ class PosicionesService:
         self._validar_cierre(cierre)
 
         def operacion(sesion: SesionMotor) -> ResultadoPosicion:
-            repo_hechos.exigir_contexto(sesion)
+            owner = repo_hechos.exigir_contexto(sesion)
+            # F04-D053 B8: raiz de la posicion antes de leerla.
+            integridad_posicion.adquirir_raiz(sesion, owner, posiciones=[entidad_id])
             posicion = self._exigir_posicion(sesion, entidad_id)
             if posicion["estado"] == ESTADO_CERRADA:
                 raise ErrorMotor(
@@ -708,7 +714,12 @@ class PosicionesService:
         importe = decimal.Decimal(delta.importe)
 
         def operacion(sesion: SesionMotor) -> ResultadoPosicion:
-            repo_hechos.exigir_contexto(sesion)
+            owner = repo_hechos.exigir_contexto(sesion)
+            # F04-D053 B8: advisory (escribe hecho_entidades, D-080/D-158) ->
+            # raiz de la posicion, ANTES de leer el saldo y antes del movimiento.
+            integridad_posicion.adquirir_raiz(
+                sesion, owner, posiciones=[entidad_id], advisory=True
+            )
 
             artefactos = self._artefactos_delta(
                 delta, tesoreria, relacion, artefactos_extra

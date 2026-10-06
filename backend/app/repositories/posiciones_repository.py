@@ -24,6 +24,11 @@
 #   F04-D036 anade las lecturas de coherencia posicion <-> efecto. Viven
 #   aqui, y no en el servicio, porque son SQL: el servicio decide que hacer
 #   con el resultado, no como obtenerlo.
+# Version: 0.5.0
+#   0.5.0 (F04-D053 B1 · B8): raiz de bloqueo por posicion. `bloquear_posiciones`
+#   toma `FOR NO KEY UPDATE` sobre la fila `entidades` de cada posicion en
+#   orden UUID ascendente; `posiciones_de_hecho` devuelve las posiciones cuyo
+#   saldo alimenta un hecho (vinculo con efecto), sin filtrar tipo_relacion.
 # Version: 0.4.0
 #   0.4.0 (F04-D052 B2): `reducciones_de_posicion`, lectura de las
 #   reducciones de una posicion con su arquetipo y la presencia de
@@ -665,3 +670,57 @@ def posiciones_para_neto(
     with sesion.conexion.cursor() as cursor:
         cursor.execute(consulta, (contraparte_actor_id, contraparte_actor_id))
         return list(cursor.fetchall())
+
+
+# ----------------------------------------------------------------------
+# F04-D053 · B8 — raiz de bloqueo por posicion
+# ----------------------------------------------------------------------
+def bloquear_posiciones(
+    sesion: SesionMotor, entidad_ids: list[uuid.UUID]
+) -> list[uuid.UUID]:
+    """Bloquea la raiz `entidades` de cada posicion, en orden UUID ascendente.
+
+    FOR NO KEY UPDATE y no FOR UPDATE (D-114): las FK de `hecho_entidades` y
+    de los subtipos toman FOR KEY SHARE sobre `entidades` y no deben chocar.
+    Dos writers de la MISMA posicion si chocan. Una sola sentencia con
+    ORDER BY: el orden de adquisicion es el de la fila, no el de la lista.
+    Devuelve las posiciones visibles bloqueadas.
+    """
+    if not entidad_ids:
+        return []
+    with sesion.conexion.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT e.id
+              FROM gapto.entidades e
+              JOIN gapto.derechos_obligaciones_financieras p ON p.entidad_id = e.id
+             WHERE e.id = ANY(%s::uuid[])
+             ORDER BY e.id
+               FOR NO KEY UPDATE OF e
+            """,
+            (sorted(set(entidad_ids), key=str),),
+        )
+        return [fila[0] for fila in cursor.fetchall()]
+
+
+def posiciones_de_hecho(sesion: SesionMotor, hecho_id: uuid.UUID) -> list[uuid.UUID]:
+    """Posiciones genericas cuyo saldo alimenta algun efecto del hecho.
+
+    Mismo criterio de vinculo que el saldo (efecto_id NOT NULL), SIN filtrar
+    tipo_relacion: RV3 vincula con AFECTA_A y el runtime con GENERADO_POR
+    (H9). Se lee con el hecho ya bloqueado: entonces el conjunto es estable.
+    """
+    with sesion.conexion.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT DISTINCT v.entidad_id
+              FROM gapto.hecho_entidades v
+              JOIN gapto.derechos_obligaciones_financieras p
+                ON p.entidad_id = v.entidad_id
+             WHERE v.hecho_id = %s::uuid
+               AND v.efecto_id IS NOT NULL
+             ORDER BY v.entidad_id
+            """,
+            (hecho_id,),
+        )
+        return [fila[0] for fila in cursor.fetchall()]

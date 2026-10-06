@@ -20,6 +20,10 @@
 #       asi que se falla cerrado en vez de recalcular nada;
 #     - OP-03, ante realidad ya vinculada: entonces el hecho ocurrio y lo que
 #       corresponde es devolucion o reversion, que pertenecen a F04-06.
+# Version: 0.8.0
+#   0.8.0 (F04-D053 B1 · B8): OP-02 y OP-03 adquieren la raiz de bloqueo de
+#   la posicion (hecho FOR NO KEY UPDATE -> posiciones que alimenta) antes
+#   de leer el estado. Ninguna otra regla cambia.
 # Version: 0.7.0
 #   0.7.0 (F04-D038): corregir `numero_participantes_total` no puede dejarlo
 #   por debajo de las personas ya identificadas en `hecho_participantes`. Es
@@ -73,6 +77,7 @@ from app.core.unidad_trabajo import SesionMotor, Traza, UnidadDeTrabajo
 from app.repositories import auditoria_repository as auditoria
 from app.repositories import hechos_repository as repo
 from app.services import coherencia_participantes, coherencia_posicion
+from app.services import integridad_posicion
 
 _MONEDA_VALIDA = re.compile(r"^[A-Z]{3}$")
 
@@ -215,7 +220,9 @@ class HechosService:
             )
 
         def operacion(sesion: SesionMotor) -> ResultadoHecho:
-            repo.exigir_contexto(sesion)
+            owner = repo.exigir_contexto(sesion)
+            # F04-D053 B8: hecho -> posiciones que alimenta, antes de leer.
+            integridad_posicion.adquirir_raiz(sesion, owner, hechos=[hecho_id])
 
             actual = repo.leer_estado(sesion, hecho_id)
             if actual is None:
@@ -340,7 +347,9 @@ class HechosService:
         motivo_limpio = _motivo_obligatorio(motivo_anulacion, "La anulacion")
 
         def operacion(sesion: SesionMotor) -> ResultadoHecho:
-            repo.exigir_contexto(sesion)
+            owner = repo.exigir_contexto(sesion)
+            # F04-D053 B8: hecho -> posiciones que alimenta, antes de leer.
+            integridad_posicion.adquirir_raiz(sesion, owner, hechos=[hecho_id])
 
             actual = repo.leer_estado(sesion, hecho_id)
             if actual is None:
