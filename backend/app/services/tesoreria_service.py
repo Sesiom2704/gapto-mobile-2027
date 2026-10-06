@@ -32,6 +32,11 @@
 #   sustituirlo: dos transacciones concurrentes pueden ver individualmente un
 #   estado valido y solo el trigger impide que el estado final lo incumpla.
 #   En multidivisa no se compara nada: no hay FX y no se inventa ninguno.
+# Version: 0.3.0
+#   0.3.0 (F04-D053 B1, dictamen v0.3): OP-09 adquiere la raiz de la posicion
+#   (hecho -> posiciones, antes del movimiento) y aplica SOLO B5 (posicion
+#   cerrada) y B6 (conciliacion de REEMBOLSO por hecho; CONDONACION sin
+#   asignaciones). Ninguna otra regla de OP-09 cambia.
 # Version: 0.2.0
 #   0.2.0 (F04-06 B2): OP-11 reversion de tesoreria. No crea hecho, efecto ni
 #   relacion; consume same-account (D-099) y profundidad 1 (D-133).
@@ -69,6 +74,7 @@ from app.repositories import auditoria_repository as auditoria
 from app.repositories import efectos_repository as repo_efectos
 from app.repositories import hechos_repository as repo_hechos
 from app.repositories import tesoreria_repository as repo_tes
+from app.services import integridad_posicion
 
 CIEN = decimal.Decimal("100")
 
@@ -361,7 +367,17 @@ class TesoreriaService:
             )
 
         def operacion(sesion: SesionMotor) -> ResultadoConciliacion:
-            repo_hechos.exigir_contexto(sesion)
+            owner = repo_hechos.exigir_contexto(sesion)
+            # F04-D053 B1/B8 (dictamen v0.3): OP-09 entra en B1 SOLO para B5 y
+            # B6. Raiz en el orden global: hecho -> posiciones que alimenta,
+            # antes del movimiento. Foto previa bajo la raiz.
+            fotos = integridad_posicion.fotografiar(
+                sesion,
+                integridad_posicion.adquirir_raiz(
+                    sesion, owner, hechos=[datos.hecho_id]
+                ),
+                hechos=[datos.hecho_id],
+            )
             self._exigir_hecho_activo(sesion, datos.hecho_id)
 
             movimiento = repo_tes.leer_movimiento(
@@ -457,6 +473,8 @@ class TesoreriaService:
                 accion=auditoria.ACCION_CREAR,
                 datos_despues_json=snapshot,
             )
+            # F04-D053: solo B5 y B6; nunca reglas de saldo.
+            integridad_posicion.validar(sesion, fotos, reglas_saldo=False)
             return ResultadoConciliacion(
                 conciliacion_id=datos.conciliacion_id,
                 hecho_row_version=nueva_hecho,

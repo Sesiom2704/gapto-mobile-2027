@@ -29,6 +29,12 @@
 #   toma `FOR NO KEY UPDATE` sobre la fila `entidades` de cada posicion en
 #   orden UUID ascendente; `posiciones_de_hecho` devuelve las posiciones cuyo
 #   saldo alimenta un hecho (vinculo con efecto), sin filtrar tipo_relacion.
+#   F04-D053 A1: `FRONTERA_A1` (fecha_hecho >= fecha_inicio_seguimiento) es la
+#   unica frontera del saldo determinado, en `saldo_deltas` y
+#   `posiciones_para_neto`; `delta_de_otra_moneda` no cambia (Q6).
+#   Lecturas del validador: `deltas_por_fecha` (secuencia B2/B3 con A1) y
+#   `delta_de_hecho_anterior_al_inicio` (B4), `firma_posicion` (B5) y
+#   `conciliacion_de_hecho` (B6, por hecho).
 # Version: 0.4.0
 #   0.4.0 (F04-D052 B2): `reducciones_de_posicion`, lectura de las
 #   reducciones de una posicion con su arquetipo y la presencia de
@@ -53,6 +59,17 @@ from typing import Any
 from psycopg import sql
 
 from app.core.unidad_trabajo import SesionMotor
+
+# F04-D053 A1. UNICA frontera del saldo determinado: un delta participa si su
+# fecha economica es >= fecha_inicio_seguimiento (inclusiva). Los anteriores ya
+# estan dentro de saldo_apertura. Toda lectura o calculo del saldo la usa por
+# esta constante; ninguna consulta puede usar otra. No filtra tipo_relacion.
+FRONTERA_A1 = "h.fecha_hecho >= {p}.fecha_inicio_seguimiento"
+
+
+def frontera_a1(alias: str) -> str:
+    """Predicado A1 sobre el hecho `h` y la posicion con alias `alias`."""
+    return FRONTERA_A1.format(p=alias)
 
 TABLA_ENTIDADES = "entidades"
 TABLA_POSICIONES = "derechos_obligaciones_financieras"
@@ -272,17 +289,21 @@ def saldo_deltas(
 
     Los hechos ANULADO quedan excluidos por el propio WHERE. Filtrarlos despues
     seria un paso que alguien puede olvidar; aqui no hay "despues".
+    F04-D053 A1: solo los deltas con fecha >= fecha_inicio_seguimiento.
     """
     fila = sesion.uno(
-        """
+        f"""
         SELECT COALESCE(sum(ef.importe_delta), 0)
           FROM gapto.hecho_entidades v
+          JOIN gapto.derechos_obligaciones_financieras p
+            ON p.entidad_id = v.entidad_id
           JOIN gapto.hecho_efectos ef ON ef.id = v.efecto_id
           JOIN gapto.hechos_financieros h ON h.id = ef.hecho_id
          WHERE v.entidad_id = %s::uuid
            AND v.efecto_id IS NOT NULL
            AND ef.tipo_efecto = %s::varchar
            AND h.estado = 'ACTIVO'
+           AND {frontera_a1("p")}
         """,
         (entidad_id, tipo_efecto),
     )
@@ -637,10 +658,12 @@ def posiciones_para_neto(
     posicion cerrada tiene saldo actual cero aunque su pasado siga siendo
     indeterminado.
     """
-    consulta = """
+    # F04-D053 A1 en la suma; el recuento de incoherentes de moneda sigue
+    # evaluando TODOS los deltas vinculados (decision v0.2, Q6).
+    consulta = f"""
         WITH activas AS (
             SELECT p.entidad_id, p.tipo, p.moneda, p.contraparte_actor_id,
-                   p.saldo_apertura
+                   p.saldo_apertura, p.fecha_inicio_seguimiento
               FROM gapto.derechos_obligaciones_financieras p
              WHERE p.estado = 'ACTIVA'
                AND (%s::uuid IS NULL OR p.contraparte_actor_id = %s::uuid)
@@ -650,7 +673,8 @@ def posiciones_para_neto(
           FROM activas a
           JOIN gapto.entidades e ON e.id = a.entidad_id
           LEFT JOIN LATERAL (
-              SELECT sum(ef.importe_delta) FILTER (WHERE h.moneda = a.moneda)
+              SELECT sum(ef.importe_delta) FILTER (
+                         WHERE h.moneda = a.moneda AND {frontera_a1("a")})
                          AS suma,
                      count(*) FILTER (WHERE h.moneda <> a.moneda)
                          AS incoherentes
@@ -724,3 +748,142 @@ def posiciones_de_hecho(sesion: SesionMotor, hecho_id: uuid.UUID) -> list[uuid.U
             (hecho_id,),
         )
         return [fila[0] for fila in cursor.fetchall()]
+
+
+# ----------------------------------------------------------------------
+# F04-D053 · lecturas del validador central
+# ----------------------------------------------------------------------
+def deltas_por_fecha(
+    sesion: SesionMotor, entidad_id: uuid.UUID, tipo_efecto: str
+) -> list[tuple[Any, Any]]:
+    """(fecha_hecho, suma de deltas de esa fecha) dentro de la frontera A1.
+
+    Mismo universo que `saldo_deltas` (vinculo con efecto, naturaleza
+    compatible, hecho ACTIVO, FRONTERA_A1): la secuencia que valida B2/B3 y el
+    saldo que se lee son, por construccion, la misma suma.
+    """
+    with sesion.conexion.cursor() as cursor:
+        cursor.execute(
+            f"""
+            SELECT h.fecha_hecho, sum(ef.importe_delta)
+              FROM gapto.hecho_entidades v
+              JOIN gapto.derechos_obligaciones_financieras p
+                ON p.entidad_id = v.entidad_id
+              JOIN gapto.hecho_efectos ef ON ef.id = v.efecto_id
+              JOIN gapto.hechos_financieros h ON h.id = ef.hecho_id
+             WHERE v.entidad_id = %s::uuid
+               AND v.efecto_id IS NOT NULL
+               AND ef.tipo_efecto = %s::varchar
+               AND h.estado = 'ACTIVO'
+               AND {frontera_a1("p")}
+             GROUP BY h.fecha_hecho
+             ORDER BY h.fecha_hecho
+            """,
+            (entidad_id, tipo_efecto),
+        )
+        return list(cursor.fetchall())
+
+
+def delta_de_hecho_anterior_al_inicio(
+    sesion: SesionMotor, entidad_id: uuid.UUID, hecho_id: uuid.UUID
+) -> bool:
+    """True si el hecho alimenta la posicion con fecha anterior al inicio (B4)."""
+    fila = sesion.uno(
+        """
+        SELECT EXISTS (
+            SELECT 1
+              FROM gapto.hecho_entidades v
+              JOIN gapto.derechos_obligaciones_financieras p
+                ON p.entidad_id = v.entidad_id
+              JOIN gapto.hechos_financieros h ON h.id = v.hecho_id
+             WHERE v.entidad_id = %s::uuid
+               AND v.hecho_id = %s::uuid
+               AND v.efecto_id IS NOT NULL
+               AND p.fecha_inicio_seguimiento IS NOT NULL
+               AND h.fecha_hecho < p.fecha_inicio_seguimiento
+        )
+        """,
+        (entidad_id, hecho_id),
+    )
+    return bool(fila and fila[0])
+
+
+def firma_posicion(sesion: SesionMotor, entidad_id: uuid.UUID) -> str:
+    """B5. Todo lo que pertenece a la posicion, en texto canonico comparable.
+
+    Por cada vinculo hecho<->posicion con efecto: hecho, estado del hecho,
+    fecha economica, moneda, efecto, tipo_efecto e importe; y las
+    asignaciones de conciliacion de esos hechos. SIN frontera A1 y sin filtrar
+    tipo_relacion: es el historico entero de la posicion, no su saldo. No
+    incluye concepto, categoria ni efectos que no alimentan la posicion.
+    """
+    fila = sesion.uno(
+        """
+        SELECT jsonb_build_object(
+            'deltas', COALESCE((
+                SELECT jsonb_agg(jsonb_build_array(
+                           v.id, v.hecho_id, h.estado, h.fecha_hecho, h.moneda,
+                           ef.id, ef.tipo_efecto, ef.importe_delta)
+                         ORDER BY v.id)
+                  FROM gapto.hecho_entidades v
+                  JOIN gapto.hechos_financieros h ON h.id = v.hecho_id
+                  JOIN gapto.hecho_efectos ef ON ef.id = v.efecto_id
+                 WHERE v.entidad_id = %s::uuid
+                   AND v.efecto_id IS NOT NULL), '[]'::jsonb),
+            'conciliaciones', COALESCE((
+                SELECT jsonb_agg(jsonb_build_array(
+                           c.id, c.hecho_id, c.movimiento_tesoreria_id,
+                           c.importe_asignado)
+                         ORDER BY c.id)
+                  FROM gapto.hecho_movimientos_tesoreria c
+                 WHERE c.hecho_id IN (
+                       SELECT v.hecho_id FROM gapto.hecho_entidades v
+                        WHERE v.entidad_id = %s::uuid
+                          AND v.efecto_id IS NOT NULL)), '[]'::jsonb)
+        )::text
+        """,
+        (entidad_id, entidad_id),
+    )
+    return "" if fila is None else fila[0]
+
+
+def conciliacion_de_hecho(
+    sesion: SesionMotor, hecho_id: uuid.UUID
+) -> tuple[str | None, Any, list[tuple[str, Any]]]:
+    """B6. (codigo de tipo_hecho, suma asignada, [(tipo posicion, suma efectos)]).
+
+    Por HECHO y no por movimiento: todas las asignaciones del hecho, desde
+    cualquier numero de movimientos (N:M y asignaciones parciales entre
+    hechos). Los efectos son los de posicion del hecho, vinculados.
+    """
+    cabecera = sesion.uno(
+        """
+        SELECT th.codigo,
+               COALESCE((SELECT sum(c.importe_asignado)
+                           FROM gapto.hecho_movimientos_tesoreria c
+                          WHERE c.hecho_id = h.id), 0)
+          FROM gapto.hechos_financieros h
+          JOIN gapto.tipos_hecho th ON th.id = h.tipo_hecho_id
+         WHERE h.id = %s::uuid
+        """,
+        (hecho_id,),
+    )
+    if cabecera is None:
+        return None, 0, []
+    with sesion.conexion.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT p.tipo, sum(ef.importe_delta)
+              FROM gapto.hecho_entidades v
+              JOIN gapto.derechos_obligaciones_financieras p
+                ON p.entidad_id = v.entidad_id
+              JOIN gapto.hecho_efectos ef ON ef.id = v.efecto_id
+             WHERE v.hecho_id = %s::uuid
+               AND v.efecto_id IS NOT NULL
+             GROUP BY p.tipo
+             ORDER BY p.tipo
+            """,
+            (hecho_id,),
+        )
+        efectos = list(cursor.fetchall())
+    return cabecera[0], cabecera[1], efectos

@@ -19,6 +19,9 @@
 #   financiacion_cuotas (guarda estructural, D4). Los casos mixtos (pago +
 #   condonacion del resto y al reves) prueban la guarda motivo_cierre <->
 #   causa, anadida por iniciativa propia y mantenida por la orquestacion.
+# Version: 0.2.0
+#   0.2.0 (F04-D053 A1): test_cc4_historico[2025-01-01] pasa de 70 a 80: el
+#   delta anterior a fecha_inicio_seguimiento no se suma (cambio legitimo).
 # Version: 0.1.0
 # ============================================================
 
@@ -48,6 +51,7 @@ from app.services.posiciones_service import PosicionesService
 from app.services.tesoreria_service import TesoreriaService
 from conftest import leer_fila
 from test_109_op12_posiciones import (
+    FECHA as FECHA_INICIO_SEGUIMIENTO,
     COBRO,
     CONDONACION,
     PAGO,
@@ -867,8 +871,11 @@ def test_cc4_historico_causa_no_determinable_sin_reclasificar(
         "JOIN gapto.tipos_hecho th ON th.id = h.tipo_hecho_id WHERE h.id = %s",
         (historica,),
     ) == ("GENERACION_DERECHO_OBLIGACION", 1)
-    # Y el saldo sigue contando lo historico: 100 - 10 - 20.
-    assert servicio_posiciones.saldo(contexto, entidad_id).saldo.importe == D("70.0000")
+    # F04-D053 A1: el historico cuenta en el saldo solo si su fecha economica
+    # no es anterior a fecha_inicio_seguimiento (2026-06-01). 2025-01-01 ya
+    # esta dentro de la apertura: 100 - 20 = 80. 2027-01-01 cuenta: 70.
+    esperado = D("80.0000") if fecha < FECHA_INICIO_SEGUIMIENTO else D("70.0000")
+    assert servicio_posiciones.saldo(contexto, entidad_id).saldo.importe == esperado
 
 
 def test_cc4_creacion_sigue_usando_generacion_derecho_obligacion(

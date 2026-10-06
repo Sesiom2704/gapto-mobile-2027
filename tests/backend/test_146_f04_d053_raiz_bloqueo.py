@@ -20,7 +20,10 @@
 #      advisory D-080 (serializacion por owner, D-158; ver DISENO_BLOQUEO.md).
 #   5. Interbloqueo D-158: OP-21 con contexto (advisory -> hecho -> posicion)
 #      frente a OP-21 de importe y frente a creacion sobre la misma posicion:
-#      sin 40P01.
+#      sin 40P01. v0.3: OP-09 frente a OP-21 y creacion, sin 40P01.
+# Version: 0.2.0
+#   0.2.0 (F04-D053 B1 · v0.3): OP-09 entra en la raiz (escenarios 1 y 5);
+#   B5 hace perdedor legitimo a INTEGRIDAD_POSICION_VIOLADA tras un cierre.
 # Version: 0.1.0
 #   0.1.0 (F04-D053 B1 · P0-1): carrera e interbloqueo de la raiz B8.
 # ============================================================
@@ -40,6 +43,7 @@ from app.core.contexto import ContextoOperacion
 from app.core.errores import CodigoError, ErrorMotor
 from app.core.modelos import CamposCorreccion
 from app.core.modelos_compuesto import DatosContextoHecho, DatosEntidadHecho
+from app.core.modelos_tesoreria import DatosConciliacion, DatosMovimiento
 from app.core.modelos_posicion import (
     TIPO_OBLIGACION,
     DatosCierre,
@@ -51,6 +55,7 @@ from app.services.correcciones_service import CorreccionesService, DatosCorrecci
 from app.services.hechos_service import HechosService
 from app.services.posiciones_service import PosicionesService
 from app.services.previsiones_service import impacto_correccion_ancla
+from app.services.tesoreria_service import TesoreriaService
 from conftest import ROL_RUNTIME, _crear_actor, _crear_cuenta, _crear_usuario
 from test_109_op12_posiciones import CONDONACION, PAGO, alta, delta, tesoreria_nueva
 from test_140_f04_r3_op22 import nueva_entidad
@@ -81,6 +86,7 @@ class Servicios:
         self.pos = PosicionesService(unidad)
         self.cor = CorreccionesService(unidad)
         self.hec = HechosService(unidad, impacto_ancla=impacto_correccion_ancla)
+        self.tes = TesoreriaService(unidad)
 
 
 class Pausa:
@@ -284,7 +290,25 @@ def _cerrar(s, e, admin, p):
     )
 
 
+def _op09(s, e, admin, p):
+    """OP-09 sobre el hecho del ALTA de la posicion (GENERACION): B5 y B6 no
+    lo rechazan con la posicion activa; compite por la misma raiz."""
+    import datetime as dt
+
+    mov = s.tes.registrar_movimiento(e["ctx"], DatosMovimiento(
+        movimiento_id=uuid.uuid4(), cuenta_id=e["cuenta"], fecha_movimiento=dt.date(2026, 6, 2),
+        importe=D("-7.0000"), clase_movimiento="OPERACION"))
+    hecho_id = p["alta"].hecho_id
+    return lambda: s.tes.conciliar(
+        e["ctx"],
+        DatosConciliacion(uuid.uuid4(), hecho_id, mov.movimiento_id, D("-7.0000")),
+        hecho_row_version_esperada=_version_hecho(admin, e["owner"], hecho_id),
+        movimiento_row_version_esperada=mov.row_version,
+    )
+
+
 OPERACIONES = {
+    "op09": _op09,
     "op21_importe": _op21_importe,
     "op21_descripcion": _op21_descripcion,
     "op21_contexto": _op21_contexto,
@@ -299,10 +323,10 @@ OPERACIONES = {
 # 1 · Misma posicion: T2 espera a T1 y termina despues
 # ==================================================================
 
-@pytest.mark.parametrize("t1", ["crear", "op21_importe", "op02", "op03", "cerrar"])
+@pytest.mark.parametrize("t1", ["crear", "op21_importe", "op02", "op03", "cerrar", "op09"])
 @pytest.mark.parametrize("t2", sorted(OPERACIONES))
 def test_1_misma_posicion_serializa(dsn, admin, monkeypatch, escenario, t1, t2) -> None:
-    if t1 == t2 and t1 in ("op02", "op03", "cerrar", "op21_importe"):
+    if t1 == t2 and t1 in ("op02", "op03", "cerrar", "op21_importe", "op09"):
         pytest.skip("misma operacion sobre el mismo hecho/version: lo cubre el control optimista")
     s1, s2 = Servicios(dsn, f"T1-{uuid.uuid4()}"), Servicios(dsn, f"T2-{uuid.uuid4()}")
     p = escenario["p1"]
@@ -324,6 +348,9 @@ PERDEDOR_LEGITIMO = frozenset({
     CodigoError.VERSION_DESFASADA,
     CodigoError.OPERACION_NO_PERMITIDA_EN_ESTADO,
     CodigoError.POSICION_CERRADA,
+    # B5 (v0.3): tras un cierre confirmado por T1, corregir o anular un delta
+    # de la posicion pierde con INTEGRIDAD_POSICION_VIOLADA/POSICION_CERRADA.
+    CodigoError.INTEGRIDAD_POSICION_VIOLADA,
 })
 
 
@@ -386,6 +413,13 @@ def test_4_mismo_owner_creaciones_serializan_en_advisory(dsn, admin, monkeypatch
     ("op21_contexto", "crear"),
     ("op02", "op21_contexto"),
     ("op21_contexto", "op03"),
+    # v0.3: OP-09 frente a OP-21 sobre el mismo hecho (alta) o la misma posicion.
+    ("op09", "op21_importe"),
+    ("op21_importe", "op09"),
+    ("op09", "op21_contexto"),
+    ("op21_contexto", "op09"),
+    ("op09", "crear"),
+    ("crear", "op09"),
 ])
 def test_5_interbloqueo_d158_pausado(dsn, admin, monkeypatch, escenario, pareja) -> None:
     t1, t2 = pareja
@@ -407,6 +441,8 @@ def test_5_interbloqueo_d158_pausado(dsn, admin, monkeypatch, escenario, pareja)
     ("op21_importe", "op21_contexto"),
     ("crear", "op21_contexto"),
     ("crear", "op21_importe"),
+    ("op09", "op21_importe"),
+    ("op09", "op21_contexto"),
 ])
 def test_5_interbloqueo_d158_libre(dsn, admin, owner, contraparte, cuenta, pareja) -> None:
     """Sin pausa, arranque simultaneo con barrera, REPETICIONES veces."""

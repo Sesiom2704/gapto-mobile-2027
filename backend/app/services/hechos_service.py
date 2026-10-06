@@ -23,7 +23,9 @@
 # Version: 0.8.0
 #   0.8.0 (F04-D053 B1 · B8): OP-02 y OP-03 adquieren la raiz de bloqueo de
 #   la posicion (hecho FOR NO KEY UPDATE -> posiciones que alimenta) antes
-#   de leer el estado. Ninguna otra regla cambia.
+#   de leer el estado. B1: foto previa, B4 en el cambio de fecha (OP-02) y
+#   validacion del estado final (B2/B3) tras escribir. Ninguna otra regla
+#   cambia.
 # Version: 0.7.0
 #   0.7.0 (F04-D038): corregir `numero_participantes_total` no puede dejarlo
 #   por debajo de las personas ya identificadas en `hecho_participantes`. Es
@@ -221,8 +223,12 @@ class HechosService:
 
         def operacion(sesion: SesionMotor) -> ResultadoHecho:
             owner = repo.exigir_contexto(sesion)
-            # F04-D053 B8: hecho -> posiciones que alimenta, antes de leer.
-            integridad_posicion.adquirir_raiz(sesion, owner, hechos=[hecho_id])
+            # F04-D053 B8: hecho -> posiciones que alimenta, antes de leer; B1:
+            # foto previa de esas posiciones bajo la raiz.
+            fotos = integridad_posicion.fotografiar(
+                sesion,
+                integridad_posicion.adquirir_raiz(sesion, owner, hechos=[hecho_id]),
+            )
 
             actual = repo.leer_estado(sesion, hecho_id)
             if actual is None:
@@ -281,6 +287,13 @@ class HechosService:
                     "El hecho ha cambiado desde la version que conoce el llamante.",
                 )
 
+            # F04-D053 B4: cambio de fecha hacia antes del inicio de seguimiento.
+            if cambios.get("fecha_hecho") is not None:
+                for foto in fotos.posiciones.values():
+                    integridad_posicion.exigir_fecha_no_anterior_al_inicio(
+                        foto, cambios["fecha_hecho"]
+                    )
+
             actualizado = repo.actualizar_campos(
                 sesion, hecho_id, row_version_esperada, cambios
             )
@@ -302,6 +315,9 @@ class HechosService:
                 coherencia_participantes.exigir_recuento_coherente(
                     sesion, hecho_id=hecho_id
                 )
+
+            # F04-D053 B1: estado final de las posiciones que alimenta.
+            integridad_posicion.validar(sesion, fotos)
 
             auditoria.registrar(
                 sesion,
@@ -348,8 +364,13 @@ class HechosService:
 
         def operacion(sesion: SesionMotor) -> ResultadoHecho:
             owner = repo.exigir_contexto(sesion)
-            # F04-D053 B8: hecho -> posiciones que alimenta, antes de leer.
-            integridad_posicion.adquirir_raiz(sesion, owner, hechos=[hecho_id])
+            # F04-D053 B8: hecho -> posiciones que alimenta, antes de leer; B1:
+            # foto previa de esas posiciones bajo la raiz.
+            fotos = integridad_posicion.fotografiar(
+                sesion,
+                integridad_posicion.adquirir_raiz(sesion, owner, hechos=[hecho_id]),
+                hechos=[hecho_id],
+            )
 
             actual = repo.leer_estado(sesion, hecho_id)
             if actual is None:
@@ -397,6 +418,9 @@ class HechosService:
                     "El hecho ha cambiado desde la version que conoce el llamante.",
                 )
             row_version_nueva, estado_nuevo, snapshot_nuevo = anulado
+
+            # F04-D053 B1: anular saca el delta del saldo; estado final.
+            integridad_posicion.validar(sesion, fotos)
 
             auditoria.registrar(
                 sesion,

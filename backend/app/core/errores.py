@@ -15,6 +15,11 @@
 #   operacion y reintentar no la hara posible". Fusionarlos haria que la UX
 #   reintentase indefinidamente algo imposible, o que abandonase algo que solo
 #   necesitaba otro intento.
+# Version: 0.19.0
+#   0.19.0 (F04-D053 B9): `INTEGRIDAD_POSICION_VIOLADA` con motivo
+#   `MotivoIntegridadPosicion` (SALDO_NEGATIVO, POSICION_CERRADA,
+#   CONCILIACION_INCOMPATIBLE, FECHA_ANTERIOR_INICIO). Ningun codigo
+#   existente cambia.
 # Version: 0.18.0
 #   0.18.0 (F04-D052 enmienda E1): `CONDONACION_EFECTO_NO_PERMITIDO`
 #   (I1-I5: OP-04/OP-21 no crean ni reclasifican GASTO/INGRESO en un hecho
@@ -233,6 +238,10 @@ class CodigoError(str, enum.Enum):
     # PosicionesService garantiza no puede eludirse por las vias genericas.
     CONDONACION_EFECTO_NO_PERMITIDO = "CONDONACION_EFECTO_NO_PERMITIDO"
     REEMBOLSO_EFECTO_NO_PERMITIDO = "REEMBOLSO_EFECTO_NO_PERMITIDO"
+    # F04-D053 B9. Integridad de la posicion generica. Un unico codigo con
+    # motivo (`MotivoIntegridadPosicion`, en el mensaje y en
+    # contexto_extra["motivo"]). Los codigos existentes no cambian.
+    INTEGRIDAD_POSICION_VIOLADA = "INTEGRIDAD_POSICION_VIOLADA"
 
     # --- F04-05 · reglas y versionado -------------------------------------
     REGLA_NO_ENCONTRADA = "REGLA_NO_ENCONTRADA"
@@ -332,6 +341,15 @@ class CodigoError(str, enum.Enum):
     ENTRADA_INVALIDA = "ENTRADA_INVALIDA"
     BD_NO_DISPONIBLE = "BD_NO_DISPONIBLE"
     INTERNO = "INTERNO"
+
+
+class MotivoIntegridadPosicion(str, enum.Enum):
+    """F04-D053 B9. Motivo de INTEGRIDAD_POSICION_VIOLADA."""
+
+    SALDO_NEGATIVO = "SALDO_NEGATIVO"
+    POSICION_CERRADA = "POSICION_CERRADA"
+    CONCILIACION_INCOMPATIBLE = "CONCILIACION_INCOMPATIBLE"
+    FECHA_ANTERIOR_INICIO = "FECHA_ANTERIOR_INICIO"
 
 
 class ErrorMotor(Exception):

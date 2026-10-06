@@ -58,7 +58,9 @@
 # Version: 0.5.0
 #   0.5.0 (F04-D053 B1 · B8): `_aplicar_delta` adquiere advisory D-080 y la
 #   raiz de la posicion ANTES de leer el saldo y de bloquear el movimiento;
-#   `cerrar_posicion` adquiere la raiz antes de leer.
+#   `cerrar_posicion` adquiere la raiz antes de leer. B1: foto previa, B4 y
+#   validacion del estado final en `_aplicar_delta`; B4 en el alta (OP-12A y
+#   via OP-22). A1 llega por `saldo_deltas`.
 # Version: 0.4.0
 #   0.4.0 (F04-D052 B2): causa obligatoria y validada antes de escribir en
 #   `_aplicar_delta`; OP-12B y OP-14 exigen cuenta Gapto (supera F04-D015 §4
@@ -232,6 +234,11 @@ class PosicionesService:
                     tipo_efecto=EFECTO_DE_POSICION[datos.tipo],
                     importe_delta=decimal.Decimal(datos.importe_inicial),
                     concepto=datos.concepto,
+                )
+                # F04-D053 B4 (v0.2 Q5): el efecto de alta no precede al
+                # inicio de seguimiento (B7: solo con saldo determinado).
+                integridad_posicion.exigir_alta_no_anterior_al_inicio(
+                    sesion, datos.entidad_id, hecho_id
                 )
 
             return self._resultado_actual(
@@ -757,6 +764,14 @@ class PosicionesService:
                     "Una posicion cerrada no admite deltas nuevos.",
                 )
 
+            # F04-D053 B1: foto previa bajo la raiz; B4 sobre la fecha nueva.
+            fotos = integridad_posicion.fotografiar(
+                sesion, [entidad_id], hechos=[delta.hecho_id]
+            )
+            integridad_posicion.exigir_fecha_no_anterior_al_inicio(
+                fotos.posiciones[entidad_id], delta.fecha_hecho
+            )
+
             saldo = self._calcular_saldo(sesion, entidad_id, posicion)
             if saldo.conocido and importe > saldo.importe:
                 raise ErrorMotor(
@@ -830,6 +845,9 @@ class PosicionesService:
 
             if delta.cierre is not None:
                 self._cerrar(sesion, entidad_id, delta.cierre, posicion["snapshot"])
+
+            # F04-D053 B1: estado final (B2/B3 fecha a fecha con A1, B5, B6).
+            integridad_posicion.validar(sesion, fotos)
 
             return self._resultado_actual(
                 sesion,

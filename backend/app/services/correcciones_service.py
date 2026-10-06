@@ -36,7 +36,9 @@
 # Version: 0.10.0
 #   0.10.0 (F04-D053 B1 · B8): raiz de bloqueo en orden global: advisory
 #   D-080 (tambien si cambia importe_delta o tipo_efecto, D-158) -> hecho
-#   (D-171) -> posiciones que alimenta. Ninguna otra regla de OP-21 cambia.
+#   (D-171) -> posiciones que alimenta. B1: foto previa y validacion del
+#   estado final de esas posiciones (B2/B3) tras la guarda D-187. Ninguna
+#   otra regla de OP-21 cambia.
 # Version: 0.9.0
 #   0.9.0 (F04-D052 enmienda E1): frontera economica por ARQUETIPO sobre los
 #   hechos de reduccion, con los helpers compartidos de efectos_service:
@@ -299,7 +301,7 @@ class CorreccionesService:
             #    0270/D-080 validan en el COMMIT tomando el mismo advisory.
             # 2. Root lock del hecho (D-171) y, F04-D053 B8, de las posiciones
             #    que alimenta, en ese orden; despues el control optimista.
-            integridad_posicion.adquirir_raiz(
+            posiciones = integridad_posicion.adquirir_raiz(
                 sesion,
                 owner,
                 hechos=[datos.hecho_id],
@@ -312,6 +314,10 @@ class CorreccionesService:
                         for cambios in datos.efectos_a_actualizar.values()
                     )
                 ),
+            )
+            # F04-D053 B1: foto previa de las posiciones del hecho, bajo la raiz.
+            fotos = integridad_posicion.fotografiar(
+                sesion, posiciones, hechos=[datos.hecho_id]
             )
             nueva_version = repo_hechos.tocar_raiz(
                 sesion, datos.hecho_id, datos.row_version_esperada
@@ -412,6 +418,9 @@ class CorreccionesService:
                         "quedarse sin efectos: si la raiz nunca debio existir, "
                         "la via es anularla.",
                     )
+
+            # F04-D053 B1: estado final de las posiciones del hecho (B2/B3).
+            integridad_posicion.validar(sesion, fotos)
 
             return ResultadoCorreccion(
                 hecho_id=datos.hecho_id,
