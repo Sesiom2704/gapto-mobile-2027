@@ -54,7 +54,17 @@
 #   VERSION_DESFASADA (409), IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION (409) y
 #   ENTRADA_INVALIDA (422). Mensajes fijos; el detalle solo para los dos
 #   codigos que lo definen.
-# Version: 0.8.0
+#
+#   v0.9.0 (F05-02 B1, F05-D026 §41.3): `rechazo_preferencia` traduce los
+#   rechazos de los writers de preferencias. Codigos F05 nuevos, sin
+#   escritura previa: PREFERENCIA_SIN_VALOR, PREFERENCIA_DIMENSION_DIFERIDA y
+#   PREFERENCIA_PRIORIDAD_NO_ADMITIDA (422: dato de entrada);
+#   PREFERENCIA_CUENTA_NO_ELEGIBLE, PREFERENCIA_CATEGORIA_NO_ELEGIBLE y
+#   PREFERENCIA_EMPATE_CONTRADICTORIO (409; este ultimo con detalle
+#   preferencia_conflicto_id, que la UI usa en S03/R07). Reutilizados:
+#   AGREGADO_NO_ENCONTRADO (404), VERSION_DESFASADA (409),
+#   IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION (409) y ENTRADA_INVALIDA (422).
+# Version: 0.9.0
 # ============================================================
 
 from __future__ import annotations
@@ -208,4 +218,27 @@ def rechazo_magnitud(codigo: str, detalle: dict | None = None) -> tuple[int, dic
     cuerpo = {"codigo": codigo, "mensaje": mensaje, "reintentable": False}
     if codigo in _CON_DETALLE_MAGNITUD and detalle is not None:
         cuerpo["detalle"] = detalle
+    return status, cuerpo
+
+
+_RECHAZOS_PREFERENCIA: dict[str, tuple[int, str]] = {
+    "PREFERENCIA_SIN_VALOR": (422, "La preferencia debe proponer una cuenta o si cuenta para el presupuesto."),
+    "PREFERENCIA_DIMENSION_DIFERIDA": (422, "Las preferencias por tercero o entidad aún no están disponibles."),
+    "PREFERENCIA_PRIORIDAD_NO_ADMITIDA": (422, "La prioridad indicada no está admitida."),
+    "PREFERENCIA_CUENTA_NO_ELEGIBLE": (409, "Esa cuenta no está disponible para registrar gastos. Elige otra."),
+    "PREFERENCIA_CATEGORIA_NO_ELEGIBLE": (409, "Esa categoría no está disponible. Elige otra o «Sin categoría»."),
+    "PREFERENCIA_EMPATE_CONTRADICTORIO": (
+        409, "Ya hay otra preferencia para el mismo caso que propone un valor distinto. Revísala."),
+    "AGREGADO_NO_ENCONTRADO": (404, "No encontrado."),
+    "VERSION_DESFASADA": (409, "La preferencia ha cambiado desde que la abriste. Vuelve a cargarla."),
+    "IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION": (409, "Este registro ya existe con otros datos. No se ha guardado nada nuevo."),
+    "ENTRADA_INVALIDA": (422, "Revisa los datos."),
+}
+
+
+def rechazo_preferencia(codigo: str, detalle: dict | None = None) -> tuple[int, dict]:
+    status, mensaje = _RECHAZOS_PREFERENCIA[codigo]
+    cuerpo = {"codigo": codigo, "mensaje": mensaje, "reintentable": False}
+    if codigo == "PREFERENCIA_EMPATE_CONTRADICTORIO" and detalle is not None:
+        cuerpo["detalle"] = {k: str(v) for k, v in detalle.items()}
     return status, cuerpo

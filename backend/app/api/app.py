@@ -60,7 +60,16 @@
 #     GET  /v1/magnitudes                                       catalogo del owner
 #   Sin DELETE HTTP: retirar una asociacion es un POST por accion. Sin cambio
 #   de unidad ni precision (R17).
-# Version: 0.9.0
+#
+#   v0.10.0 (F05-02 B1, F05-D026 §41.3): rutas /v1 internas y provisionales
+#   de preferencias de registro, cada comando en UNA transaccion de la unidad
+#   de trabajo (preferencias/servicio.py):
+#     GET  /v1/preferencias                       lista + cuenta_disponible_hoy
+#     POST /v1/preferencias                       alta
+#     POST /v1/preferencias/{id}/editar | desactivar | reactivar
+#     GET  /v1/preferencias/propuesta?categoria_id=&fecha=   resolver (lectura)
+#   No se conectan a REG-01, a la ejecucion del gasto ni al cliente (B2).
+# Version: 0.10.0
 # ============================================================
 
 from __future__ import annotations
@@ -117,6 +126,16 @@ from app.api.dto_magnitudes import (
     ResultadoComandoMagnitud,
     RetirarAsociacion,
 )
+from app.api.dto_preferencias import (
+    AltaPreferencia,
+    DesactivarPreferencia,
+    EditarPreferencia,
+    ListaPreferencias,
+    PreferenciaNodo,
+    PropuestaRegistro,
+    ReactivarPreferencia,
+    ResultadoComandoPreferencia,
+)
 from app.api.dto_vs01 import (
     GastoMesVs01,
     IntencionGastoPagado,
@@ -128,6 +147,8 @@ from app.categorias import lecturas as lect_cat
 from app.categorias import servicio as serv_cat
 from app.magnitudes import lecturas as lect_mag
 from app.magnitudes import servicio as serv_mag
+from app.preferencias import lecturas as lect_pref
+from app.preferencias import servicio as serv_pref
 from app.core.contexto import ContextoOperacion
 from app.core.errores import ErrorMotor
 from app.core.unidad_trabajo import UnidadDeTrabajo
@@ -403,6 +424,57 @@ def create_app(
     def rehabilitar_magnitud(magnitud_id: uuid.UUID, c: RehabilitarMagnitud):
         return _comando_magnitudes("mag_rehabilitar", lambda s: serv_mag.rehabilitar(
             s, magnitud_id=magnitud_id, row_version=c.row_version), _ficha)
+
+    # ------------------------------------------------------------ F05-02 B1
+    def _comando_preferencia(nombre_op: str, operacion) -> dict | JSONResponse:
+        salida = unidad.ejecutar(contexto(), operacion, nombre=f"F05-02 {nombre_op}")
+        if isinstance(salida, serv_pref.Rechazo):
+            status, cuerpo = eh.rechazo_preferencia(salida.codigo, salida.detalle)
+            return JSONResponse(cuerpo, status_code=status)
+        campos = PreferenciaNodo.model_fields
+        return {
+            "preferencia": {k: v for k, v in salida.preferencia.items() if k in campos},
+            "idempotente": salida.idempotente,
+            "modificadas": list(salida.modificadas),
+        }
+
+    _RP = {"response_model": ResultadoComandoPreferencia, "dependencies": [Depends(autorizar)]}
+
+    @app.get("/v1/preferencias", response_model=ListaPreferencias, dependencies=[Depends(autorizar)])
+    def preferencias() -> dict:
+        return {"preferencias": unidad.ejecutar(contexto(), lect_pref.listar, nombre="F05-02 listar")}
+
+    @app.get("/v1/preferencias/propuesta", response_model=PropuestaRegistro, dependencies=[Depends(autorizar)])
+    def propuesta_preferencias(fecha: dt.date = Query(...), categoria_id: uuid.UUID | None = Query(None)) -> dict:
+        # Sin categoria_id = «Sin categoria»: solo casan preferencias de categoria NULL.
+        return unidad.ejecutar(
+            contexto(), lambda s: lect_pref.propuesta(s, categoria_id, fecha), nombre="F05-02 propuesta"
+        )
+
+    @app.post("/v1/preferencias", **_RP)
+    def alta_preferencia(c: AltaPreferencia):
+        return _comando_preferencia("alta", lambda s: serv_pref.alta(
+            s, preferencia_id=c.id, tipo_hecho_id=c.tipo_hecho_id, categoria_id=c.categoria_id,
+            tercero_id=c.tercero_id, entidad_id=c.entidad_id, cuenta_default_id=c.cuenta_default_id,
+            presupuestable_default=c.presupuestable_default, prioridad=c.prioridad))
+
+    @app.post("/v1/preferencias/{preferencia_id}/editar", **_RP)
+    def editar_preferencia(preferencia_id: uuid.UUID, c: EditarPreferencia):
+        return _comando_preferencia("editar", lambda s: serv_pref.editar(
+            s, preferencia_id=preferencia_id, row_version=c.row_version, tipo_hecho_id=c.tipo_hecho_id,
+            categoria_id=c.categoria_id, tercero_id=c.tercero_id, entidad_id=c.entidad_id,
+            cuenta_default_id=c.cuenta_default_id, presupuestable_default=c.presupuestable_default,
+            prioridad=c.prioridad))
+
+    @app.post("/v1/preferencias/{preferencia_id}/desactivar", **_RP)
+    def desactivar_preferencia(preferencia_id: uuid.UUID, c: DesactivarPreferencia):
+        return _comando_preferencia("desactivar", lambda s: serv_pref.desactivar(
+            s, preferencia_id=preferencia_id, row_version=c.row_version))
+
+    @app.post("/v1/preferencias/{preferencia_id}/reactivar", **_RP)
+    def reactivar_preferencia(preferencia_id: uuid.UUID, c: ReactivarPreferencia):
+        return _comando_preferencia("reactivar", lambda s: serv_pref.reactivar(
+            s, preferencia_id=preferencia_id, row_version=c.row_version))
 
     @app.post(
         "/v1/intenciones/gasto-pagado",

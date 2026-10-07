@@ -19,7 +19,12 @@
 #   Todas las lecturas corren como gapto_runtime bajo RLS del tenant.
 #   v0.2.0 (F05-D003): cuentas_pago recibe la fecha del pago y devuelve una
 #   propuesta de financiacion explicita en vez de un booleano derivable.
-# Version: 0.2.0
+#   v0.3.0 (F05-02 B1, F05-D026 E2): la regla de elegibilidad de cuentas de
+#   pago se extrae, SIN cambiar su comportamiento, a `cuentas_elegibles`
+#   (habilitada, ACTIVO, abierta en `fecha`; mismo orden). La reutilizan
+#   cuentas_pago y el resolver/writers de preferencias (que anaden la misma
+#   moneda del registro, REG-01 campo 5). Regresion: test_167.
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
@@ -77,12 +82,11 @@ def gasto_mes(sesion: SesionMotor, mes: str) -> dict:
     }
 
 
-def cuentas_pago(sesion: SesionMotor, fecha: dt.date) -> list[dict]:
-    """Cuentas habilitadas, ACTIVO y abiertas en `fecha` (fecha comun de gasto
-    y pago, §16.3), con la PROPUESTA de financiacion para esa fecha (§16.4):
-    SELF_100 solo si hay una unica participacion vigente, del self, al 100 %.
-    Es una propuesta para mostrar; la ejecucion la revalida bajo lock."""
-    actor = leer_actor_self(sesion)
+def cuentas_elegibles(sesion: SesionMotor, fecha: dt.date) -> list[tuple]:
+    """Regla UNICA de elegibilidad de cuentas de pago en `fecha` (fecha comun
+    de gasto y pago, §16.3): habilitada, ACTIVO y abierta en esa fecha.
+    Devuelve [(id, nombre, moneda)] en orden estable (orden, nombre, id). No
+    filtra moneda: la misma moneda la exige quien compone el registro."""
     with sesion.conexion.cursor() as cur:
         cur.execute(
             "SELECT id, nombre, moneda FROM gapto.cuentas "
@@ -90,7 +94,16 @@ def cuentas_pago(sesion: SesionMotor, fecha: dt.date) -> list[dict]:
             "AND naturaleza = 'ACTIVO' ORDER BY orden, nombre, id",
             (fecha,),
         )
-        filas = cur.fetchall()
+        return cur.fetchall()
+
+
+def cuentas_pago(sesion: SesionMotor, fecha: dt.date) -> list[dict]:
+    """Cuentas habilitadas, ACTIVO y abiertas en `fecha` (fecha comun de gasto
+    y pago, §16.3), con la PROPUESTA de financiacion para esa fecha (§16.4):
+    SELF_100 solo si hay una unica participacion vigente, del self, al 100 %.
+    Es una propuesta para mostrar; la ejecucion la revalida bajo lock."""
+    actor = leer_actor_self(sesion)
+    filas = cuentas_elegibles(sesion, fecha)
     return [
         {
             "cuenta_id": f[0],
