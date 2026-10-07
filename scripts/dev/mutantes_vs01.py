@@ -68,7 +68,18 @@
 #   el test que lo mata por asercion de texto es regcat «AJ-09 N3: aviso de
 #   nivel sin descendiente elegible, motivo «Solo ingresos» (literal exacto)».
 #   Censo: 19 py + M01..M12 y U01..U17 (29 js) = 48.
-# Version: 0.9.0
+#   v0.10.0 (F05-02 B2; F05-D027 §42.7): un mutante por guarda de la
+#   integracion de preferencias en REG-01. Cliente (suite js,
+#   preferencias_registro.test.tsx): U18 vuelve el fallback de cuenta unica
+#   sin filtro de moneda (AJ-B1-09); U19 sobrescribe un campo tocado
+#   (D-PREF-03); U20 ofrece la tarjeta con «Sin categoria» (D-PREF-05); U21
+#   edita con estado parcial (E05); U22 usa un UUID nuevo en cada reintento del
+#   alta (R06); U23 vuelve a pedir la propuesta en el reintento del registro
+#   (CC-02-4); U24 preselecciona una cuenta fuera de la lista (AJ-B1-11).
+#   Backend (suite py, test_171): A21 la propuesta ignora el rechazo de la
+#   guarda C-a y devuelve propuesta con una categoria no elegible.
+#   Censo: 20 py + M01..M12 y U01..U24 (36 js) = 56.
+# Version: 0.10.0
 # ============================================================
 
 from __future__ import annotations
@@ -109,6 +120,10 @@ MUTANTES = [
     ('A18', 'backend/app/api/dto_vs01.py', '            and self.financiacion.importe != self.importe\n', '            and False\n', 'py'),
     ('A19', 'backend/app/api/lecturas_vs01.py', '"SELF_100" if participacion_self_100(sesion, f[0], actor, fecha) else "NO_DETERMINADA"', '"SELF_100"', 'py'),
     ('A20', 'backend/app/api/configuracion.py', '    if entorno != ENTORNO_UNICO_PERMITIDO:\n', '    if False:\n', 'py'),
+    # ---------------------------------------------------------------- F05-02 B2 (backend)
+    ("A21", "backend/app/preferencias/lecturas.py",
+     "        if rechazo is not None:\n            return rechazo\n    return resolver(",
+     "        if False:\n            return rechazo\n    return resolver(", "py"),
     ("M01", "mobile/src/state/useEnvioGasto.ts", "if (enVuelo.current) return; // doble tap", "if (false) return; // doble tap", "js"),
     ("M02", "mobile/src/state/useEnvioGasto.ts", "      if (selladaRef.current) {\n        // Intención", "      if (false) {\n        // Intención", "js"),
     ("M03", "mobile/src/domain/intencion.ts", "presupuestable: null,\n    soloMio", "presupuestable: true,\n    soloMio", "js"),
@@ -176,6 +191,27 @@ MUTANTES = [
      "                  ? `${actual.nombre} está desactivada y no se puede elegir. ${!usables(actual) ? 'Sus subcategorías activas sí.' : 'Sus subcategorías tampoco se pueden elegir ahora. Elige otra categoría o registra sin categoría.'}`\n"
      "                  : `${actual.nombre} no se puede elegir (${p.motivo(actual)!.toLowerCase()}). ${!usables(actual) ? 'Sus subcategorías sí.' : 'Sus subcategorías tampoco se pueden elegir ahora. Elige otra categoría o registra sin categoría.'}`}\n",
      "js"),
+    # ---------------------------------------------------------------- F05-02 B2 (preferencias en REG-01)
+    ("U18", "mobile/src/domain/preferencias.ts",
+     "      x = { ...x, cuentaId: null, cuentaOrigen: 'PENDIENTE', cuentaPropuesta: null, propuesta: null, propuestaRechazada: false };\n",
+     "      x = lista.length === 1 ? { ...x, cuentaId: lista[0].cuenta_id, cuentaOrigen: 'INFERIDO', cuentaPropuesta: 'UNICA', propuesta: lista[0].propuesta_financiacion, propuestaRechazada: false } : { ...x, cuentaId: null, cuentaOrigen: 'PENDIENTE', cuentaPropuesta: null, propuesta: null, propuestaRechazada: false };\n",
+     "js"),
+    ("U19", "mobile/src/domain/preferencias.ts", "  if (b.cuentaOrigen !== 'USUARIO') {\n", "  if (true) {\n", "js"),
+    ("U20", "mobile/src/domain/preferencias.ts",
+     "  if (payload.categoria.estado !== 'CATEGORIA') return null;", "  if (false) return null;", "js"),
+    ("U21", "mobile/src/domain/preferencias.ts",
+     "    cuenta_default_id: c.cuenta ? f.cuenta : e.cuenta_default_id,\n    presupuestable_default: c.presupuestable ? f.presupuestable : e.presupuestable_default,\n",
+     "    cuenta_default_id: c.cuenta ? f.cuenta : null,\n    presupuestable_default: c.presupuestable ? f.presupuestable : null,\n",
+     "js"),
+    ("U22", "mobile/src/components/GuardarPreferencia.tsx",
+     "p.cliente.altaPreferencia({ id: idAlta, ...plan.contenido })",
+     "p.cliente.altaPreferencia({ id: p.nuevoId(), ...plan.contenido })", "js"),
+    ("U23", "mobile/src/screens/RegistroGastoScreen.tsx",
+     '<BotonPrimario testID="reintentar" titulo="Reintentar" onPress={reintentar} />',
+     "<BotonPrimario testID=\"reintentar\" titulo=\"Reintentar\" onPress={() => { editable.current = true; void pedirPropuesta(b.fechaHecho, categoriaActual.current, cuentas.fase === 'OK' ? cuentas.lista : []); return reintentar(); }} />",
+     "js"),
+    ("U24", "mobile/src/domain/preferencias.ts",
+     "  if (p.cuenta && lista.some((x) => x.cuenta_id === p.cuenta!.valor)) {\n", "  if (p.cuenta) {\n", "js"),
 ]
 
 

@@ -5,7 +5,8 @@
 // Descripción: Modelo de la intención VS-01 «gasto ya ocurrido y pagado». Separa: borrador editable (con ORIGEN de cada valor: decisión del usuario, inferido visible o pendiente, mandato §8) y la intención SELLADA (identidad + payload inmutables antes de enviar, F05-00-A).
 // v0.2.0 (F05-D003): fecha común gasto/pago editable (≤ hoy) y financiación sellada en la intención (§16.3/§16.4).
 // v0.3.0 (F05-01 S6-WIRE+UI (este mandato); F05 §22.2 C01/C07, §26.2 AJ-03, §28.2): estado categorial resuelto OBLIGATORIO (PENDIENTE bloquea; «Sin categoría» es decisión explícita) y magnitudes de la categoría elegida. `sellar` envía `categoria` exactamente en el wire de §28.2: {estado:'SIN_CATEGORIA'} sin `magnitudes`, o {estado:'CATEGORIA', categoria_id, magnitudes:[{magnitud_id, valor}]} con valores canónicos con punto, solo las informadas y nunca `unidad`.
-// Versión: 0.3.0
+// v0.4.0 (F05-02 B2; F05-D026 E1/E2, lámina REG-PREF R01–R03): `presupuestableOrigen` (USUARIO cuando el usuario lo toca; INFERIDO cuando viene de una preferencia; PENDIENTE sin valor) y el origen VISIBLE de cada propuesta (`cuentaPropuesta`, `presupuestablePropuesta`). La propuesta no cuenta como modificación y se sella como cualquier valor visible; el payload no cambia. Campos nuevos al final del borrador.
+// Versión: 0.4.0
 // ============================================================
 
 import type { MagnitudCategoria } from './categoria';
@@ -13,6 +14,9 @@ import { parsearImporte } from './importe';
 import { normalizarValorMagnitud, textoMotivoValor } from './magnitud';
 
 export type Origen = 'USUARIO' | 'INFERIDO' | 'PENDIENTE';
+
+/** Origen visible de una propuesta (D-PREF-02): preferencia de la categoría, preferencia general o única cuenta. */
+export type OrigenPropuestaCampo = 'PREFERENCIA_CATEGORIA' | 'PREFERENCIA_GENERAL' | 'UNICA';
 
 /** Propuesta del servidor para la cuenta y fecha elegidas (§16.4). */
 export type PropuestaFinanciacion = 'SELF_100' | 'NO_DETERMINADA';
@@ -46,7 +50,7 @@ export interface Borrador {
   presupuestable: boolean | null; // null = pendiente: NUNCA se inventa (R2)
   soloMio: boolean; // affordance explícito «Solo mío»; false = sin indicar (A01)
   cuentaId: string | null;
-  cuentaOrigen: Origen; // INFERIDO solo si es la única cuenta disponible (visible)
+  cuentaOrigen: Origen; // INFERIDO = propuesta visible del resolver (preferencia o única elegible)
   fechaHecho: string; // YYYY-MM-DD local: fecha COMÚN del gasto y del pago (§16.3)
   fechaOrigen: Origen; // INFERIDO = «Hoy» propuesto y visible; USUARIO si la cambia
   /** Propuesta vigente para cuentaId + fechaHecho; null = aún no conocida. */
@@ -56,6 +60,12 @@ export interface Borrador {
   categoria: SeleccionCategoria;
   /** Texto escrito por magnitud_id; ausente o vacío = desconocido (nunca cero). */
   magnitudesTexto: Record<string, string>;
+  /** Origen visible de la cuenta propuesta (solo con cuentaOrigen INFERIDO). */
+  cuentaPropuesta: OrigenPropuestaCampo | null;
+  /** USUARIO si el usuario lo eligió; INFERIDO si viene de una preferencia (E1); PENDIENTE sin valor. */
+  presupuestableOrigen: Origen;
+  /** Origen visible de `presupuestable` propuesto (solo con presupuestableOrigen INFERIDO). */
+  presupuestablePropuesta: OrigenPropuestaCampo | null;
 }
 
 export interface MagnitudCapturada {
@@ -104,6 +114,9 @@ export function borradorInicial(fechaHecho: string): Borrador {
     propuestaRechazada: false,
     categoria: { estado: 'PENDIENTE' },
     magnitudesTexto: {},
+    cuentaPropuesta: null,
+    presupuestableOrigen: 'PENDIENTE',
+    presupuestablePropuesta: null,
   };
 }
 

@@ -14,7 +14,18 @@
 #   - `propuesta`: expone el resolver para el contexto del registro VS-01
 #     (tipo de hecho GASTO, categoria o «Sin categoria», fecha). No se conecta
 #     todavia a REG-01 ni a la ejecucion (B2).
-# Version: 0.1.0
+#
+#   v0.2.0 (F05-02 B2; F05 §42.7, R-B1-03): la propuesta con una categoria
+#   que no es elegible para GASTO (inexistente u oculta por RLS, de otro
+#   owner, deshabilitada o de ambito incompatible) devuelve el codigo
+#   CATEGORIA_NO_ELEGIBLE y nunca una propuesta. La decision es la de la
+#   guarda UNICA C-a (elegibilidad_categoria.validar_seleccion_categoria),
+#   reutilizada sin modificarla: el registro no convierte una categoria
+#   incompatible en una propuesta valida. La guarda toma FOR SHARE sobre la
+#   fila de la categoria durante esta transaccion de lectura (nunca el
+#   advisory de categorias ni el de preferencias) y no escribe. Sin categoria
+#   («Sin categoria») no se consulta la guarda.
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -23,9 +34,13 @@ import datetime as dt
 import uuid
 from typing import Any
 
+from app.api.elegibilidad_categoria import validar_seleccion_categoria
 from app.core.unidad_trabajo import SesionMotor
 from app.preferencias import repositorio as repo
 from app.preferencias.resolver import cuentas_elegibles_registro, resolver, tipo_hecho_registro
+
+#: Naturaleza del registro VS-01 en la matriz C02 de la guarda C-a.
+NATURALEZA_REGISTRO = "GASTO"
 
 
 def listar(sesion: SesionMotor) -> list[dict[str, Any]]:
@@ -42,7 +57,13 @@ def listar(sesion: SesionMotor) -> list[dict[str, Any]]:
     ]
 
 
-def propuesta(sesion: SesionMotor, categoria_id: uuid.UUID | None, fecha: dt.date) -> dict[str, Any]:
+def propuesta(sesion: SesionMotor, categoria_id: uuid.UUID | None, fecha: dt.date) -> dict[str, Any] | str:
+    """Propuesta por campo, o el codigo CATEGORIA_NO_ELEGIBLE si la categoria
+    no es elegible para GASTO (guarda C-a; nunca una propuesta en ese caso)."""
+    if categoria_id is not None:
+        rechazo = validar_seleccion_categoria(sesion, categoria_id, NATURALEZA_REGISTRO)
+        if rechazo is not None:
+            return rechazo
     return resolver(
         sesion, tipo_hecho_id=tipo_hecho_registro(sesion), categoria_id=categoria_id, fecha=fecha
     )

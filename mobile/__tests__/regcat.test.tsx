@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-01 S6-WIRE+UI (este mandato))
 // Versión: 0.2.0 (F05-01 S6-WIRE+UI, correctivo AJ-S6WIREUI-09): el selector no promete subcategorías seleccionables cuando ningún descendiente es elegible (padre no seleccionable cuyo único hijo visible no es capturable, tipo Gas); caso positivo con hijo elegible; casos de `tieneDescendienteElegible`.
 // Versión: 0.3.0 (F05-01 P7 · N3, Moisés D-P7-05, AJ-P7BAT-12): los tests AJ-09 afirman el literal exacto del aviso de nivel en las cuatro combinaciones {Desactivada, Solo ingresos} × {usables false, true} (las de «Desactivada» con fixture de cliente, PR-01) y del subtítulo de fila en las dos; el de «Solo ingresos» sin descendiente elegible es el discriminante de U17.
+// Versión: 0.4.0 (F05-02 B2): el cliente simulado sirve la propuesta del resolver con la única cuenta (DEFAULT_GENERAL), que sustituye al fallback retirado del cliente (AJ-B1-09). Ningún caso REG-CAT cambia.
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
@@ -19,7 +20,7 @@ import { construirArbol, tieneDescendienteElegible, type CategoriaNodo } from '.
 import type { PayloadGastoPagado } from '../src/domain/intencion';
 import { ProveedorTema } from '../src/theme/tema';
 
-import { clienteCategoriasStub, LISTA, mag, nodo } from './fixtures_categorias';
+import { clienteCategoriasStub, LISTA, mag, nodo, propuestaUnica } from './fixtures_categorias';
 
 const CUENTA = 'c0000000-0000-4000-8000-000000000001';
 const AHORA = () => new Date(2026, 8, 24, 10, 0, 0);
@@ -41,6 +42,7 @@ function fake(o: { arboles?: Respuesta<{ categorias: CategoriaNodo[] }>[]; regis
     }),
     cuentasPago: jest.fn(async () => ({ tipo: 'OK', datos: { cuentas: [{ cuenta_id: CUENTA, nombre: 'Cuenta (sintética)', moneda: 'EUR', propuesta_financiacion: 'SELF_100' }] } }) as Respuesta<{ cuentas: CuentaPago[] }>),
     gastoMes: jest.fn(async () => ({ tipo: 'INDETERMINADO' as const, mensaje: '' })),
+    propuestaPreferencias: propuestaUnica(CUENTA), // F05-02 B2: el resolver propone la única cuenta
   };
   return { cliente, enviados };
 }

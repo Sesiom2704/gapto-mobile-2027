@@ -6,7 +6,8 @@
 // v0.2.0 (F05-D003): tarjeta parcial de Home fuera de «Este mes», fecha editable ≤ hoy, financiación visible y sellada, rechazo por propuesta obsoleta.
 // v0.3.0 (F05 — VS-01 · Alineación visual): A1 — los bloques de Home no son tarjetas; A2 — SPEC-08: «Registrar gasto» desactivado mientras falte una decisión bloqueante, con indicación visible de lo que falta. Los tests de validación (antes: pulsar y leer errores) comprueban ahora el estado disabled de forma discriminante y conservan la propiedad «ante cualquier condición bloqueante no se produce ninguna petición ni mutación».
 // v0.4.0 (F05-01 S6-WIRE+UI (este mandato)): el estado categorial es una decisión bloqueante más (S6-WIRE, F09 §12.97.1). El cliente simulado sirve el árbol de categorías; `rellenar()` elige por defecto «Sin categoría» en el selector (decisión explícita); `faltan` nombra la categoría y la intención sellada lleva {estado:'SIN_CATEGORIA'}. Las pruebas de REG-CAT viven en regcat.test.tsx.
-// Versión: 0.4.0
+// v0.5.0 (F05-02 B2): el cliente simulado sirve la propuesta del resolver con la única cuenta (DEFAULT_GENERAL); el fallback del cliente se retira (AJ-B1-09). Los casos VS-01 no cambian; los de preferencias viven en preferencias_registro.test.tsx.
+// Versión: 0.5.0
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
@@ -20,7 +21,7 @@ import type { CategoriaNodo } from '../src/domain/categoria';
 import type { PayloadGastoPagado } from '../src/domain/intencion';
 import { ProveedorTema } from '../src/theme/tema';
 
-import { clienteCategoriasStub } from './fixtures_categorias';
+import { clienteCategoriasStub, propuestaUnica } from './fixtures_categorias';
 
 const CUENTA = 'c0000000-0000-4000-8000-000000000001';
 const AHORA = () => new Date(2026, 8, 24, 10, 0, 0);
@@ -62,6 +63,7 @@ function crearFake(
       return colaGastos.length > 1 ? colaGastos.shift()! : colaGastos[0];
     }),
     ...clienteCategoriasStub(opciones.categorias ?? []),
+    propuestaPreferencias: propuestaUnica(CUENTA), // el resolver propone la única cuenta (DEFAULT_GENERAL)
   };
   return { cliente, enviados, fechasConsultadas, lecturas: () => lecturasHome };
 }

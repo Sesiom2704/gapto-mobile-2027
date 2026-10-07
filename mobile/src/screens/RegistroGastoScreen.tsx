@@ -6,7 +6,8 @@
 // v0.2.0 (F05-D003 REG-01): fecha común gasto/pago editable (Hoy · Ayer · Otra, ≤ hoy) con propuesta recargada por fecha; financiación visible y sellada: «Financiado por ti · cuenta 100 % tuya» (aceptación implícita, con vía «No es así») o «Financiación no determinada»; un rechazo por propuesta obsoleta recarga la propuesta.
 // v0.3.0 (F05 — VS-01 · Alineación visual, A2 — aplicación prospectiva de REG-SPEC-01 SPEC-08, no corrección retrospectiva de VS-01): «Registrar gasto» permanece desactivado mientras falte una decisión bloqueante de REG-01 (importe válido, concepto, presupuestable, cuenta de pago —incluido «Cargando…»— o fecha válida ≤ hoy) y la pantalla indica, de forma visible y accesible, qué falta sin necesidad de pulsar. Los errores de formato de importe y fecha se muestran al escribir. La atribución sin respuesta no bloquea. Payload, API y validación del servidor sin cambios.
 // v0.4.0 (F05-01 S6-WIRE+UI (este mandato); F09 §12.97.1–12.97.3, lámina REG-CAT v1.0 R01–R10): campo «Categoría» inmediatamente después de «Concepto» con tres estados visibles (Pendiente «Elige categoría» · Categoría con icono, nombre y ruta · «Sin categoría»), sin preselección; mientras esté Pendiente «Registrar gasto» sigue desactivado y `faltan` lo nombra (misma `validar` del sellado). El árbol se carga al abrir el formulario y el selector jerárquico filtra con `visibleEnRegistro`; un error de carga nunca selecciona «Sin categoría» (AJ-09). Sección «Datos de <categoría>» con las magnitudes habilitadas: obligatorias sin valor por defecto y con unidad, opcionales «(opcional)», teclado decimal, coma o punto. Al cambiar de categoría se conservan las magnitudes comunes y se confirma antes de descartar valores informados (también al elegir «Sin categoría»). `presupuestable_default` NO rellena «¿Cuenta para el presupuesto?». Rechazo definitivo de categoría o magnitudes tras confirmar: la intención sellada no se reenvía; se conservan las demás decisiones, se recarga el árbol, la categoría queda marcada como no válida con texto y se pide otra; la nueva intención tendrá UUID nuevo.
-// Versión: 0.4.0
+// v0.5.0 (F05-02 B2; F05-D026 §41.3/§41.4, E1/E2/E3; F05-D027 §42.7; lámina SET-PREF / REG-PREF v0.1 R01–R07): propuesta de preferencias por campo. Tras cargar las cuentas, y en cada cambio de categoría o de fecha, se pide GET /v1/preferencias/propuesta (categoría o «Sin categoría»; con categoría pendiente, el contexto «Sin categoría») y se aplica SOLO a los campos no tocados, con su origen visible («Propuesta: tu preferencia para <categoría>.» / «… general.» / «Propuesta: es tu única cuenta disponible.»); un campo tocado muestra «Elegida por ti.» y no se recalcula (D-PREF-03). Se ELIMINA el fallback de cuenta única del cliente (AJ-B1-09): la única fuente de la propuesta de cuenta es el resolver, y nunca se preselecciona una cuenta fuera de la lista (AJ-B1-11). `presupuestable` se preselecciona solo con propuesta (E1). El sellado no cambia: el reintento no vuelve a pedir la propuesta y no hay sondeo. Pantalla de éxito: «Guardar como preferencia» (GuardarPreferencia) solo con categoría y si hay algo que recordar (D-PREF-05/06).
+// Versión: 0.5.0
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -16,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ClienteApi, CuentaPago } from '../api/cliente';
 import { BotonPrimario, BotonTexto, Chip, EstadoDato, Segmentado, Velo } from '../components/Basicos';
+import { GuardarPreferencia } from '../components/GuardarPreferencia';
 import { BotonSecundario, CargaArbol, IconoCategoriaVista, SelectorCategorias } from '../components/SelectorCategorias';
 import {
   CategoriaNodo,
@@ -31,6 +33,18 @@ import { ayer, ddmmaaaaAIso, fechaCortaIso, isoADdmmaaaa, isoLocal } from '../do
 import { formatearEur, parsearImporte } from '../domain/importe';
 import { Borrador, borradorInicial, Errores, esFechaIso, SeleccionCategoria, validar } from '../domain/intencion';
 import { conservarMagnitudes, descartadas } from '../domain/magnitud';
+import type { IndicePreferencias, PropuestaVista } from '../domain/preferencias';
+import {
+  aplicarPropuesta,
+  datosRecordables,
+  faltanPreferencias,
+  indexar,
+  propuestaAplicable,
+  SIN_PROPUESTA,
+  TEXTO_ELEGIDA,
+  textoOrigen,
+  valoresPropuestos,
+} from '../domain/preferencias';
 import { useEnvioGasto } from '../state/useEnvioGasto';
 import { useTema } from '../theme/tema';
 import { espacio, importe, radio, TACTIL_MIN, tipo } from '../theme/tokens';
@@ -85,10 +99,44 @@ export function RegistroGastoScreen(p: {
     void cargarArbol();
   }, [cargarArbol]);
 
+  // F05-02: preferencias conocidas (para explicar el origen), última propuesta vista
+  // (para «Guardar como preferencia») y contexto vigente de la propuesta.
+  const prefs = useRef<IndicePreferencias | null>(null);
+  const vista = useRef<PropuestaVista | null>(null);
+  const peticionPropuesta = useRef(0);
+  const categoriaActual = useRef<string | null>(null);
+  categoriaActual.current = b.categoria.estado === 'CATEGORIA' ? b.categoria.id : null;
+  // Tras sellar (enviando, indeterminado o confirmado) ninguna propuesta toca el borrador.
+  const editable = useRef(true);
+  editable.current = estado.fase === 'EDITANDO' || estado.fase === 'RECHAZADO';
+
+  // Propuesta por campo del resolver: tras cargar las cuentas y en cada cambio de categoría
+  // o de fecha. Nunca por sondeo ni en un reintento (la intención sellada no se recalcula).
+  const pedirPropuesta = async (fecha: string, categoriaId: string | null, lista: CuentaPago[]) => {
+    const n = ++peticionPropuesta.current;
+    const caducada = () => n !== peticionPropuesta.current || !editable.current;
+    const r = await p.cliente.propuestaPreferencias(fecha, categoriaId);
+    if (caducada()) return;
+    let ap = SIN_PROPUESTA;
+    if (r.tipo === 'OK') {
+      vista.current = { fecha, categoriaId, valores: valoresPropuestos(r.datos) };
+      if (faltanPreferencias(r.datos, prefs.current)) {
+        const l = await p.cliente.listarPreferencias();
+        if (caducada()) return;
+        if (l.tipo === 'OK') prefs.current = indexar(l.datos.preferencias);
+      }
+      ap = propuestaAplicable(r.datos, prefs.current, lista);
+    } else {
+      vista.current = null; // sin propuesta (incluida una categoría no elegible): nada que aplicar
+    }
+    setB((x) => aplicarPropuesta(x, ap, lista));
+  };
+
   // Cuentas y propuesta de financiación SIEMPRE para la fecha elegida (§16.4):
   // la propuesta se evalúa en la fecha del pago.
   const cargarCuentas = async (fecha: string) => {
     const n = ++peticion.current;
+    ++peticionPropuesta.current; // una propuesta en vuelo de otra fecha ya no se aplica
     setCuentas({ fase: 'CARGANDO' });
     setB((x) => ({ ...x, propuesta: null }));
     const r = await p.cliente.cuentasPago(fecha);
@@ -98,13 +146,12 @@ export function RegistroGastoScreen(p: {
     setCuentas({ fase: 'OK', lista });
     setB((x) => {
       const sel = lista.find((c2) => c2.cuenta_id === x.cuentaId);
-      if (sel) return { ...x, propuesta: sel.propuesta_financiacion };
-      // Única cuenta: se preselecciona como valor INFERIDO y visible (no oculto).
-      if (lista.length === 1) {
-        return { ...x, cuentaId: lista[0].cuenta_id, cuentaOrigen: 'INFERIDO', propuesta: lista[0].propuesta_financiacion, propuestaRechazada: false };
-      }
-      return { ...x, cuentaId: null, cuentaOrigen: 'PENDIENTE', propuesta: null, propuestaRechazada: false };
+      // La cuenta elegida por el usuario se conserva si sigue en la lista (lo explícito gana).
+      if (sel && x.cuentaOrigen === 'USUARIO') return { ...x, propuesta: sel.propuesta_financiacion };
+      // Sin fallback del cliente (AJ-B1-09): la propuesta de cuenta solo la da el resolver.
+      return { ...x, cuentaId: null, cuentaOrigen: 'PENDIENTE', cuentaPropuesta: null, propuesta: null, propuestaRechazada: false };
     });
+    void pedirPropuesta(fecha, categoriaActual.current, lista);
   };
   useEffect(() => {
     if (esFechaIso(b.fechaHecho) && b.fechaHecho <= hoyIso) void cargarCuentas(b.fechaHecho);
@@ -123,11 +170,12 @@ export function RegistroGastoScreen(p: {
   }, [estado]);
 
   const bloqueado = estado.fase === 'ENVIANDO' || estado.fase === 'INDETERMINADO' || estado.fase === 'CONFIRMADO';
-  // Defaults inferidos (fecha, cuenta única) no cuentan como modificación (F09 BLOQUE A).
+  // Defaults inferidos (fecha, propuestas de cuenta y de presupuesto) no cuentan como modificación (F09 BLOQUE A; E2).
   const modificado =
-    b.importeTexto.trim() !== '' || b.concepto.trim() !== '' || b.presupuestable !== null || b.soloMio || b.cuentaOrigen === 'USUARIO' || b.fechaOrigen === 'USUARIO' || b.propuestaRechazada ||
+    b.importeTexto.trim() !== '' || b.concepto.trim() !== '' || b.presupuestableOrigen === 'USUARIO' || b.soloMio || b.cuentaOrigen === 'USUARIO' || b.fechaOrigen === 'USUARIO' || b.propuestaRechazada ||
     b.categoria.estado !== 'PENDIENTE' || Object.values(b.magnitudesTexto).some((v) => v.trim() !== '');
   const cuentaSel = cuentas.fase === 'OK' ? cuentas.lista.find((x) => x.cuenta_id === b.cuentaId) : undefined;
+  const nombreCategoria = b.categoria.estado === 'CATEGORIA' ? b.categoria.nombre : null;
 
   // SPEC-08: decisiones bloqueantes de REG-01 que faltan, calculadas en cada render
   // con la MISMA validación que protege el sellado (sin duplicar reglas).
@@ -169,6 +217,9 @@ export function RegistroGastoScreen(p: {
     setCambioPendiente(null);
     setSelectorAbierto(false);
     cambiar({ categoria: destino, magnitudesTexto: conservarMagnitudes(b.magnitudesTexto, nuevas) });
+    // Cambio de categoría: se vuelve a resolver sin pisar los campos tocados (R03).
+    categoriaActual.current = destino.estado === 'CATEGORIA' ? destino.id : null;
+    if (!bloqueado && cuentas.fase === 'OK') void pedirPropuesta(b.fechaHecho, categoriaActual.current, cuentas.lista);
   };
 
   /** Pide confirmación si el cambio descartaría valores informados (C07; lámina R07). */
@@ -194,6 +245,7 @@ export function RegistroGastoScreen(p: {
   };
 
   const onRegistrar = async () => {
+    editable.current = false; // desde el sellado, ninguna propuesta en vuelo toca el borrador
     const e = await enviar(b, hoyIso);
     setErrores(e);
   };
@@ -206,6 +258,8 @@ export function RegistroGastoScreen(p: {
 
   if (estado.fase === 'CONFIRMADO') {
     const r = estado.resultado;
+    // «Guardar como preferencia» (R05): solo con categoría y si algo difiere de lo propuesto.
+    const recordar = datosRecordables(estado.sellada.payload, vista.current);
     return (
       <View testID="registro-exito" style={[s.pantalla, { backgroundColor: c.background, paddingTop: inset.top + espacio.xl, paddingBottom: inset.bottom + espacio.l }]}>
         <View style={[s.exito, { backgroundColor: c.surfacePrimary }]} accessibilityLiveRegion="polite">
@@ -220,6 +274,18 @@ export function RegistroGastoScreen(p: {
             {r.financiacion === 'PROPUESTA_ACEPTADA' ? 'Financiado por ti.' : 'Financiación no determinada.'}
           </Text>
         </View>
+        {recordar ? (
+          <GuardarPreferencia
+            cliente={p.cliente}
+            nuevoId={p.nuevoId}
+            categoriaId={recordar.categoriaId}
+            nombre={b.categoria.estado === 'CATEGORIA' ? b.categoria.nombre : textoCategoria(b.categoria)}
+            finales={recordar.finales}
+            casillas={recordar.casillas}
+            cuentas={cuentas.fase === 'OK' ? cuentas.lista : []}
+          />
+        ) : null}
+        <View style={{ flex: 1 }} />
         <BotonPrimario testID="volver-inicio" titulo="Volver a Inicio" onPress={() => p.onCerrar(true)} />
       </View>
     );
@@ -359,8 +425,13 @@ export function RegistroGastoScreen(p: {
             etiquetaGrupo="¿Cuenta para el presupuesto?"
             opciones={[{ valor: true, etiqueta: 'Sí' }, { valor: false, etiqueta: 'No' }]}
             valor={b.presupuestable}
-            onCambiar={(v) => cambiar({ presupuestable: v })}
+            onCambiar={(v) => cambiar({ presupuestable: v, presupuestableOrigen: 'USUARIO', presupuestablePropuesta: null })}
           />
+          {b.presupuestable !== null && (b.presupuestableOrigen === 'USUARIO' || b.presupuestablePropuesta) ? (
+            <Text testID="origen-presupuestable" style={[tipo.footnote, { color: c.textSecondary }]}>
+              {b.presupuestableOrigen === 'USUARIO' ? TEXTO_ELEGIDA : textoOrigen(b.presupuestablePropuesta!, nombreCategoria)}
+            </Text>
+          ) : null}
         </Campo>
 
         <Campo etiqueta="¿De quién es este gasto?">
@@ -393,13 +464,15 @@ export function RegistroGastoScreen(p: {
                   testID={`cuenta-${x.cuenta_id}`}
                   etiqueta={x.nombre}
                   seleccionado={b.cuentaId === x.cuenta_id}
-                  onPress={() => cambiar({ cuentaId: x.cuenta_id, cuentaOrigen: 'USUARIO', propuesta: x.propuesta_financiacion, propuestaRechazada: false })}
+                  onPress={() => cambiar({ cuentaId: x.cuenta_id, cuentaOrigen: 'USUARIO', cuentaPropuesta: null, propuesta: x.propuesta_financiacion, propuestaRechazada: false })}
                 />
               ))}
             </View>
           ) : null}
-          {cuentaSel && b.cuentaOrigen === 'INFERIDO' ? (
-            <Text testID="origen-cuenta" style={[tipo.footnote, { color: c.textSecondary }]}>Propuesta: es tu única cuenta disponible.</Text>
+          {cuentaSel && (b.cuentaOrigen === 'USUARIO' || (b.cuentaOrigen === 'INFERIDO' && b.cuentaPropuesta)) ? (
+            <Text testID="origen-cuenta" style={[tipo.footnote, { color: c.textSecondary }]}>
+              {b.cuentaOrigen === 'USUARIO' ? TEXTO_ELEGIDA : textoOrigen(b.cuentaPropuesta!, nombreCategoria)}
+            </Text>
           ) : null}
           {cuentaSel && b.propuesta ? (
             <View testID="financiacion" style={s.filaFinanciacion}>

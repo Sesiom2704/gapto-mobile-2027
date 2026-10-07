@@ -7,7 +7,8 @@
 // v0.3.0 (F05-01 S6-WIRE+UI (este mandato)): lectura del árbol y del uso de una categoría y comandos de Ajustes › Categorías (alta, icono, renombrar, mover, desactivar, reactivar, ámbito y reordenar), todos con la clasificación OK / RECHAZADO(codigo) / INDETERMINADO vigente. La reordenación usa SOLO la ruta atómica /v1/categorias/reordenar (F05 §26.3): el cliente no invoca el comando por nodo. El resultado del registro informa el estado categorial.
 // v0.4.0 (F05-01 S6-WIRE+UI (este mandato), commit 2): un RECHAZADO conserva el `detalle` del servidor cuando lo trae (CAMBIO_AMBITO_REQUIERE_CONFIRMACION devuelve el uso vigente `efectos_activos`, que la UI vuelve a mostrar y confirmar).
 // v0.5.0 (F05-01 S7-MAG UI; F05-D020): catálogo GET /v1/magnitudes y los comandos de magnitudes (asociar EXISTENTE/NUEVA, obligatoriedad, retirar, reordenar el conjunto COMPLETO de asociaciones por la ruta atómica de la categoría, renombrar, deshabilitar con confirmación de impacto y rehabilitar), con la clasificación OK / RECHAZADO(codigo, detalle) / INDETERMINADO vigente. `detalle` tipado para MAGNITUD_NOMBRE_DUPLICADO y MAGNITUD_DESHABILITAR_REQUIERE_CONFIRMACION.
-// Versión: 0.5.0
+// v0.6.0 (F05-02 B2; F05-D026 §41.3, F05-D027 §42.7): preferencias de registro. Lectura de la propuesta por campo (GET /v1/preferencias/propuesta, por fecha y categoría o «Sin categoría») y de la lista (GET /v1/preferencias); alta y edición (POST, clasificación 'CAMBIO'). Editar envía SIEMPRE el estado completo (E05): el tipo no admite un parche parcial. Sin imports nuevos.
+// Versión: 0.6.0
 // ============================================================
 
 import type { Ambito, CategoriaNodo } from '../domain/categoria';
@@ -147,6 +148,42 @@ export interface GastoMes {
   contrato: string;
 }
 
+// ------------------------------------------------------------------ F05-02 B2 (preferencias de registro)
+export interface OrigenPropuesta {
+  capa: 'PREFERENCIA' | 'DEFAULT_GENERAL';
+  preferencia_id: string | null;
+}
+
+/** Propuesta del resolver por campo; null = sin propuesta (nunca se inventa). */
+export interface PropuestaRegistro {
+  cuenta: { valor: string; origen: OrigenPropuesta } | null;
+  presupuestable: { valor: boolean; origen: OrigenPropuesta } | null;
+}
+
+/** Contenido COMPLETO de una preferencia (alta y edición: E05, sin parches). */
+export interface ContenidoPreferencia {
+  tipo_hecho_id: string | null;
+  categoria_id: string | null;
+  tercero_id: string | null;
+  entidad_id: string | null;
+  cuenta_default_id: string | null;
+  presupuestable_default: boolean | null;
+  prioridad: number;
+}
+
+export interface Preferencia extends ContenidoPreferencia {
+  id: string;
+  enabled: boolean;
+  row_version: number;
+  cuenta_disponible_hoy?: boolean | null;
+}
+
+export interface ResultadoComandoPreferencia {
+  preferencia: Preferencia;
+  idempotente: boolean;
+  modificadas: string[];
+}
+
 export type Respuesta<T> =
   | { tipo: 'OK'; datos: T }
   | { tipo: 'RECHAZADO'; codigo: string; mensaje: string; detalle?: Record<string, unknown> }
@@ -201,10 +238,15 @@ export interface ClienteApi {
     c: { row_version: number; confirmacion_impacto: string[] | null },
   ): Promise<Respuesta<ResultadoComandoMagnitud>>;
   rehabilitarMagnitud(id: string, c: { row_version: number }): Promise<Respuesta<ResultadoComandoMagnitud>>;
+  propuestaPreferencias(fecha: string, categoriaId: string | null): Promise<Respuesta<PropuestaRegistro>>;
+  listarPreferencias(): Promise<Respuesta<{ preferencias: Preferencia[] }>>;
+  altaPreferencia(c: { id: string } & ContenidoPreferencia): Promise<Respuesta<ResultadoComandoPreferencia>>;
+  editarPreferencia(id: string, c: { row_version: number } & ContenidoPreferencia): Promise<Respuesta<ResultadoComandoPreferencia>>;
 }
 
 const CAT = '/v1/categorias';
 const MAG = '/v1/magnitudes';
+const PREF = '/v1/preferencias';
 const asoc = (cat: string, a?: string) => `${CAT}/${encodeURIComponent(cat)}/magnitudes${a ? `/${encodeURIComponent(a)}` : ''}`;
 const post = (cuerpo: unknown): RequestInit => ({ method: 'POST', body: JSON.stringify(cuerpo) });
 
@@ -262,5 +304,14 @@ export function crearCliente(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): C
     renombrarMagnitud: (id, c) => llamar(`${MAG}/${encodeURIComponent(id)}/renombrar`, post(c), 'CAMBIO'),
     deshabilitarMagnitud: (id, c) => llamar(`${MAG}/${encodeURIComponent(id)}/deshabilitar`, post(c), 'CAMBIO'),
     rehabilitarMagnitud: (id, c) => llamar(`${MAG}/${encodeURIComponent(id)}/rehabilitar`, post(c), 'CAMBIO'),
+    propuestaPreferencias: (fecha, categoriaId) =>
+      llamar(
+        `${PREF}/propuesta?fecha=${encodeURIComponent(fecha)}${categoriaId === null ? '' : `&categoria_id=${encodeURIComponent(categoriaId)}`}`,
+        { method: 'GET' },
+        false,
+      ),
+    listarPreferencias: () => llamar(PREF, { method: 'GET' }, false),
+    altaPreferencia: (c) => llamar(PREF, post(c), 'CAMBIO'),
+    editarPreferencia: (id, c) => llamar(`${PREF}/${encodeURIComponent(id)}/editar`, post(c), 'CAMBIO'),
   };
 }

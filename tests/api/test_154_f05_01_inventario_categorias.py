@@ -173,7 +173,19 @@
 #   admite PREFERENCIA). REGISTRO: entradas del paquete, del DTO y de las
 #   rutas nuevas. EXCLUIDOS: el arnes mutantes_f05_02.py. Ninguna regla
 #   (I1..I13) ni entrada previa cambia; test_170 verifica este diff.
-# Version: 0.9.0
+#
+#   v0.10.0 (F05-02 B2, F05-D027 §42.7; mandato B2 §1, «altas aditivas en
+#   inventarios»): SOLO altas, ninguna regla ni entrada previa cambia.
+#   I7  registra mobile/src/domain/preferencias.ts (lee categoria_id de la
+#       intencion sellada y de las preferencias para la tarjeta «Guardar como
+#       preferencia» y el ambito «Una categoria»; nunca escribe el catalogo).
+#   I13a registra los imports nuevos de RegistroGastoScreen.tsx: el componente
+#       GuardarPreferencia y la logica pura de domain/preferencias.ts. Ninguno
+#       resuelve ni propone CATEGORIA (la propuesta es de cuenta y
+#       presupuestable; C01 sigue siendo eleccion del usuario: I13b intacta).
+#   La propuesta con categoria no elegible usa la guarda C-a ya registrada
+#   (preferencias/lecturas.py::propuesta, clase PREFERENCIA, sin entrada nueva).
+# Version: 0.10.0
 # ============================================================
 
 from __future__ import annotations
@@ -895,6 +907,7 @@ MENCIONES_CLIENTE: dict[str, str] = {
     "mobile/src/domain/intencion.ts": "sella {estado:'CATEGORIA', categoria_id, magnitudes} (A_FRONTERA via VS-01; C-a en servidor)",
     "mobile/src/api/cliente.ts": "tipo de lectura de GET /v1/categorias/{id}/uso y detalle de impacto de deshabilitar magnitud (R)",
     "mobile/src/domain/magnitud.ts": "tipo del catalogo GET /v1/magnitudes (categorias de cada magnitud) y su vista neutra (R)",
+    "mobile/src/domain/preferencias.ts": "lee la categoria sellada y la clave de contexto de las preferencias (F05-02 B2, R)",
 }
 
 
@@ -997,6 +1010,14 @@ IMPORTS_CAMINO: dict[str, set[tuple[str, str]]] = {
         ("../domain/intencion", "SeleccionCategoria"), ("../domain/intencion", "borradorInicial"),
         ("../domain/intencion", "esFechaIso"), ("../domain/intencion", "validar"),
         ("../domain/magnitud", "conservarMagnitudes"), ("../domain/magnitud", "descartadas"),
+        # F05-02 B2 (alta aditiva): preferencias de registro (cuenta y presupuestable; nunca categoria).
+        ("../components/GuardarPreferencia", "GuardarPreferencia"),
+        ("../domain/preferencias", "type IndicePreferencias"), ("../domain/preferencias", "type PropuestaVista"),
+        ("../domain/preferencias", "aplicarPropuesta"), ("../domain/preferencias", "datosRecordables"),
+        ("../domain/preferencias", "faltanPreferencias"), ("../domain/preferencias", "indexar"),
+        ("../domain/preferencias", "propuestaAplicable"), ("../domain/preferencias", "SIN_PROPUESTA"),
+        ("../domain/preferencias", "TEXTO_ELEGIDA"), ("../domain/preferencias", "textoOrigen"),
+        ("../domain/preferencias", "valoresPropuestos"),
         ("../state/useEnvioGasto", "useEnvioGasto"), ("../theme/tema", "useTema"),
         ("../theme/tokens", "TACTIL_MIN"), ("../theme/tokens", "espacio"), ("../theme/tokens", "importe"),
         ("../theme/tokens", "radio"), ("../theme/tokens", "tipo"),

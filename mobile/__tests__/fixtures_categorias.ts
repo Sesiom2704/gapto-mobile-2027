@@ -5,9 +5,10 @@
 // Descripción: Fixtures sintéticos del árbol de categorías para los tests del cliente (no es un fichero de test: no casa con testMatch). Incluye el estado «padre desactivado con hijo activo», inalcanzable por la API (AJ-S4-03) y cubierto aquí por fixture (F05 §26.4).
 // Versión: 0.1.0 (F05-01 S6-WIRE+UI (este mandato))
 // Versión: 0.2.0 (F05-01 S7-MAG UI): `mag()` rellena `asociacion_id` (por defecto `a-<magnitud_id>`); el stub incluye el catálogo (vacío por defecto) y los comandos de magnitudes (no esperados por defecto).
+// Versión: 0.3.0 (F05-02 B2): el stub incluye las preferencias de registro: propuesta SIN propuesta y lista vacía por defecto; alta y edición no esperadas. `propuestaUnica(cuenta)` emula al resolver con una única cuenta elegible (DEFAULT_GENERAL): sustituye al antiguo fallback del cliente (AJ-B1-09).
 // ============================================================
 
-import type { ClienteApi, Respuesta } from '../src/api/cliente';
+import type { ClienteApi, PropuestaRegistro, Respuesta } from '../src/api/cliente';
 import type { CategoriaNodo, MagnitudCategoria } from '../src/domain/categoria';
 
 export function mag(p: Partial<MagnitudCategoria> & { magnitud_id: string }): MagnitudCategoria {
@@ -59,5 +60,16 @@ export function clienteCategoriasStub(
     renombrarMagnitud: noEsperado('renombrarMagnitud'),
     deshabilitarMagnitud: noEsperado('deshabilitarMagnitud'),
     rehabilitarMagnitud: noEsperado('rehabilitarMagnitud'),
+    propuestaPreferencias: jest.fn(async () => ({ tipo: 'OK', datos: { cuenta: null, presupuestable: null } }) as Respuesta<PropuestaRegistro>),
+    listarPreferencias: jest.fn(async () => ({ tipo: 'OK', datos: { preferencias: [] } }) as Respuesta<{ preferencias: never[] }>),
+    altaPreferencia: noEsperado('altaPreferencia'),
+    editarPreferencia: noEsperado('editarPreferencia'),
   };
+}
+
+/** Resolver con una única cuenta elegible: propuesta DEFAULT_GENERAL de esa cuenta, sin presupuestable (E1). */
+export function propuestaUnica(cuenta: string) {
+  return jest.fn(
+    async () => ({ tipo: 'OK', datos: { cuenta: { valor: cuenta, origen: { capa: 'DEFAULT_GENERAL', preferencia_id: null } }, presupuestable: null } }) as Respuesta<PropuestaRegistro>,
+  );
 }

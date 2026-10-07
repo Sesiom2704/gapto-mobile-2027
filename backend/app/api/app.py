@@ -69,7 +69,12 @@
 #     POST /v1/preferencias/{id}/editar | desactivar | reactivar
 #     GET  /v1/preferencias/propuesta?categoria_id=&fecha=   resolver (lectura)
 #   No se conectan a REG-01, a la ejecucion del gasto ni al cliente (B2).
-# Version: 0.10.0
+#
+#   v0.11.0 (F05-02 B2; F05 §42.7): GET /v1/preferencias/propuesta con una
+#   categoria_id no elegible para GASTO responde 409 CATEGORIA_NO_ELEGIBLE
+#   (mismo codigo y cuerpo que el rechazo de la intencion) y nunca una
+#   propuesta. La ejecucion del gasto y su traductor no cambian.
+# Version: 0.11.0
 # ============================================================
 
 from __future__ import annotations
@@ -445,11 +450,16 @@ def create_app(
         return {"preferencias": unidad.ejecutar(contexto(), lect_pref.listar, nombre="F05-02 listar")}
 
     @app.get("/v1/preferencias/propuesta", response_model=PropuestaRegistro, dependencies=[Depends(autorizar)])
-    def propuesta_preferencias(fecha: dt.date = Query(...), categoria_id: uuid.UUID | None = Query(None)) -> dict:
+    def propuesta_preferencias(fecha: dt.date = Query(...), categoria_id: uuid.UUID | None = Query(None)):
         # Sin categoria_id = «Sin categoria»: solo casan preferencias de categoria NULL.
-        return unidad.ejecutar(
+        salida = unidad.ejecutar(
             contexto(), lambda s: lect_pref.propuesta(s, categoria_id, fecha), nombre="F05-02 propuesta"
         )
+        if isinstance(salida, str):
+            # Categoria no elegible para GASTO (guarda C-a): codigo y status de la capa F05.
+            status, cuerpo = eh.rechazo_integracion(salida)
+            return JSONResponse(cuerpo, status_code=status)
+        return salida
 
     @app.post("/v1/preferencias", **_RP)
     def alta_preferencia(c: AltaPreferencia):
