@@ -16,10 +16,17 @@
 #     - un veredicto unico por mutante: MUERTO | VIVO | NO_CLASIFICABLE.
 #   Censo: PF01..PF13 (guardas exigidas por el mandato B1 §3) y PF14..PF28
 #   (guardas adicionales del bloque). Sin equivalentes documentados.
+#
+#   v0.2.0 (F05-02 B1-C, AJ-B1-05/06): test_170 deja de comprobar el diff
+#   frente a a44bb34 (pasa a verificar_cierre_f05_02_b1.py). Ningun PF moria
+#   solo por esas comprobaciones: PF12 y PF28 siguen con sus garantias
+#   permanentes de test_170. Nuevo PF29 (el paquete escribe una tabla de
+#   terceros), discriminante: la garantia permanente acotada al paquete.
+#   Censo vigente: PF01..PF29.
 #   Requiere GAPTO_TEST_DATABASE_URL (base local desechable con la cadena
 #   aplicada). No es evidencia de proveedor. No ejecutar en paralelo con otro
 #   arnes ni con la suite sobre el mismo arbol (INC-P7-01).
-# Version: 0.1.0
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -175,6 +182,11 @@ MUTANTES = [
      [(REPO, '    "tipo_hecho_id", "categoria_id", "cuenta_default_id", "presupuestable_default", "enabled",\n',
        '    "tipo_hecho_id", "categoria_id", "cuenta_default_id", "presupuestable_default", "enabled", "prioridad",\n')],
      [f"{T170}::test_el_writer_no_escribe_dimensiones_diferidas_ni_prioridad"]),
+    ("PF29", "el paquete de preferencias escribe una tabla de terceros",
+     [(SERV, '    return sesion.uno("SELECT current_date")[0]\n',
+       '    sesion.uno("UPDATE gapto.terceros SET nombre = nombre WHERE false")\n'
+       '    return sesion.uno("SELECT current_date")[0]\n')],
+     [f"{T170}::test_el_paquete_de_preferencias_no_escribe_terceros_ni_otras_tablas"]),
 ]
 
 

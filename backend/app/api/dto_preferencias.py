@@ -15,7 +15,10 @@
 #     null (comodin o «no propone»).
 #   - `PropuestaRegistro`: por campo, {valor, origen: {capa,
 #     preferencia_id}} o null («sin propuesta»).
-# Version: 0.1.0
+#
+#   v0.1.1 (F05-02 B1-C, AJ-B1-03): solo documentacion de `EditarPreferencia`
+#   (E05: reemplazo completo; el cliente envia siempre el estado completo).
+# Version: 0.1.1
 # ============================================================
 
 from __future__ import annotations
@@ -49,6 +52,11 @@ class _ConVersion(_Estricto):
 
 
 class EditarPreferencia(_Contenido):
+    """Editar = REEMPLAZO COMPLETO del contenido (E05). Un campo ausente vale
+    NULL (comodin en las claves de contexto; «no propone» en los valores
+    propuestos). El cliente envia SIEMPRE el
+    estado completo de la preferencia, nunca un parche parcial."""
+
     row_version: int = Field(ge=1)
 
 

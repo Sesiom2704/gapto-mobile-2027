@@ -38,7 +38,12 @@
 #   error. Elegible = regla de cuentas_pago (lecturas_vs01.cuentas_elegibles)
 #   + misma moneda del registro (EUR; REG-01 campo 5, §41.7).
 #   Presupuestable (E1): valor de la ganadora; sin default general.
-# Version: 0.1.0
+#
+#   v0.1.1 (F05-02 B1-C, AJ-B1-02): solo documentacion. La cabeza
+#   contradictoria es una DEFENSA fail-closed ante configuracion invalida
+#   (que el writer impide), no una regla de precedencia (E01). Sin cambio
+#   de comportamiento.
+# Version: 0.1.1
 # ============================================================
 
 from __future__ import annotations
@@ -88,7 +93,12 @@ CONTRADICTORIA = "CONTRADICTORIA"
 def ganadora(candidatas: list[dict[str, Any]], columna: str) -> dict[str, Any] | str | None:
     """Preferencia que decide `columna`; None si ninguna la propone;
     CONTRADICTORIA si la cabeza (max especificidad, max prioridad) propone
-    valores distintos."""
+    valores distintos.
+
+    CONTRADICTORIA no es una regla de precedencia: es una DEFENSA fail-closed
+    ante una configuracion invalida que el writer impide (empate de
+    AJ-D026-03) y que solo puede existir por escritura fuera del writer. Ante
+    ella el campo queda sin propuesta y nunca se elige un valor (E01)."""
     propias = [p for p in candidatas if p[columna] is not None]
     if not propias:
         return None
@@ -121,6 +131,11 @@ def resolver(
     categoria_id: uuid.UUID | None,
     fecha: dt.date,
 ) -> dict[str, dict[str, Any] | None]:
+    """Propuesta por campo para el contexto del registro: {campo: {valor,
+    origen: {capa, preferencia_id}} | None}. Instantanea de lectura, sin locks.
+    Si la cabeza de un campo es contradictoria (defensa fail-closed, ver
+    `ganadora`), ese campo queda sin propuesta, tambien sin el fallback de
+    cuenta unica (E01)."""
     contexto = {"tipo_hecho_id": tipo_hecho_id, "categoria_id": categoria_id}
     candidatas = [
         p for p in repo.habilitadas(sesion) if not dimension_diferida(p) and coincide(p, contexto)

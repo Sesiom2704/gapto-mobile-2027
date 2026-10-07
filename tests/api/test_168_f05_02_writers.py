@@ -16,7 +16,11 @@
 #   - auditoria CREAR/ACTUALIZAR con motivo por operacion;
 #   - aislamiento por owner (RLS); lista con cuenta_disponible_hoy.
 #   Todo rechazo se comprueba SIN escritura (fila y auditoria intactas).
-# Version: 0.1.0
+#
+#   v0.2.0 (F05-02 B1-C, AJ-B1-04): el alta con un UUID de OTRO owner (E09)
+#   afirma de forma explicita el codigo, la fila ajena intacta (contenido y
+#   row_version), ninguna fila nueva y ninguna auditoria escrita.
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -87,12 +91,27 @@ def test_alta_idempotente_y_reutilizada(t):
     assert r.status_code == 409 and _codigo(r) == "IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION"
 
 
+def _auditorias_preferencias(owner) -> int:
+    return h.leer(owner, "SELECT count(*) FROM gapto.auditoria WHERE tabla='preferencias_registro'")[0][0]
+
+
 def test_alta_con_id_de_otro_owner_es_identidad_reutilizada(t):
+    """E09 / AJ-B1-04: el UUID ya existe en OTRO owner (oculto por RLS). Se
+    rechaza con IDENTIDAD_REUTILIZADA sin tocar nada: la fila ajena conserva
+    contenido y row_version, no nace ninguna fila y no se audita nada."""
     owner, _, cli, a, _ = t
     otro, otro_actor = h.crear_tenant()
-    ajena = ph.insertar_sql(otro, cuenta=ph.cuenta(otro, otro_actor))
+    ajena = ph.insertar_sql(otro, cuenta=ph.cuenta(otro, otro_actor), presupuestable=True)
+    fila_ajena = ph.fila(otro, ajena)
+    antes = {"owner": ph.n_preferencias(owner), "otro": ph.n_preferencias(otro),
+             "aud_owner": _auditorias_preferencias(owner), "aud_otro": _auditorias_preferencias(otro)}
     _, r = ph.alta(cli, ajena, cuenta_default_id=a)
     assert r.status_code == 409 and _codigo(r) == "IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION"
+    assert ph.fila(otro, ajena) == fila_ajena and fila_ajena["row_version"] == 1
+    assert ph.fila(owner, ajena) is None
+    assert {"owner": ph.n_preferencias(owner), "otro": ph.n_preferencias(otro),
+            "aud_owner": _auditorias_preferencias(owner), "aud_otro": _auditorias_preferencias(otro)} == antes
+    assert ph.auditorias(owner, ajena) == [] and ph.auditorias(otro, ajena) == []
 
 
 # ------------------------------------------------------------------ codigos de entrada
