@@ -22,7 +22,8 @@
 # Version: 0.3.0
 #   0.3.0 (F04-D055 B1 · A4): `test_4_..._indeterminada_...` afirma la
 #   lectura de una CERRADA (conocido 0) y `apertura_indeterminada` en lugar
-#   de `saldo.conocido is False`; el cierre sigue sin residual (1 efecto).
+#   de `saldo.conocido is False`; el cierre sigue sin residual (1 efecto) y,
+#   reabierta, la posicion vuelve a leerse INDETERMINADA (canonico intacto).
 # Version: 0.2.0
 #   0.2.0 (F04-D053 A1): test_cc4_historico[2025-01-01] pasa de 70 a 80: el
 #   delta anterior a fecha_inicio_seguimiento no se suma (cambio legitimo).
@@ -405,6 +406,14 @@ def test_4_condonacion_total_indeterminada_solo_por_declaracion_sin_residual(
     assert _contar(admin, contexto,
                    "SELECT count(*) FROM gapto.hecho_efectos WHERE hecho_id = %s",
                    (datos.delta.hecho_id,)) == 1
+    # El saldo CANONICO sigue indeterminado: al reabrir vuelve a leerse asi.
+    reabierta = servicio_posiciones.reabrir_posicion(
+        contexto, entidad_id=entidad_id,
+        entidad_row_version_esperada=resultado.entidad_row_version,
+        motivo="comprobar el saldo canonico",
+    )
+    assert reabierta.estado == "ACTIVA" and reabierta.saldo.conocido is False
+    assert reabierta.apertura_indeterminada is False
 
 
 def test_4_condonacion_obligacion_excede_saldo_conocido(

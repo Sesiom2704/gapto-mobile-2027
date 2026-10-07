@@ -62,6 +62,12 @@
 #   declaracion sin residual (A3). Dos saldos y nunca uno por otro (A4):
 #   `_calcular_saldo` es el CANONICO (exceso, A1; F04-D053 tiene su propio
 #   SQL) y `_saldo_de_lectura` solo alimenta `ResultadoPosicion`.
+#   Reapertura auditable (B1): `reabrir_posicion` es la unica transicion
+#   CERRADA -> ACTIVA; todo cierre se audita CERRAR y toda reapertura
+#   REABRIR, ambos bajo la raiz B8 (invariante de alternancia de R-Q2).
+# Version: 0.7.0
+#   0.7.0 (F04-D055 B1 · Parte B): `reabrir_posicion` (B1, B4/R-Q2) y
+#   `_cerrar` audita CERRAR en lugar de ACTUALIZAR (B2).
 # Version: 0.6.0
 #   0.6.0 (F04-D055 B1 · Parte A): A1 en `cerrar_posicion` (bajo la raiz,
 #   antes de `_cerrar`) y en `_aplicar_delta` con cierre (tras `_cerrar`,
@@ -648,6 +654,70 @@ class PosicionesService:
         return self._ejecutar(contexto, operacion, "cerrar_posicion")
 
     # ==================================================================
+    # REAPERTURA (F04-D055 B1)
+    # ==================================================================
+    def reabrir_posicion(
+        self,
+        contexto: ContextoOperacion,
+        *,
+        entidad_id: uuid.UUID,
+        entidad_row_version_esperada: int,
+        motivo: str,
+    ) -> ResultadoPosicion:
+        """Unica transicion prospectiva CERRADA -> ACTIVA.
+
+        Solo sobre una CERRADA, con motivo textual obligatorio, bajo la raiz
+        B8 (sin advisory: no escribe nada que D-080 valide en el COMMIT, como
+        `cerrar_posicion`) y con control optimista. Deja motivo y fecha de
+        cierre a NULL y audita REABRIR con el estado encontrado integro en
+        `datos_antes`. No toca deltas: tras reabrir rigen B2-B6 de F04-D053 y
+        el nuevo cierre cumple A1, A2 y R-Q1.
+
+        R-Q2 (B4). El cierre actual esta acreditado si C >= max(R, 1), con C y
+        R las filas CERRAR y REABRIR auditadas de la posicion (recuento bajo
+        la raiz, sin orden). Si no, la reapertura es de un estado LEGACY (RV3,
+        SQL directo o cierre anterior a D055 auditado ACTUALIZAR): solo cambia
+        el prefijo del motivo. No se fabrica fecha, cierre ni causa.
+        """
+        if not isinstance(motivo, str) or not motivo.strip():
+            raise ErrorMotor(
+                CodigoError.MOTIVO_AUSENTE,
+                "Reabrir una posicion exige un motivo textual.",
+            )
+
+        def operacion(sesion: SesionMotor) -> ResultadoPosicion:
+            owner = repo_hechos.exigir_contexto(sesion)
+            integridad_posicion.adquirir_raiz(sesion, owner, posiciones=[entidad_id])
+            posicion = self._exigir_posicion(sesion, entidad_id)
+            if posicion["estado"] != ESTADO_CERRADA:
+                raise ErrorMotor(
+                    CodigoError.OPERACION_NO_PERMITIDA_EN_ESTADO,
+                    "Solo se reabre una posicion CERRADA.",
+                )
+            self._tocar_entidad(sesion, entidad_id, entidad_row_version_esperada)
+            cerrar, reabrir = repo_pos.recuento_ciclo(sesion, entidad_id)
+            legacy = cerrar < max(reabrir, 1)
+            snapshot = repo_pos.reabrir_posicion(sesion, entidad_id)
+            if snapshot is None:  # pragma: no cover - imposible bajo la raiz
+                raise ErrorMotor(
+                    CodigoError.OPERACION_NO_PERMITIDA_EN_ESTADO,
+                    "Solo se reabre una posicion CERRADA.",
+                )
+            prefijo = "REABRIR LEGACY" if legacy else "REABRIR"
+            auditoria.registrar(
+                sesion,
+                tabla=repo_pos.TABLA_POSICIONES,
+                registro_id=entidad_id,
+                accion=auditoria.ACCION_REABRIR,
+                datos_antes_json=posicion["snapshot"],
+                datos_despues_json=snapshot,
+                motivo=f"{prefijo}: {motivo.strip()}",
+            )
+            return self._resultado_actual(sesion, entidad_id)
+
+        return self._ejecutar(contexto, operacion, "reabrir_posicion")
+
+    # ==================================================================
     # Lectura de saldo
     # ==================================================================
     def saldo(
@@ -1182,11 +1252,13 @@ class PosicionesService:
                 CodigoError.POSICION_CERRADA,
                 "La posicion ya estaba cerrada.",
             )
+        # F04-D055 B2: todo cierre de runtime (las dos vias pasan por aqui)
+        # se audita CERRAR. Es la mitad del invariante de alternancia de R-Q2.
         auditoria.registrar(
             sesion,
             tabla=repo_pos.TABLA_POSICIONES,
             registro_id=entidad_id,
-            accion=auditoria.ACCION_ACTUALIZAR,
+            accion=auditoria.ACCION_CERRAR,
             datos_antes_json=snapshot_previo,
             datos_despues_json=snapshot,
             motivo=f"cierre explicito: {cierre.motivo_cierre}",

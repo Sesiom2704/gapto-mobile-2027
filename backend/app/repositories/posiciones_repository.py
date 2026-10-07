@@ -24,6 +24,10 @@
 #   F04-D036 anade las lecturas de coherencia posicion <-> efecto. Viven
 #   aqui, y no en el servicio, porque son SQL: el servicio decide que hacer
 #   con el resultado, no como obtenerlo.
+# Version: 0.7.0
+#   0.7.0 (F04-D055 B1 · Parte B): `reabrir_posicion` (UPDATE CERRADA ->
+#   ACTIVA con motivo y fecha a NULL, unica via inversa de `cerrar_posicion`)
+#   y `recuento_ciclo` (C/R de CERRAR y REABRIR auditados, sin orden).
 # Version: 0.6.0
 #   0.6.0 (F04-D055 B1 · R-Q1): `reducciones_de_posicion` admite
 #   `en_ventana_a1` (FRONTERA_A1; sin frontera si no hay inicio de
@@ -280,6 +284,49 @@ def cerrar_posicion(
         cursor.execute(consulta, (motivo_cierre, fecha_cierre, entidad_id))
         fila = cursor.fetchone()
     return None if fila is None else fila[0]
+
+
+def reabrir_posicion(sesion: SesionMotor, entidad_id: uuid.UUID) -> str | None:
+    """F04-D055 B1. UNICA transicion CERRADA -> ACTIVA.
+
+    motivo_cierre y fecha_cierre a NULL (lo exige el CHECK
+    cierre_deshabilita). Solo desde CERRADA: None si la posicion no lo esta.
+    """
+    consulta = sql.SQL(
+        """
+        UPDATE gapto.derechos_obligaciones_financieras AS p
+           SET estado = 'ACTIVA',
+               motivo_cierre = NULL,
+               fecha_cierre = NULL
+         WHERE p.entidad_id = %s::uuid
+           AND p.estado = 'CERRADA'
+        RETURNING ({})::text
+        """
+    ).format(_snapshot("p", TIPOS_SQL_POSICION))
+    with sesion.conexion.cursor() as cursor:
+        cursor.execute(consulta, (entidad_id,))
+        fila = cursor.fetchone()
+    return None if fila is None else fila[0]
+
+
+def recuento_ciclo(sesion: SesionMotor, entidad_id: uuid.UUID) -> tuple[int, int]:
+    """F04-D055 R-Q2. (C, R): filas CERRAR y REABRIR auditadas de la posicion.
+
+    Un RECUENTO, sin orden: `auditoria.created_at` es el inicio de la
+    transaccion y el id es aleatorio, de modo que ninguno ordena los eventos
+    de forma fiable. ACTUALIZAR (cierres anteriores a D055) no cuenta.
+    """
+    fila = sesion.uno(
+        """
+        SELECT count(*) FILTER (WHERE a.accion = 'CERRAR'),
+               count(*) FILTER (WHERE a.accion = 'REABRIR')
+          FROM gapto.auditoria a
+         WHERE a.tabla = %s
+           AND a.registro_id = %s::uuid
+        """,
+        (TABLA_POSICIONES, entidad_id),
+    )
+    return (0, 0) if fila is None else (int(fila[0]), int(fila[1]))
 
 
 # ==================================================================

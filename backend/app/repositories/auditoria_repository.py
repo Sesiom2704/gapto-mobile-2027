@@ -13,6 +13,10 @@
 #   Los snapshots se pasan como TEXTO JSON con cast explicito a jsonb, tal y
 #   como salieron de PostgreSQL, para no alterar la representacion de numeric
 #   ni de fechas en un round-trip por Python.
+# Version: 0.2.0
+#   0.2.0 (F04-D055 B1 · B2): `ACCION_CERRAR` y `ACCION_REABRIR` (ya admitidas
+#   por ck_auditoria__accion de 0070). El cierre de una posicion generica se
+#   audita CERRAR de forma prospectiva; no se migran auditorias antiguas.
 # Version: 0.1.0
 # ============================================================
 
@@ -25,6 +29,8 @@ from app.core.unidad_trabajo import SesionMotor
 ACCION_CREAR = "CREAR"
 ACCION_ACTUALIZAR = "ACTUALIZAR"
 ACCION_ANULAR = "ANULAR"
+ACCION_CERRAR = "CERRAR"
+ACCION_REABRIR = "REABRIR"
 
 
 def registrar(

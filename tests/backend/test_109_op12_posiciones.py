@@ -13,7 +13,8 @@
 #   en runtime (A2). `test_cierre_explicito` cobra el total antes de cerrar y
 #   afirma ademas saldo 0; `test_posicion_cerrada_no_admite_deltas` condona
 #   el total y cierra CONDONADA por `cerrar_posicion`; version desfasada y
-#   cross-tenant usan LIQUIDADA. Mismas aserciones.
+#   cross-tenant usan LIQUIDADA. Mismas aserciones. B2: el cierre se audita
+#   CERRAR; `test_cierre_sin_motivo_valido` anade CANCELADA y OTRO (A2).
 # Version: 0.2.0
 #   0.2.0 (F04-D052 B2): toda reduccion declara causa explicita con su forma
 #   fisica. OP-12B es PAGO con movimiento en cuenta Gapto y OP-14 COBRO con
@@ -714,9 +715,18 @@ def test_cierre_explicito(
         (entidad_id,),
     )
     assert fila == ("CERRADA", "LIQUIDADA", dt.date(2026, 7, 1))
+    # F04-D055 B2: el cierre de runtime se audita CERRAR.
+    assert leer_fila(
+        admin,
+        contexto.owner_user_id,
+        "SELECT accion, motivo FROM gapto.auditoria "
+        "WHERE tabla = 'derechos_obligaciones_financieras' AND registro_id = %s "
+        "AND accion IN ('CERRAR', 'ACTUALIZAR')",
+        (entidad_id,),
+    ) == ("CERRAR", "cierre explicito: LIQUIDADA")
 
 
-@pytest.mark.parametrize("motivo", [None, "", "PORQUE_SI"])
+@pytest.mark.parametrize("motivo", [None, "", "PORQUE_SI", "CANCELADA", "OTRO"])
 def test_cierre_sin_motivo_valido(
     servicio_posiciones: PosicionesService, contexto, derecho, motivo
 ) -> None:
