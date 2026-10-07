@@ -28,6 +28,10 @@
 # Uso:
 #   python scripts/mutantes/f04_d052.py            # todos
 #   python scripts/mutantes/f04_d052.py D052-M3    # subconjunto
+# Version: 0.2.1
+#   0.2.1 (F04-D055 B1): D052-M16 sigue a la clasificacion de causas, que
+#   pasa a `PosicionesService._causas_leidas` (sangria de 20 a 16 espacios).
+#   Misma mutacion y mismo discriminante.
 # Version: 0.2.0
 #   0.2.0 (F04-D052 enmienda E1): suite test_144 + test_145 y mutantes
 #   D052-M20..M25 sobre las guardas I1-I6 de OP-04/OP-21.
@@ -202,8 +206,8 @@ MUTANTES = (
     Mutante(
         "D052-M16", "Lectura: GENERACION_DERECHO_OBLIGACION -> causa no determinable",
         POS,
-        "                    causa = CAUSA_NO_DETERMINABLE\n",
-        "                    causa = causa_reembolso.value\n",
+        "                causa = CAUSA_NO_DETERMINABLE\n",
+        "                causa = causa_reembolso.value\n",
         "test_cc4_historico_causa_no_determinable_sin_reclasificar",
     ),
     Mutante(

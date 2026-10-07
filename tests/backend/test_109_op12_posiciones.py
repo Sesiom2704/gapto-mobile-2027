@@ -8,6 +8,12 @@
 #   El nucleo de esta suite es INV-17: saldo CONOCIDO frente a INDETERMINADO.
 #   No son un numero y su ausencia, son dos estados distintos, y la diferencia
 #   se pierde en cuanto alguien trata el NULL como cero.
+# Version: 0.3.0
+#   0.3.0 (F04-D055 B1): cierre con saldo 0 (A1) y solo LIQUIDADA/CONDONADA
+#   en runtime (A2). `test_cierre_explicito` cobra el total antes de cerrar y
+#   afirma ademas saldo 0; `test_posicion_cerrada_no_admite_deltas` condona
+#   el total y cierra CONDONADA por `cerrar_posicion`; version desfasada y
+#   cross-tenant usan LIQUIDADA. Mismas aserciones.
 # Version: 0.2.0
 #   0.2.0 (F04-D052 B2): toda reduccion declara causa explicita con su forma
 #   fisica. OP-12B es PAGO con movimiento en cuenta Gapto y OP-14 COBRO con
@@ -676,15 +682,30 @@ def test_cierre_explicito(
     contexto: ContextoOperacion,
     admin: psycopg.Connection,
     derecho,
+    cuenta,
 ) -> None:
+    from app.core.modelos_posicion import DatosReembolso
+
     entidad_id, creada = derecho
-    resultado = servicio_posiciones.cerrar_posicion(
+    # F04-D055 A1: el residual se extingue antes con un hecho explicito (cobro
+    # total); el cierre explicito solo declara.
+    cobrada = servicio_posiciones.reembolsar(
         contexto,
         entidad_id=entidad_id,
         entidad_row_version_esperada=creada.entidad_row_version,
+        datos=DatosReembolso(
+            delta=delta("100.0000", causa=COBRO), tesoreria=tesoreria_nueva(cuenta)
+        ),
+    )
+    assert cobrada.estado == "ACTIVA" and cobrada.saldo.importe == D("0")
+    resultado = servicio_posiciones.cerrar_posicion(
+        contexto,
+        entidad_id=entidad_id,
+        entidad_row_version_esperada=cobrada.entidad_row_version,
         cierre=DatosCierre(motivo_cierre="LIQUIDADA", fecha_cierre=dt.date(2026, 7, 1)),
     )
     assert resultado.estado == "CERRADA"
+    assert resultado.saldo.conocido and resultado.saldo.importe == D("0")
     fila = leer_fila(
         admin,
         contexto.owner_user_id,
@@ -713,15 +734,25 @@ def test_cierre_sin_motivo_valido(
 def test_posicion_cerrada_no_admite_deltas(
     servicio_posiciones: PosicionesService, contexto, derecho, cuenta
 ) -> None:
-    from app.core.modelos_posicion import DatosReembolso
+    from app.core.modelos_posicion import DatosCondonacion, DatosReembolso
 
     entidad_id, creada = derecho
-    cerrada = servicio_posiciones.cerrar_posicion(
+    # F04-D055 A1/A2: CANCELADA ya no se escribe en runtime y el residual se
+    # extingue antes (condonacion total); el cierre explicito sigue siendo
+    # `cerrar_posicion`, CONDONADA porque la unica causa es CONDONACION (R-Q1).
+    condonada = servicio_posiciones.condonar_derecho(
         contexto,
         entidad_id=entidad_id,
         entidad_row_version_esperada=creada.entidad_row_version,
-        cierre=DatosCierre(motivo_cierre="CANCELADA", fecha_cierre=dt.date(2026, 7, 1)),
+        datos=DatosCondonacion(delta=delta("100.0000", causa=CONDONACION)),
     )
+    cerrada = servicio_posiciones.cerrar_posicion(
+        contexto,
+        entidad_id=entidad_id,
+        entidad_row_version_esperada=condonada.entidad_row_version,
+        cierre=DatosCierre(motivo_cierre="CONDONADA", fecha_cierre=dt.date(2026, 7, 1)),
+    )
+    assert cerrada.estado == "CERRADA"
     with pytest.raises(ErrorMotor) as excinfo:
         servicio_posiciones.reembolsar(
             contexto,
@@ -744,8 +775,10 @@ def test_version_desfasada_en_cierre(
             contexto,
             entidad_id=entidad_id,
             entidad_row_version_esperada=creada.entidad_row_version + 99,
+            # F04-D055 A2: OTRO ya cae antes de la version; LIQUIDADA llega a
+            # la guarda de version, que es lo que este test comprueba.
             cierre=DatosCierre(
-                motivo_cierre="OTRO", fecha_cierre=dt.date(2026, 7, 1)
+                motivo_cierre="LIQUIDADA", fecha_cierre=dt.date(2026, 7, 1)
             ),
         )
     assert excinfo.value.codigo is CodigoError.VERSION_DESFASADA
@@ -760,8 +793,9 @@ def test_posicion_cross_tenant_no_encontrada(
             ContextoOperacion.de_usuario(otro_owner),
             entidad_id=entidad_id,
             entidad_row_version_esperada=creada.entidad_row_version,
+            # F04-D055 A2: motivo de runtime valido para llegar a la RLS.
             cierre=DatosCierre(
-                motivo_cierre="OTRO", fecha_cierre=dt.date(2026, 7, 1)
+                motivo_cierre="LIQUIDADA", fecha_cierre=dt.date(2026, 7, 1)
             ),
         )
     assert excinfo.value.codigo is CodigoError.AGREGADO_NO_ENCONTRADO

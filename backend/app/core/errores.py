@@ -15,6 +15,12 @@
 #   operacion y reintentar no la hara posible". Fusionarlos haria que la UX
 #   reintentase indefinidamente algo imposible, o que abandonase algo que solo
 #   necesitaba otro intento.
+# Version: 0.20.0
+#   0.20.0 (F04-D055 B1 · A1): `CIERRE_CON_SALDO_NO_NULO`. Con saldo
+#   determinado, un cierre solo es valido si el saldo canonico resultante es
+#   exactamente 0, por cualquiera de las dos vias. Distinto de
+#   INTEGRIDAD_POSICION_VIOLADA (trayectoria) y de los excesos. Ningun codigo
+#   existente cambia.
 # Version: 0.19.0
 #   0.19.0 (F04-D053 B9): `INTEGRIDAD_POSICION_VIOLADA` con motivo
 #   `MotivoIntegridadPosicion` (SALDO_NEGATIVO, POSICION_CERRADA,
@@ -194,6 +200,9 @@ class CodigoError(str, enum.Enum):
     APERTURA_INCONSISTENTE = "APERTURA_INCONSISTENTE"
     CIERRE_SIN_MOTIVO = "CIERRE_SIN_MOTIVO"
     POSICION_CERRADA = "POSICION_CERRADA"
+    # F04-D055 A1. El cierre, como acto administrativo, no extingue un
+    # residual: este se extingue antes con un hecho economico explicito.
+    CIERRE_CON_SALDO_NO_NULO = "CIERRE_CON_SALDO_NO_NULO"
 
     # --- F04-D036 - coherencia monetaria y de naturaleza posicion<->efecto -
     # Una posicion tiene moneda propia y estable. Un efecto que participa en

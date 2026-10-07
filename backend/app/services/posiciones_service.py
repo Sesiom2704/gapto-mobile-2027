@@ -55,6 +55,20 @@
 #   reduccion con GENERACION_DERECHO_OBLIGACION (historica o migrada) se lee
 #   como NO_DETERMINABLE, sin fecha ni procedencia como discriminante.
 #   GENERACION_DERECHO_OBLIGACION queda para la creacion e incremento.
+#
+#   F04-D055 · CICLO DE VIDA. Con saldo determinado un cierre exige saldo
+#   canonico resultante exactamente 0 (A1), por las dos vias; solo LIQUIDADA
+#   y CONDONADA en runtime (A2); con saldo indeterminado, cierre por
+#   declaracion sin residual (A3). Dos saldos y nunca uno por otro (A4):
+#   `_calcular_saldo` es el CANONICO (exceso, A1; F04-D053 tiene su propio
+#   SQL) y `_saldo_de_lectura` solo alimenta `ResultadoPosicion`.
+# Version: 0.6.0
+#   0.6.0 (F04-D055 B1 · Parte A): A1 en `cerrar_posicion` (bajo la raiz,
+#   antes de `_cerrar`) y en `_aplicar_delta` con cierre (tras `_cerrar`,
+#   sobre la posicion releida); A2 en `cerrar_posicion`; R-Q1 (motivo
+#   determinado por el conjunto de causas de la ventana A1, con la misma
+#   clasificacion que `causas_de_reduccion`, extraida a `_causas_leidas`);
+#   A4 con `_saldo_de_lectura` y `apertura_indeterminada`.
 # Version: 0.5.0
 #   0.5.0 (F04-D053 B1 · B8): `_aplicar_delta` adquiere advisory D-080 y la
 #   raiz de la posicion ANTES de leer el saldo y de bloquear el movimiento;
@@ -117,6 +131,7 @@ from app.core.modelos_posicion import (
     MOTIVO_CONDONADA,
     MOTIVO_LIQUIDADA,
     MOTIVOS_CIERRE,
+    MOTIVOS_CIERRE_RUNTIME,
     RELACION_ENTIDAD_GENERADO_POR,
     RELACION_HECHO_REEMBOLSO_DE,
     ResultadoPosicion,
@@ -598,8 +613,19 @@ class PosicionesService:
         Una posicion con saldo cero puede seguir ACTIVA y recibir deltas
         legitimos despues; cerrarla automaticamente la haria irreabrible por
         una coincidencia aritmetica.
+
+        F04-D055: solo LIQUIDADA o CONDONADA (A2); con saldo determinado, el
+        saldo canonico debe ser exactamente 0 (A1); el motivo lo determina el
+        conjunto de causas de la ventana A1 cuando es univoco (R-Q1). Con
+        saldo indeterminado se cierra por declaracion (A3), con la misma R-Q1.
         """
         self._validar_cierre(cierre)
+        if cierre.motivo_cierre not in MOTIVOS_CIERRE_RUNTIME:
+            raise ErrorMotor(
+                CodigoError.CIERRE_SIN_MOTIVO,
+                "Un cierre de runtime solo admite LIQUIDADA o CONDONADA; "
+                "CANCELADA y OTRO solo existen como datos legacy.",
+            )
 
         def operacion(sesion: SesionMotor) -> ResultadoPosicion:
             owner = repo_hechos.exigir_contexto(sesion)
@@ -612,6 +638,10 @@ class PosicionesService:
                     "La posicion ya esta cerrada.",
                 )
             self._tocar_entidad(sesion, entidad_id, entidad_row_version_esperada)
+            self._exigir_saldo_cero(sesion, entidad_id, posicion)
+            self._exigir_motivo_de_las_causas(
+                sesion, entidad_id, posicion, cierre.motivo_cierre
+            )
             self._cerrar(sesion, entidad_id, cierre, posicion["snapshot"])
             return self._resultado_actual(sesion, entidad_id)
 
@@ -645,29 +675,47 @@ class PosicionesService:
         def operacion(sesion: SesionMotor) -> list[CausaLeida]:
             repo_hechos.exigir_contexto(sesion)
             posicion = self._exigir_posicion(sesion, entidad_id)
-            causa_reembolso = (
-                CausaReduccion.PAGO
-                if posicion["tipo"] == TIPO_OBLIGACION
-                else CausaReduccion.COBRO
-            )
-            leidas = []
-            for hecho_id, codigo, con_movimiento in repo_pos.reducciones_de_posicion(
-                sesion, entidad_id, EFECTO_DE_POSICION[posicion["tipo"]]
-            ):
-                if codigo == TIPO_HECHO_REEMBOLSO:
-                    causa = causa_reembolso.value
-                elif codigo == TIPO_HECHO_CONDONACION:
-                    causa = CausaReduccion.CONDONACION.value
-                else:
-                    causa = CAUSA_NO_DETERMINABLE
-                leidas.append(CausaLeida(hecho_id, codigo, con_movimiento, causa))
-            return leidas
+            return self._causas_leidas(sesion, entidad_id, posicion)
 
         resultado = self._unidad.ejecutar_con_traza(
             contexto, operacion, nombre="leer_causas_de_reduccion"
         )
         self.ultima_traza = resultado.traza
         return resultado.valor
+
+    @staticmethod
+    def _causas_leidas(
+        sesion: SesionMotor,
+        entidad_id: uuid.UUID,
+        posicion: dict[str, Any],
+        *,
+        en_ventana: bool = False,
+    ) -> list[CausaLeida]:
+        """UNICA clasificacion arquetipo -> causa (F04-D052 CC4).
+
+        `causas_de_reduccion` la usa sin ventana; R-Q1 de F04-D055, con la
+        ventana canonica de F04-D053 (`en_ventana`).
+        """
+        causa_reembolso = (
+            CausaReduccion.PAGO
+            if posicion["tipo"] == TIPO_OBLIGACION
+            else CausaReduccion.COBRO
+        )
+        leidas = []
+        for hecho_id, codigo, con_movimiento in repo_pos.reducciones_de_posicion(
+            sesion,
+            entidad_id,
+            EFECTO_DE_POSICION[posicion["tipo"]],
+            en_ventana_a1=en_ventana,
+        ):
+            if codigo == TIPO_HECHO_REEMBOLSO:
+                causa = causa_reembolso.value
+            elif codigo == TIPO_HECHO_CONDONACION:
+                causa = CausaReduccion.CONDONACION.value
+            else:
+                causa = CAUSA_NO_DETERMINABLE
+            leidas.append(CausaLeida(hecho_id, codigo, con_movimiento, causa))
+        return leidas
 
     # ==================================================================
     # Nucleo comun de los deltas
@@ -845,6 +893,12 @@ class PosicionesService:
 
             if delta.cierre is not None:
                 self._cerrar(sesion, entidad_id, delta.cierre, posicion["snapshot"])
+                # F04-D055 A1: saldo CANONICO posterior (con el delta recien
+                # creado) sobre la posicion releida, ya CERRADA. La lectura
+                # A4 de una CERRADA (0) nunca sirve aqui.
+                self._exigir_saldo_cero(
+                    sesion, entidad_id, self._exigir_posicion(sesion, entidad_id)
+                )
 
             # F04-D053 B1: estado final (B2/B3 fecha a fecha con A1, B5, B6).
             integridad_posicion.validar(sesion, fotos)
@@ -1177,18 +1231,79 @@ class PosicionesService:
         movimiento_row_version: int | None = None,
     ) -> ResultadoPosicion:
         posicion = self._exigir_posicion(sesion, entidad_id)
+        saldo, apertura_indeterminada = self._saldo_de_lectura(
+            sesion, entidad_id, posicion
+        )
         return ResultadoPosicion(
             entidad_id=entidad_id,
             entidad_row_version=posicion["row_version"],
             tipo=posicion["tipo"],
             estado=posicion["estado"],
-            saldo=self._calcular_saldo(sesion, entidad_id, posicion),
+            saldo=saldo,
             hecho_id=hecho_id,
             hecho_row_version=hecho_row_version,
             movimiento_id=movimiento_id,
             movimiento_row_version=movimiento_row_version,
             idempotente=idempotente,
+            apertura_indeterminada=apertura_indeterminada,
         )
+
+    def _saldo_de_lectura(
+        self, sesion: SesionMotor, entidad_id: uuid.UUID, posicion: dict[str, Any]
+    ) -> tuple[Saldo, bool]:
+        """F04-D055 A4. (saldo de LECTURA, apertura_indeterminada).
+
+        ACTIVA: exactamente el canonico (INV-17 intacto). CERRADA: conocido 0
+        sin tocar deltas, tambien una legacy con residual, y el indicador
+        separado si la apertura era indeterminada. SOLO lo usa
+        `_resultado_actual`: ningun validador lo consume.
+        """
+        if posicion["estado"] == ESTADO_CERRADA:
+            return Saldo.de(CERO), posicion["saldo_apertura"] is None
+        return self._calcular_saldo(sesion, entidad_id, posicion), False
+
+    def _exigir_saldo_cero(
+        self, sesion: SesionMotor, entidad_id: uuid.UUID, posicion: dict[str, Any]
+    ) -> None:
+        """F04-D055 A1 con el saldo CANONICO. Indeterminado: no se exige (A3)."""
+        saldo = self._calcular_saldo(sesion, entidad_id, posicion)
+        if saldo.conocido and saldo.importe != CERO:
+            raise ErrorMotor(
+                CodigoError.CIERRE_CON_SALDO_NO_NULO,
+                "Con saldo determinado solo se cierra con saldo exactamente 0: "
+                "el residual se extingue antes con un pago, cobro o "
+                "condonacion explicitos.",
+                contexto_extra={"saldo": str(saldo.importe)},
+            )
+
+    def _exigir_motivo_de_las_causas(
+        self,
+        sesion: SesionMotor,
+        entidad_id: uuid.UUID,
+        posicion: dict[str, Any],
+        motivo_cierre: str,
+    ) -> None:
+        """F04-D055 R-Q1 (solo `cerrar_posicion`).
+
+        S = causas DETERMINABLES de las reducciones de la ventana A1. Si S
+        determina un unico motivo (MISMA tabla que la guarda de F04-D052), el
+        cierre debe declararlo; vacio o mixto admite LIQUIDADA o CONDONADA.
+        Es un conjunto: ni orden, ni ultima reduccion, ni timestamps.
+        """
+        causas = {
+            leida.causa
+            for leida in self._causas_leidas(
+                sesion, entidad_id, posicion, en_ventana=True
+            )
+            if leida.causa != CAUSA_NO_DETERMINABLE
+        }
+        motivos = {MOTIVO_CIERRE_DE_CAUSA[CausaReduccion(c)] for c in causas}
+        if len(motivos) == 1 and motivo_cierre not in motivos:
+            raise ErrorMotor(
+                CodigoError.CAUSA_REDUCCION_INVALIDA,
+                "El motivo de cierre no corresponde a las causas de las "
+                "reducciones de la posicion.",
+            )
 
     # ==================================================================
     # Idempotencia

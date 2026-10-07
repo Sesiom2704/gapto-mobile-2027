@@ -25,6 +25,11 @@
 #   Todas las identidades llegan reservadas por el llamante, antes del primer
 #   intento: es lo que permite reintentar una operacion compuesta —hecho,
 #   efecto, vinculo, movimiento, conciliacion, relacion— sin duplicar realidad.
+# Version: 0.4.0
+#   0.4.0 (F04-D055 B1): A2, `MOTIVOS_CIERRE_RUNTIME` = {LIQUIDADA,
+#   CONDONADA}; CANCELADA y OTRO siguen en `MOTIVOS_CIERRE` solo como datos
+#   legacy legibles. A4, `ResultadoPosicion.apertura_indeterminada`: indicador
+#   contractual separado del saldo (no viaja por `saldo.importe`).
 # Version: 0.3.0
 #   0.3.0 (F04-D052 B2): causa de reduccion obligatoria. `CausaReduccion`
 #   {PAGO, COBRO, CONDONACION} sustituye al antiguo `motivo` libre de
@@ -84,6 +89,10 @@ MOTIVO_OTRO: Final = "OTRO"
 MOTIVOS_CIERRE: Final = frozenset(
     {MOTIVO_LIQUIDADA, MOTIVO_CONDONADA, MOTIVO_CANCELADA, MOTIVO_OTRO}
 )
+# F04-D055 A2. Los cierres de runtime solo escriben estos dos. CANCELADA y
+# OTRO no tienen semantica canonica: quedan legibles como legacy y no se
+# escriben nunca mas.
+MOTIVOS_CIERRE_RUNTIME: Final = frozenset({MOTIVO_LIQUIDADA, MOTIVO_CONDONADA})
 
 TIPO_ENTIDAD_POSICION: Final = "DERECHO_OBLIGACION"
 RELACION_ENTIDAD_GENERADO_POR: Final = "GENERADO_POR"
@@ -312,6 +321,18 @@ class CausaLeida:
 
 @dataclass(frozen=True, slots=True)
 class ResultadoPosicion:
+    """Lectura de una posicion (F04-D055 A4).
+
+    `saldo` es el saldo de LECTURA: en una ACTIVA es el canonico (conocido o
+    INDETERMINADO, INV-17); en una CERRADA es siempre conocido 0, tambien en
+    una legacy con residual, sin reinterpretar sus deltas.
+
+    `apertura_indeterminada` es True solo si estado = CERRADA y
+    saldo_apertura IS NULL: el 0 actual no es conocimiento del saldo
+    historico. Es False en una ACTIVA, donde la indeterminacion ya la expresa
+    `saldo`. Ningun validador lee este DTO.
+    """
+
     entidad_id: uuid.UUID
     entidad_row_version: int
     tipo: str
@@ -322,3 +343,4 @@ class ResultadoPosicion:
     movimiento_id: uuid.UUID | None = None
     movimiento_row_version: int | None = None
     idempotente: bool = False
+    apertura_indeterminada: bool = False

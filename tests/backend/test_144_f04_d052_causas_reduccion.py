@@ -19,6 +19,10 @@
 #   financiacion_cuotas (guarda estructural, D4). Los casos mixtos (pago +
 #   condonacion del resto y al reves) prueban la guarda motivo_cierre <->
 #   causa, anadida por iniciativa propia y mantenida por la orquestacion.
+# Version: 0.3.0
+#   0.3.0 (F04-D055 B1 · A4): `test_4_..._indeterminada_...` afirma la
+#   lectura de una CERRADA (conocido 0) y `apertura_indeterminada` en lugar
+#   de `saldo.conocido is False`; el cierre sigue sin residual (1 efecto).
 # Version: 0.2.0
 #   0.2.0 (F04-D053 A1): test_cc4_historico[2025-01-01] pasa de 70 a 80: el
 #   delta anterior a fecha_inicio_seguimiento no se suma (cambio legitimo).
@@ -393,7 +397,11 @@ def test_4_condonacion_total_indeterminada_solo_por_declaracion_sin_residual(
         delta_extra={"cierre": DatosCierre(motivo_cierre="CONDONADA", fecha_cierre=CIERRE)},
     )
     assert resultado.estado == "CERRADA"
-    assert resultado.saldo.conocido is False
+    # F04-D055 A4: una CERRADA se lee con saldo conocido 0; que la apertura
+    # era indeterminada lo dice el indicador separado, no el saldo (antes:
+    # `saldo.conocido is False`).
+    assert resultado.saldo.conocido is True and resultado.saldo.importe == D("0")
+    assert resultado.apertura_indeterminada is True
     assert _contar(admin, contexto,
                    "SELECT count(*) FROM gapto.hecho_efectos WHERE hecho_id = %s",
                    (datos.delta.hecho_id,)) == 1

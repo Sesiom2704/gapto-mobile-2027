@@ -9,6 +9,10 @@
 #   la misma contraparte conviven aunque su neto calculado sea cero. No se
 #   extinguen, no se reescriben importes y no nace ningun hecho de
 #   compensacion. El neteo es lectura, nunca realidad persistida.
+# Version: 0.4.0
+#   0.4.0 (F04-D055 B1): `test_c3` compite con un cierre VALIDO (posicion
+#   indeterminada, A3, motivo LIQUIDADA) en lugar de CANCELADA con residual,
+#   que A1/A2 rechazan antes de la carrera. Mismas aserciones.
 # Version: 0.3.0
 #   0.3.0 (F04-D052 B2): toda reduccion declara su causa con su forma fisica.
 #   Los cobros (OP-14) llevan movimiento en cuenta Gapto (helper `reembolso`
@@ -1116,11 +1120,17 @@ def test_c3_cierre_frente_a_delta_concurrente(
     servicio_posiciones: PosicionesService,
     contexto: ContextoOperacion,
     admin: psycopg.Connection,
-    derecho,
+    derecho_indeterminado,
     cuenta: uuid.UUID,
 ) -> None:
-    """Cerrar y anadir delta sobre la MISMA version: no confirman las dos."""
-    entidad_id, creada, _ = derecho
+    """Cerrar y anadir delta sobre la MISMA version: no confirman las dos.
+
+    F04-D055: las dos operaciones deben ser validas por separado para que la
+    carrera la decida la version. Con saldo indeterminado el cierre por
+    declaracion es valido (A3, sin reducciones: LIQUIDADA admitida por R-Q1)
+    y el cobro tambien; CANCELADA ya no se escribe en runtime (A2).
+    """
+    entidad_id, creada = derecho_indeterminado
     datos = reembolso("10.0000", cuenta)
 
     def intentar(indice: int) -> None:
@@ -1131,7 +1141,7 @@ def test_c3_cierre_frente_a_delta_concurrente(
                 entidad_id=entidad_id,
                 entidad_row_version_esperada=creada.entidad_row_version,
                 cierre=DatosCierre(
-                    motivo_cierre="CANCELADA", fecha_cierre=dt.date(2026, 7, 1)
+                    motivo_cierre="LIQUIDADA", fecha_cierre=dt.date(2026, 7, 1)
                 ),
             )
         else:

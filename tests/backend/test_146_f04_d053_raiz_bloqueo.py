@@ -21,6 +21,12 @@
 #   5. Interbloqueo D-158: OP-21 con contexto (advisory -> hecho -> posicion)
 #      frente a OP-21 de importe y frente a creacion sobre la misma posicion:
 #      sin 40P01. v0.3: OP-09 frente a OP-21 y creacion, sin 40P01.
+# Version: 0.3.0
+#   0.3.0 (F04-D055 B1): el cierre de la carrera es un cierre VALIDO por la
+#   misma via (`cerrar_posicion`, sin advisory): el residual se extingue
+#   fuera de la carrera con una condonacion explicita y el motivo es
+#   CONDONADA (A1, A2, R-Q1). CIERRE_CON_SALDO_NO_NULO es perdedor legitimo
+#   de T2 cuando T1 devuelve saldo. Mismos escenarios y oraculos.
 # Version: 0.2.0
 #   0.2.0 (F04-D053 B1 · v0.3): OP-09 entra en la raiz (escenarios 1 y 5);
 #   B5 hace perdedor legitimo a INTEGRIDAD_POSICION_VIOLADA tras un cierre.
@@ -280,13 +286,29 @@ def _op03(s, e, admin, p):
     )
 
 
-def _cerrar(s, e, admin, p):
+def _cerrar(s, e, admin, p, residuo: str = "0"):
+    """Cierre explicito (`cerrar_posicion`, sin advisory) VALIDO bajo F04-D055.
+
+    Fuera de la carrera, como `_op21_contexto`, se extingue el residual con
+    una condonacion explicita hasta dejar exactamente `residuo` (A1: el
+    cierre no extingue nada). `residuo` > 0 solo cuando T1 reduce la
+    posicion antes que el cierre. S = {PAGO, CONDONACION} es mixto: R-Q1
+    admite CONDONADA. OTRO ya no se escribe en runtime (A2).
+    """
     import datetime as dt
 
+    saldo = s.pos.saldo(e["ctx"], p["entidad"]).saldo.importe
+    extinguir = saldo - D(residuo)
+    if extinguir > 0:
+        s.pos.condonar_obligacion(
+            e["ctx"], entidad_id=p["entidad"],
+            entidad_row_version_esperada=_version_entidad(admin, e["owner"], p["entidad"]),
+            datos=DatosCondonacionObligacion(delta=delta(str(extinguir), causa=CONDONACION)),
+        )
     return lambda: s.pos.cerrar_posicion(
         e["ctx"], entidad_id=p["entidad"],
         entidad_row_version_esperada=_version_entidad(admin, e["owner"], p["entidad"]),
-        cierre=DatosCierre(motivo_cierre="OTRO", fecha_cierre=dt.date(2026, 7, 1)),
+        cierre=DatosCierre(motivo_cierre="CONDONADA", fecha_cierre=dt.date(2026, 7, 1)),
     )
 
 
@@ -331,7 +353,11 @@ def test_1_misma_posicion_serializa(dsn, admin, monkeypatch, escenario, t1, t2) 
     s1, s2 = Servicios(dsn, f"T1-{uuid.uuid4()}"), Servicios(dsn, f"T2-{uuid.uuid4()}")
     p = escenario["p1"]
     f1 = OPERACIONES[t1](s1, escenario, admin, p)
-    f2 = OPERACIONES[t2](s2, escenario, admin, p)
+    if t1 == "crear" and t2 == "cerrar":
+        # F04-D055: T1 (pago de 5) necesita saldo; el cierre deja 5 y no 0.
+        f2 = _cerrar(s2, escenario, admin, p, residuo="5.0000")
+    else:
+        f2 = OPERACIONES[t2](s2, escenario, admin, p)
     espero, h1, h2 = _carrera(admin, monkeypatch, f1, f2, s2.nombre)
     assert espero, f"{t2} no espero a {t1} sobre la misma posicion"
     assert h1.error is None, repr(h1.error)
@@ -351,6 +377,9 @@ PERDEDOR_LEGITIMO = frozenset({
     # B5 (v0.3): tras un cierre confirmado por T1, corregir o anular un delta
     # de la posicion pierde con INTEGRIDAD_POSICION_VIOLADA/POSICION_CERRADA.
     CodigoError.INTEGRIDAD_POSICION_VIOLADA,
+    # F04-D055 A1: T1 (OP-03 u OP-21 de importe) devuelve saldo a la
+    # posicion y el cierre de T2 ya no tiene saldo 0.
+    CodigoError.CIERRE_CON_SALDO_NO_NULO,
 })
 
 

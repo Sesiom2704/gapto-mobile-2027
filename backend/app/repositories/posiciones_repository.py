@@ -24,6 +24,10 @@
 #   F04-D036 anade las lecturas de coherencia posicion <-> efecto. Viven
 #   aqui, y no en el servicio, porque son SQL: el servicio decide que hacer
 #   con el resultado, no como obtenerlo.
+# Version: 0.6.0
+#   0.6.0 (F04-D055 B1 · R-Q1): `reducciones_de_posicion` admite
+#   `en_ventana_a1` (FRONTERA_A1; sin frontera si no hay inicio de
+#   seguimiento). Sin el parametro devuelve exactamente lo de antes.
 # Version: 0.5.0
 #   0.5.0 (F04-D053 B1 · B8): raiz de bloqueo por posicion. `bloquear_posiciones`
 #   toma `FOR NO KEY UPDATE` sobre la fila `entidades` de cada posicion en
@@ -311,7 +315,11 @@ def saldo_deltas(
 
 
 def reducciones_de_posicion(
-    sesion: SesionMotor, entidad_id: uuid.UUID, tipo_efecto: str
+    sesion: SesionMotor,
+    entidad_id: uuid.UUID,
+    tipo_efecto: str,
+    *,
+    en_ventana_a1: bool = False,
 ) -> list[tuple[uuid.UUID, str, bool]]:
     """(hecho_id, codigo de tipo_hecho, con_movimiento) de cada reduccion.
 
@@ -319,10 +327,20 @@ def reducciones_de_posicion(
     posicion en un hecho ACTIVO. `con_movimiento` es True si el hecho tiene
     al menos una conciliacion con un movimiento ACTIVO. Orden estable por
     fecha economica e identidad.
+
+    F04-D055 R-Q1: con `en_ventana_a1` solo entran las reducciones de la
+    ventana canonica de F04-D053 (misma `FRONTERA_A1` que el saldo); sin
+    fecha_inicio_seguimiento (saldo indeterminado) no hay frontera. Sin el
+    parametro, la lectura es la de siempre (`causas_de_reduccion`).
     """
+    ventana = (
+        f"AND (p.fecha_inicio_seguimiento IS NULL OR {frontera_a1('p')})"
+        if en_ventana_a1
+        else ""
+    )
     with sesion.conexion.cursor() as cursor:
         cursor.execute(
-            """
+            f"""
             SELECT h.id, th.codigo,
                    EXISTS (
                        SELECT 1
@@ -332,6 +350,8 @@ def reducciones_de_posicion(
                         WHERE c.hecho_id = h.id
                           AND m.estado = 'ACTIVO')
               FROM gapto.hecho_entidades v
+              JOIN gapto.derechos_obligaciones_financieras p
+                ON p.entidad_id = v.entidad_id
               JOIN gapto.hecho_efectos ef ON ef.id = v.efecto_id
               JOIN gapto.hechos_financieros h ON h.id = ef.hecho_id
               JOIN gapto.tipos_hecho th ON th.id = h.tipo_hecho_id
@@ -339,6 +359,7 @@ def reducciones_de_posicion(
                AND ef.tipo_efecto = %s::varchar
                AND ef.importe_delta < 0
                AND h.estado = 'ACTIVO'
+               {ventana}
              ORDER BY h.fecha_hecho, h.id
             """,
             (entidad_id, tipo_efecto),
