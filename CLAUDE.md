@@ -119,7 +119,7 @@ Arneses que aplican mutantes de texto exacto sobre el código y exigen que la su
 Las rutas de esta máquina están en `CLAUDE.local.md` (no versionado). Si no existe, pide las rutas a Moisés antes de ejecutar un mandato que dependa de ellas.
 
 - Repositorio: clon de origin/main. `core.autocrlf=false`; se respetan los finales de línea existentes en cada fichero.
-- Documentos canónicos (carpeta Drive sincronizada `00_CORE`: Project_Memory, Working_Method, DB_Schema, Migration_V3, y expedientes de fase en la misma carpeta raíz; mockups validados en `01_Mockups_Validados`): solo lectura salvo mandato documental D-200.
+- Documentos canónicos (carpeta Drive sincronizada `00_CORE`: Project_Memory, Working_Method, DB_Schema, Migration_V3, y expedientes de fase en la misma carpeta raíz; mockups validados en `01_Mockups_Validados`): solo lectura salvo mandato documental D-200. La única vía de escritura es `scripts/docs/copiar_d200.ps1` con el `PLAN_D200.csv` del mandato; sus raíces salen de las variables de entorno de usuario `GAPTO_D200_ORIGEN` y `GAPTO_D200_DESTINO` (valores en `CLAUDE.local.md`). Antes de invocarlo, `git diff --quiet HEAD -- scripts/docs/copiar_d200.ps1` debe terminar con código 0: el script no puede tener cambios locales sin versionar. La regla de permiso que permite invocarlo es local (`.claude/settings.local.json`, no versionada) y solo cubre esa invocación.
 - Evidencias: fuera del repositorio, en una carpeta por bloque (`evidencia_<bloque>\<nombre>_<yyyyMMdd-HHmmss>\`), siempre con `manifest_sha256.txt`. La salida de la terminal no es evidencia.
 - ENV-DEV (cluster 5434, solo loopback): no se toca sin mandato; contiene credenciales.
 - Copia antigua `_zip` del repositorio: respaldo temporal, no se usa.
@@ -130,6 +130,26 @@ Las rutas de esta máquina están en `CLAUDE.local.md` (no versionado). Si no ex
 - Claude Code no cierra fases, no declara veredictos definitivos, no modifica documentos canónicos ni sube nada a origin/main sin que el mandato lo diga y Moisés lo apruebe en la sesión.
 - Cada sesión atiende un mandato. Primera línea del mandato = nombre del bloque (patrón `FASE — BLOQUE · Objeto (vX.Y)`).
 - Al terminar un mandato: handoff con tabla de ficheros tocados y SHA-256 completos, resumen de evidencia (rutas), riesgos nuevos, propuesta de veredicto para la revisora en formato de copiar y pegar; después detenerse.
+
+### Autonomía
+Decisión de Moisés del 2026-10-07, pendiente de registro en el Working Method.
+
+Dentro de un mandato aprobado, Claude Code ejecuta sin pedir aprobación todo paso lógico y reversible:
+- lecturas;
+- tests;
+- clusters locales desechables;
+- worktrees, ramas y commits locales;
+- escritura de evidencia y handoffs;
+- ficheros en el canal.
+
+Solo pide aprobación para:
+- (a) merge a main y push;
+- (b) escrituras en Drive o G: fuera de `scripts/docs/copiar_d200.ps1`;
+- (c) operaciones destructivas en Neon o Supabase no autorizadas en el mandato;
+- (d) cambios en `.claude/` o en el sistema (variables, servicios);
+- (e) cualquier STOP del mandato.
+
+Las dudas que no bloquean se anotan y se resuelven en el handoff, sin detener el trabajo.
 
 ### STOP obligatorio (parar y preguntar antes de seguir)
 - A: una realidad válida no es representable con el head físico vigente.
