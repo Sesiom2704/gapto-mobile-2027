@@ -116,11 +116,14 @@ Arneses que aplican mutantes de texto exacto sobre el código y exigen que la su
 ## Método de trabajo (transición a Claude Code, pendiente de D-2xx)
 
 ### Rutas
-- Repositorio (clon de origin/main): `C:\DEV\gapto-mobile-2027-main`. `core.autocrlf=false`; se respetan los finales de línea existentes en cada fichero.
-- Documentos canónicos (solo lectura salvo mandato documental): `G:\Mi unidad\1-GASTOS\GaptoMobile 2027\00_CORE` (Project_Memory, Working_Method, DB_Schema, Migration_V3) y expedientes de fase en la misma carpeta raíz. Mockups validados en `G:\Mi unidad\1-GASTOS\GaptoMobile 2027\01_Mockups_Validados`.
-- Evidencias: `C:\DEV\evidencia_<bloque>\<nombre>_<yyyyMMdd-HHmmss>\`, siempre con `manifest_sha256.txt`. La salida de la terminal no es evidencia.
-- ENV-DEV: `C:\DEV\gapto-envdev` (cluster 5434, solo loopback). No se toca sin mandato; contiene credenciales.
-- Copia antigua `C:\DEV\gapto-mobile-2027-main_zip`: respaldo temporal, no se usa.
+Las rutas de esta máquina están en `CLAUDE.local.md` (no versionado). Si no existe, pide las rutas a Moisés antes de ejecutar un mandato que dependa de ellas.
+
+- Repositorio: clon de origin/main. `core.autocrlf=false`; se respetan los finales de línea existentes en cada fichero.
+- Documentos canónicos (carpeta Drive sincronizada `00_CORE`: Project_Memory, Working_Method, DB_Schema, Migration_V3, y expedientes de fase en la misma carpeta raíz; mockups validados en `01_Mockups_Validados`): solo lectura salvo mandato documental D-200.
+- Evidencias: fuera del repositorio, en una carpeta por bloque (`evidencia_<bloque>\<nombre>_<yyyyMMdd-HHmmss>\`), siempre con `manifest_sha256.txt`. La salida de la terminal no es evidencia.
+- ENV-DEV (cluster 5434, solo loopback): no se toca sin mandato; contiene credenciales.
+- Copia antigua `_zip` del repositorio: respaldo temporal, no se usa.
+- Canal de mandatos y handoffs: fuera del repositorio (ver `CLAUDE.local.md`).
 
 ### Roles y límites
 - Moisés decide; la IA revisora es obligatoria para decisiones críticas y cierres de fase; Claude Code ejecuta mandatos.

@@ -12,11 +12,20 @@
 #      (npx expo start --lan).
 #   Nunca muestra el token ni contrasenas. Sin tuneles. Solo desarrollo.
 #   Uso: powershell -NoProfile -ExecutionPolicy Bypass -File envdev_arranque.ps1
+#   Rutas (MANT H-B): -Base, o $env:GAPTO_ENVDEV_BASE, o por defecto la raiz
+#   de ENV-DEV deducida de la ubicacion del script (<Base>\repo\scripts\dev).
+#   Si se ejecuta desde otro clon, el paso 1 falla cerrado (falta pgdata).
+#   -PgBin, o $env:GAPTO_PG_BIN, o por defecto PostgreSQL 17 en Program Files.
+# Version: 0.2.0
+#   0.2.0: MANT H-B, sin rutas de maquina versionadas ($PSScriptRoot y
+#          variables de entorno); misma interfaz.
 # Version: 0.1.0
 # ============================================================
 param(
-    [string]$Base = 'C:\DEV\gapto-envdev',
-    [string]$PgBin = 'C:\Program Files\PostgreSQL\17\bin',
+    [string]$Base = $(if ($env:GAPTO_ENVDEV_BASE) { $env:GAPTO_ENVDEV_BASE }
+                      else { Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent }),
+    [string]$PgBin = $(if ($env:GAPTO_PG_BIN) { $env:GAPTO_PG_BIN }
+                       else { 'C:\Program Files\PostgreSQL\17\bin' }),
     [string]$Interfaz = 'Wi-Fi'
 )
 $ErrorActionPreference = 'Stop'
