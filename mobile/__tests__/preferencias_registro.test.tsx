@@ -3,7 +3,8 @@
 // Fichero: preferencias_registro.test.tsx
 // Ruta: mobile/__tests__/preferencias_registro.test.tsx
 // Descripción: Preferencias de registro en «Nuevo gasto» (F05-02 B2; F05-D026 §41.3/§41.4, E1/E2/E3; F05-D027 §42.7; lámina SET-PREF / REG-PREF v0.1 R01–R07, D-PREF-02..06). Propuesta por campo con origen visible; lo explícito gana (un campo tocado no se recalcula al cambiar de categoría); sin fallback laxo del cliente (AJ-B1-09) y nunca una cuenta fuera de la lista (AJ-B1-11); el reintento del registro no vuelve a pedir la propuesta. «Guardar como preferencia»: oculta con «Sin categoría» y cuando no hay nada que recordar; alta con el UUID de la tarjeta (el reintento usa el MISMO); edición con el ESTADO COMPLETO (E05); conflicto R07 «Sustituir / Mantener»; VERSION_DESFASADA y empate → recarga y se vuelve a preguntar; fallo R06 sin afectar al hecho.
-// Versión: 0.1.0 (F05-02 B2)
+// v0.2.0 (F05-02 B2-V): discriminante de M03 (E1 / REG-01): con la propuesta pendiente, fallida o rechazada, «¿Cuenta para el presupuesto?» no está preseleccionado y no se envía sin decisión explícita.
+// Versión: 0.2.0
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
@@ -228,6 +229,41 @@ test('R04 / sin propuesta tras una propuesta previa: los campos no tocados vuelv
   expect(screen.getByTestId('presupuestable-true').props.accessibilityState.selected).toBe(false);
   expect(screen.queryByTestId('origen-cuenta')).toBeNull();
   expect(screen.queryByTestId('origen-presupuestable')).toBeNull();
+});
+
+// E1 / REG-01 (discriminante de M03): el valor inicial del borrador es lo que se ve mientras la
+// propuesta no ha llegado; si la petición falla, aplicarPropuesta(SIN_PROPUESTA) lo deja pendiente.
+const PROPUESTA_SIN_EXITO: [string, () => Promise<Respuesta<PropuestaRegistro>>][] = [
+  ['pendiente (aún no ha llegado)', () => new Promise<Respuesta<PropuestaRegistro>>(() => {})],
+  ['fallida (INDETERMINADO)', async () => ({ tipo: 'INDETERMINADO', mensaje: 'x' })],
+  ['rechazada (CATEGORIA_NO_ELEGIBLE)', async () => ({ tipo: 'RECHAZADO', codigo: 'CATEGORIA_NO_ELEGIBLE', mensaje: '' })],
+];
+
+test.each(PROPUESTA_SIN_EXITO)('E1: propuesta %s → presupuestable sin preselección y sin envío hasta decidir', async (_caso, respuesta) => {
+  const f = fake();
+  f.cliente.propuestaPreferencias = jest.fn(respuesta);
+  await abrir(f.cliente);
+  await waitFor(() => expect(screen.getByTestId(`cuenta-${TARJETA}`)).toBeTruthy());
+  await act(async () => {});
+  const marcado = (v: boolean) => screen.getByTestId(`presupuestable-${v}`).props.accessibilityState.selected;
+  expect(marcado(true)).toBe(false);
+  expect(marcado(false)).toBe(false);
+  expect(screen.queryByTestId('origen-presupuestable')).toBeNull();
+  basicos();
+  sinCategoria(); // vuelve a pedir la propuesta, con el mismo resultado
+  fireEvent.press(screen.getByTestId(`cuenta-${EFECTIVO}`));
+  await act(async () => {});
+  expect(marcado(true)).toBe(false);
+  expect(marcado(false)).toBe(false);
+  expect(textoDe('faltan')).toBe('Para registrar falta: si cuenta para el presupuesto.');
+  expect(screen.getByTestId('registrar')).toBeDisabled();
+  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
+  expect(f.cliente.registrarGastoPagado).not.toHaveBeenCalled();
+  // Con la decisión explícita ya se puede registrar, y se sella lo elegido.
+  fireEvent.press(screen.getByTestId('presupuestable-false'));
+  expect(screen.getByTestId('registrar')).toBeEnabled();
+  await registrar();
+  expect(f.enviados[0]).toMatchObject({ cuenta_id: EFECTIVO, presupuestable: false });
 });
 
 test('sin fallback laxo (AJ-B1-09): una única cuenta en otra moneda y sin propuesta del resolver no se preselecciona', async () => {

@@ -26,11 +26,17 @@
 #          «Ya tienes una preferencia para <categoria>» -> «Sustituir»: la MISMA
 #          preferencia pasa a la nueva cuenta, conserva el presupuesto (estado
 #          completo, E05) y row_version 2; sigue habiendo UNA.
-#   Capturas 393x852 @3x (claro; R02 y R07 tambien en oscuro) y manifest JSON.
+#     R07p (DERIVADO, no presente en la lamina; B2-V §5.10) gasto nuevo con el
+#          presupuesto cambiado a «No»: la tarjeta marca solo el presupuesto;
+#          «Guardar» abre la hoja con el texto de presupuesto y «Mantener la
+#          actual» -> «Mantener» no escribe (misma fila y row_version).
+#   Capturas 393x852 @3x (claro; R02, R07 y R07p tambien en oscuro) y manifest JSON.
 #   Requiere (ya levantados): API en --api con CORS para --web, cliente web en
 #   --web (o --dist), GAPTO_DATABASE_URL (base LOCAL; preparacion y lectura),
 #   GAPTO_DEV_OWNER_USER_ID y GAPTO_DEV_TOKEN (nunca se imprime).
 # Version: 0.1.0 (F05-02 B2)
+#          0.2.0 (F05-02 B2-V paso 5): escenario R07p (texto R07 del presupuesto y
+#                «Mantener la actual», derivados) con captura clara y oscura.
 # ============================================================
 
 from __future__ import annotations
@@ -281,13 +287,44 @@ def main() -> None:
         t("pref-sustituir").click()
         t("pref-guardada").wait_for(timeout=15000)
         shot(page, "09_R07_sustituida")
+        res["bd_tras_sustituir"] = [p for p in preferencias(dsn, owner) if p not in previas or p[0] == pid]
+        t("volver-inicio").click()
+
+        # ---------------------------------------------------- R07 de presupuesto (DERIVADO, no presente en la lamina)
+        abrir_formulario()
+        basicos(f"PrefD-{run}")
+        t("origen-presupuestable").wait_for()
+        t("presupuestable-false").click()
+        t("registrar").click()
+        t("registro-exito").wait_for(timeout=15000)
+        t("pref-tarjeta").wait_for()
+        res["r07p_casillas"] = [marcado("pref-casilla-cuenta"), marcado("pref-casilla-presupuestable")]
+        comprobar(res["r07p_casillas"] == ["false", "true"], f"casillas R07 presupuesto {res['r07p_casillas']}")
+        t("pref-guardar").click()
+        t("pref-conflicto").wait_for(timeout=15000)
+        res["r07p_texto"] = t("pref-conflicto-texto").inner_text()
+        res["r07p_mantener"] = t("pref-mantener").inner_text()
+        comprobar(res["r07p_texto"] == "Ahora propone que cuenta para el presupuesto: Sí. ¿Quieres que proponga que "
+                                       "cuenta para el presupuesto: No a partir de ahora?", f"texto R07p {res['r07p_texto']}")
+        comprobar(res["r07p_mantener"] == "Mantener la actual", f"boton R07p {res['r07p_mantener']}")
+        shot(page, "10_R07_presupuesto_DERIVADO")
+        page.emulate_media(color_scheme="dark")
+        page.wait_for_timeout(400)
+        shot(page, "11_R07_presupuesto_DERIVADO_dark")
+        page.emulate_media(color_scheme="light")
+        t("pref-mantener").click()
+        t("pref-conflicto").wait_for(state="detached", timeout=15000)
+        shot(page, "12_R07_presupuesto_mantenida")
         nav.close()
 
     finales = [p for p in preferencias(dsn, owner) if p not in previas or p[0] == pid]
-    res["bd_tras_sustituir"] = finales
-    comprobar(finales == [[pid, efectivo, "True", "True", "2"]], f"sustituir en BD {finales}")
+    comprobar(res["bd_tras_sustituir"] == [[pid, efectivo, "True", "True", "2"]], f"sustituir en BD {res['bd_tras_sustituir']}")
+    res["bd_tras_mantener"] = finales  # «Mantener» no escribe: misma fila y misma row_version
+    comprobar(finales == res["bd_tras_sustituir"], f"mantener en BD {finales}")
     res["bd_hecho_r07"] = hecho(dsn, owner, f"PrefC-{run}")
     comprobar(res["bd_hecho_r07"] == [["True", efectivo]], f"R07 hecho {res['bd_hecho_r07']}")
+    res["bd_hecho_r07p"] = hecho(dsn, owner, f"PrefD-{run}")
+    comprobar(res["bd_hecho_r07p"] == [["False", efectivo]], f"R07p hecho {res['bd_hecho_r07p']}")
     comprobar(not consola, f"errores de consola: {consola}")
     manifest = {"etiqueta": ETIQUETA, "run_id": run, "categoria": nombre_cat, "cuentas": {"tarjeta": tarjeta,
                 "efectivo": efectivo}, "resultados": res, "errores_consola": consola, "capturas": capturas}
