@@ -185,7 +185,18 @@
 #       presupuestable; C01 sigue siendo eleccion del usuario: I13b intacta).
 #   La propuesta con categoria no elegible usa la guarda C-a ya registrada
 #   (preferencias/lecturas.py::propuesta, clase PREFERENCIA, sin entrada nueva).
-# Version: 0.10.0
+#
+#   v0.11.0 (F05-02 B3, mandato B3+B4 B2, «altas aditivas en inventarios»):
+#   SOLO altas, ninguna regla ni entrada previa cambia.
+#   I7  registra mobile/src/screens/PreferenciasAjustesScreen.tsx (Ajustes >
+#       Preferencias lee la clave `categoria_id` de cada preferencia para
+#       mostrarla y la envia, completa, en el alta y la edicion por
+#       /v1/preferencias; nunca escribe el catalogo).
+#   I13 sin altas: la pantalla nueva no forma parte del camino de resolucion
+#       categorial del registro (RegistroGastoScreen, SelectorCategorias,
+#       domain/categoria, api/cliente); reutiliza SelectorCategorias sin
+#       modificarlo y sus imports de cliente.ts no cambian.
+# Version: 0.11.0
 # ============================================================
 
 from __future__ import annotations
@@ -908,6 +919,7 @@ MENCIONES_CLIENTE: dict[str, str] = {
     "mobile/src/api/cliente.ts": "tipo de lectura de GET /v1/categorias/{id}/uso y detalle de impacto de deshabilitar magnitud (R)",
     "mobile/src/domain/magnitud.ts": "tipo del catalogo GET /v1/magnitudes (categorias de cada magnitud) y su vista neutra (R)",
     "mobile/src/domain/preferencias.ts": "lee la categoria sellada y la clave de contexto de las preferencias (F05-02 B2, R)",
+    "mobile/src/screens/PreferenciasAjustesScreen.tsx": "Ajustes > Preferencias: muestra y envia la clave de categoria de la preferencia por /v1/preferencias (F05-02 B3, R)",
 }
 
 

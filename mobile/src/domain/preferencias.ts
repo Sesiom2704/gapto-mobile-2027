@@ -4,6 +4,7 @@
 // Ruta: mobile/src/domain/preferencias.ts
 // Descripción: Lógica pura de las preferencias de registro en REG-01 (F05-02 B2; F05-D026 §41.3/§41.4, E1/E2/E3; F05-D027 §42.7; lámina SET-PREF / REG-PREF v0.1, R01–R07, D-PREF-02..06). (1) Propuesta aplicable: la ÚNICA fuente de la propuesta de cuenta es el resolver del servidor (AJ-B1-09: sin fallback del cliente) y nunca se preselecciona una cuenta que no esté en la lista de elegibles (AJ-B1-11 / AJ-B1C-08); un origen que no se puede explicar no se aplica (D-PREF-02). (2) Aplicación por campo: solo a los campos que el usuario no ha tocado (D-PREF-03, «lo explícito gana»). (3) «Guardar como preferencia»: casillas iniciales (marcada si el valor final difiere de lo propuesto) y plan de escritura sobre la preferencia de ámbito «Una categoría» (alta, edición con el ESTADO COMPLETO —E05— o conflicto R07).
 // Versión: 0.1.0 (F05-02 B2)
+// Versión: 0.2.0 (F05-02 B3; lámina SET-PREF v0.1 S01–S06, D-PREF-01/04; AJ-B1-10): SOLO altas para Ajustes › Preferencias: ámbito visible (D-PREF-01), grupos y orden de la lista (S01), textos de lo que propone cada preferencia, preferencia existente del mismo ámbito (S03, «nunca crear otra»), estado del formulario (S02/S06) con el espejo del CHECK «propone algo» y el contenido COMPLETO que se envía (E05). Ninguna regla de elegibilidad: las cuentas y categorías ofrecidas son las de REG-01 y la disponibilidad de la cuenta la dice el servidor (`cuenta_disponible_hoy`).
 // ============================================================
 
 import type { ContenidoPreferencia, CuentaPago, OrigenPropuesta, Preferencia, PropuestaRegistro } from '../api/cliente';
@@ -196,4 +197,132 @@ export function planificarGuardado(lista: Preferencia[], categoriaId: string, f:
 
 export function siNo(v: boolean): string {
   return v ? 'Sí' : 'No';
+}
+
+// ------------------------------------------------------------------ Ajustes › Preferencias (F05-02 B3; lámina SET-PREF S01–S06)
+/** Ámbito visible (D-PREF-01). OTRO = tipo de hecho sin categoría: solo creable por API, se lista con los generales. */
+export type AmbitoPreferencia = 'GENERAL' | 'CATEGORIA' | 'OTRO';
+
+export function ambitoDe(x: Pick<Preferencia, 'tipo_hecho_id' | 'categoria_id'>): AmbitoPreferencia {
+  if (x.categoria_id !== null) return 'CATEGORIA';
+  return x.tipo_hecho_id === null ? 'GENERAL' : 'OTRO';
+}
+
+export const TITULO_GENERAL = 'General';
+export const TITULO_OTRO = 'Por tipo de gasto'; // DERIVADO (no está en la lámina)
+
+export interface GruposPreferencias {
+  todos: Preferencia[];
+  categoria: Preferencia[];
+  desactivadas: Preferencia[];
+}
+
+const ORDEN_AMBITO: Record<AmbitoPreferencia, number> = { GENERAL: 0, OTRO: 1, CATEGORIA: 2 };
+
+/**
+ * S01: «Todos los gastos» (habilitadas sin categoría), «Por categoría» (habilitadas con categoría) y «Desactivadas».
+ * Orden (decisión de ejecución D2 de B3): por ámbito (General, tipo de gasto, categoría) y, dentro, por el rótulo
+ * visible («Padre › Hija») con la colación del español; a igualdad, por id. Es estable y no depende del orden de la API.
+ */
+export function agruparPreferencias(lista: Preferencia[], rotulo: (x: Preferencia) => string): GruposPreferencias {
+  const orden = (a: Preferencia, b: Preferencia) =>
+    ORDEN_AMBITO[ambitoDe(a)] - ORDEN_AMBITO[ambitoDe(b)] || rotulo(a).localeCompare(rotulo(b), 'es') || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  const ordenada = [...lista].sort(orden);
+  return {
+    todos: ordenada.filter((x) => x.enabled && ambitoDe(x) !== 'CATEGORIA'),
+    categoria: ordenada.filter((x) => x.enabled && ambitoDe(x) === 'CATEGORIA'),
+    desactivadas: ordenada.filter((x) => !x.enabled),
+  };
+}
+
+/** D-PREF-04: la cuenta preferida no es elegible hoy (dato del servidor; nunca una regla del cliente). */
+export function cuentaNoDisponible(x: Pick<Preferencia, 'cuenta_disponible_hoy'>): boolean {
+  return x.cuenta_disponible_hoy === false;
+}
+
+/** Lo que propone, en el orden de la lámina: «Pagar con X», «Presupuesto: Sí/No». */
+export function textosPropone(x: Pick<Preferencia, 'cuenta_default_id' | 'presupuestable_default'>, nombreCuenta: (id: string) => string | null): string[] {
+  const r: string[] = [];
+  if (x.cuenta_default_id !== null) r.push(`Pagar con ${nombreCuenta(x.cuenta_default_id) ?? 'una cuenta'}`);
+  if (x.presupuestable_default !== null) r.push(`Presupuesto: ${siNo(x.presupuestable_default)}`);
+  return r;
+}
+
+/** Preferencia HABILITADA del mismo ámbito «Todos los gastos» (categoría null) o «Una categoría» (S03; D4 de B2). */
+export function preferenciaDeAmbito(lista: Preferencia[], categoriaId: string | null, excluirId: string | null = null): Preferencia | null {
+  return (
+    lista.find(
+      (x) =>
+        x.id !== excluirId && x.enabled && x.categoria_id === categoriaId && x.tipo_hecho_id === null && x.tercero_id === null && x.entidad_id === null,
+    ) ?? null
+  );
+}
+
+/** Valor del campo «Proponer cuenta»: una cuenta, «No proponer» (null) o la actual NO disponible (no se puede enviar). */
+export type CuentaFormulario = string | null | { noDisponible: string };
+
+export interface FormularioPreferencia {
+  ambito: 'GENERAL' | 'CATEGORIA' | null;
+  categoriaId: string | null;
+  cuenta: CuentaFormulario;
+  presupuestable: boolean | null;
+}
+
+export const FORMULARIO_NUEVO: FormularioPreferencia = Object.freeze({ ambito: null, categoriaId: null, cuenta: null, presupuestable: null });
+
+/**
+ * Formulario de edición desde la preferencia cargada. Una cuenta que el servidor marca como no disponible hoy, o que
+ * no está entre las que ofrece REG-01, queda como «no disponible»: no se reenvía sin una elección explícita.
+ */
+export function formularioDesde(x: Preferencia, cuentas: CuentaPago[]): FormularioPreferencia {
+  const id = x.cuenta_default_id;
+  const fuera = id !== null && (cuentaNoDisponible(x) || !cuentas.some((c) => c.cuenta_id === id));
+  return {
+    ambito: x.categoria_id === null ? 'GENERAL' : 'CATEGORIA',
+    categoriaId: x.categoria_id,
+    cuenta: fuera ? { noDisponible: id } : id,
+    presupuestable: x.presupuestable_default,
+  };
+}
+
+/** Espejo del CHECK «propone algo» (ck_preferencias_registro__propone_valor). El servidor sigue siendo la guarda. */
+export function proponeAlgo(f: Pick<FormularioPreferencia, 'cuenta' | 'presupuestable'>): boolean {
+  return f.cuenta !== null || f.presupuestable !== null;
+}
+
+export type FaltaFormulario = 'AMBITO' | 'CATEGORIA' | 'PROPONER' | 'CUENTA_NO_DISPONIBLE';
+
+/** Lo que impide «Guardar», en el orden del formulario; vacío = se puede guardar. */
+export function faltaFormulario(f: FormularioPreferencia): FaltaFormulario[] {
+  const r: FaltaFormulario[] = [];
+  if (f.ambito === null) r.push('AMBITO');
+  if (f.ambito === 'CATEGORIA' && f.categoriaId === null) r.push('CATEGORIA');
+  if (!proponeAlgo(f)) r.push('PROPONER');
+  if (f.cuenta !== null && typeof f.cuenta === 'object') r.push('CUENTA_NO_DISPONIBLE');
+  return r;
+}
+
+/** Contenido COMPLETO que se envía (E05): alta con prioridad 100; edición con las claves y la prioridad de la existente. */
+export function contenidoFormulario(f: FormularioPreferencia, base: Preferencia | null): ContenidoPreferencia {
+  const cuenta = typeof f.cuenta === 'string' ? f.cuenta : null;
+  if (base) {
+    return {
+      tipo_hecho_id: base.tipo_hecho_id,
+      categoria_id: base.categoria_id,
+      tercero_id: base.tercero_id,
+      entidad_id: base.entidad_id,
+      cuenta_default_id: cuenta,
+      presupuestable_default: f.presupuestable,
+      prioridad: base.prioridad,
+    };
+  }
+  return {
+    tipo_hecho_id: null,
+    categoria_id: f.ambito === 'CATEGORIA' ? f.categoriaId : null,
+    tercero_id: null,
+    entidad_id: null,
+    cuenta_default_id: cuenta,
+    presupuestable_default: f.presupuestable,
+    prioridad: 100,
+  };
 }

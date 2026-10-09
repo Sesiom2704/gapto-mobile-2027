@@ -24,7 +24,11 @@
 #     cuenta (cuentas-pago la lista: el fallback anterior del cliente la habria
 #     propuesto).
 #   Datos sinteticos como gapto_owner; el adaptador corre como gapto_runtime.
-# Version: 0.1.0
+#
+#   v0.2.0 (F05-02 B3, AJ-B2-05): alta aditiva. La propuesta con categoria no
+#   elegible conserva codigo y status pero lleva un mensaje de lectura (sin
+#   «no se ha guardado nada»); el rechazo de la intencion conserva el suyo.
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -38,6 +42,8 @@ import pytest
 import f05_01_helpers as fh
 import f05_02_helpers as ph
 import vs01_api_helpers as h
+from app.api import errores_http as eh
+from app.api.app import MENSAJE_PROPUESTA_NO_ELEGIBLE
 
 URL = "/v1/intenciones/gasto-pagado"
 CAMBIO = dt.date(2026, 9, 20)  # desde esta fecha la cuenta pasa a 50/50
@@ -277,6 +283,22 @@ def test_propuesta_con_categoria_elegible_para_gasto(t, ambito):
     pid = ph.insertar_sql(owner, categoria_id=cat, cuenta=a)
     assert _propuesta(cli, cat)["cuenta"] == {"valor": str(a), "origen": {"capa": "PREFERENCIA",
                                                                           "preferencia_id": str(pid)}}
+
+
+def test_propuesta_no_elegible_lleva_mensaje_de_lectura_y_la_intencion_conserva_el_suyo(t):
+    """AJ-B2-05: mismo codigo y status; la propuesta (lectura) no dice «no se ha guardado nada»;
+    el rechazo de la intencion con esa misma categoria conserva su mensaje."""
+    owner, _, cli, a, _, _ = t
+    cat = ph.categoria(owner, "Nomina", ambito="INGRESO")
+    antiguo = eh.rechazo_integracion("CATEGORIA_NO_ELEGIBLE")[1]["mensaje"]
+    r = ph.propuesta_http(cli, cat)
+    assert r.status_code == 409 and r.json()["codigo"] == "CATEGORIA_NO_ELEGIBLE", r.text
+    assert r.json()["mensaje"] == MENSAJE_PROPUESTA_NO_ELEGIBLE
+    assert r.json()["mensaje"] != antiguo and "no se ha guardado nada" not in r.json()["mensaje"]
+    cuerpo = h.intencion(a, categoria={"estado": "CATEGORIA", "categoria_id": str(cat), "magnitudes": []})
+    ri = cli.post(URL, json=cuerpo, headers=h.AUTH)
+    assert ri.status_code == 409 and ri.json()["codigo"] == "CATEGORIA_NO_ELEGIBLE", ri.text
+    assert ri.json()["mensaje"] == antiguo and "no se ha guardado nada" in antiguo
 
 
 def test_propuesta_sin_categoria_no_consulta_la_guarda(t):

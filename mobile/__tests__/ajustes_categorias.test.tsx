@@ -5,6 +5,7 @@
 // Descripción: Más → Ajustes → Categorías (D-UI-03; F09 §12.91.1, §12.97.4–12.97.6, §12.97.9 I01–I03; lámina SET-CAT v1.0), commit 1: diez secciones en orden con solo «Categorías» operativa y el resto «No disponible» no pulsable; lista por niveles con filtro Activas (por defecto) / Todas y desactivadas con texto; detalle en lectura SIN acciones EDIT-* (llegan en el commit 2) y fila «Icono» que guarda con el row_version vigente; conflicto de versión que recarga sin reintento; alta CREATE-M con acción desactivada hasta completar, sin preselección de ámbito ni presupuesto, aviso D-198 solo con padre, ubicación restringida a padres habilitados, id sellado y reutilizado en el reintento indeterminado, y tratamiento de los códigos de rechazo; tareas inmersivas sin barra inferior.
 // Versión: 0.1.0 (F05-01 S6-WIRE+UI (este mandato))
 // Versión: 0.2.0 (F05-01 S6-WIRE+UI (este mandato), commit 2): el detalle ya muestra las acciones EDIT-* (cubiertas en ajustes_edicion.test.tsx); aquí se comprueba que «Editar orden» es de la lista y no del detalle.
+// Versión: 0.3.0 (F05-02 B3, A1): «Preferencias financieras» pasa de «No disponible» a navegable; las ocho restantes siguen «No disponible» y no pulsables.
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
@@ -72,12 +73,13 @@ test('Más → Ajustes: 10 secciones de F09 §12.91.1 en orden; solo Categorías
   fireEvent.press(screen.getByTestId('mas-ajustes'));
   expect(SECCIONES_AJUSTES).toEqual(['Terceros', 'Categorías', 'Etiquetas', 'Contextos', 'Reglas y recurrencias', 'Preferencias financieras',
     'Apariencia y personalización', 'Preferencias de uso', 'Datos y mantenimiento', 'Cuenta y sistema']);
-  for (const sec of SECCIONES_AJUSTES.filter((x) => x !== 'Categorías')) {
+  // F05-02 B3: «Preferencias financieras» también es operativa (cubierta en ajustes_preferencias.test.tsx).
+  for (const sec of SECCIONES_AJUSTES.filter((x) => x !== 'Categorías' && x !== 'Preferencias financieras')) {
     const fila = screen.getByTestId(`ajustes-seccion-${sec}`);
     expect(fila.props.accessibilityLabel).toBe(`${sec}. No disponible`);
     expect(fila.props.onPress).toBeUndefined(); // no pulsable
   }
-  expect(screen.getAllByText('No disponible')).toHaveLength(9);
+  expect(screen.getAllByText('No disponible')).toHaveLength(8);
   fireEvent.press(screen.getByTestId('ajustes-atras'));
   expect(screen.getByTestId('pantalla-mas')).toBeTruthy(); // «Atrás» al nivel anterior real
 });

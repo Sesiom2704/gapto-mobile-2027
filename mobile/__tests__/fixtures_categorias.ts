@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-01 S6-WIRE+UI (este mandato))
 // Versión: 0.2.0 (F05-01 S7-MAG UI): `mag()` rellena `asociacion_id` (por defecto `a-<magnitud_id>`); el stub incluye el catálogo (vacío por defecto) y los comandos de magnitudes (no esperados por defecto).
 // Versión: 0.3.0 (F05-02 B2): el stub incluye las preferencias de registro: propuesta SIN propuesta y lista vacía por defecto; alta y edición no esperadas. `propuestaUnica(cuenta)` emula al resolver con una única cuenta elegible (DEFAULT_GENERAL): sustituye al antiguo fallback del cliente (AJ-B1-09).
+// Versión: 0.4.0 (F05-02 B3): el stub incluye desactivar y reactivar preferencia (no esperados por defecto).
 // ============================================================
 
 import type { ClienteApi, PropuestaRegistro, Respuesta } from '../src/api/cliente';
@@ -64,6 +65,8 @@ export function clienteCategoriasStub(
     listarPreferencias: jest.fn(async () => ({ tipo: 'OK', datos: { preferencias: [] } }) as Respuesta<{ preferencias: never[] }>),
     altaPreferencia: noEsperado('altaPreferencia'),
     editarPreferencia: noEsperado('editarPreferencia'),
+    desactivarPreferencia: noEsperado('desactivarPreferencia'),
+    reactivarPreferencia: noEsperado('reactivarPreferencia'),
   };
 }
 

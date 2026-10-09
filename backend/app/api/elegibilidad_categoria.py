@@ -13,9 +13,16 @@
 #   siendo valida (OP-13 por D-194, OP-21 por C04).
 #
 #   Contrato de uso (lo verifica el inventario C-b):
-#     - se invoca SOLO para una intencion nueva, DESPUES del reconocimiento de
-#       identidad y ANTES de componer/ejecutar OP-22: un reintento de una
-#       intencion ya materializada no revalida la categoria;
+#     - llamante de escritura: se invoca para una intencion nueva, DESPUES del
+#       reconocimiento de identidad y ANTES de componer/ejecutar OP-22: un
+#       reintento de una intencion ya materializada no revalida la categoria;
+#     - llamante de lectura (F05-D028 §43.4, AJ-B2-01):
+#       preferencias/lecturas.py::propuesta, para que la propuesta del registro
+#       nunca acepte una categoria que la intencion rechazaria (§42.7). Abre su
+#       propia transaccion corta de lectura: FOR SHARE de la categoria (unico
+#       lock de fila, sin advisory) -> lecturas sin lock del resolver -> COMMIT.
+#       Orden de locks: categoria -> nada; no puede formar ciclo con los
+#       writers de CATEGORIAS ni de PREFERENCIAS;
 #     - toma `FOR SHARE` sobre la fila de la categoria y relee dentro de la
 #       transaccion owner, `enabled` y `ambito` (C04). Nunca valida el estado
 #       que mostro la UI;
@@ -37,7 +44,11 @@
 #   elegibilidad C02 (owner, `enabled`, `ambito`); las magnitudes las decide
 #   C07 (captura_magnitudes.py), que se ejecuta despues de esta guarda y bajo
 #   el mismo FOR SHARE de la categoria.
-# Version: 0.2.0
+#
+#   v0.2.1 (F05-02 B3, AJ-B2-01; F05-D028 §43.4): SOLO cabecera. Registra el
+#   segundo llamante, de lectura (propuesta de preferencias), y su orden de
+#   locks. El cuerpo de la guarda no cambia.
+# Version: 0.2.1
 # ============================================================
 
 from __future__ import annotations

@@ -74,7 +74,12 @@
 #   categoria_id no elegible para GASTO responde 409 CATEGORIA_NO_ELEGIBLE
 #   (mismo codigo y cuerpo que el rechazo de la intencion) y nunca una
 #   propuesta. La ejecucion del gasto y su traductor no cambian.
-# Version: 0.11.0
+#
+#   v0.11.1 (F05-02 B3, AJ-B2-05): ese 409 de la propuesta (una LECTURA)
+#   conserva codigo y status, pero lleva un mensaje propio de lectura
+#   (MENSAJE_PROPUESTA_NO_ELEGIBLE), sin «no se ha guardado nada». El mensaje
+#   del rechazo de la intencion no cambia.
+# Version: 0.11.1
 # ============================================================
 
 from __future__ import annotations
@@ -162,6 +167,9 @@ _LOG = logging.getLogger("gapto.api.f05_00_b")
 import decimal
 _CENT = decimal.Decimal("0.01")
 _MES = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+
+#: AJ-B2-05: mensaje de CATEGORIA_NO_ELEGIBLE en la propuesta (lectura: no hay nada que guardar).
+MENSAJE_PROPUESTA_NO_ELEGIBLE = "Esa categoría no se puede elegir para registrar un gasto. Elige otra o «Sin categoría»."
 
 
 class _NoAutorizado(Exception):
@@ -456,9 +464,10 @@ def create_app(
             contexto(), lambda s: lect_pref.propuesta(s, categoria_id, fecha), nombre="F05-02 propuesta"
         )
         if isinstance(salida, str):
-            # Categoria no elegible para GASTO (guarda C-a): codigo y status de la capa F05.
+            # Categoria no elegible para GASTO (guarda C-a): codigo y status de la capa F05,
+            # con mensaje de lectura (AJ-B2-05).
             status, cuerpo = eh.rechazo_integracion(salida)
-            return JSONResponse(cuerpo, status_code=status)
+            return JSONResponse({**cuerpo, "mensaje": MENSAJE_PROPUESTA_NO_ELEGIBLE}, status_code=status)
         return salida
 
     @app.post("/v1/preferencias", **_RP)

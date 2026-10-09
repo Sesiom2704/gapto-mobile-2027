@@ -79,7 +79,24 @@
 #   Backend (suite py, test_171): A21 la propuesta ignora el rechazo de la
 #   guarda C-a y devuelve propuesta con una categoria no elegible.
 #   Censo: 20 py + M01..M12 y U01..U24 (36 js) = 56.
-# Version: 0.10.0
+#   v0.11.0 (F05-02 B3; lamina SET-PREF S01-S06): un mutante por guarda nueva
+#   del cliente de Ajustes > Preferencias (suite js; los mata
+#   ajustes_preferencias.test.tsx salvo U35): U25 «Guardar» habilitado sin
+#   proponer nada (espejo del CHECK); U26 sin deteccion de la existente del
+#   mismo ambito (S03: crearia otra); U27 el empate del servidor no lleva a la
+#   existente (S03 por carrera); U28 VERSION_DESFASADA reintenta solo en vez de
+#   recargar y avisar (S06); U29 la cuenta actual no disponible se puede
+#   reenviar sin elegir; U30 editar envia la clave de tipo de hecho a NULL
+#   (estado parcial, E05: la preferencia por tipo pasaria a general); U31
+#   la marca «No disponible» la decide el cliente por la lista de REG-01 en
+#   vez del servidor (D-PREF-04); U32 el selector lista categorias que REG-01 oculta (AJ-B1-10); U33 el
+#   reintento del alta usa un UUID nuevo; U34 desactivar sin el row_version
+#   cargado; U35 (AJ-B2-04, preferencias_registro.test.tsx) tras recargar sin
+#   conflicto se muestra error en vez de volver a la tarjeta. Decision de
+#   ejecucion: altas en este arnes (misma infraestructura js y mismo journal)
+#   y no un arnes nuevo.
+#   Censo: 20 py + M01..M12 y U01..U35 (47 js) = 67.
+# Version: 0.11.0
 # ============================================================
 
 from __future__ import annotations
@@ -212,6 +229,33 @@ MUTANTES = [
      "js"),
     ("U24", "mobile/src/domain/preferencias.ts",
      "  if (p.cuenta && lista.some((x) => x.cuenta_id === p.cuenta!.valor)) {\n", "  if (p.cuenta) {\n", "js"),
+    # ---------------------------------------------------------------- F05-02 B3 (Ajustes > Preferencias)
+    ("U25", "mobile/src/domain/preferencias.ts",
+     "  return f.cuenta !== null || f.presupuestable !== null;\n", "  return true;\n", "js"),
+    ("U26", "mobile/src/screens/PreferenciasAjustesScreen.tsx",
+     "        ? preferenciaDeAmbito(datos.prefs, form.ambito === 'GENERAL' ? null : form.categoriaId)\n", "        ? null\n", "js"),
+    ("U27", "mobile/src/screens/PreferenciasAjustesScreen.tsx",
+     "      if (otra) return setConflicto(otra);\n", "", "js"),
+    ("U28", "mobile/src/screens/PreferenciasAjustesScreen.tsx",
+     "      setForm(formularioDesde(actual, d.cuentas)); // S06: la versión actual, sin reintento automático\n",
+     "      return void guardar(); // reintento automatico\n", "js"),
+    ("U29", "mobile/src/domain/preferencias.ts",
+     "  if (f.cuenta !== null && typeof f.cuenta === 'object') r.push('CUENTA_NO_DISPONIBLE');\n", "", "js"),
+    ("U30", "mobile/src/domain/preferencias.ts",
+     "    return {\n      tipo_hecho_id: base.tipo_hecho_id,\n", "    return {\n      tipo_hecho_id: null,\n", "js"),
+    ("U31", "mobile/src/screens/PreferenciasAjustesScreen.tsx",
+     "                        propone={textosPropone(x, nombreCuenta).join(' · ')}\n                        noDisponible={x.cuenta_default_id !== null && cuentaNoDisponible(x)}\n",
+     "                        propone={textosPropone(x, nombreCuenta).join(' · ')}\n                        noDisponible={x.cuenta_default_id !== null && nombreCuenta(x.cuenta_default_id) === null}\n",
+     "js"),
+    ("U32", "mobile/src/screens/PreferenciasAjustesScreen.tsx",
+     "            esVisible={(n) => visibleEnRegistro(datos.arbol, n)}\n", "            esVisible={() => true}\n", "js"),
+    ("U33", "mobile/src/screens/PreferenciasAjustesScreen.tsx",
+     "p.cliente.altaPreferencia({ id: idAlta!, ...contenido })", "p.cliente.altaPreferencia({ id: p.nuevoId(), ...contenido })", "js"),
+    ("U34", "mobile/src/screens/PreferenciasAjustesScreen.tsx",
+     "        ? await p.cliente.desactivarPreferencia(x.id, x.row_version)\n", "        ? await p.cliente.desactivarPreferencia(x.id, 1)\n", "js"),
+    ("U35", "mobile/src/components/GuardarPreferencia.tsx",
+     "    intento.current = null;\n    setFase({ f: 'EDITANDO' });\n  };\n\n  const tras",
+     "    intento.current = null;\n    setFase({ f: 'ERROR' });\n  };\n\n  const tras", "js"),
 ]
 
 

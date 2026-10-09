@@ -4,7 +4,8 @@
 // Ruta: mobile/__tests__/preferencias_registro.test.tsx
 // Descripción: Preferencias de registro en «Nuevo gasto» (F05-02 B2; F05-D026 §41.3/§41.4, E1/E2/E3; F05-D027 §42.7; lámina SET-PREF / REG-PREF v0.1 R01–R07, D-PREF-02..06). Propuesta por campo con origen visible; lo explícito gana (un campo tocado no se recalcula al cambiar de categoría); sin fallback laxo del cliente (AJ-B1-09) y nunca una cuenta fuera de la lista (AJ-B1-11); el reintento del registro no vuelve a pedir la propuesta. «Guardar como preferencia»: oculta con «Sin categoría» y cuando no hay nada que recordar; alta con el UUID de la tarjeta (el reintento usa el MISMO); edición con el ESTADO COMPLETO (E05); conflicto R07 «Sustituir / Mantener»; VERSION_DESFASADA y empate → recarga y se vuelve a preguntar; fallo R06 sin afectar al hecho.
 // v0.2.0 (F05-02 B2-V): discriminante de M03 (E1 / REG-01): con la propuesta pendiente, fallida o rechazada, «¿Cuenta para el presupuesto?» no está preseleccionado y no se envía sin decisión explícita.
-// Versión: 0.2.0
+// v0.3.0 (F05-02 B3, AJ-B2-04): alta aditiva de la rama de D6 «tras VERSION_DESFASADA o un empate, al recargar ya no hay conflicto → se vuelve a la tarjeta», sin R07 y sin otra escritura.
+// Versión: 0.3.0
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
@@ -497,4 +498,42 @@ test('R07 con presupuesto: texto y «Mantener la actual»', async () => {
     'Ahora propone que cuenta para el presupuesto: No. ¿Quieres que proponga que cuenta para el presupuesto: Sí a partir de ahora?',
   );
   expect(within(screen.getByTestId('pref-mantener')).getByText('Mantener la actual')).toBeTruthy();
+});
+
+// ------------------------------------------------------------------ AJ-B2-04 (rama de D6 sin conflicto tras recargar)
+test.each([
+  ['VERSION_DESFASADA en la edición', 'EDITAR'],
+  ['PREFERENCIA_EMPATE_CONTRADICTORIO en el alta', 'ALTA'],
+] as const)('AJ-B2-04: %s y, al recargar, ya no hay conflicto → vuelve a la tarjeta, sin R07 y sin escribir', async (_caso, via) => {
+  // Antes: EDITAR → existe la de Supermercado sin cuenta (se editaría); ALTA → no existe ninguna (se daría de alta).
+  // Mientras tanto, otra sesión deja la de Supermercado proponiendo YA la cuenta elegida (Tarjeta): no hay conflicto.
+  let cambiada = false;
+  const inicial = via === 'EDITAR' ? [pref({ id: 'p-super', categoria_id: 'super', presupuestable_default: true, row_version: 1 })] : [];
+  const despues = [pref({ id: 'p-super', categoria_id: 'super', cuenta_default_id: TARJETA, presupuestable_default: true, row_version: 2 })];
+  const f = fake({
+    propuesta: () => prop(null, null),
+    prefs: () => (cambiada ? despues : inicial),
+    editar: async () => {
+      cambiada = true;
+      return { tipo: 'RECHAZADO', codigo: 'VERSION_DESFASADA', mensaje: '' };
+    },
+    alta: async () => {
+      cambiada = true;
+      return { tipo: 'RECHAZADO', codigo: 'PREFERENCIA_EMPATE_CONTRADICTORIO', mensaje: '', detalle: { preferencia_conflicto_id: 'p-super' } };
+    },
+  });
+  await registrarCon(f, { categoria: 'super', cuenta: TARJETA, presupuestable: true });
+  fireEvent.press(screen.getByTestId('pref-casilla-presupuestable')); // solo la cuenta
+  expect(seleccionada('pref-casilla-cuenta')).toBe(true);
+  expect(seleccionada('pref-casilla-presupuestable')).toBe(false);
+  await act(async () => fireEvent.press(screen.getByTestId('pref-guardar')));
+  await waitFor(() => expect(f.cliente.listarPreferencias).toHaveBeenCalledTimes(2)); // lectura previa + recarga tras el rechazo
+  expect(screen.getByTestId('pref-tarjeta')).toBeTruthy(); // vuelve a la tarjeta
+  expect(screen.queryByTestId('pref-conflicto')).toBeNull(); // sin R07
+  expect(screen.queryByTestId('pref-error')).toBeNull();
+  expect(screen.queryByTestId('pref-guardada')).toBeNull();
+  // Ninguna escritura más que la rechazada.
+  expect(f.cliente.editarPreferencia).toHaveBeenCalledTimes(via === 'EDITAR' ? 1 : 0);
+  expect(f.cliente.altaPreferencia).toHaveBeenCalledTimes(via === 'ALTA' ? 1 : 0);
+  expect(f.cliente.registrarGastoPagado).toHaveBeenCalledTimes(1);
 });

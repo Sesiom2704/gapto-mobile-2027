@@ -10,8 +10,15 @@
 #   *** EVIDENCIA WEB/VIEWPORT — NO EVIDENCIA iOS ***  (corroboracion de
 #   desarrollo, no certificacion de proveedor)
 #
-#   Escenario (datos sinteticos «P-<run_id>», creados por el propio E2E: dos
-#   cuentas EUR por SQL como gapto_owner y una categoria por la API publica):
+#   Datos con NOMBRES LEGIBLES (v0.3.0): cuentas «Tarjeta» y «Efectivo»
+#   (creadas por SQL como gapto_owner), categoria «Supermercado» (creada por la
+#   API publica, en la raiz) y concepto «Compra semanal». El id de ejecucion no aparece en ningun texto visible (solo en
+#   el manifest y en el nombre de las capturas). Exige una base dev local
+#   RECIEN RECREADA (bootstrap_dev_db --recrear): si ya existen las cuentas
+#   «Tarjeta» o «Efectivo», una categoria «Supermercado» o alguna
+#   preferencia, falla con un error claro (sin sufijos). Cada hecho se localiza en la BD por su UUID (hecho_id de la
+#   respuesta del registro), nunca por su concepto.
+#   Escenario:
 #     R01  formulario sin preferencia aplicable: varias cuentas, ninguna
 #          preseleccionada ni presupuesto preseleccionado;
 #     R05  gasto con la categoria, cuenta y presupuesto ELEGIDOS por el
@@ -30,13 +37,23 @@
 #          presupuesto cambiado a «No»: la tarjeta marca solo el presupuesto;
 #          «Guardar» abre la hoja con el texto de presupuesto y «Mantener la
 #          actual» -> «Mantener» no escribe (misma fila y row_version).
-#   Capturas 393x852 @3x (claro; R02, R07 y R07p tambien en oscuro) y manifest JSON.
+#     AJ  Ajustes › Preferencias (F05-02 B3, lamina S01/S02/S04): lista con
+#          la preferencia de Supermercado -> «Nueva preferencia» «Todos los
+#          gastos» con presupuesto «No» -> detalle -> «Desactivar» ->
+#          «Reactivar»; la BD sigue cada paso (enabled y row_version 1-2-3).
+#          S03 y S06 quedan cubiertos por Jest.
+#   Capturas 393x852 @3x (claro; R02, R07, R07p, lista, detalle y reactivada
+#   tambien en oscuro) y manifest JSON.
 #   Requiere (ya levantados): API en --api con CORS para --web, cliente web en
 #   --web (o --dist), GAPTO_DATABASE_URL (base LOCAL; preparacion y lectura),
 #   GAPTO_DEV_OWNER_USER_ID y GAPTO_DEV_TOKEN (nunca se imprime).
 # Version: 0.1.0 (F05-02 B2)
 #          0.2.0 (F05-02 B2-V paso 5): escenario R07p (texto R07 del presupuesto y
 #                «Mantener la actual», derivados) con captura clara y oscura.
+#          0.3.0 (F05-02 B3, decision de Moises 2026-10-08; F05-D028 §43.5):
+#                nombres legibles en lo visible, id de ejecucion fuera de los
+#                textos, base recreada exigida (error claro, sin sufijos), hechos
+#                por UUID y escenario AJ de Ajustes › Preferencias.
 # ============================================================
 
 from __future__ import annotations
@@ -129,13 +146,31 @@ def preferencias(dsn: str, owner: str) -> list[list[str]]:
     return [[str(x) for x in f] for f in filas]
 
 
-def hecho(dsn: str, owner: str, concepto: str) -> list[list[str]]:
+def hecho(dsn: str, owner: str, hecho_id: str) -> list[list[str]]:
+    """(presupuestable, cuenta) del hecho localizado por su UUID."""
     filas = _sql(dsn, owner, "gapto_runtime",
                  "SELECT h.presupuestable, m.cuenta_id FROM gapto.hechos_financieros h "
                  "JOIN gapto.hecho_movimientos_tesoreria hm ON hm.hecho_id = h.id "
-                 "JOIN gapto.movimientos_tesoreria m ON m.id = hm.movimiento_tesoreria_id WHERE h.concepto = %s",
-                 (concepto,))
+                 "JOIN gapto.movimientos_tesoreria m ON m.id = hm.movimiento_tesoreria_id WHERE h.id = %s",
+                 (hecho_id,))
     return [[str(x) for x in f] for f in filas]
+
+
+TARJETA, EFECTIVO, CATEGORIA, CONCEPTO = "Tarjeta", "Efectivo", "Supermercado", "Compra semanal"
+
+
+def exigir_base_recreada(dsn: str, owner: str) -> None:
+    """Error claro si la base no esta recien recreada (los nombres legibles ya existen)."""
+    ya = _sql(dsn, owner, "gapto_runtime", "SELECT nombre FROM gapto.cuentas WHERE nombre IN (%s, %s) ORDER BY nombre",
+              (TARJETA, EFECTIVO))
+    if ya:
+        raise SystemExit(f"FALLO: la base dev ya tiene la(s) cuenta(s) {[f[0] for f in ya]}. Recreala con "
+                         "scripts/dev/bootstrap_dev_db.py --recrear antes del E2E (no se usan sufijos).")
+    if _sql(dsn, owner, "gapto_runtime", "SELECT 1 FROM gapto.preferencias_registro LIMIT 1"):
+        raise SystemExit("FALLO: la base dev ya tiene preferencias. Recreala con bootstrap_dev_db.py --recrear.")
+    if _sql(dsn, owner, "gapto_runtime", "SELECT 1 FROM gapto.categorias_financieras WHERE nombre = %s", (CATEGORIA,)):
+        raise SystemExit(f"FALLO: la base dev ya tiene una categoria «{CATEGORIA}». Recreala con "
+                         "bootstrap_dev_db.py --recrear (no se usan sufijos).")
 
 
 def comprobar(cond: bool, mensaje: str) -> None:
@@ -156,14 +191,16 @@ def main() -> None:
     salida = pathlib.Path(a.salida)
     salida.mkdir(parents=True, exist_ok=True)
 
-    # Preparacion: dos cuentas EUR mas (con la del seed, varias elegibles) y una categoria.
-    tarjeta = crear_cuenta(dsn, owner, f"Tarjeta P-{run[-6:]}")
-    efectivo = crear_cuenta(dsn, owner, f"Efectivo P-{run[-6:]}")
-    nombre_cat = f"Super P-{run[-6:]}"
+    # Preparacion: base recien recreada; dos cuentas EUR mas (con la del seed, varias elegibles).
+    exigir_base_recreada(dsn, owner)
+    tarjeta = crear_cuenta(dsn, owner, TARJETA)
+    efectivo = crear_cuenta(dsn, owner, EFECTIVO)
+    nombre_cat = CATEGORIA
     cid = str(uuid.uuid4())
     api(a.api, "POST", "/v1/categorias", {"id": cid, "nombre": nombre_cat, "parent_id": None, "ambito": "GASTO",
-                                          "presupuestable_default": True, "icon_key": None})
-    previas = preferencias(dsn, owner)
+                                          "presupuestable_default": True, "icon_key": "compras.carrito"})
+    previas = preferencias(dsn, owner)  # vacia (exigido)
+    hechos: dict[str, str] = {}
     capturas: list[str] = []
     res: dict = {}
 
@@ -187,12 +224,20 @@ def main() -> None:
             t(f"cuenta-{tarjeta}").wait_for()
             page.wait_for_timeout(600)
 
-        def basicos(concepto: str):
+        def basicos():
             t("campo-importe").fill("42,18")
-            t("campo-concepto").fill(concepto)
+            t("campo-concepto").fill(CONCEPTO)
             t("campo-categoria").click()
             t(f"cat-{cid}").click()
             page.wait_for_timeout(800)
+
+        def registrar(paso: str):
+            """Pulsa «Registrar gasto» y guarda el UUID del hecho (respuesta del adaptador)."""
+            with page.expect_response(lambda r: r.url.endswith("/v1/intenciones/gasto-pagado")
+                                      and r.request.method == "POST", timeout=15000) as resp:
+                t("registrar").click()
+            hechos[paso] = resp.value.json()["hecho_id"]
+            t("registro-exito").wait_for(timeout=15000)
 
         def marcado(testid: str) -> str | None:
             """Estado visible: aria-checked (casillas) o, en chips y segmentos de Basicos (react-native-web
@@ -212,13 +257,12 @@ def main() -> None:
                       "origen_cuenta": t("origen-cuenta").count(), "presupuesto_si": marcado("presupuestable-true")}
         comprobar(not res["r01"]["cuentas_marcadas"] and res["r01"]["origen_cuenta"] == 0, "R01 con preseleccion")
         shot(page, "01_R01_sin_propuesta")
-        basicos(f"PrefA-{run}")
+        basicos()
         t(f"cuenta-{tarjeta}").click()
         t("presupuestable-true").click()
         res["r05_origen_cuenta"] = t("origen-cuenta").inner_text()
         comprobar(res["r05_origen_cuenta"] == "Elegida por ti.", "origen de la cuenta elegida")
-        t("registrar").click()
-        t("registro-exito").wait_for(timeout=15000)
+        registrar("A")
         t("pref-tarjeta").wait_for()
         res["r05"] = {"titulo_visible": page.get_by_text(f"¿Recordarlo para {nombre_cat}?").count(),
                       "casilla_cuenta": marcado("pref-casilla-cuenta"),
@@ -238,7 +282,7 @@ def main() -> None:
 
         # ---------------------------------------------------- R02
         abrir_formulario()
-        basicos(f"PrefB-{run}")
+        basicos()
         t("origen-cuenta").wait_for()
         res["r02"] = {"cuenta_marcada": marcado(f"cuenta-{tarjeta}"), "origen_cuenta": t("origen-cuenta").inner_text(),
                       "presupuesto_si": marcado("presupuestable-true"),
@@ -253,32 +297,30 @@ def main() -> None:
         page.wait_for_timeout(400)
         shot(page, "05_R02_propuesta_dark")
         page.emulate_media(color_scheme="light")
-        t("registrar").click()
-        t("registro-exito").wait_for(timeout=15000)
+        registrar("B")
         res["r02_tarjeta_tras_registro"] = t("pref-tarjeta").count()  # nada que recordar: oculta
         comprobar(res["r02_tarjeta_tras_registro"] == 0, "tarjeta visible sin nada que recordar")
-        res["bd_hecho_r02"] = hecho(dsn, owner, f"PrefB-{run}")
+        res["bd_hecho_r02"] = hecho(dsn, owner, hechos["B"])
         comprobar(res["bd_hecho_r02"] == [["True", tarjeta]], f"R02 sellado {res['bd_hecho_r02']}")
         t("volver-inicio").click()
 
         # ---------------------------------------------------- R03 + R07
         abrir_formulario()
-        basicos(f"PrefC-{run}")
+        basicos()
         t("origen-cuenta").wait_for()
         t(f"cuenta-{efectivo}").click()
         res["r03_origen_cuenta"] = t("origen-cuenta").inner_text()
         comprobar(res["r03_origen_cuenta"] == "Elegida por ti.", "R03 cuenta elegida")
         shot(page, "06_R03_elegida")
-        t("registrar").click()
-        t("registro-exito").wait_for(timeout=15000)
+        registrar("C")
         t("pref-tarjeta").wait_for()
         res["r07_casillas"] = [marcado("pref-casilla-cuenta"), marcado("pref-casilla-presupuestable")]
         comprobar(res["r07_casillas"] == ["true", "false"], f"casillas R07 {res['r07_casillas']}")
         t("pref-guardar").click()
         t("pref-conflicto").wait_for(timeout=15000)
         res["r07_texto"] = t("pref-conflicto-texto").inner_text()
-        comprobar(res["r07_texto"] == f"Ahora propone pagar con Tarjeta P-{run[-6:]}. ¿Quieres que proponga "
-                                      f"Efectivo P-{run[-6:]} a partir de ahora?", f"texto R07 {res['r07_texto']}")
+        comprobar(res["r07_texto"] == f"Ahora propone pagar con {TARJETA}. ¿Quieres que proponga "
+                                      f"{EFECTIVO} a partir de ahora?", f"texto R07 {res['r07_texto']}")
         shot(page, "07_R07_conflicto")
         page.emulate_media(color_scheme="dark")
         page.wait_for_timeout(400)
@@ -292,11 +334,10 @@ def main() -> None:
 
         # ---------------------------------------------------- R07 de presupuesto (DERIVADO, no presente en la lamina)
         abrir_formulario()
-        basicos(f"PrefD-{run}")
+        basicos()
         t("origen-presupuestable").wait_for()
         t("presupuestable-false").click()
-        t("registrar").click()
-        t("registro-exito").wait_for(timeout=15000)
+        registrar("D")
         t("pref-tarjeta").wait_for()
         res["r07p_casillas"] = [marcado("pref-casilla-cuenta"), marcado("pref-casilla-presupuestable")]
         comprobar(res["r07p_casillas"] == ["false", "true"], f"casillas R07 presupuesto {res['r07p_casillas']}")
@@ -315,19 +356,74 @@ def main() -> None:
         t("pref-mantener").click()
         t("pref-conflicto").wait_for(state="detached", timeout=15000)
         shot(page, "12_R07_presupuesto_mantenida")
+        t("volver-inicio").click()
+
+        # ---------------------------------------------------- AJ: Ajustes › Preferencias (S01, S02, S04)
+        def oscuro(nombre: str):
+            page.emulate_media(color_scheme="dark")
+            page.wait_for_timeout(400)
+            shot(page, nombre)
+            page.emulate_media(color_scheme="light")
+            page.wait_for_timeout(200)
+
+        t("tab-MAS").click()
+        t("mas-ajustes").click()
+        t("ajustes-preferencias").click()
+        t(f"ajpref-fila-{pid}").wait_for(timeout=15000)
+        res["aj_lista"] = {"titulo": t(f"ajpref-fila-{pid}-titulo").inner_text(),
+                           "propone": t(f"ajpref-fila-{pid}-propone").inner_text()}
+        comprobar(res["aj_lista"] == {"titulo": CATEGORIA,
+                                      "propone": f"Pagar con {EFECTIVO} · Presupuesto: Sí"}, f"AJ lista {res['aj_lista']}")
+        shot(page, "13_AJ_S01_lista")
+        oscuro("14_AJ_S01_lista_dark")
+        t("ajpref-nueva").click()
+        t("ajpref-form").wait_for()
+        t("ajpref-ambito-GENERAL").click()
+        t("ajpref-presu-false").click()
+        shot(page, "15_AJ_S02_nueva")
+        t("ajpref-guardar").click()
+        t("ajpref-detalle").wait_for(timeout=15000)
+        res["aj_detalle"] = {k: t(f"ajpref-det-{k}-valor").inner_text() for k in ("ambito", "cuenta", "presupuesto")}
+        comprobar(res["aj_detalle"] == {"ambito": "Todos los gastos", "cuenta": "No propone", "presupuesto": "No"},
+                  f"AJ detalle {res['aj_detalle']}")
+        general = [p for p in preferencias(dsn, owner) if p[0] != pid]
+        res["bd_aj_alta"] = general
+        comprobar(len(general) == 1 and general[0][1:] == ["None", "False", "True", "1"], f"AJ alta en BD {general}")
+        gid = general[0][0]
+        shot(page, "16_AJ_S04_detalle")
+        oscuro("17_AJ_S04_detalle_dark")
+        t("ajpref-desactivar").click()
+        t("ajpref-aviso-ok").wait_for(timeout=15000)
+        res["aj_desactivada"] = t("ajpref-aviso-ok").inner_text()
+        comprobar(res["aj_desactivada"].startswith("Desactivada: deja de proponerse."), f"AJ desactivar {res['aj_desactivada']}")
+        res["bd_aj_desactivada"] = [p for p in preferencias(dsn, owner) if p[0] == gid]
+        comprobar(res["bd_aj_desactivada"] == [[gid, "None", "False", "False", "2"]],
+                  f"AJ desactivar BD {res['bd_aj_desactivada']}")
+        shot(page, "18_AJ_S04_desactivada")
+        t("ajpref-reactivar").click()
+        page.get_by_text("Reactivada: vuelve a proponerse.").wait_for(timeout=15000)
+        res["aj_reactivada"] = t("ajpref-aviso-ok").inner_text()
+        res["bd_aj_reactivada"] = [p for p in preferencias(dsn, owner) if p[0] == gid]
+        comprobar(res["bd_aj_reactivada"] == [[gid, "None", "False", "True", "3"]],
+                  f"AJ reactivar BD {res['bd_aj_reactivada']}")
+        shot(page, "19_AJ_S04_reactivada_DERIVADO")
+        oscuro("20_AJ_S04_reactivada_DERIVADO_dark")
+        t("ajpref-detalle-atras").click()
+        t("ajpref-grupo-todos").wait_for()
+        shot(page, "21_AJ_S01_lista_final")
         nav.close()
 
-    finales = [p for p in preferencias(dsn, owner) if p not in previas or p[0] == pid]
+    finales = [p for p in preferencias(dsn, owner) if p[0] == pid]
     comprobar(res["bd_tras_sustituir"] == [[pid, efectivo, "True", "True", "2"]], f"sustituir en BD {res['bd_tras_sustituir']}")
     res["bd_tras_mantener"] = finales  # «Mantener» no escribe: misma fila y misma row_version
     comprobar(finales == res["bd_tras_sustituir"], f"mantener en BD {finales}")
-    res["bd_hecho_r07"] = hecho(dsn, owner, f"PrefC-{run}")
+    res["bd_hecho_r07"] = hecho(dsn, owner, hechos["C"])
     comprobar(res["bd_hecho_r07"] == [["True", efectivo]], f"R07 hecho {res['bd_hecho_r07']}")
-    res["bd_hecho_r07p"] = hecho(dsn, owner, f"PrefD-{run}")
+    res["bd_hecho_r07p"] = hecho(dsn, owner, hechos["D"])
     comprobar(res["bd_hecho_r07p"] == [["False", efectivo]], f"R07p hecho {res['bd_hecho_r07p']}")
     comprobar(not consola, f"errores de consola: {consola}")
     manifest = {"etiqueta": ETIQUETA, "run_id": run, "categoria": nombre_cat, "cuentas": {"tarjeta": tarjeta,
-                "efectivo": efectivo}, "resultados": res, "errores_consola": consola, "capturas": capturas}
+                "efectivo": efectivo}, "hechos": hechos, "resultados": res, "errores_consola": consola, "capturas": capturas}
     (salida / f"PREF_{run}_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
     print("RESULTADO: PASS")
