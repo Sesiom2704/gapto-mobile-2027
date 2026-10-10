@@ -17,7 +17,17 @@
 #   FALLA. Preflight: --head debe dar PASS (rc 0).
 #
 #   Uso: python scripts/dev/mutantes_cierre_f05_02.py --base <merge-base> [--head HEAD]
+#          [--rutas-prohibidas ...] [--writers-terceros-autorizados ...]
+#          [--funciones-enmendadas ...]
 # Version: 0.1.0 (F05-02 B4, AJ-B2-03)
+# Version: 0.2.0 (F05-03/F05-04 J2 §1.10): parametrizado por bloque. Las
+#   rutas prohibidas y los dos parametros declarados del script 0.2.0 se
+#   pasan tal cual al script (por defecto, los de B3+B4). MC2b localiza la
+#   linea `# Version:` vigente del inventario (no una version fija) y MC5
+#   modifica el primer fichero existente bajo la primera ruta prohibida. MC1
+#   anade el writer en un fichero NO autorizado. Mismos 8 mutantes; ninguno
+#   se relaja: los parametros declarados nunca cubren el fichero o la
+#   funcion que muta cada uno.
 # ============================================================
 
 from __future__ import annotations
@@ -68,11 +78,30 @@ def commit_desechable(head: str, mid: str, cambios: dict[str, str]) -> str:
     return git("commit-tree", arbol, "-p", head, "-m", f"MUTANTE {mid} (desechable, no se publica)").strip()
 
 
-def mutantes(head: str) -> list[tuple[str, str, str, dict[str, str]]]:
+def _version(t154: str) -> str:
+    import re
+
+    lineas = re.findall(r"^# Version: [^\n]*\n", t154, flags=re.MULTILINE)
+    if len(lineas) != 1:
+        raise RuntimeError(f"el inventario debe tener UNA linea # Version: ({len(lineas)})")
+    return lineas[0]
+
+
+def _prohibido(head: str, rutas: str) -> str:
+    primera = rutas.split(",")[0].strip()
+    if not primera.endswith("/"):
+        return primera
+    ficheros = git("ls-tree", "-r", "--name-only", head, "--", primera).split("\n")
+    return next(f for f in ficheros if f and not f.endswith(".sql")) if not primera.startswith("migrations") \
+        else next(f for f in ficheros if f)
+
+
+def mutantes(head: str, rutas: str = "") -> list[tuple[str, str, str, dict[str, str]]]:
     """(id, condicion objetivo, descripcion, cambios)."""
     t154 = leer(head, T154)
     lect = leer(head, "backend/app/api/lecturas_vs01.py")
-    resolver = leer(head, "backend/app/preferencias/resolver.py")
+    prohibido = _prohibido(head, (rutas or RUTAS_B3B4).replace("migrations/,", ""))
+    resolver = leer(head, prohibido)
     return [
         ("MC1", "C1", "writer de terceros anadido en backend/ (fuera de las rutas prohibidas)",
          # El literal se parte para que este arnes no sea, el mismo, un falso positivo de C1.
@@ -80,7 +109,7 @@ def mutantes(head: str) -> list[tuple[str, str, str, dict[str, str]]]:
         ("MC2a", "C2", "linea de comentario retirada del inventario (no es la de version)",
          {T154: una_vez(t154, "#: Herramientas de test dentro de scripts/dev que NO se ejecutan en runtime y\n", "")}),
         ("MC2b", "C2", "linea # Version: retirada sin sustituta",
-         {T154: una_vez(t154, "# Version: 0.11.0\n", "")}),
+         {T154: una_vez(t154, _version(t154), "")}),
         ("MC2c", "C2", "funcion previa modificada SOLO por adicion de una linea",
          {T154: una_vez(t154, "def test_i7_cliente_movil_sin_menciones_sin_registrar():\n",
                         "def test_i7_cliente_movil_sin_menciones_sin_registrar():\n    assert True\n")}),
@@ -93,14 +122,14 @@ def mutantes(head: str) -> list[tuple[str, str, str, dict[str, str]]]:
                         "def test_i13_c_orden_autoritativo_de_la_api_sin_reordenacion_en_el_cliente():\n    return\n")}),
         ("MC4", "C4", "migration nueva (DDL)",
          {"migrations/9999_mutante_cierre.sql": "-- mutante desechable: no se aplica ni se publica\nSELECT 1;\n"}),
-        ("MC5", "C5", "fichero prohibido exacto modificado (preferencias/resolver.py)",
-         {"backend/app/preferencias/resolver.py": resolver + "# mutante desechable\n"}),
+        ("MC5", "C5", f"fichero prohibido modificado ({prohibido})",
+         {prohibido: resolver + "# mutante desechable\n"}),
     ]
 
 
-def ejecutar(base: str, head: str) -> tuple[int, str]:
+def ejecutar(base: str, head: str, extra: tuple[str, ...] = ("--rutas-prohibidas", RUTAS_B3B4)) -> tuple[int, str]:
     r = subprocess.run(
-        [sys.executable, str(SCRIPT), "--base", base, "--head", head, "--rutas-prohibidas", RUTAS_B3B4],
+        [sys.executable, str(SCRIPT), "--base", base, "--head", head, *extra],
         cwd=RAIZ, capture_output=True, text=True, encoding="utf-8",
     )
     return r.returncode, r.stdout + r.stderr
@@ -110,20 +139,25 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Pruebas negativas del script de cierre F05-02")
     ap.add_argument("--base", required=True)
     ap.add_argument("--head", default="HEAD")
+    ap.add_argument("--rutas-prohibidas", default=RUTAS_B3B4)
+    ap.add_argument("--writers-terceros-autorizados", default="")
+    ap.add_argument("--funciones-enmendadas", default="")
     a = ap.parse_args()
+    extra = ("--rutas-prohibidas", a.rutas_prohibidas, "--writers-terceros-autorizados",
+             a.writers_terceros_autorizados, "--funciones-enmendadas", a.funciones_enmendadas)
     base = git("rev-parse", "--verify", f"{a.base}^{{commit}}").strip()
     head = git("rev-parse", "--verify", f"{a.head}^{{commit}}").strip()
     print(f"base {base}\nhead {head}")
-    rc, salida = ejecutar(base, head)
+    rc, salida = ejecutar(base, head, extra)
     print(f"PREFLIGHT head: rc={rc}")
     if rc != 0:
         print(salida)
         print("PREFLIGHT ROJO: no se muta nada.")
         return 1
     veredictos = []
-    for mid, cond, desc, cambios in mutantes(head):
+    for mid, cond, desc, cambios in mutantes(head, a.rutas_prohibidas):
         commit = commit_desechable(head, mid, cambios)
-        rc, salida = ejecutar(base, commit)
+        rc, salida = ejecutar(base, commit, extra)
         falla = any(l.startswith(f"FALLA {cond} ") for l in salida.splitlines())
         v = "MUERTO" if rc == 1 and falla else "VIVO"
         veredictos.append((mid, v))

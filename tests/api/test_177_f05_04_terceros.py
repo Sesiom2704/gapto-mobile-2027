@@ -219,3 +219,17 @@ def test_longitud_del_nombre_es_regla_de_dominio_sin_intentar_escribir():
     assert r == servicio.Rechazo("ENTRADA_INVALIDA")
     assert isinstance(fh.en_transaccion(owner, lambda s: servicio.alta(s, tercero_id=uuid.uuid4(),
                                                                       nombre="x" * 160)), servicio.Resultado)
+
+
+def test_preferencia_con_tercero_desactivado_avisa_en_la_lista(t):
+    """A7: desactivar el tercero no escribe la preferencia; la lista la marca
+    `tercero_disponible=False` (Ajustes avisa) y el registro no admite ese tercero."""
+    owner, actor, cli = t
+    cuenta = ph.cuenta(owner, actor)
+    tid, _ = alta(cli, nombre="Proveedor")
+    pid, _ = ph.alta(cli, tercero_id=tid, cuenta_default_id=cuenta)
+    lista = {p["id"]: p for p in cli.get(ph.BASE, headers=h.AUTH).json()["preferencias"]}
+    assert lista[str(pid)]["tercero_disponible"] is True
+    assert cli.post(f"{BASE}/{tid}/desactivar", json={"row_version": 1}, headers=h.AUTH).status_code == 200
+    lista = {p["id"]: p for p in cli.get(ph.BASE, headers=h.AUTH).json()["preferencias"]}
+    assert lista[str(pid)]["tercero_disponible"] is False and lista[str(pid)]["row_version"] == 1

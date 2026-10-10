@@ -34,6 +34,18 @@
 #          [--inventario tests/api/test_154_f05_01_inventario_categorias.py]
 #   Pruebas negativas: scripts/dev/mutantes_cierre_f05_02.py.
 # Version: 0.1.0 (F05-02 B4, AJ-B2-03)
+# Version: 0.2.0 (F05-03/F05-04 J2 §1.10; F05 §45.4 R3 «el script de cierre
+#   generalizado declara las rutas de F05-03»; §46.3 A7): dos parametros
+#   OPCIONALES y explicitos, que el informe imprime siempre:
+#     --writers-terceros-autorizados  ficheros cuyo diff PUEDE anadir writers
+#        de terceros (C1): el writer unico de A7 (backend/app/terceros/
+#        repositorio.py) y los arneses de mutacion (texto); cualquier otro
+#        fichero sigue fallando;
+#     --funciones-enmendadas  funciones del inventario cuya modificacion se
+#        declara (C2 b): se listan como ENMENDADA y no fallan; cualquier otra
+#        funcion modificada o retirada sigue fallando. Las lineas retiradas
+#        dentro de esas funciones tampoco fallan (C2 a).
+#   Sin estos parametros el comportamiento es identico a 0.1.0.
 # ============================================================
 
 from __future__ import annotations
@@ -93,13 +105,15 @@ def linea_fin_cabecera(texto: str) -> int:
 
 
 # ------------------------------------------------------------------ condiciones
-def c1_sin_writer_de_terceros(base: str, head: str, _a: argparse.Namespace) -> list[str]:
+def c1_sin_writer_de_terceros(base: str, head: str, a: argparse.Namespace) -> list[str]:
     diff = git("diff", base, head, "--", "backend", "scripts")
+    autorizados = set(getattr(a, "writers_terceros", ()))
     fallos, fichero = [], None
     for linea in diff.splitlines():
         if linea.startswith("+++ "):
             fichero = linea[6:] if linea.startswith("+++ b/") else None
-        elif linea.startswith("+") and fichero != ESTE and ESCRITURA_TERCEROS.search(linea[1:]):
+        elif (linea.startswith("+") and fichero != ESTE and fichero not in autorizados
+              and ESCRITURA_TERCEROS.search(linea[1:])):
             fallos.append(f"{fichero}: {linea[1:].strip()}")
     return fallos
 
@@ -128,15 +142,22 @@ def c2_inventario_solo_aditivo(base: str, head: str, a: argparse.Namespace) -> l
         elif linea.startswith("+") and not linea.startswith("+++"):
             puestas.append(linea[1:])
     version = [(n, l) for n, l in quitadas if LINEA_VERSION.match(l) and n < fin]
+    enmendadas = set(getattr(a, "enmendadas", ()))
+    rangos = [(nodo.lineno, nodo.end_lineno) for nodo in ast.parse(antes).body
+              if isinstance(nodo, (ast.FunctionDef, ast.AsyncFunctionDef)) and nodo.name in enmendadas]
     for n, l in quitadas:
-        if (n, l) not in version[:1]:
+        if (n, l) not in version[:1] and not any(i <= n <= j for i, j in rangos):
             fallos.append(f"linea {n} retirada no autorizada: {l.strip()}")
     if version and not any(LINEA_VERSION.match(l) for l in puestas):
         fallos.append(f"linea de version retirada sin su sustituta: {version[0][1].strip()}")
     # (b) Ninguna funcion previa cambia (AST).
     f_antes, f_despues = funciones(antes), funciones(despues)
     fallos += [f"funcion retirada: {n}" for n in sorted(set(f_antes) - set(f_despues))]
-    fallos += [f"funcion modificada: {n}" for n in sorted(f_antes) if n in f_despues and f_antes[n] != f_despues[n]]
+    fallos += [f"funcion modificada: {n}" for n in sorted(f_antes)
+               if n in f_despues and f_antes[n] != f_despues[n] and n not in enmendadas]
+    for n in sorted(enmendadas):
+        if n in f_antes and n in f_despues and f_antes[n] != f_despues[n]:
+            print(f"      ENMENDADA (declarada): {n}")
     # (c) Ninguna clave previa de un diccionario de modulo cambia ni se redefine.
     d_antes, d_despues = diccionarios(antes), diccionarios(despues)
     for nombre, pares in d_antes.items():
@@ -192,7 +213,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--head", required=True, help="HEAD final del bloque")
     ap.add_argument("--rutas-prohibidas", required=True, help="lista separada por comas (dir/ o fichero)")
     ap.add_argument("--inventario", default=T154, help="fichero cuyo diff debe ser solo aditivo")
+    ap.add_argument("--writers-terceros-autorizados", default="", help="ficheros (comas) que pueden anadir writers de terceros")
+    ap.add_argument("--funciones-enmendadas", default="", help="funciones del inventario cuya modificacion se declara")
     a = ap.parse_args(argv)
+    a.writers_terceros = tuple(x.strip() for x in a.writers_terceros_autorizados.split(",") if x.strip())
+    a.enmendadas = tuple(x.strip() for x in a.funciones_enmendadas.split(",") if x.strip())
     a.rutas = tuple(r.strip() for r in a.rutas_prohibidas.split(",") if r.strip())
     if not a.rutas:
         print("ERROR: --rutas-prohibidas vacia")
@@ -211,6 +236,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"head {head}")
     print(f"inventario {a.inventario}")
     print(f"rutas prohibidas {','.join(a.rutas)}")
+    print(f"writers de terceros autorizados {','.join(a.writers_terceros) or '(ninguno)'}")
+    print(f"funciones enmendadas declaradas {','.join(a.enmendadas) or '(ninguna)'}")
     rc = 0
     for nombre, fn in COMPROBACIONES:
         fallos = fn(base, head, a)

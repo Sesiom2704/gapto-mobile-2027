@@ -206,7 +206,9 @@
 #     ambito) y como capa de la propuesta del registro (lectura; la categoria
 #     EXPLICITA pasa por la guarda C-a con FOR SHARE, como §43.4). No consume
 #     hecho_efectos.categoria_id ni escribe el catalogo.
-#   - backend/app/plantillas/ entra en FRONTERA (I3 admite PLANTILLA).
+#   - backend/app/plantillas/ tiene su comprobacion I3 propia (aditiva):
+#     solo clases R, GUARDA, A_FRONTERA o PLANTILLA y sin servicios del motor
+#     con caminos A/B/P (test_i3_plantillas_frontera).
 #   - EXCLUIDOS: el arnes mutantes_f05_j2j3.py (los mutantes son texto).
 #
 #   v0.13.0 (F05-03/F05-04 J2 §1.7; F05 §46.3 A3, A12): SOLO altas. El
@@ -216,7 +218,14 @@
 #   componer (componer_ingreso, A_FRONTERA con un unico llamador). Se anaden
 #   sus entradas al REGISTRO, el llamante a la lista cerrada de C07 y una
 #   comprobacion I4 propia del ingreso. Las reglas I1..I13 no cambian.
-# Version: 0.13.0
+#
+#   v0.14.0 (F05-03 J2 §1.8/§1.10; F05 §45.4 R5): SOLO altas. El comando de
+#   onboarding (backend/app/categorias/onboarding) crea el arbol con los
+#   writers de C06 (servicio.alta y servicio.reordenar; clase CATALOGO) y
+#   toma el advisory con servicio.tomar_advisory_del_catalogo (el recuento
+#   de cero categorias se hace bajo el advisory): no importa el repositorio
+#   (I8 intacta); comprobacion propia test_i8_onboarding_solo_comandos_de_c06.
+# Version: 0.14.0
 # ============================================================
 
 from __future__ import annotations
@@ -233,8 +242,7 @@ if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
 APP = BACKEND / "app"
-FRONTERA = ("backend/app/api/", "backend/app/categorias/", "backend/app/magnitudes/", "backend/app/preferencias/",
-            "backend/app/plantillas/")
+FRONTERA = ("backend/app/api/", "backend/app/categorias/", "backend/app/magnitudes/", "backend/app/preferencias/")
 TOKEN = "categoria_id"
 
 # ------------------------------------------------------------------ registro
@@ -314,7 +322,7 @@ REGISTRO: dict[tuple[str, str], tuple[str, str, str]] = {
     **{("backend/app/preferencias/servicio.py", n): ("PREFERENCIA", f"F05-02 {n}", "writer de preferencias bajo advisory")
        for n in ("<modulo>", "_categoria_elegible", "_validar_valores", "_valores", "alta", "editar")},
     # --- F05-03 J2 §1.6 (PLANTILLA): plantillas de registro y capa plantilla de la propuesta
-    **{("backend/app/api/app.py", f"create_app.{n}"): ("PLANTILLA", "ruta F05-03", "parametro de la ruta de plantillas")
+    **{("backend/app/api/app.py", f"create_app.{n}"): ("R", "ruta F05-03", "parametro de la ruta de plantillas")
        for n in ("alta_plantilla", "editar_plantilla", "propuesta_registro")},
     **{("backend/app/api/dto_plantillas.py", n): ("R", "DTO F05-03", "declaracion de campo de plantilla")
        for n in ("_ContenidoPlantilla", "PlantillaNodo")},
@@ -328,6 +336,9 @@ REGISTRO: dict[tuple[str, str], tuple[str, str, str]] = {
         "PLANTILLA", "lista de plantillas", "aviso de categoria no elegible hoy; solo lectura"),
     ("backend/app/plantillas/propuesta.py", "propuesta_registro"): (
         "PLANTILLA", "GET /v1/registro/propuesta", "capa plantilla; categoria explicita por la guarda C-a (lectura)"),
+    # --- F05-03 J2 §1.8: onboarding de categorias sugeridas (writers de C06)
+    ("backend/app/categorias/onboarding/__init__.py", "onboarding_categorias"): (
+        "CATALOGO", "F05-03 onboarding", "alta y reordenar de C06 bajo el advisory CATEGORIAS; sin escritor propio"),
     # --- F05-04 J2 §1.7: registro de INGRESO (C-14 via OP-22)
     ("backend/app/api/dto_registro.py", "IntencionIngresoCobrado.categoria_id"): (
         "R", "DTO F05-04", "lectura derivada del estado categorial sellado"),
@@ -386,7 +397,9 @@ REGISTRO: dict[tuple[str, str], tuple[str, str, str]] = {
     ("backend/app/repositories/previsiones_repository.py", "<modulo>"): ("R", "tipos SQL", "mapa de columnas"),
 }
 
-CLASES = {"A_FRONTERA", "GUARDA", "A_MOTOR", "B", "P", "R", "CATALOGO", "SEED_DEV", "PREFERENCIA", "PLANTILLA"}
+CLASES = {"A_FRONTERA", "GUARDA", "A_MOTOR", "B", "P", "R", "CATALOGO", "SEED_DEV", "PREFERENCIA"}
+#: v0.12.0 (J2 §1.6): alta aditiva de la clase PLANTILLA.
+CLASES = CLASES | {"PLANTILLA"}
 
 #: Servicios del motor que la frontera NO puede referenciar (I3): tienen
 #: caminos A_MOTOR, B o P con categoria. OP-22 es la unica puerta.
@@ -515,7 +528,7 @@ def test_i2_clases_validas_y_justificadas():
 def test_i3_frontera_solo_r_guarda_o_a_frontera():
     for (ruta, qual), (clase, _, _) in REGISTRO.items():
         if ruta.startswith(FRONTERA):
-            assert clase in {"R", "GUARDA", "A_FRONTERA", "CATALOGO", "PREFERENCIA", "PLANTILLA"}, (ruta, qual, clase)
+            assert clase in {"R", "GUARDA", "A_FRONTERA", "CATALOGO", "PREFERENCIA"}, (ruta, qual, clase)
 
 
 def test_i3_frontera_no_referencia_servicios_con_caminos_a_b_o_p():
@@ -829,6 +842,19 @@ def test_i8_primitivas_de_escritura_solo_desde_el_servicio():
 
 
 SERVICIO_MAG = "backend/app/magnitudes/servicio.py"
+ONBOARDING = "backend/app/categorias/onboarding/__init__.py"
+
+
+def test_i8_onboarding_solo_comandos_de_c06():
+    """J2 §1.8: el onboarding no importa categorias/repositorio.py; toma el
+    advisory con el helper de servicio.py y escribe solo con alta y
+    reordenar (sin camino de escritura propio)."""
+    arbol = ast.parse((RAIZ / ONBOARDING).read_bytes().decode("utf-8"))
+    comandos = {c.attr for c in ast.walk(arbol) if isinstance(c, ast.Attribute)
+                and isinstance(c.value, ast.Name) and c.value.id == "serv_cat"}
+    assert comandos <= {"alta", "reordenar", "tomar_advisory_del_catalogo", "Rechazo"}, comandos
+    texto = (RAIZ / ONBOARDING).read_bytes().decode("utf-8")
+    assert not re.search(r"\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\b", texto)
 PRIMITIVAS_ESCRITURA_MAG = {"insertar_magnitud", "actualizar_magnitud", "insertar_asociacion",
                             "actualizar_asociacion", "eliminar_asociacion"}
 COMANDOS_MAG = ("asociar", "cambiar_obligatoria", "retirar", "reordenar", "renombrar", "deshabilitar", "rehabilitar")
@@ -1252,3 +1278,19 @@ def test_i13_e_barrido_textual_corroborante():
     for ruta in CAMINO_CATEGORIAL:
         codigo = [linea for linea in _texto(ruta).splitlines() if not linea.lstrip().startswith(("//", "*", "/*"))]
         assert not [linea for linea in codigo if _PROPUESTA_TEXTUAL.search(linea)], ruta
+
+
+# ------------------------------------------------------------------ I3 de plantillas (J2 §1.6, aditivo)
+def test_i3_plantillas_frontera():
+    """backend/app/plantillas/: solo clases R, GUARDA, A_FRONTERA o PLANTILLA
+    y sin referencias a servicios del motor con caminos A/B/P."""
+    for (ruta, qual), (clase, _, _) in REGISTRO.items():
+        if ruta.startswith("backend/app/plantillas/"):
+            assert clase in {"R", "GUARDA", "A_FRONTERA", "PLANTILLA"}, (ruta, qual, clase)
+    for p in sorted((APP / "plantillas").rglob("*.py")):
+        arbol = ast.parse(p.read_bytes().decode("utf-8"))
+        nombres = {n.id for n in ast.walk(arbol) if isinstance(n, ast.Name)}
+        nombres |= {n.attr for n in ast.walk(arbol) if isinstance(n, ast.Attribute)}
+        for imp in (n for n in ast.walk(arbol) if isinstance(n, ast.ImportFrom)):
+            nombres |= {a.name for a in imp.names}
+        assert not nombres & set(SERVICIOS_VEDADOS_EN_FRONTERA), _rel(p)

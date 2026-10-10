@@ -39,7 +39,13 @@
 #   v0.5.0 (F05-03/F05-04 J2 §1.2; F05-D032 C6): `listar` evalua «hoy» con
 #   hoy_owner (zona del owner, reloj inyectable) y no con current_date de la
 #   sesion (UTC). `propuesta` sigue usando la fecha que recibe.
-# Version: 0.5.0
+#
+#   v0.6.0 (F05-03/F05-04 J2 §1.9; F05 §46.3 A7): `listar` informa
+#   `tercero_disponible` (None sin tercero; False si el tercero ya no es del
+#   owner o esta desactivado): la preferencia deja de aplicarse en el
+#   registro (el registro no admite ese tercero) y Ajustes lo avisa. Solo
+#   lectura; desactivar un tercero no escribe preferencias.
+# Version: 0.6.0
 # ============================================================
 
 from __future__ import annotations
@@ -67,6 +73,10 @@ def tipos_registro(sesion: SesionMotor) -> dict[str, uuid.UUID]:
 def listar(sesion: SesionMotor, reloj: Reloj = reloj_sistema) -> list[dict[str, Any]]:
     hoy = hoy_owner(sesion, reloj)
     elegibles = {op: set(cuentas_elegibles_registro(sesion, hoy, op)) for op in ("GASTO", "INGRESO")}
+    with sesion.conexion.cursor() as cur:
+        cur.execute("SELECT id FROM gapto.terceros WHERE enabled "
+                    "AND owner_user_id = current_setting('gapto.owner_user_id')::uuid")
+        terceros = {f[0] for f in cur.fetchall()}
     return [
         {
             **p,
@@ -74,6 +84,7 @@ def listar(sesion: SesionMotor, reloj: Reloj = reloj_sistema) -> list[dict[str, 
                 None if p["cuenta_default_id"] is None
                 else p["cuenta_default_id"] in elegibles[operacion_de_tipo(sesion, p["tipo_hecho_id"])]
             ),
+            "tercero_disponible": None if p["tercero_id"] is None else p["tercero_id"] in terceros,
         }
         for p in repo.todas(sesion)
     ]

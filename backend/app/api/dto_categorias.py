@@ -28,7 +28,9 @@
 #   422 estructural: lista vacia, mas de 32768 elementos, ids repetidos,
 #   row_version < 1 o campo extra. `ResultadoReordenar` devuelve los hermanos
 #   (CategoriaNodo) en el orden persistido resultante.
-# Version: 0.5.0
+#   v0.6.0 (F05-03 J2 §1.8): DTO de lectura del arbol sugerido (NodoSugerido,
+#   CategoriasSugeridas) y resultado del onboarding (ResultadoOnboarding).
+# Version: 0.6.0
 # ============================================================
 
 from __future__ import annotations
@@ -75,6 +77,29 @@ class CategoriaNodoArbol(CategoriaNodo):
 
 class ArbolCategorias(_Estricto):
     categorias: list[CategoriaNodoArbol]
+
+
+class NodoSugerido(_Estricto):
+    """Nodo del arbol de categorias sugeridas (J2 §1.8, O02)."""
+
+    ruta: str
+    nombre: str
+    nivel: int
+    padre: str | None
+    orden: int
+    ambito: str
+    presupuestable_default: bool
+    icon_key: str
+
+
+class CategoriasSugeridas(_Estricto):
+    version: int
+    nodos: list[NodoSugerido]
+
+
+class ResultadoOnboarding(_Estricto):
+    creadas: int
+    idempotente: bool
 
 
 class UsoCategoria(_Estricto):

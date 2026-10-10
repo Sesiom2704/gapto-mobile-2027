@@ -127,7 +127,13 @@
 #     POST /v1/intenciones/transferencia    -> OP-10 (guarda de replay propia)
 #   El gasto sigue en /v1/intenciones/gasto-pagado (tercero, contexto y «No
 #   lo sé» aditivos).
-# Version: 0.17.0
+#
+#   v0.18.0 (F05-03 J2 §1.8; F05 §45.4 R5): onboarding de categorias:
+#     GET  /v1/categorias/sugeridas   arbol del fichero versionado (O02)
+#     POST /v1/categorias/onboarding  crea el arbol si el owner tiene cero
+#                                     categorias (ONBOARDING_NO_APLICABLE si no;
+#                                     idempotente con el arbol exacto)
+# Version: 0.18.0
 # ============================================================
 
 from __future__ import annotations
@@ -158,6 +164,7 @@ from app.api.dto_categorias import (
     AltaCategoria,
     AmbitoCambio,
     CategoriaNodo,
+    CategoriasSugeridas,
     DesactivarCategoria,
     IconoCategoria,
     MoverCategoria,
@@ -166,6 +173,7 @@ from app.api.dto_categorias import (
     RenombrarCategoria,
     ReordenarHermanos,
     ResultadoComandoCategoria,
+    ResultadoOnboarding,
     ResultadoReordenar,
     UsoCategoria,
 )
@@ -231,6 +239,7 @@ from app.api.dto_registro import IntencionIngresoCobrado, IntencionTransferencia
 from app.api.ejecucion_gasto_pagado import RechazoIntegracion, registrar_gasto_pagado
 from app.api.ejecucion_registro import RechazoRegistro, registrar_ingreso_cobrado, registrar_transferencia
 from app.categorias import lecturas as lect_cat
+from app.categorias import onboarding as onb
 from app.contextos import lecturas as lect_ctx
 from app.plantillas import lecturas as lect_plt
 from app.plantillas import propuesta as prop_plt
@@ -456,6 +465,18 @@ def create_app(
             "idempotente": salida.idempotente,
             "modificadas": list(salida.modificadas),
         }
+
+    @app.get("/v1/categorias/sugeridas", response_model=CategoriasSugeridas, dependencies=[Depends(autorizar)])
+    def categorias_sugeridas() -> dict:
+        return {"version": onb.VERSION, "nodos": [n.__dict__ for n in onb.arbol_v1()]}
+
+    @app.post("/v1/categorias/onboarding", response_model=ResultadoOnboarding, dependencies=[Depends(autorizar)])
+    def onboarding_categorias():
+        salida = unidad.ejecutar(contexto(), onb.onboarding_categorias, nombre="F05-03 onboarding_categorias")
+        if isinstance(salida, serv_cat.Rechazo):
+            status, cuerpo = eh.rechazo_categoria(salida.codigo, salida.detalle)
+            return JSONResponse(cuerpo, status_code=status)
+        return {"creadas": len(salida.creadas), "idempotente": salida.idempotente}
 
     @app.post("/v1/categorias/{categoria_id}/icono", **_R)
     def icono_categoria(categoria_id: uuid.UUID, c: IconoCategoria):

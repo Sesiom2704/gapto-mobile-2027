@@ -88,7 +88,10 @@
 #   v0.14.0 (F05-03/F05-04 J2 §1.7): rechazos de integracion
 #   TERCERO_NO_DISPONIBLE y CONTEXTO_NO_DISPONIBLE (409, sin escritura); el
 #   codigo F04 MISMA_CUENTA (OP-10) con mensaje de campo (422).
-# Version: 0.14.0
+#
+#   v0.15.0 (F05-03 J2 §1.8): ONBOARDING_NO_APLICABLE (409) en los rechazos
+#   de categoria (el owner ya tiene categorias).
+# Version: 0.15.0
 # ============================================================
 
 from __future__ import annotations
@@ -219,6 +222,7 @@ _RECHAZOS_CATEGORIA: dict[str, tuple[int, str]] = {
     "ENTRADA_INVALIDA": (422, "Revisa los datos."),
     "ICONO_CATEGORIA_NO_VALIDO": (422, "Ese icono no está disponible. Elige otro o «Sin icono»."),
     "CONJUNTO_HERMANOS_DESFASADO": (409, "Las categorías de este nivel han cambiado. Vuelve a cargarlas."),
+    "ONBOARDING_NO_APLICABLE": (409, "Ya tienes categorías: las sugeridas solo se ofrecen si aún no tienes ninguna."),
 }
 
 

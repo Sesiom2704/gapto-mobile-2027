@@ -63,7 +63,12 @@
 #   devolvia el Rechazo y la UdT confirmaba las anteriores (confirmacion
 #   parcial). Un fallo no reconocido sigue propagandose (rollback total). Sin
 #   cambios de API, codigos, status ni orden del comando.
-# Version: 0.5.0
+#
+#   v0.6.0 (F05-03 J2 §1.8): helper publico `tomar_advisory_del_catalogo`
+#   para el onboarding (recuento de cero categorias bajo el advisory antes de
+#   la primera alta) sin que el onboarding importe el repositorio. No
+#   escribe; los comandos no cambian.
+# Version: 0.6.0
 # ============================================================
 
 from __future__ import annotations
@@ -248,6 +253,11 @@ def _nodo(sesion: SesionMotor, categoria_id, row_version: int) -> dict | Rechazo
 
 def _resultado(sesion: SesionMotor, categoria_id, **kw) -> Resultado:
     return Resultado(categoria=repo.leer(sesion, categoria_id), **kw)
+
+
+def tomar_advisory_del_catalogo(sesion: SesionMotor) -> None:
+    """Advisory (CATEGORIAS, owner) para un comando compuesto de C06 (onboarding)."""
+    repo.tomar_advisory(sesion)
 
 
 # ------------------------------------------------------------------ comandos

@@ -23,7 +23,9 @@
 #   operativo (el dominio lo valida); `entidad_id` sigue aceptandose solo para
 #   rechazarlo con PREFERENCIA_DIMENSION_DIFERIDA. `ListaPreferencias` anade
 #   `tipos` (TiposRegistro: ids de GASTO e INGRESO), campo aditivo.
-# Version: 0.2.0
+#   v0.3.0 (F05-03/F05-04 J2 §1.9): PreferenciaLista anade
+#   `tercero_disponible` (aviso de Ajustes, A7).
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
@@ -88,6 +90,7 @@ class PreferenciaNodo(_Estricto):
 
 class PreferenciaLista(PreferenciaNodo):
     cuenta_disponible_hoy: bool | None
+    tercero_disponible: bool | None
 
 
 class TiposRegistro(_Estricto):
