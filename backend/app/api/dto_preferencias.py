@@ -18,7 +18,12 @@
 #
 #   v0.1.1 (F05-02 B1-C, AJ-B1-03): solo documentacion de `EditarPreferencia`
 #   (E05: reemplazo completo; el cliente envia siempre el estado completo).
-# Version: 0.1.1
+#
+#   v0.2.0 (F05-03/F05-04 J2 §1.5; F05 §46.5 E2/E3): `tercero_id` es
+#   operativo (el dominio lo valida); `entidad_id` sigue aceptandose solo para
+#   rechazarlo con PREFERENCIA_DIMENSION_DIFERIDA. `ListaPreferencias` anade
+#   `tipos` (TiposRegistro: ids de GASTO e INGRESO), campo aditivo.
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -85,8 +90,14 @@ class PreferenciaLista(PreferenciaNodo):
     cuenta_disponible_hoy: bool | None
 
 
+class TiposRegistro(_Estricto):
+    GASTO: uuid.UUID
+    INGRESO: uuid.UUID
+
+
 class ListaPreferencias(_Estricto):
     preferencias: list[PreferenciaLista]
+    tipos: TiposRegistro
 
 
 class ResultadoComandoPreferencia(_Estricto):

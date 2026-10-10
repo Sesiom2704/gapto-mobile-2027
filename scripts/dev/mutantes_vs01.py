@@ -96,7 +96,11 @@
 #   ejecucion: altas en este arnes (misma infraestructura js y mismo journal)
 #   y no un arnes nuevo.
 #   Censo: 20 py + M01..M12 y U01..U35 (47 js) = 67.
-# Version: 0.11.0
+#
+#   v0.12.0 (F05-03/F05-04 J2 §1.5; F05 §46.5 E3): texto protegido de U26
+#   actualizado (preferenciaDeAmbito recibe el tipo GASTO de la lista). Mismo
+#   mutante y mismo discriminante; censo sin cambios (67).
+# Version: 0.12.0
 # ============================================================
 
 from __future__ import annotations
@@ -233,7 +237,8 @@ MUTANTES = [
     ("U25", "mobile/src/domain/preferencias.ts",
      "  return f.cuenta !== null || f.presupuestable !== null;\n", "  return true;\n", "js"),
     ("U26", "mobile/src/screens/PreferenciasAjustesScreen.tsx",
-     "        ? preferenciaDeAmbito(datos.prefs, form.ambito === 'GENERAL' ? null : form.categoriaId)\n", "        ? null\n", "js"),
+     "        ? preferenciaDeAmbito(datos.prefs, form.ambito === 'GENERAL' ? null : form.categoriaId, datos.tipos.GASTO)\n",
+     "        ? null\n", "js"),
     ("U27", "mobile/src/screens/PreferenciasAjustesScreen.tsx",
      "      if (otra) return setConflicto(otra);\n", "", "js"),
     ("U28", "mobile/src/screens/PreferenciasAjustesScreen.tsx",

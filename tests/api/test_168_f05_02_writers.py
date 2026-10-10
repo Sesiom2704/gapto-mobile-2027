@@ -20,7 +20,20 @@
 #   v0.2.0 (F05-02 B1-C, AJ-B1-04): el alta con un UUID de OTRO owner (E09)
 #   afirma de forma explicita el codigo, la fila ajena intacta (contenido y
 #   row_version), ninguna fila nueva y ninguna auditoria escrita.
-# Version: 0.2.0
+#
+#   v0.3.0 (F05-03/F05-04 J2 §1.5; F05 §46.4 R6, §46.5 E2/E3; F05-D032 C4;
+#   decision OPCION A2 del STOP 2, tabla «tests adaptados» del handoff
+#   J2+J3): las altas sin tipo explicito llevan tipo GASTO (helper). Con
+#   oraculo nuevo, conservando cada caso negativo: tercero en el alta ->
+#   categoria + tercero rechazado con PREFERENCIA_AMBITO_NO_ADMITIDO; empate
+#   por comodines entre tipo + categoria y tipo + tercero; «mismo valor» a
+#   igual especificidad (tipo + categoria / tipo + tercero); editar valida
+#   tambien SIN_TIPO, AMBITO_NO_ADMITIDO y TERCERO_NO_ELEGIBLE; reactivar
+#   una fila con entidad (DIMENSION_DIFERIDA) o sin tipo (SIN_TIPO). Nuevos:
+#   alta tipo + tercero admitida, alta sin tipo -> PREFERENCIA_SIN_TIPO,
+#   tercero ajeno/inexistente/desactivado -> PREFERENCIA_TERCERO_NO_ELEGIBLE;
+#   la lista informa los ids de GASTO e INGRESO (`tipos`).
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
@@ -141,10 +154,52 @@ def test_check_fisico_propone_valor_mapeado_por_identidad(t):
 
 @pytest.mark.parametrize("campo", ["tercero_id", "entidad_id"])
 def test_dimension_diferida_en_alta(t, campo):
+    """entidad_id sigue diferida. tercero_id es operativo (E2): su caso
+    negativo es el ambito no admitido categoria + tercero (R6)."""
     owner, _, cli, a, _ = t
-    valor = ph.tercero(owner) if campo == "tercero_id" else uuid.uuid4()
-    pid, r = ph.alta(cli, cuenta_default_id=a, **{campo: valor})
-    assert r.status_code == 422 and _codigo(r) == "PREFERENCIA_DIMENSION_DIFERIDA"
+    if campo == "tercero_id":
+        pid, r = ph.alta(cli, cuenta_default_id=a, categoria_id=ph.categoria(owner, "Super"),
+                         tercero_id=ph.tercero(owner))
+        assert r.status_code == 422 and _codigo(r) == "PREFERENCIA_AMBITO_NO_ADMITIDO"
+    else:
+        pid, r = ph.alta(cli, cuenta_default_id=a, entidad_id=uuid.uuid4())
+        assert r.status_code == 422 and _codigo(r) == "PREFERENCIA_DIMENSION_DIFERIDA"
+    _sin_escritura(owner, pid)
+
+
+def test_alta_tipo_mas_tercero_admitida(t):
+    """E2/R6: el ambito tipo + tercero se admite y persiste el tercero."""
+    owner, _, cli, a, _ = t
+    ter = ph.tercero(owner)
+    pid, r = ph.alta(cli, tercero_id=ter, cuenta_default_id=a)
+    assert r.status_code == 200, r.text
+    assert r.json()["preferencia"]["tercero_id"] == str(ter)
+    assert h.leer(owner, "SELECT tercero_id FROM gapto.preferencias_registro WHERE id=%s", (pid,)) == [(ter,)]
+    assert ph.auditorias(owner, pid) == [("CREAR", "F05-02 ALTA")]
+
+
+def test_alta_sin_tipo_rechazada(t):
+    """E3/R6: no hay preferencia sin tipo (antes «global»)."""
+    owner, _, cli, a, _ = t
+    for campos in ({"cuenta_default_id": a}, {"categoria_id": ph.categoria(owner, "Super"), "cuenta_default_id": a}):
+        pid, r = ph.alta(cli, tipo_hecho_id=None, **campos)
+        assert r.status_code == 422 and _codigo(r) == "PREFERENCIA_SIN_TIPO"
+        _sin_escritura(owner, pid)
+
+
+@pytest.mark.parametrize("motivo", ["desactivado", "ajeno", "inexistente"])
+def test_tercero_no_elegible(t, motivo):
+    owner, _, cli, a, _ = t
+    if motivo == "ajeno":
+        otro, _ = h.crear_tenant()
+        ter = ph.tercero(otro)
+    elif motivo == "inexistente":
+        ter = uuid.uuid4()
+    else:
+        ter = ph.tercero(owner)
+        h.como_owner(owner, "UPDATE gapto.terceros SET enabled=false WHERE id=%s", (ter,))
+    pid, r = ph.alta(cli, tercero_id=ter, cuenta_default_id=a)
+    assert r.status_code == 409 and _codigo(r) == "PREFERENCIA_TERCERO_NO_ELEGIBLE"
     _sin_escritura(owner, pid)
 
 
@@ -219,13 +274,13 @@ def test_empate_misma_clave_valores_distintos(t):
 
 
 def test_empate_por_comodines(t):
-    """tipo-solo frente a categoria-sola: misma especificidad (1) y pueden
-    coincidir (cada dimension: igual o alguna NULL)."""
+    """tipo + categoria frente a tipo + tercero (E2): misma especificidad (2)
+    y pueden coincidir (cada dimension: igual o alguna NULL)."""
     owner, _, cli, a, b = t
     cat = ph.categoria(owner, "Super")
-    p1, r = ph.alta(cli, tipo_hecho_id=ph.tipo_gasto(owner), cuenta_default_id=a)
+    p1, r = ph.alta(cli, categoria_id=cat, cuenta_default_id=a)
     assert r.status_code == 200
-    _, r = ph.alta(cli, categoria_id=cat, cuenta_default_id=b)
+    _, r = ph.alta(cli, tercero_id=ph.tercero(owner), cuenta_default_id=b)
     assert r.status_code == 409 and _codigo(r) == EMPATE
     assert r.json()["detalle"]["preferencia_conflicto_id"] == str(p1)
 
@@ -246,7 +301,8 @@ def test_no_empate(t, caso):
     primero, segundo = {
         "campos_distintos": ({"categoria_id": c1, "cuenta_default_id": a},
                              {"categoria_id": c1, "presupuestable_default": True}),
-        "mismo_valor": ({"tipo_hecho_id": g, "cuenta_default_id": a}, {"categoria_id": c1, "cuenta_default_id": a}),
+        "mismo_valor": ({"categoria_id": c1, "cuenta_default_id": a},
+                        {"tercero_id": ph.tercero(owner), "cuenta_default_id": a}),
         "otra_especificidad": ({"cuenta_default_id": a}, {"categoria_id": c1, "cuenta_default_id": b}),
         "categorias_distintas": ({"categoria_id": c1, "cuenta_default_id": a},
                                  {"categoria_id": c2, "cuenta_default_id": b}),
@@ -299,7 +355,10 @@ def test_editar_valida_como_el_alta(t):
     pid, _ = ph.alta(cli, cuenta_default_id=a)
     casos = [
         ({}, "PREFERENCIA_SIN_VALOR"),
-        ({"cuenta_default_id": a, "tercero_id": ph.tercero(owner)}, "PREFERENCIA_DIMENSION_DIFERIDA"),
+        ({"cuenta_default_id": a, "tipo_hecho_id": None}, "PREFERENCIA_SIN_TIPO"),
+        ({"cuenta_default_id": a, "tercero_id": ph.tercero(owner), "categoria_id": ph.categoria(owner, "Cat")},
+         "PREFERENCIA_AMBITO_NO_ADMITIDO"),
+        ({"cuenta_default_id": a, "tercero_id": uuid.uuid4()}, "PREFERENCIA_TERCERO_NO_ELEGIBLE"),
         ({"cuenta_default_id": a, "entidad_id": uuid.uuid4()}, "PREFERENCIA_DIMENSION_DIFERIDA"),
         ({"cuenta_default_id": a, "prioridad": 90}, "PREFERENCIA_PRIORIDAD_NO_ADMITIDA"),
         ({"cuenta_default_id": ph.cuenta(owner, actor, moneda="USD")}, "PREFERENCIA_CUENTA_NO_ELEGIBLE"),
@@ -396,11 +455,16 @@ def test_reactivar_no_revalida_la_cuenta(t):
 
 
 def test_reactivar_fila_con_dimension_diferida_se_rechaza(t):
+    """entidad_id sigue diferida (DIMENSION_DIFERIDA); una fila sin tipo
+    tampoco se pone en uso (E3, SIN_TIPO). Una fila tipo + tercero ya es
+    valida (E2) y no entra aqui."""
     owner, _, cli, a, _ = t
-    pid = ph.insertar_sql(owner, tercero_id=ph.tercero(owner), cuenta=a, enabled=False)
-    r = ph.reactivar(cli, pid, 1)
-    assert r.status_code == 422 and _codigo(r) == "PREFERENCIA_DIMENSION_DIFERIDA"
-    assert ph.fila(owner, pid)["enabled"] is False
+    for kw, codigo in (({"entidad_id": ph.entidad(owner)}, "PREFERENCIA_DIMENSION_DIFERIDA"),
+                       ({"tipo_hecho_id": None}, "PREFERENCIA_SIN_TIPO")):
+        pid = ph.insertar_sql(owner, cuenta=a, enabled=False, **kw)
+        r = ph.reactivar(cli, pid, 1)
+        assert r.status_code == 422 and _codigo(r) == codigo
+        assert ph.fila(owner, pid)["enabled"] is False
 
 
 @pytest.mark.parametrize("comando", ["desactivar", "reactivar"])
@@ -440,3 +504,13 @@ def test_lista_con_desactivadas_y_cuenta_disponible_hoy(t):
     assert lista[str(p1)]["enabled"] is False and lista[str(p1)]["cuenta_disponible_hoy"] is True
     assert lista[str(p2)]["cuenta_disponible_hoy"] is False
     assert lista[str(p3)]["cuenta_disponible_hoy"] is None
+
+
+def test_lista_incluye_los_tipos_de_registro(t):
+    """E3 (J2 §1.5): GET /v1/preferencias informa los ids de GASTO e INGRESO
+    para que el cliente envie siempre el tipo."""
+    owner, _, cli, _, _ = t
+    r = cli.get(ph.BASE, headers=h.AUTH)
+    assert r.status_code == 200
+    ingreso = h.leer(owner, "SELECT id FROM gapto.tipos_hecho WHERE codigo='INGRESO'")[0][0]
+    assert r.json()["tipos"] == {"GASTO": str(ph.tipo_gasto(owner)), "INGRESO": str(ingreso)}

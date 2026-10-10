@@ -5,7 +5,8 @@
 // Descripción: Preferencias de registro en «Nuevo gasto» (F05-02 B2; F05-D026 §41.3/§41.4, E1/E2/E3; F05-D027 §42.7; lámina SET-PREF / REG-PREF v0.1 R01–R07, D-PREF-02..06). Propuesta por campo con origen visible; lo explícito gana (un campo tocado no se recalcula al cambiar de categoría); sin fallback laxo del cliente (AJ-B1-09) y nunca una cuenta fuera de la lista (AJ-B1-11); el reintento del registro no vuelve a pedir la propuesta. «Guardar como preferencia»: oculta con «Sin categoría» y cuando no hay nada que recordar; alta con el UUID de la tarjeta (el reintento usa el MISMO); edición con el ESTADO COMPLETO (E05); conflicto R07 «Sustituir / Mantener»; VERSION_DESFASADA y empate → recarga y se vuelve a preguntar; fallo R06 sin afectar al hecho.
 // v0.2.0 (F05-02 B2-V): discriminante de M03 (E1 / REG-01): con la propuesta pendiente, fallida o rechazada, «¿Cuenta para el presupuesto?» no está preseleccionado y no se envía sin decisión explícita.
 // v0.3.0 (F05-02 B3, AJ-B2-04): alta aditiva de la rama de D6 «tras VERSION_DESFASADA o un empate, al recargar ya no hay conflicto → se vuelve a la tarjeta», sin R07 y sin otra escritura.
-// Versión: 0.3.0
+// v0.4.0 (F05-03/F05-04 J2 §1.5; F05 §46.5 E3; decisión OPCIÓN A2 del STOP 2, tabla «tests adaptados»): toda preferencia lleva tipo. El doble devuelve `tipos` en la lista; las preferencias de «Una categoría» son de tipo GASTO y el alta y la edición de «Guardar como preferencia» esperan `tipo_hecho_id: TIPOS.GASTO` en lugar de null.
+// Versión: 0.4.0
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
@@ -17,6 +18,7 @@ import type {
   ClienteApi,
   ContenidoPreferencia,
   CuentaPago,
+  ListaPreferencias,
   Preferencia,
   PropuestaRegistro,
   Respuesta,
@@ -41,9 +43,12 @@ const CATEGORIAS = [nodo({ id: 'super', nombre: 'Supermercado' }), nodo({ id: 'l
 const cuenta = (cuenta_id: string, nombre: string, moneda = 'EUR'): CuentaPago => ({ cuenta_id, nombre, moneda, propuesta_financiacion: 'SELF_100' });
 const TRES = [cuenta(TARJETA, 'Tarjeta BBVA'), cuenta(EFECTIVO, 'Efectivo'), cuenta(COMUN, 'Cuenta común')];
 
+/** Ids de tipo que informa GET /v1/preferencias (E3). */
+const TIPOS = { GASTO: 't-gasto', INGRESO: 't-ingreso' };
+
 function pref(p: Partial<Preferencia> & { id: string }): Preferencia {
   return {
-    tipo_hecho_id: null, categoria_id: null, tercero_id: null, entidad_id: null, cuenta_default_id: null,
+    tipo_hecho_id: TIPOS.GASTO, categoria_id: null, tercero_id: null, entidad_id: null, cuenta_default_id: null,
     presupuestable_default: null, prioridad: 100, enabled: true, row_version: 1, ...p,
   };
 }
@@ -91,7 +96,7 @@ function fake(o: Opciones = {}) {
       consultas.push([fecha, cat]);
       return { tipo: 'OK', datos: (o.propuesta ?? (() => prop(null, null)))(fecha, cat) } as Respuesta<PropuestaRegistro>;
     }),
-    listarPreferencias: jest.fn(async () => ({ tipo: 'OK', datos: { preferencias: (o.prefs ?? (() => []))() } }) as Respuesta<{ preferencias: Preferencia[] }>),
+    listarPreferencias: jest.fn(async () => ({ tipo: 'OK', datos: { preferencias: (o.prefs ?? (() => []))(), tipos: TIPOS } }) as Respuesta<ListaPreferencias>),
     altaPreferencia: jest.fn(async (c) => (o.alta ?? (async (x) => okPref(x)))(c)),
     editarPreferencia: jest.fn(async (id, c) => (o.editar ?? (async (_i, x) => okPref({ ...x, id }, x.row_version + 1)))(id, c)),
   };
@@ -393,7 +398,7 @@ test('R05: casillas iniciales por diferencia; alta con ámbito «Una categoría�
   const idTarjeta = '00000000-0000-4000-8000-000000000002'; // 1 = intención; 2 = generado al abrir la tarjeta
   await act(async () => fireEvent.press(screen.getByTestId('pref-guardar')));
   expect(f.cliente.altaPreferencia).toHaveBeenCalledWith({
-    id: idTarjeta, tipo_hecho_id: null, categoria_id: 'super', tercero_id: null, entidad_id: null,
+    id: idTarjeta, tipo_hecho_id: TIPOS.GASTO, categoria_id: 'super', tercero_id: null, entidad_id: null,
     cuenta_default_id: TARJETA, presupuestable_default: null, prioridad: 100,
   });
   expect(await screen.findByText('Preferencia guardada')).toBeTruthy();
@@ -409,7 +414,7 @@ test('editar envía el ESTADO COMPLETO (E05): el campo no recordado conserva su 
   await act(async () => fireEvent.press(screen.getByTestId('pref-guardar')));
   expect(f.cliente.altaPreferencia).not.toHaveBeenCalled();
   expect(f.cliente.editarPreferencia).toHaveBeenCalledWith('p-super', {
-    row_version: 3, tipo_hecho_id: null, categoria_id: 'super', tercero_id: null, entidad_id: null,
+    row_version: 3, tipo_hecho_id: TIPOS.GASTO, categoria_id: 'super', tercero_id: null, entidad_id: null,
     cuenta_default_id: EFECTIVO, presupuestable_default: true, prioridad: 100,
   });
   expect(await screen.findByTestId('pref-guardada')).toBeTruthy();
@@ -463,7 +468,7 @@ test('R07: conflicto → «Mantener» no escribe; «Sustituir» edita con row_ve
   expect((f.cliente.editarPreferencia as jest.Mock).mock.calls[0]).toEqual([
     'p-super',
     // Sin propuesta de presupuesto la casilla venía marcada: se recuerda también (sin conflicto: la existente no lo propone).
-    { row_version: 1, tipo_hecho_id: null, categoria_id: 'super', tercero_id: null, entidad_id: null, cuenta_default_id: TARJETA, presupuestable_default: true, prioridad: 100 },
+    { row_version: 1, tipo_hecho_id: TIPOS.GASTO, categoria_id: 'super', tercero_id: null, entidad_id: null, cuenta_default_id: TARJETA, presupuestable_default: true, prioridad: 100 },
   ]);
   // Recargada: vuelve a preguntar con el valor ACTUAL.
   await waitFor(() => expect(plano('pref-conflicto-texto')).toBe('Ahora propone pagar con Cuenta común. ¿Quieres que proponga Tarjeta BBVA a partir de ahora?'));

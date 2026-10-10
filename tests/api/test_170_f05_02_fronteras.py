@@ -29,7 +29,16 @@
 #   obligatorios), que se ejecuta al cierre del bloque. Queda aqui la
 #   garantia permanente acotada al paquete. I13 lo sigue protegiendo
 #   test_154 con sus propias reglas.
-# Version: 0.2.0
+#
+#   v0.3.0 (F05-03/F05-04 J2 §1.5; F05 §46.5 E2, §46.4 R6; decision OPCION
+#   A2 del STOP 2, tabla «tests adaptados» del handoff J2+J3): tercero_id
+#   pasa a ser dimension OPERATIVA. Casos conservados con oraculo nuevo:
+#   [tercero_id] en alta/edicion -> categoria + tercero rechazado con
+#   PREFERENCIA_AMBITO_NO_ADMITIDO; [tercero_id] en el resolver -> la fila
+#   tipo + tercero solo se consume en el contexto de ese tercero; el writer
+#   escribe tercero_id (INSERT y COLUMNAS_EDITABLES) y sigue sin escribir
+#   entidad_id ni prioridad. [entidad_id] no cambia.
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
@@ -101,13 +110,19 @@ def _entidad(owner) -> uuid.UUID:
 @pytest.mark.parametrize("campo", ["tercero_id", "entidad_id"])
 def test_alta_y_edicion_con_dimension_diferida_se_rechazan(t, campo):
     owner, _, cli, a, _ = t
-    valor = ph.tercero(owner) if campo == "tercero_id" else _entidad(owner)
-    pid, r = ph.alta(cli, cuenta_default_id=a, **{campo: valor})
-    assert r.status_code == 422 and r.json()["codigo"] == "PREFERENCIA_DIMENSION_DIFERIDA"
+    if campo == "tercero_id":
+        # E2: tercero operativo; el caso negativo es categoria + tercero (R6).
+        extra = {"tercero_id": ph.tercero(owner), "categoria_id": ph.categoria(owner, "Super")}
+        codigo = "PREFERENCIA_AMBITO_NO_ADMITIDO"
+    else:
+        extra = {"entidad_id": _entidad(owner)}
+        codigo = "PREFERENCIA_DIMENSION_DIFERIDA"
+    pid, r = ph.alta(cli, cuenta_default_id=a, **extra)
+    assert r.status_code == 422 and r.json()["codigo"] == codigo
     assert ph.fila(owner, pid) is None
     pid, _ = ph.alta(cli, cuenta_default_id=a)
-    r = ph.editar(cli, pid, 1, cuenta_default_id=a, **{campo: valor})
-    assert r.status_code == 422 and r.json()["codigo"] == "PREFERENCIA_DIMENSION_DIFERIDA"
+    r = ph.editar(cli, pid, 1, cuenta_default_id=a, **extra)
+    assert r.status_code == 422 and r.json()["codigo"] == codigo
     assert ph.n_preferencias(owner) == 1
 
 
@@ -115,10 +130,20 @@ def test_alta_y_edicion_con_dimension_diferida_se_rechazan(t, campo):
 def test_el_resolver_ignora_filas_con_dimension_diferida(t, campo):
     owner, _, _, a, b = t
     cat = ph.categoria(owner, "Super")
-    valor = ph.tercero(owner) if campo == "tercero_id" else _entidad(owner)
+    if campo == "tercero_id":
+        # E2: la fila tipo + tercero es operativa: se ignora fuera del contexto
+        # de su tercero y se consume (y gana) dentro de el.
+        ter = ph.tercero(owner)
+        p_ter = ph.insertar_sql(owner, tercero_id=ter, cuenta=b, presupuestable=True)
+        p_glob = ph.insertar_sql(owner, cuenta=a)
+        p = ph.resolver(owner, cat)
+        assert ph.origen(p, "cuenta") == ("PREFERENCIA", p_glob) and p["presupuestable"] is None
+        p = ph.resolver(owner, cat, tercero_id=ter)
+        assert ph.origen(p, "cuenta") == ("PREFERENCIA", p_ter)
+        return
     # Mas especifica y con todos los campos: si se consumiera, ganaria.
     ph.insertar_sql(owner, tipo_hecho_id=ph.tipo_gasto(owner), categoria_id=cat, cuenta=b, presupuestable=True,
-                    **{campo: valor})
+                    entidad_id=_entidad(owner))
     p_glob = ph.insertar_sql(owner, cuenta=a)
     p = ph.resolver(owner, cat)
     assert ph.origen(p, "cuenta") == ("PREFERENCIA", p_glob)
@@ -163,14 +188,17 @@ def test_primitivas_solo_desde_el_servicio_y_advisory_primero():
 def test_el_writer_no_escribe_dimensiones_diferidas_ni_prioridad():
     from app.preferencias import repositorio as repo
 
-    assert not repo.COLUMNAS_EDITABLES & {"tercero_id", "entidad_id", "prioridad", "id", "owner_user_id"}
+    # E2: tercero_id es operativo y editable; entidad_id y prioridad no.
+    assert "tercero_id" in repo.COLUMNAS_EDITABLES
+    assert not repo.COLUMNAS_EDITABLES & {"entidad_id", "prioridad", "id", "owner_user_id"}
     arbol = ast.parse((RAIZ / REPO_PREF).read_bytes().decode("utf-8"))
     fn = next(n for n in arbol.body if isinstance(n, ast.FunctionDef) and n.name == "insertar_preferencia")
     cuerpo = fn.body[1:]  # sin la docstring
     sql = " ".join(c.value for s in cuerpo for c in ast.walk(s) if isinstance(c, ast.Constant)
                    and isinstance(c.value, str))
     assert "INSERT INTO gapto.preferencias_registro" in sql
-    for col in ("tercero_id", "entidad_id", "prioridad"):
+    assert "tercero_id" in sql
+    for col in ("entidad_id", "prioridad"):
         assert col not in sql, col
 
 

@@ -4,6 +4,7 @@
 // Ruta: mobile/src/components/GuardarPreferencia.tsx
 // Descripción: «Guardar como preferencia» en la pantalla de éxito de «Nuevo gasto» (F05-02 B2; F05-D026 §41.3, AJ-P02-05; lámina SET-PREF / REG-PREF v0.1 R05–R07, D-PREF-05/06). Escritura INDEPENDIENTE y posterior al hecho: el hecho nunca se ve afectado. Tarjeta «¿Recordarlo para <categoría>?» con una casilla por campo (marcada si el valor final difiere de lo propuesto). Al guardar se relee la lista y se decide: sin preferencia de la categoría → alta con el UUID generado al abrir la tarjeta (el reintento usa el MISMO); con preferencia que no contradice → edición con el ESTADO COMPLETO (E05); si contradice (o el servidor responde PREFERENCIA_EMPATE_CONTRADICTORIO) → hoja R07 «Sustituir / Mantener»; VERSION_DESFASADA → se recarga y se vuelve a preguntar. Fallo → aviso R06 con «Reintentar»; éxito → «Preferencia guardada». Ninguna escritura sin acción del usuario.
 // Versión: 0.1.0 (F05-02 B2)
+// Versión: 0.2.0 (F05-03/F05-04 J2 §1.5; F05 §46.5 E3): la preferencia de la categoría lleva el tipo GASTO que informa la lista (`tipos.GASTO`).
 // ============================================================
 
 import React, { useRef, useState } from 'react';
@@ -53,7 +54,7 @@ export function GuardarPreferencia(p: {
       // Cambió mientras tanto: se recarga y se vuelve a preguntar (R07), sin escribir.
       const l = await p.cliente.listarPreferencias();
       if (l.tipo !== 'OK') return setFase({ f: 'ERROR' });
-      return volverAPreguntar(planificarGuardado(l.datos.preferencias, p.categoriaId, p.finales, intento.current ?? casillas));
+      return volverAPreguntar(planificarGuardado(l.datos.preferencias, p.categoriaId, p.finales, intento.current ?? casillas, l.datos.tipos.GASTO));
     }
     setFase({ f: 'ERROR' });
   };
@@ -64,7 +65,7 @@ export function GuardarPreferencia(p: {
     setFase({ f: 'GUARDANDO' });
     const l = await p.cliente.listarPreferencias();
     if (l.tipo !== 'OK') return setFase({ f: 'ERROR' });
-    const plan = planificarGuardado(l.datos.preferencias, p.categoriaId, p.finales, elegidas);
+    const plan = planificarGuardado(l.datos.preferencias, p.categoriaId, p.finales, elegidas, l.datos.tipos.GASTO);
     if (plan.tipo === 'NADA' || plan.tipo === 'CONFLICTO') return volverAPreguntar(plan);
     if (plan.tipo === 'ALTA') return tras(await p.cliente.altaPreferencia({ id: idAlta, ...plan.contenido }));
     return tras(await p.cliente.editarPreferencia(plan.existente.id, { row_version: plan.existente.row_version, ...plan.contenido }));

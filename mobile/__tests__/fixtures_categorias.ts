@@ -7,9 +7,10 @@
 // Versión: 0.2.0 (F05-01 S7-MAG UI): `mag()` rellena `asociacion_id` (por defecto `a-<magnitud_id>`); el stub incluye el catálogo (vacío por defecto) y los comandos de magnitudes (no esperados por defecto).
 // Versión: 0.3.0 (F05-02 B2): el stub incluye las preferencias de registro: propuesta SIN propuesta y lista vacía por defecto; alta y edición no esperadas. `propuestaUnica(cuenta)` emula al resolver con una única cuenta elegible (DEFAULT_GENERAL): sustituye al antiguo fallback del cliente (AJ-B1-09).
 // Versión: 0.4.0 (F05-02 B3): el stub incluye desactivar y reactivar preferencia (no esperados por defecto).
+// Versión: 0.5.0 (F05-03/F05-04 J2 §1.5; F05 §46.5 E3): la lista de preferencias del stub informa `tipos` (ids de GASTO e INGRESO).
 // ============================================================
 
-import type { ClienteApi, PropuestaRegistro, Respuesta } from '../src/api/cliente';
+import type { ClienteApi, ListaPreferencias, PropuestaRegistro, Respuesta } from '../src/api/cliente';
 import type { CategoriaNodo, MagnitudCategoria } from '../src/domain/categoria';
 
 export function mag(p: Partial<MagnitudCategoria> & { magnitud_id: string }): MagnitudCategoria {
@@ -62,7 +63,9 @@ export function clienteCategoriasStub(
     deshabilitarMagnitud: noEsperado('deshabilitarMagnitud'),
     rehabilitarMagnitud: noEsperado('rehabilitarMagnitud'),
     propuestaPreferencias: jest.fn(async () => ({ tipo: 'OK', datos: { cuenta: null, presupuestable: null } }) as Respuesta<PropuestaRegistro>),
-    listarPreferencias: jest.fn(async () => ({ tipo: 'OK', datos: { preferencias: [] } }) as Respuesta<{ preferencias: never[] }>),
+    listarPreferencias: jest.fn(
+      async () => ({ tipo: 'OK', datos: { preferencias: [], tipos: { GASTO: 't-gasto', INGRESO: 't-ingreso' } } }) as Respuesta<ListaPreferencias>,
+    ),
     altaPreferencia: noEsperado('altaPreferencia'),
     editarPreferencia: noEsperado('editarPreferencia'),
     desactivarPreferencia: noEsperado('desactivarPreferencia'),

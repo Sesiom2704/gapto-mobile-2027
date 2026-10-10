@@ -9,7 +9,16 @@
 #   sinteticos creados como gapto_owner con la GUC del tenant (WM 12C.7).
 #   Exigen GAPTO_TEST_DATABASE_URL apuntando a una base DESECHABLE con la
 #   cadena aplicada (estos tests confirman filas).
-# Version: 0.1.0
+#
+#   v0.2.0 (F05-03/F05-04 J2 §1.5; F05 §46.5 E3, §46.4 R6; F05-D032 C4;
+#   decision de Moises OPCION A2 del STOP 2): se retira la preferencia global
+#   sin tipo. `alta`, `editar` e `insertar_sql` toman por DEFECTO el tipo
+#   GASTO cuando el test no indica `tipo_hecho_id` (sustitucion canonica de
+#   E3: la global sin tipo pasa a «Todos los gastos»). Un test que necesita
+#   una fila o un alta SIN tipo lo pide expresamente con tipo_hecho_id=None.
+#   `resolver` admite el tercero del contexto (E2). `entidad` crea una entidad
+#   PROPIEDAD sintetica (dimension diferida vigente).
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -50,6 +59,23 @@ def categoria(owner: uuid.UUID, nombre: str, **kw) -> uuid.UUID:
     return fh.crear_categoria(owner, nombre, **kw)
 
 
+_GASTO: list[uuid.UUID] = []
+
+
+def tipo_gasto_global() -> uuid.UUID:
+    """Id del tipo GASTO (catalogo global, igual para todos los owners)."""
+    if not _GASTO:
+        import psycopg
+
+        with psycopg.connect(h.dsn()) as c:
+            _GASTO.append(c.execute("SELECT id FROM gapto.tipos_hecho WHERE codigo='GASTO'").fetchone()[0])
+    return _GASTO[0]
+
+
+#: Centinela: «el test no indica tipo» -> GASTO por defecto (E3). None explicito = sin tipo.
+POR_DEFECTO = object()
+
+
 def tipo_gasto(owner: uuid.UUID) -> uuid.UUID:
     return h.leer(owner, "SELECT id FROM gapto.tipos_hecho WHERE codigo='GASTO'")[0][0]
 
@@ -58,10 +84,14 @@ def otro_tipo(owner: uuid.UUID) -> uuid.UUID:
     return h.leer(owner, "SELECT id FROM gapto.tipos_hecho WHERE codigo<>'GASTO' ORDER BY codigo LIMIT 1")[0][0]
 
 
-def insertar_sql(owner: uuid.UUID, *, tipo_hecho_id=None, categoria_id=None, tercero_id=None, entidad_id=None,
-                 cuenta=None, presupuestable=None, prioridad: int = 100, enabled: bool = True) -> uuid.UUID:
+def insertar_sql(owner: uuid.UUID, *, tipo_hecho_id=POR_DEFECTO, categoria_id=None, tercero_id=None,
+                 entidad_id=None, cuenta=None, presupuestable=None, prioridad: int = 100,
+                 enabled: bool = True) -> uuid.UUID:
     """Preferencia escrita por SQL DIRECTO (sin el writer): para fijar
-    escenarios del resolver y filas que el writer nunca crearia."""
+    escenarios del resolver y filas que el writer nunca crearia. Sin
+    `tipo_hecho_id`, GASTO (E3); tipo_hecho_id=None escribe una fila sin tipo."""
+    if tipo_hecho_id is POR_DEFECTO:
+        tipo_hecho_id = tipo_gasto_global()
     pid = uuid.uuid4()
     h.como_owner(
         owner,
@@ -73,6 +103,21 @@ def insertar_sql(owner: uuid.UUID, *, tipo_hecho_id=None, categoria_id=None, ter
     return pid
 
 
+def entidad(owner: uuid.UUID) -> uuid.UUID:
+    """Entidad PROPIEDAD sintetica (dimension diferida entidad_id)."""
+    eid = uuid.uuid4()
+    c = fh.sesion_owner(owner)
+    try:
+        c.execute("SET CONSTRAINTS ALL DEFERRED")
+        c.execute("INSERT INTO gapto.entidades (id, owner_user_id, tipo_entidad, nombre) "
+                  "VALUES (%s, %s, 'PROPIEDAD', 'Vivienda sintetica')", (eid, owner))
+        c.execute("INSERT INTO gapto.propiedades (entidad_id, tipo_propiedad) VALUES (%s, 'VIVIENDA')", (eid,))
+        c.execute("COMMIT")
+    finally:
+        c.close()
+    return eid
+
+
 def tercero(owner: uuid.UUID) -> uuid.UUID:
     tid = uuid.uuid4()
     h.como_owner(owner, "INSERT INTO gapto.terceros (id, owner_user_id, nombre) VALUES (%s,%s,'Tercero sintetico')",
@@ -80,12 +125,13 @@ def tercero(owner: uuid.UUID) -> uuid.UUID:
     return tid
 
 
-def resolver(owner: uuid.UUID, categoria_id: uuid.UUID | None, fecha: dt.date = FECHA, tipo_hecho_id=None):
+def resolver(owner: uuid.UUID, categoria_id: uuid.UUID | None, fecha: dt.date = FECHA, tipo_hecho_id=None,
+             tercero_id=None):
     from app.preferencias import resolver as r
 
     def op(s):
         th = tipo_hecho_id or r.tipo_hecho_registro(s)
-        return r.resolver(s, tipo_hecho_id=th, categoria_id=categoria_id, fecha=fecha)
+        return r.resolver(s, tipo_hecho_id=th, categoria_id=categoria_id, fecha=fecha, tercero_id=tercero_id)
 
     return fh.en_transaccion(owner, op)
 
@@ -101,13 +147,20 @@ def origen(propuesta: dict, campo: str):
 
 
 # ------------------------------------------------------------------ HTTP
+def _con_tipo(campos: dict) -> dict:
+    """Sin `tipo_hecho_id` en el test -> GASTO (E3); None explicito se envia como null."""
+    return campos if "tipo_hecho_id" in campos else {"tipo_hecho_id": tipo_gasto_global(), **campos}
+
+
 def alta(cli, pid: uuid.UUID | None = None, **campos):
     pid = pid or uuid.uuid4()
+    campos = _con_tipo(campos)
     cuerpo = {"id": str(pid), **{k: (str(v) if isinstance(v, uuid.UUID) else v) for k, v in campos.items()}}
     return pid, cli.post(BASE, json=cuerpo, headers=h.AUTH)
 
 
 def editar(cli, pid: uuid.UUID, row_version: int, **campos):
+    campos = _con_tipo(campos)
     cuerpo = {"row_version": row_version, **{k: (str(v) if isinstance(v, uuid.UUID) else v) for k, v in campos.items()}}
     return cli.post(f"{BASE}/{pid}/editar", json=cuerpo, headers=h.AUTH)
 

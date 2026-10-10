@@ -36,7 +36,7 @@ _SNAPSHOT = "SELECT row_to_json(p)::text FROM gapto.preferencias_registro p WHER
 
 #: Columnas que los comandos pueden modificar. Nunca id ni owner.
 COLUMNAS_EDITABLES = frozenset({
-    "tipo_hecho_id", "categoria_id", "cuenta_default_id", "presupuestable_default", "enabled",
+    "tipo_hecho_id", "categoria_id", "tercero_id", "cuenta_default_id", "presupuestable_default", "enabled",
 })
 
 
@@ -76,6 +76,14 @@ def habilitadas(sesion: SesionMotor) -> list[dict[str, Any]]:
         return [_fila(f) for f in cur.fetchall()]
 
 
+def sin_tipo_bloqueadas(sesion: SesionMotor) -> list[dict[str, Any]]:
+    """Preferencias del owner (habilitadas o no) con tipo_hecho_id NULL, con
+    FOR NO KEY UPDATE en orden determinista por id (conversion C4)."""
+    with sesion.conexion.cursor() as cur:
+        cur.execute(_SELECT + " AND tipo_hecho_id IS NULL ORDER BY id FOR NO KEY UPDATE")
+        return [_fila(f) for f in cur.fetchall()]
+
+
 def snapshot(sesion: SesionMotor, preferencia_id: uuid.UUID) -> str:
     fila = sesion.uno(_SNAPSHOT, (preferencia_id,))
     assert fila is not None
@@ -88,16 +96,17 @@ def insertar_preferencia(
     preferencia_id: uuid.UUID,
     tipo_hecho_id: uuid.UUID | None,
     categoria_id: uuid.UUID | None,
+    tercero_id: uuid.UUID | None,
     cuenta_default_id: uuid.UUID | None,
     presupuestable_default: bool | None,
 ) -> None:
-    """Alta. tercero_id y entidad_id quedan NULL (DIFERIDAS a F05-04) y
-    prioridad toma su DEFAULT 100 (AJ-D026-04): esta primitiva no los admite."""
+    """Alta. entidad_id queda NULL (DIFERIDA) y prioridad toma su DEFAULT 100
+    (AJ-D026-04): esta primitiva no los admite. tercero_id es operativo (E2)."""
     sesion.uno(
         "INSERT INTO gapto.preferencias_registro (id, owner_user_id, tipo_hecho_id, categoria_id, "
-        "cuenta_default_id, presupuestable_default) VALUES (%s, "
-        "current_setting('gapto.owner_user_id')::uuid, %s, %s, %s, %s) RETURNING id",
-        (preferencia_id, tipo_hecho_id, categoria_id, cuenta_default_id, presupuestable_default),
+        "tercero_id, cuenta_default_id, presupuestable_default) VALUES (%s, "
+        "current_setting('gapto.owner_user_id')::uuid, %s, %s, %s, %s, %s) RETURNING id",
+        (preferencia_id, tipo_hecho_id, categoria_id, tercero_id, cuenta_default_id, presupuestable_default),
     )
 
 

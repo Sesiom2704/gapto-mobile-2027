@@ -20,7 +20,20 @@
 #   Las filas de los escenarios se escriben por SQL directo como gapto_owner
 #   (incluidas configuraciones que el writer rechazaria) y el resolver se
 #   ejecuta como gapto_runtime con RLS.
-# Version: 0.1.0
+#
+#   v0.2.0 (F05-03/F05-04 J2 §1.5; F05 §46.4 R6, §46.5 E2/E3; F05-D032 C4;
+#   decision OPCION A2 del STOP 2, tabla «tests adaptados» del handoff
+#   J2+J3): se retira la preferencia global sin tipo y tercero_id pasa a ser
+#   dimension operativa. Las filas sin `tipo_hecho_id` explicito se escriben
+#   con tipo GASTO (helper, sustitucion «Todos los gastos»). Adaptados con
+#   oraculo nuevo, conservando cada caso: especificidad (la fila sin tipo se
+#   ignora; 1 = tipo, 2 = tipo + categoria o tipo + tercero), categoria sin
+#   tipo ignorada, especificidad antes que prioridad, empate no
+#   contradictorio y cabeza contradictoria (tipo + categoria frente a tipo +
+#   tercero), no elegible sin descender (mas especifica por categoria) y
+#   «Todos los gastos» frente a otro tipo. Nuevos: tipo + tercero consumido
+#   solo con ese tercero y fila sin tipo ignorada.
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -90,26 +103,33 @@ def test_plantilla_no_produce_propuesta(t):
 
 # ------------------------------------------------------------------ especificidad y prioridad
 def test_especificidad_0_1_2(t):
+    """E3/R6: la fila sin tipo (antigua especificidad 0) se ignora; 1 = tipo,
+    2 = tipo + categoria o tipo + tercero."""
     owner, actor, _ = t
-    c0, c1, c2 = ph.cuenta(owner, actor), ph.cuenta(owner, actor), ph.cuenta(owner, actor)
+    c0, c1, c2, c3 = (ph.cuenta(owner, actor) for _ in range(4))
     cat = ph.categoria(owner, "Super")
+    ter = ph.tercero(owner)
     g = ph.tipo_gasto(owner)
-    p0 = ph.insertar_sql(owner, cuenta=c0)
+    ph.insertar_sql(owner, tipo_hecho_id=None, cuenta=c0)
     p1 = ph.insertar_sql(owner, tipo_hecho_id=g, cuenta=c1)
     p2 = ph.insertar_sql(owner, tipo_hecho_id=g, categoria_id=cat, cuenta=c2)
+    p3 = ph.insertar_sql(owner, tipo_hecho_id=g, tercero_id=ter, cuenta=c3)
     assert ph.origen(ph.resolver(owner, cat), "cuenta") == (PREF, p2)
     assert ph.origen(ph.resolver(owner, None), "cuenta") == (PREF, p1)
-    # Otro tipo de hecho: solo coincide la global.
-    assert ph.origen(ph.resolver(owner, None, tipo_hecho_id=ph.otro_tipo(owner)), "cuenta") == (PREF, p0)
+    assert ph.origen(ph.resolver(owner, None, tercero_id=ter), "cuenta") == (PREF, p3)
+    # Otro tipo de hecho: la fila sin tipo ya no coincide (E3) -> sin propuesta.
+    assert ph.resolver(owner, None, tipo_hecho_id=ph.otro_tipo(owner))["cuenta"] is None
 
 
 def test_especificidad_categoria_sola_cuenta_como_1(t):
+    """E3: una preferencia de categoria SIN tipo ya no cuenta (se ignora); la
+    de «Todos los gastos» decide."""
     owner, actor, _ = t
     c0, c1 = ph.cuenta(owner, actor), ph.cuenta(owner, actor)
     cat = ph.categoria(owner, "Super")
-    ph.insertar_sql(owner, cuenta=c0)
-    p1 = ph.insertar_sql(owner, categoria_id=cat, cuenta=c1)
-    assert ph.origen(ph.resolver(owner, cat), "cuenta") == (PREF, p1)
+    p0 = ph.insertar_sql(owner, cuenta=c0)
+    ph.insertar_sql(owner, tipo_hecho_id=None, categoria_id=cat, cuenta=c1)
+    assert ph.origen(ph.resolver(owner, cat), "cuenta") == (PREF, p0)
 
 
 def test_mayor_valor_de_prioridad_gana(t):
@@ -123,9 +143,10 @@ def test_mayor_valor_de_prioridad_gana(t):
 def test_especificidad_antes_que_prioridad(t):
     owner, actor, _ = t
     c_esp, c_prio = ph.cuenta(owner, actor), ph.cuenta(owner, actor)
-    p_esp = ph.insertar_sql(owner, tipo_hecho_id=ph.tipo_gasto(owner), cuenta=c_esp, prioridad=10)
+    cat = ph.categoria(owner, "Super")
+    p_esp = ph.insertar_sql(owner, categoria_id=cat, cuenta=c_esp, prioridad=10)
     ph.insertar_sql(owner, cuenta=c_prio, prioridad=100)
-    assert ph.origen(ph.resolver(owner, None), "cuenta") == (PREF, p_esp)
+    assert ph.origen(ph.resolver(owner, cat), "cuenta") == (PREF, p_esp)
 
 
 # ------------------------------------------------------------------ por campo
@@ -158,9 +179,11 @@ def test_empate_no_contradictorio_propone_el_valor_comun(t):
     owner, actor, _ = t
     a, _ = _dos_cuentas(owner, actor)
     cat = ph.categoria(owner, "Super")
-    ids = sorted([ph.insertar_sql(owner, tipo_hecho_id=ph.tipo_gasto(owner), cuenta=a),
-                  ph.insertar_sql(owner, categoria_id=cat, cuenta=a)])
-    p = ph.resolver(owner, cat)
+    ter = ph.tercero(owner)
+    # Misma especificidad (2): tipo + categoria frente a tipo + tercero (E2).
+    ids = sorted([ph.insertar_sql(owner, categoria_id=cat, cuenta=a),
+                  ph.insertar_sql(owner, tercero_id=ter, cuenta=a)])
+    p = ph.resolver(owner, cat, tercero_id=ter)
     assert ph.valor(p, "cuenta") == a and ph.origen(p, "cuenta") == (PREF, ids[0])
 
 
@@ -171,12 +194,14 @@ def test_cabeza_contradictoria_sin_propuesta_ni_fallback(t):
     eur = ph.cuenta(owner, actor)
     usd = ph.cuenta(owner, actor, moneda="USD")
     cat = ph.categoria(owner, "Super")
-    ph.insertar_sql(owner, tipo_hecho_id=ph.tipo_gasto(owner), cuenta=eur, presupuestable=True)
-    ph.insertar_sql(owner, categoria_id=cat, cuenta=usd, presupuestable=False)
-    p = ph.resolver(owner, cat)
+    ter = ph.tercero(owner)
+    # Misma especificidad (2) y pueden coincidir: tipo + categoria / tipo + tercero (E2).
+    ph.insertar_sql(owner, categoria_id=cat, cuenta=eur, presupuestable=True)
+    ph.insertar_sql(owner, tercero_id=ter, cuenta=usd, presupuestable=False)
+    p = ph.resolver(owner, cat, tercero_id=ter)
     assert p == {"cuenta": None, "presupuestable": None}
-    # Fuera del contexto conflictivo, la del tipo propone con normalidad.
-    p = ph.resolver(owner, None)
+    # Fuera del contexto conflictivo, la de categoria propone con normalidad.
+    p = ph.resolver(owner, cat)
     assert ph.valor(p, "cuenta") == eur and ph.valor(p, "presupuestable") is True
 
 
@@ -229,9 +254,10 @@ def test_no_elegible_no_desciende_a_la_siguiente_preferencia(t):
     owner, actor, _ = t
     a, b = _dos_cuentas(owner, actor)
     baja = ph.cuenta(owner, actor, enabled=False)
-    ph.insertar_sql(owner, tipo_hecho_id=ph.tipo_gasto(owner), cuenta=baja)
+    cat = ph.categoria(owner, "Super")
+    ph.insertar_sql(owner, categoria_id=cat, cuenta=baja)
     ph.insertar_sql(owner, cuenta=a)
-    assert ph.resolver(owner, None)["cuenta"] is None
+    assert ph.resolver(owner, cat)["cuenta"] is None
 
 
 @pytest.mark.parametrize("motivo", ["otra_moneda", "pasivo", "deshabilitada", "cerrada_en_fecha"])
@@ -311,12 +337,41 @@ def test_sin_categoria_solo_coinciden_preferencias_de_categoria_nula(t):
 
 
 def test_preferencia_global_coincide_con_cualquier_contexto(t):
+    """E3: «Todos los gastos» coincide con cualquier categoria y tercero del
+    gasto, pero no con otro tipo; una fila sin tipo no coincide con nada."""
     owner, actor, _ = t
-    a, _ = _dos_cuentas(owner, actor)
+    a, b = _dos_cuentas(owner, actor)
     pid = ph.insertar_sql(owner, cuenta=a)
+    ph.insertar_sql(owner, tipo_hecho_id=None, cuenta=b)
+    ter = ph.tercero(owner)
     for ctx in (None, ph.categoria(owner, "X")):
         assert ph.origen(ph.resolver(owner, ctx), "cuenta") == (PREF, pid)
-    assert ph.origen(ph.resolver(owner, None, tipo_hecho_id=ph.otro_tipo(owner)), "cuenta") == (PREF, pid)
+        assert ph.origen(ph.resolver(owner, ctx, tercero_id=ter), "cuenta") == (PREF, pid)
+    assert ph.resolver(owner, None, tipo_hecho_id=ph.otro_tipo(owner))["cuenta"] is None
+
+
+def test_tipo_mas_tercero_solo_coincide_con_ese_tercero(t):
+    """E2: la preferencia tipo + tercero se consume solo en el contexto de ese
+    tercero; sin tercero o con otro tercero, decide la del tipo."""
+    owner, actor, _ = t
+    a, b = _dos_cuentas(owner, actor)
+    ter, otro = ph.tercero(owner), ph.tercero(owner)
+    p_ter = ph.insertar_sql(owner, tercero_id=ter, cuenta=a, presupuestable=True)
+    p_tipo = ph.insertar_sql(owner, cuenta=b)
+    p = ph.resolver(owner, None, tercero_id=ter)
+    assert ph.origen(p, "cuenta") == (PREF, p_ter) and ph.origen(p, "presupuestable") == (PREF, p_ter)
+    for contexto in (None, otro):
+        p = ph.resolver(owner, None, tercero_id=contexto)
+        assert ph.origen(p, "cuenta") == (PREF, p_tipo) and p["presupuestable"] is None
+
+
+def test_fila_sin_tipo_se_ignora(t):
+    """E3 (C4): una fila sin tipo (previa a la conversion o por SQL directo)
+    nunca produce propuesta, aunque sea la unica."""
+    owner, actor, _ = t
+    a, _ = _dos_cuentas(owner, actor)
+    ph.insertar_sql(owner, tipo_hecho_id=None, cuenta=a, presupuestable=True)
+    assert ph.resolver(owner, None) == {"cuenta": None, "presupuestable": None}
 
 
 def test_desactivada_se_ignora(t):

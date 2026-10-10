@@ -4,6 +4,7 @@
 // Ruta: mobile/src/screens/PreferenciasAjustesScreen.tsx
 // Descripción: Ajustes › Preferencias (F05-02 B3; F05-D026 §41.3; lámina SET-PREF / REG-PREF v0.1, sección B S01–S06 y variante oscura; D-PREF-01..06; AJ-B1-10; D-B3-01). Lista agrupada «Todos los gastos» / «Por categoría» / «Desactivadas» con lo que propone cada preferencia y la marca «No disponible» cuando el servidor dice que la cuenta preferida no es elegible hoy (D-PREF-04: solo aquí, nunca en el registro); estado vacío (S05). Nueva preferencia (S02): ámbitos «Todos los gastos» y «Una categoría» (D-PREF-01); el selector de categoría y la lista de cuentas son la MISMA fuente y componente que REG-01 (SelectorCategorias con visibleEnRegistro / elegibleParaGasto; GET /v1/vs01/cuentas-pago de hoy): sin regla de elegibilidad propia del cliente. «Guardar» desactivado si no se propone nada (espejo del CHECK; el servidor sigue siendo la guarda). Preferencia existente del mismo ámbito o PREFERENCIA_EMPATE_CONTRADICTORIO → S03 «Ir a la preferencia», nunca se crea otra. Detalle (S04) con desactivar / reactivar (el servidor comprueba el empate al reactivar) y sin borrado. Editar envía el ESTADO COMPLETO (E05) con `row_version`; VERSION_DESFASADA → recarga y aviso S06, sin reintento automático (patrón M16 de SET-MAG). INDETERMINADO → se recarga antes de repetir; el alta reutiliza su UUID. Los formularios y el selector son tareas inmersivas (ocultan la barra inferior).
 // Versión: 0.1.0 (F05-02 B3)
+// Versión: 0.2.0 (F05-03/F05-04 J2 §1.5; F05 §46.5 E3): las preferencias nuevas llevan SIEMPRE el tipo GASTO (`tipos.GASTO` de la lista); el ámbito «Todos los gastos» es el tipo GASTO sin categoría.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -11,7 +12,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import type { ClienteApi, CuentaPago, Preferencia, Respuesta, ResultadoComandoPreferencia } from '../api/cliente';
+import type { ClienteApi, CuentaPago, Preferencia, Respuesta, ResultadoComandoPreferencia, TiposRegistro } from '../api/cliente';
 import { BotonPrimario, BotonTexto, CabeceraNavegacion, Chip, EstadoDato, Segmentado } from '../components/Basicos';
 import { BotonSecundario, SelectorCategorias } from '../components/SelectorCategorias';
 import { Arbol, ancestros, construirArbol, elegibleParaGasto, motivoNoSeleccionable, visibleEnRegistro } from '../domain/categoria';
@@ -63,7 +64,10 @@ export const TEXTO_FALTA: Record<Exclude<FaltaFormulario, 'PROPONER'>, string> =
   CUENTA_NO_DISPONIBLE: 'La cuenta actual ya no está disponible: elige otra o «No proponer».',
 };
 
-type Carga = { fase: 'CARGANDO' } | { fase: 'ERROR' } | { fase: 'OK'; prefs: Preferencia[]; cuentas: CuentaPago[]; arbol: Arbol };
+type Carga =
+  | { fase: 'CARGANDO' }
+  | { fase: 'ERROR' }
+  | { fase: 'OK'; prefs: Preferencia[]; tipos: TiposRegistro; cuentas: CuentaPago[]; arbol: Arbol };
 type Datos = Extract<Carga, { fase: 'OK' }>;
 type Vista = { v: 'LISTA' } | { v: 'DETALLE'; id: string } | { v: 'NUEVA' } | { v: 'EDITAR'; id: string };
 type Aviso = { tipo: 'OK' | 'AVISO'; texto: string; irA?: string } | null;
@@ -101,7 +105,13 @@ export function PreferenciasAjustesScreen(p: {
         if (!silencioso) setCarga({ fase: 'ERROR' });
         return null;
       }
-      const datos: Datos = { fase: 'OK', prefs: l.datos.preferencias, cuentas: cu.datos.cuentas, arbol: construirArbol(a.datos.categorias) };
+      const datos: Datos = {
+        fase: 'OK',
+        prefs: l.datos.preferencias,
+        tipos: l.datos.tipos,
+        cuentas: cu.datos.cuentas,
+        arbol: construirArbol(a.datos.categorias),
+      };
       setCarga(datos);
       return datos;
     },
@@ -119,6 +129,8 @@ export function PreferenciasAjustesScreen(p: {
 
   const datos = carga.fase === 'OK' ? carga : null;
   const prefs = datos?.prefs ?? [];
+  const tipoGasto = datos?.tipos.GASTO ?? null;
+  const ambito = (x: Preferencia) => ambitoDe(x, tipoGasto);
   const porId = (id: string) => prefs.find((x) => x.id === id) ?? null;
 
   // ---------------------------------------------------------------- nombres visibles
@@ -130,14 +142,14 @@ export function PreferenciasAjustesScreen(p: {
     return datos && n ? [...ancestros(datos.arbol, id), n].map((x) => x.nombre).join(' › ') : 'Categoría no disponible';
   };
   const rotulo = (x: Preferencia) => {
-    const a = ambitoDe(x);
+    const a = ambito(x);
     return a === 'CATEGORIA' ? rutaCategoria(x.categoria_id!) : a === 'GENERAL' ? TITULO_GENERAL : TITULO_OTRO;
   };
   /** Título del detalle (lámina S04: «Supermercado»). */
-  const tituloDe = (x: Preferencia) => (ambitoDe(x) === 'CATEGORIA' ? nodo(x.categoria_id!)?.nombre ?? rutaCategoria(x.categoria_id!) : rotulo(x));
+  const tituloDe = (x: Preferencia) => (ambito(x) === 'CATEGORIA' ? nodo(x.categoria_id!)?.nombre ?? rutaCategoria(x.categoria_id!) : rotulo(x));
   /** «para …» de los avisos S03 y de reactivar. */
   const paraDe = (x: Preferencia) => {
-    const a = ambitoDe(x);
+    const a = ambito(x);
     return a === 'CATEGORIA' ? tituloDe(x) : a === 'GENERAL' ? 'todos los gastos' : 'este tipo de gasto';
   };
   /** «que propone …» (lámina S03: «que propone Tarjeta BBVA»). */
@@ -183,7 +195,8 @@ export function PreferenciasAjustesScreen(p: {
   const guardar = async () => {
     if (ocupado || vista.v === 'LISTA' || vista.v === 'DETALLE') return;
     const base = vista.v === 'EDITAR' ? porId(vista.id) : null;
-    const contenido = contenidoFormulario(form, base);
+    if (tipoGasto === null) return;
+    const contenido = contenidoFormulario(form, base, tipoGasto);
     setOcupado(true);
     setAvisoForm(null);
     const r: Respuesta<ResultadoComandoPreferencia> = base
@@ -253,7 +266,7 @@ export function PreferenciasAjustesScreen(p: {
     const existente =
       conflicto ??
       (vista.v === 'NUEVA' && datos && (form.ambito === 'GENERAL' || (form.ambito === 'CATEGORIA' && form.categoriaId !== null))
-        ? preferenciaDeAmbito(datos.prefs, form.ambito === 'GENERAL' ? null : form.categoriaId)
+        ? preferenciaDeAmbito(datos.prefs, form.ambito === 'GENERAL' ? null : form.categoriaId, datos.tipos.GASTO)
         : null);
     const puede = faltas.length === 0 && existente === null && !ocupado;
     const cuentaActual = form.cuenta !== null && typeof form.cuenta === 'object' ? form.cuenta.noDisponible : null;
@@ -281,7 +294,7 @@ export function PreferenciasAjustesScreen(p: {
           {base ? (
             <Campo etiqueta="Se aplica a">
               <Text testID="ajpref-form-ambito-fijo" style={[tipo.body, { color: c.textPrimary }]}>
-                {ambitoDe(base) === 'CATEGORIA' ? rutaCategoria(base.categoria_id!) : ambitoDe(base) === 'GENERAL' ? 'Todos los gastos' : TITULO_OTRO}
+                {ambito(base) === 'CATEGORIA' ? rutaCategoria(base.categoria_id!) : ambito(base) === 'GENERAL' ? 'Todos los gastos' : TITULO_OTRO}
               </Text>
             </Campo>
           ) : (
@@ -404,7 +417,7 @@ export function PreferenciasAjustesScreen(p: {
   if (vista.v === 'DETALLE') {
     const x = porId(vista.id);
     if (!x) return null; // el efecto de recarga vuelve a la lista
-    const ambito = ambitoDe(x);
+    const ambitoX = ambito(x);
     const nombre = x.cuenta_default_id !== null ? nombreCuenta(x.cuenta_default_id) : null;
     return (
       <View testID="ajpref-detalle" style={{ flex: 1, backgroundColor: c.background }}>
@@ -417,7 +430,7 @@ export function PreferenciasAjustesScreen(p: {
         <ScrollView contentContainerStyle={[s.cuerpo, { paddingBottom: inset.bottom + espacio.xxl }]}>
           <View style={[s.tarjeta, { backgroundColor: c.surfacePrimary, borderColor: c.borderDefault }]}>
             <FilaDato testID="ajpref-det-ambito" etiqueta="Se aplica a"
-              valor={ambito === 'CATEGORIA' ? rutaCategoria(x.categoria_id!) : ambito === 'GENERAL' ? 'Todos los gastos' : TITULO_OTRO} />
+              valor={ambitoX === 'CATEGORIA' ? rutaCategoria(x.categoria_id!) : ambitoX === 'GENERAL' ? 'Todos los gastos' : TITULO_OTRO} />
             <FilaDato
               testID="ajpref-det-cuenta"
               etiqueta="Cuenta"
@@ -445,7 +458,7 @@ export function PreferenciasAjustesScreen(p: {
   }
 
   // ---------------------------------------------------------------- LISTA (S01 / S05)
-  const grupos = datos ? agruparPreferencias(datos.prefs, rotulo) : null;
+  const grupos = datos ? agruparPreferencias(datos.prefs, rotulo, datos.tipos.GASTO) : null;
   return (
     <View testID="pantalla-preferencias" style={{ flex: 1, backgroundColor: c.background }}>
       <CabeceraNavegacion

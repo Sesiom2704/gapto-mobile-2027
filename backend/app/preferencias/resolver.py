@@ -18,9 +18,9 @@
 #   operativa (tipo_hecho_id, categoria_id): NULL = comodin; si no, igualdad
 #   EXACTA (categoria sin herencia de ancestros, AJ-D026-05). Una categoria
 #   NULL en el contexto («Sin categoria») solo casa con preferencias de
-#   categoria NULL. Filas con tercero_id o entidad_id no nulos se ignoran
-#   SIEMPRE (dimensiones diferidas a F05-04, AJ-D026-12; defensa frente a
-#   filas escritas fuera del writer).
+#   categoria NULL. Filas con tercero_id o entidad_id no nulos se ignoraban
+#   SIEMPRE (dimensiones diferidas a F05-04, AJ-D026-12); desde v0.2.0 solo
+#   entidad_id sigue diferida y las filas sin tipo se ignoran (ver v0.2.0).
 #
 #   Orden: especificidad desc (claves no nulas entre tipo_hecho_id y
 #   categoria_id, AJ-D026-02), prioridad desc (mayor valor = mayor prioridad,
@@ -43,7 +43,22 @@
 #   contradictoria es una DEFENSA fail-closed ante configuracion invalida
 #   (que el writer impide), no una regla de precedencia (E01). Sin cambio
 #   de comportamiento.
-# Version: 0.1.1
+#
+#   v0.2.0 (F05-03/F05-04 J2 §1.5; F05 §46.4 R6, §46.5 E2/E3; F05-D032 C4):
+#   - `tercero_id` pasa a ser dimension OPERATIVA (E2): DIMENSIONES =
+#     (tipo_hecho_id, categoria_id, tercero_id) y la especificidad tecnica es
+#     el numero de claves no nulas entre las tres (0..3). Un tercero NULL en
+#     el contexto («sin tercero») solo casa con preferencias de tercero NULL,
+#     igual que la categoria. `entidad_id` sigue DIFERIDA: una fila con
+#     entidad_id no nulo se ignora siempre.
+#   - Se retira la preferencia global sin tipo (E3): el resolver IGNORA las
+#     filas con tipo_hecho_id NULL (datos previos a la conversion C4 o
+#     escritos fuera del writer). La precedencia D-042 y el desempate de
+#     §41.4 no cambian.
+#   - `resolver` recibe el tercero del contexto (None = sin tercero) y
+#     `cuentas_elegibles_registro` sigue siendo la regla de elegibilidad
+#     de cuenta del registro.
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -63,13 +78,24 @@ TIPO_HECHO_REGISTRO = "GASTO"
 
 CAPA_PREFERENCIA = "PREFERENCIA"
 CAPA_DEFAULT_GENERAL = "DEFAULT_GENERAL"
-DIMENSIONES = ("tipo_hecho_id", "categoria_id")
+DIMENSIONES = ("tipo_hecho_id", "categoria_id", "tercero_id")
 CAMPOS = {"cuenta": "cuenta_default_id", "presupuestable": "presupuestable_default"}
 
 
 # ------------------------------------------------------------------ reglas puras
 def dimension_diferida(p: dict[str, Any]) -> bool:
-    return p.get("tercero_id") is not None or p.get("entidad_id") is not None
+    """Solo `entidad_id` sigue diferida (E2: tercero_id es operativo)."""
+    return p.get("entidad_id") is not None
+
+
+def sin_tipo(p: dict[str, Any]) -> bool:
+    """Preferencia global sin tipo, retirada por E3: el resolver no la consume."""
+    return p.get("tipo_hecho_id") is None
+
+
+def consumible(p: dict[str, Any]) -> bool:
+    """El resolver y la regla de empate solo consideran estas filas."""
+    return not dimension_diferida(p) and not sin_tipo(p)
 
 
 def especificidad(p: dict[str, Any]) -> int:
@@ -110,9 +136,10 @@ def ganadora(candidatas: list[dict[str, Any]], columna: str) -> dict[str, Any] |
 
 
 # ------------------------------------------------------------------ lecturas
-def tipo_hecho_registro(sesion: SesionMotor) -> uuid.UUID:
-    fila = sesion.uno("SELECT id FROM gapto.tipos_hecho WHERE codigo = %s", (TIPO_HECHO_REGISTRO,))
-    assert fila is not None, "catalogo tipos_hecho sin GASTO"
+def tipo_hecho_registro(sesion: SesionMotor, codigo: str = TIPO_HECHO_REGISTRO) -> uuid.UUID:
+    """Id del tipo de hecho de un registro (GASTO por defecto; INGRESO en F05-04)."""
+    fila = sesion.uno("SELECT id FROM gapto.tipos_hecho WHERE codigo = %s", (codigo,))
+    assert fila is not None, f"catalogo tipos_hecho sin {codigo}"
     return fila[0]
 
 
@@ -130,16 +157,15 @@ def resolver(
     tipo_hecho_id: uuid.UUID,
     categoria_id: uuid.UUID | None,
     fecha: dt.date,
+    tercero_id: uuid.UUID | None = None,
 ) -> dict[str, dict[str, Any] | None]:
     """Propuesta por campo para el contexto del registro: {campo: {valor,
     origen: {capa, preferencia_id}} | None}. Instantanea de lectura, sin locks.
     Si la cabeza de un campo es contradictoria (defensa fail-closed, ver
     `ganadora`), ese campo queda sin propuesta, tambien sin el fallback de
     cuenta unica (E01)."""
-    contexto = {"tipo_hecho_id": tipo_hecho_id, "categoria_id": categoria_id}
-    candidatas = [
-        p for p in repo.habilitadas(sesion) if not dimension_diferida(p) and coincide(p, contexto)
-    ]
+    contexto = {"tipo_hecho_id": tipo_hecho_id, "categoria_id": categoria_id, "tercero_id": tercero_id}
+    candidatas = [p for p in repo.habilitadas(sesion) if consumible(p) and coincide(p, contexto)]
     elegibles = cuentas_elegibles_registro(sesion, fecha)
 
     cuenta = None

@@ -4,6 +4,7 @@
 // Ruta: mobile/src/domain/preferencias.ts
 // Descripción: Lógica pura de las preferencias de registro en REG-01 (F05-02 B2; F05-D026 §41.3/§41.4, E1/E2/E3; F05-D027 §42.7; lámina SET-PREF / REG-PREF v0.1, R01–R07, D-PREF-02..06). (1) Propuesta aplicable: la ÚNICA fuente de la propuesta de cuenta es el resolver del servidor (AJ-B1-09: sin fallback del cliente) y nunca se preselecciona una cuenta que no esté en la lista de elegibles (AJ-B1-11 / AJ-B1C-08); un origen que no se puede explicar no se aplica (D-PREF-02). (2) Aplicación por campo: solo a los campos que el usuario no ha tocado (D-PREF-03, «lo explícito gana»). (3) «Guardar como preferencia»: casillas iniciales (marcada si el valor final difiere de lo propuesto) y plan de escritura sobre la preferencia de ámbito «Una categoría» (alta, edición con el ESTADO COMPLETO —E05— o conflicto R07).
 // Versión: 0.1.0 (F05-02 B2)
+// Versión: 0.3.0 (F05-03/F05-04 J2 §1.5; F05 §46.5 E2/E3; F05-D032 C4): se retira la preferencia sin tipo. «Todos los gastos» y «Una categoría» llevan SIEMPRE el tipo GASTO (`tipoGasto`, id que informa GET /v1/preferencias): el alta lo envía y las búsquedas del ámbito lo exigen. Una preferencia sin tipo (anterior a la conversión C4) ya no es de ningún ámbito vigente.
 // Versión: 0.2.0 (F05-02 B3; lámina SET-PREF v0.1 S01–S06, D-PREF-01/04; AJ-B1-10): SOLO altas para Ajustes › Preferencias: ámbito visible (D-PREF-01), grupos y orden de la lista (S01), textos de lo que propone cada preferencia, preferencia existente del mismo ámbito (S03, «nunca crear otra»), estado del formulario (S02/S06) con el espejo del CHECK «propone algo» y el contenido COMPLETO que se envía (E05). Ninguna regla de elegibilidad: las cuentas y categorías ofrecidas son las de REG-01 y la disponibilidad de la cuenta la dice el servidor (`cuenta_disponible_hoy`).
 // ============================================================
 
@@ -143,11 +144,11 @@ export function datosRecordables(
   return casillas ? { categoriaId, finales, casillas } : null;
 }
 
-/** Preferencia habilitada de ámbito «Una categoría» (categoria_id = X, tipo de hecho NULL). */
-export function preferenciaDeCategoria(lista: Preferencia[], categoriaId: string): Preferencia | null {
+/** Preferencia habilitada de ámbito «Una categoría» (categoria_id = X, tipo GASTO; E3). */
+export function preferenciaDeCategoria(lista: Preferencia[], categoriaId: string, tipoGasto: string): Preferencia | null {
   return (
     lista.find(
-      (x) => x.enabled && x.categoria_id === categoriaId && x.tipo_hecho_id === null && x.tercero_id === null && x.entidad_id === null,
+      (x) => x.enabled && x.categoria_id === categoriaId && x.tipo_hecho_id === tipoGasto && x.tercero_id === null && x.entidad_id === null,
     ) ?? null
   );
 }
@@ -171,14 +172,20 @@ export function estadoCompleto(e: Preferencia, f: ValoresFinales, c: Casillas): 
   };
 }
 
-export function planificarGuardado(lista: Preferencia[], categoriaId: string, f: ValoresFinales, c: Casillas): PlanGuardado {
+export function planificarGuardado(
+  lista: Preferencia[],
+  categoriaId: string,
+  f: ValoresFinales,
+  c: Casillas,
+  tipoGasto: string,
+): PlanGuardado {
   if (!c.cuenta && !c.presupuestable) return { tipo: 'NADA' };
-  const e = preferenciaDeCategoria(lista, categoriaId);
+  const e = preferenciaDeCategoria(lista, categoriaId, tipoGasto);
   if (!e) {
     return {
       tipo: 'ALTA',
       contenido: {
-        tipo_hecho_id: null,
+        tipo_hecho_id: tipoGasto,
         categoria_id: categoriaId,
         tercero_id: null,
         entidad_id: null,
@@ -200,12 +207,15 @@ export function siNo(v: boolean): string {
 }
 
 // ------------------------------------------------------------------ Ajustes › Preferencias (F05-02 B3; lámina SET-PREF S01–S06)
-/** Ámbito visible (D-PREF-01). OTRO = tipo de hecho sin categoría: solo creable por API, se lista con los generales. */
+/**
+ * Ámbito visible (D-PREF-01; E3). GENERAL = «Todos los gastos» (tipo GASTO sin categoría). OTRO = otro tipo sin
+ * categoría, o una preferencia sin tipo anterior a la conversión C4: solo creable por API, se lista con los generales.
+ */
 export type AmbitoPreferencia = 'GENERAL' | 'CATEGORIA' | 'OTRO';
 
-export function ambitoDe(x: Pick<Preferencia, 'tipo_hecho_id' | 'categoria_id'>): AmbitoPreferencia {
+export function ambitoDe(x: Pick<Preferencia, 'tipo_hecho_id' | 'categoria_id'>, tipoGasto: string | null): AmbitoPreferencia {
   if (x.categoria_id !== null) return 'CATEGORIA';
-  return x.tipo_hecho_id === null ? 'GENERAL' : 'OTRO';
+  return tipoGasto !== null && x.tipo_hecho_id === tipoGasto ? 'GENERAL' : 'OTRO';
 }
 
 export const TITULO_GENERAL = 'General';
@@ -224,13 +234,14 @@ const ORDEN_AMBITO: Record<AmbitoPreferencia, number> = { GENERAL: 0, OTRO: 1, C
  * Orden (decisión de ejecución D2 de B3): por ámbito (General, tipo de gasto, categoría) y, dentro, por el rótulo
  * visible («Padre › Hija») con la colación del español; a igualdad, por id. Es estable y no depende del orden de la API.
  */
-export function agruparPreferencias(lista: Preferencia[], rotulo: (x: Preferencia) => string): GruposPreferencias {
+export function agruparPreferencias(lista: Preferencia[], rotulo: (x: Preferencia) => string, tipoGasto: string | null): GruposPreferencias {
+  const amb = (x: Preferencia) => ambitoDe(x, tipoGasto);
   const orden = (a: Preferencia, b: Preferencia) =>
-    ORDEN_AMBITO[ambitoDe(a)] - ORDEN_AMBITO[ambitoDe(b)] || rotulo(a).localeCompare(rotulo(b), 'es') || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+    ORDEN_AMBITO[amb(a)] - ORDEN_AMBITO[amb(b)] || rotulo(a).localeCompare(rotulo(b), 'es') || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
   const ordenada = [...lista].sort(orden);
   return {
-    todos: ordenada.filter((x) => x.enabled && ambitoDe(x) !== 'CATEGORIA'),
-    categoria: ordenada.filter((x) => x.enabled && ambitoDe(x) === 'CATEGORIA'),
+    todos: ordenada.filter((x) => x.enabled && amb(x) !== 'CATEGORIA'),
+    categoria: ordenada.filter((x) => x.enabled && amb(x) === 'CATEGORIA'),
     desactivadas: ordenada.filter((x) => !x.enabled),
   };
 }
@@ -248,12 +259,17 @@ export function textosPropone(x: Pick<Preferencia, 'cuenta_default_id' | 'presup
   return r;
 }
 
-/** Preferencia HABILITADA del mismo ámbito «Todos los gastos» (categoría null) o «Una categoría» (S03; D4 de B2). */
-export function preferenciaDeAmbito(lista: Preferencia[], categoriaId: string | null, excluirId: string | null = null): Preferencia | null {
+/** Preferencia HABILITADA del mismo ámbito «Todos los gastos» (categoría null) o «Una categoría» (S03; D4 de B2), tipo GASTO (E3). */
+export function preferenciaDeAmbito(
+  lista: Preferencia[],
+  categoriaId: string | null,
+  tipoGasto: string,
+  excluirId: string | null = null,
+): Preferencia | null {
   return (
     lista.find(
       (x) =>
-        x.id !== excluirId && x.enabled && x.categoria_id === categoriaId && x.tipo_hecho_id === null && x.tercero_id === null && x.entidad_id === null,
+        x.id !== excluirId && x.enabled && x.categoria_id === categoriaId && x.tipo_hecho_id === tipoGasto && x.tercero_id === null && x.entidad_id === null,
     ) ?? null
   );
 }
@@ -303,7 +319,7 @@ export function faltaFormulario(f: FormularioPreferencia): FaltaFormulario[] {
 }
 
 /** Contenido COMPLETO que se envía (E05): alta con prioridad 100; edición con las claves y la prioridad de la existente. */
-export function contenidoFormulario(f: FormularioPreferencia, base: Preferencia | null): ContenidoPreferencia {
+export function contenidoFormulario(f: FormularioPreferencia, base: Preferencia | null, tipoGasto: string): ContenidoPreferencia {
   const cuenta = typeof f.cuenta === 'string' ? f.cuenta : null;
   if (base) {
     return {
@@ -317,7 +333,7 @@ export function contenidoFormulario(f: FormularioPreferencia, base: Preferencia 
     };
   }
   return {
-    tipo_hecho_id: null,
+    tipo_hecho_id: tipoGasto,
     categoria_id: f.ambito === 'CATEGORIA' ? f.categoriaId : null,
     tercero_id: null,
     entidad_id: null,

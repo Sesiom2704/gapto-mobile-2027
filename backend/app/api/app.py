@@ -79,7 +79,15 @@
 #   conserva codigo y status, pero lleva un mensaje propio de lectura
 #   (MENSAJE_PROPUESTA_NO_ELEGIBLE), sin «no se ha guardado nada». El mensaje
 #   del rechazo de la intencion no cambia.
-# Version: 0.11.1
+#
+#   v0.12.0 (F05-03/F05-04 J2 §1.5; F05 §46.4 R6, §46.5 E2/E3):
+#     GET /v1/preferencias/propuesta admite `tipo` (GASTO por defecto |
+#       INGRESO) y `tercero_id` (dimension operativa, E2); la guarda C-a se
+#       evalua con ese tipo;
+#     GET /v1/preferencias anade `tipos` (ids de GASTO e INGRESO, campo
+#       aditivo) para que el cliente envie siempre el tipo (E3: no hay
+#       preferencia sin tipo).
+# Version: 0.12.0
 # ============================================================
 
 from __future__ import annotations
@@ -90,7 +98,7 @@ import logging
 import re
 import uuid
 from contextlib import contextmanager
-from typing import Callable, Iterator
+from typing import Callable, Iterator, Literal
 
 import psycopg
 from fastapi import Body, Depends, FastAPI, Query, Request
@@ -170,6 +178,8 @@ _MES = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 #: AJ-B2-05: mensaje de CATEGORIA_NO_ELEGIBLE en la propuesta (lectura: no hay nada que guardar).
 MENSAJE_PROPUESTA_NO_ELEGIBLE = "Esa categoría no se puede elegir para registrar un gasto. Elige otra o «Sin categoría»."
+MENSAJE_PROPUESTA_NO_ELEGIBLE_INGRESO = (
+    "Esa categoría no se puede elegir para registrar un ingreso. Elige otra o «Sin categoría».")
 
 
 class _NoAutorizado(Exception):
@@ -455,19 +465,26 @@ def create_app(
 
     @app.get("/v1/preferencias", response_model=ListaPreferencias, dependencies=[Depends(autorizar)])
     def preferencias() -> dict:
-        return {"preferencias": unidad.ejecutar(contexto(), lect_pref.listar, nombre="F05-02 listar")}
+        return unidad.ejecutar(
+            contexto(), lambda s: {"preferencias": lect_pref.listar(s), "tipos": lect_pref.tipos_registro(s)},
+            nombre="F05-02 listar")
 
     @app.get("/v1/preferencias/propuesta", response_model=PropuestaRegistro, dependencies=[Depends(autorizar)])
-    def propuesta_preferencias(fecha: dt.date = Query(...), categoria_id: uuid.UUID | None = Query(None)):
+    def propuesta_preferencias(fecha: dt.date = Query(...), categoria_id: uuid.UUID | None = Query(None),
+                               tipo: Literal["GASTO", "INGRESO"] = Query("GASTO"),
+                               tercero_id: uuid.UUID | None = Query(None)):
         # Sin categoria_id = «Sin categoria»: solo casan preferencias de categoria NULL.
+        # Sin tercero_id = sin tercero: solo casan preferencias de tercero NULL (E2).
         salida = unidad.ejecutar(
-            contexto(), lambda s: lect_pref.propuesta(s, categoria_id, fecha), nombre="F05-02 propuesta"
+            contexto(), lambda s: lect_pref.propuesta(s, categoria_id, fecha, tipo, tercero_id),
+            nombre="F05-02 propuesta",
         )
         if isinstance(salida, str):
-            # Categoria no elegible para GASTO (guarda C-a): codigo y status de la capa F05,
+            # Categoria no elegible para el tipo (guarda C-a): codigo y status de la capa F05,
             # con mensaje de lectura (AJ-B2-05).
             status, cuerpo = eh.rechazo_integracion(salida)
-            return JSONResponse({**cuerpo, "mensaje": MENSAJE_PROPUESTA_NO_ELEGIBLE}, status_code=status)
+            mensaje = MENSAJE_PROPUESTA_NO_ELEGIBLE if tipo == "GASTO" else MENSAJE_PROPUESTA_NO_ELEGIBLE_INGRESO
+            return JSONResponse({**cuerpo, "mensaje": mensaje}, status_code=status)
         return salida
 
     @app.post("/v1/preferencias", **_RP)

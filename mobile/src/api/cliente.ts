@@ -9,7 +9,8 @@
 // v0.5.0 (F05-01 S7-MAG UI; F05-D020): catálogo GET /v1/magnitudes y los comandos de magnitudes (asociar EXISTENTE/NUEVA, obligatoriedad, retirar, reordenar el conjunto COMPLETO de asociaciones por la ruta atómica de la categoría, renombrar, deshabilitar con confirmación de impacto y rehabilitar), con la clasificación OK / RECHAZADO(codigo, detalle) / INDETERMINADO vigente. `detalle` tipado para MAGNITUD_NOMBRE_DUPLICADO y MAGNITUD_DESHABILITAR_REQUIERE_CONFIRMACION.
 // v0.6.0 (F05-02 B2; F05-D026 §41.3, F05-D027 §42.7): preferencias de registro. Lectura de la propuesta por campo (GET /v1/preferencias/propuesta, por fecha y categoría o «Sin categoría») y de la lista (GET /v1/preferencias); alta y edición (POST, clasificación 'CAMBIO'). Editar envía SIEMPRE el estado completo (E05): el tipo no admite un parche parcial. Sin imports nuevos.
 // v0.7.0 (F05-02 B3; lámina SET-PREF S04, A2 del mandato B3+B4): desactivar y reactivar una preferencia (`desactivarPreferencia(id, row_version)` y `reactivarPreferencia(id, row_version)`) sobre las rutas existentes de B1, con la clasificación 'CAMBIO' vigente. Sin cambios en rutas ni DTO.
-// Versión: 0.7.0
+// v0.8.0 (F05-03/F05-04 J2 §1.5; F05 §46.5 E2/E3): GET /v1/preferencias devuelve también `tipos` (ids de GASTO e INGRESO) para enviar SIEMPRE el tipo de la preferencia (se retira la preferencia sin tipo). Sin rutas nuevas.
+// Versión: 0.8.0
 // ============================================================
 
 import type { Ambito, CategoriaNodo } from '../domain/categoria';
@@ -179,6 +180,17 @@ export interface Preferencia extends ContenidoPreferencia {
   cuenta_disponible_hoy?: boolean | null;
 }
 
+/** Ids de los tipos de registro con preferencias (E3: toda preferencia lleva tipo). */
+export interface TiposRegistro {
+  GASTO: string;
+  INGRESO: string;
+}
+
+export interface ListaPreferencias {
+  preferencias: Preferencia[];
+  tipos: TiposRegistro;
+}
+
 export interface ResultadoComandoPreferencia {
   preferencia: Preferencia;
   idempotente: boolean;
@@ -240,7 +252,7 @@ export interface ClienteApi {
   ): Promise<Respuesta<ResultadoComandoMagnitud>>;
   rehabilitarMagnitud(id: string, c: { row_version: number }): Promise<Respuesta<ResultadoComandoMagnitud>>;
   propuestaPreferencias(fecha: string, categoriaId: string | null): Promise<Respuesta<PropuestaRegistro>>;
-  listarPreferencias(): Promise<Respuesta<{ preferencias: Preferencia[] }>>;
+  listarPreferencias(): Promise<Respuesta<ListaPreferencias>>;
   altaPreferencia(c: { id: string } & ContenidoPreferencia): Promise<Respuesta<ResultadoComandoPreferencia>>;
   editarPreferencia(id: string, c: { row_version: number } & ContenidoPreferencia): Promise<Respuesta<ResultadoComandoPreferencia>>;
   desactivarPreferencia(id: string, row_version: number): Promise<Respuesta<ResultadoComandoPreferencia>>;

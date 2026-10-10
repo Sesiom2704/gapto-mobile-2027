@@ -4,6 +4,7 @@
 // Ruta: mobile/__tests__/ajustes_preferencias.test.tsx
 // Descripción: Ajustes › Preferencias (F05-02 B3; lámina SET-PREF / REG-PREF v0.1, sección B S01–S06 y oscuro; D-PREF-01..06; AJ-B1-10; D-B3-01). Una prueba por pantalla y por regla: entrada desde Ajustes con título «Preferencias»; S05 vacío; S01 lista agrupada y ordenada, «Pagar con X» / «Presupuesto: Sí/No», «Padre › Hija», marca «No disponible» solo con `cuenta_disponible_hoy = false` (D-PREF-04) y pie; S02 alta con solo dos ámbitos (D-PREF-01), cuentas y categorías de la MISMA fuente que REG-01 (sin regla propia: una INGRESO no se puede elegir, AJ-B1-10), «Guardar» desactivado sin propuesta (espejo del CHECK), contenido completo y UUID sellado al abrir; S03 por existente y por carrera (nunca se crea otra); S04 detalle, desactivar y reactivar (empate al reactivar) sin borrado; E05 al editar; S06 VERSION_DESFASADA → recarga y aviso sin reintento; INDETERMINADO con el mismo UUID; cuenta actual no disponible al editar; tareas inmersivas; modo oscuro.
 // Versión: 0.1.0 (F05-02 B3)
+// Versión: 0.2.0 (F05-03/F05-04 J2 §1.5; F05 §46.5 E3; decisión OPCIÓN A2 del STOP 2, tabla «tests adaptados»): toda preferencia lleva tipo. Los dobles devuelven `tipos` en la lista y las preferencias de la lámina son de tipo GASTO (`TIPOS.GASTO`); los altas y ediciones esperan `tipo_hecho_id: TIPOS.GASTO` en lugar de null. La preferencia «por tipo» creada por API pasa a ser de OTRO tipo (`t-otro`): la de tipo GASTO sin categoría es ahora «Todos los gastos».
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
@@ -11,7 +12,7 @@ import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { Raiz } from '../App';
-import type { ClienteApi, ContenidoPreferencia, CuentaPago, Preferencia, Respuesta, ResultadoComandoPreferencia } from '../src/api/cliente';
+import type { ClienteApi, ContenidoPreferencia, CuentaPago, ListaPreferencias, Preferencia, Respuesta, ResultadoComandoPreferencia } from '../src/api/cliente';
 import { agruparPreferencias, contenidoFormulario, faltaFormulario, formularioDesde, textosPropone } from '../src/domain/preferencias';
 import {
   TEXTO_CHECK,
@@ -55,9 +56,12 @@ const cuenta = (cuenta_id: string, nombre: string, moneda = 'EUR'): CuentaPago =
 // Lo que ofrece REG-01 (GET /v1/vs01/cuentas-pago): también una cuenta en otra moneda.
 const CUENTAS = [cuenta(TARJETA, 'Tarjeta BBVA'), cuenta(EFECTIVO, 'Efectivo'), cuenta(COMUN, 'Cuenta común'), cuenta(USD, 'Cuenta USD', 'USD')];
 
+/** Ids de tipo que informa GET /v1/preferencias (E3). */
+const TIPOS = { GASTO: 't-gasto', INGRESO: 't-ingreso' };
+
 function pref(p: Partial<Preferencia> & { id: string }): Preferencia {
   return {
-    tipo_hecho_id: null, categoria_id: null, tercero_id: null, entidad_id: null, cuenta_default_id: null,
+    tipo_hecho_id: TIPOS.GASTO, categoria_id: null, tercero_id: null, entidad_id: null, cuenta_default_id: null,
     presupuestable_default: null, prioridad: 100, enabled: true, row_version: 1, cuenta_disponible_hoy: null, ...p,
   };
 }
@@ -88,7 +92,7 @@ function fake(inicial: Preferencia[] = [], o: { alta?: Mando; editar?: Mando; de
     registrarGastoPagado: jest.fn(async () => { throw new Error('no esperado'); }),
     cuentasPago: jest.fn(async () => ({ tipo: 'OK', datos: { cuentas: CUENTAS } }) as Respuesta<{ cuentas: CuentaPago[] }>),
     gastoMes: jest.fn(async () => ({ tipo: 'INDETERMINADO' as const, mensaje: '' })),
-    listarPreferencias: jest.fn(async () => ({ tipo: 'OK', datos: { preferencias: lista } }) as Respuesta<{ preferencias: Preferencia[] }>),
+    listarPreferencias: jest.fn(async () => ({ tipo: 'OK', datos: { preferencias: lista, tipos: TIPOS } }) as Respuesta<ListaPreferencias>),
     altaPreferencia: jest.fn(async (c: ContenidoPreferencia & { id: string }) =>
       (await o.alta?.(c.id, c)) ?? fijar(pref({ ...c, cuenta_disponible_hoy: c.cuenta_default_id === null ? null : true }))),
     editarPreferencia: jest.fn(async (id: string, c: ContenidoPreferencia & { row_version: number }) => {
@@ -226,8 +230,8 @@ test('S01 lista: grupos, orden, «Padre › Hija», lo que propone, «No disponi
 
 test('S01 (dominio): agrupar y ordenar es estable y no depende del orden de la API', () => {
   const rot = (x: Preferencia) => ({ 'p-general': 'General', 'p-super': 'Alimentación › Supermercado', 'p-rest': 'Ocio › Restaurantes', 'p-gas': 'Transporte › Gasolina', 'p-limp': 'Hogar › Limpieza' })[x.id]!;
-  const a = agruparPreferencias(LAMINA, rot);
-  const b = agruparPreferencias([...LAMINA].reverse(), rot);
+  const a = agruparPreferencias(LAMINA, rot, TIPOS.GASTO);
+  const b = agruparPreferencias([...LAMINA].reverse(), rot, TIPOS.GASTO);
   expect(a).toEqual(b);
   expect(a.todos.map((x) => x.id)).toEqual(['p-general']);
   expect(a.categoria.map((x) => x.id)).toEqual(['p-super', 'p-rest', 'p-gas']);
@@ -273,7 +277,7 @@ test('S02 alta «Una categoría»: contenido COMPLETO, prioridad 100, UUID sella
   fireEvent.press(screen.getByTestId(`ajpref-cuenta-${TARJETA}`));
   await pulsar('ajpref-guardar');
   expect(f.cliente.altaPreferencia).toHaveBeenCalledWith({
-    id: '00000000-0000-4000-8000-000000000001', tipo_hecho_id: null, categoria_id: 'rest', tercero_id: null, entidad_id: null,
+    id: '00000000-0000-4000-8000-000000000001', tipo_hecho_id: TIPOS.GASTO, categoria_id: 'rest', tercero_id: null, entidad_id: null,
     cuenta_default_id: TARJETA, presupuestable_default: null, prioridad: 100,
   });
   expect(await screen.findByTestId('ajpref-detalle')).toBeTruthy();
@@ -345,8 +349,8 @@ test('S03 por carrera: el alta responde PREFERENCIA_EMPATE_CONTRADICTORIO → se
 });
 
 test('S03 por empate con una preferencia por tipo de gasto (solo creable por API; D-PREF-01): la lleva a ella', async () => {
-  // «Gasto → Efectivo» frente a «Restaurantes → Tarjeta»: misma especificidad, el servidor rechaza (AJ-D026-03).
-  const porTipo = pref({ id: 'p-tipo', tipo_hecho_id: 't-gasto', cuenta_default_id: EFECTIVO, cuenta_disponible_hoy: true });
+  // Preferencia de otro ámbito creada por API frente a «Restaurantes → Tarjeta»: el servidor rechaza (AJ-D026-03).
+  const porTipo = pref({ id: 'p-tipo', tipo_hecho_id: 't-otro', cuenta_default_id: EFECTIVO, cuenta_disponible_hoy: true });
   const f = fake([porTipo], {
     alta: async () => ({ tipo: 'RECHAZADO', codigo: 'PREFERENCIA_EMPATE_CONTRADICTORIO', mensaje: 'x', detalle: { preferencia_conflicto_id: 'p-tipo' } }),
   });
@@ -423,7 +427,7 @@ test('editar envía el ESTADO COMPLETO (E05) con row_version y las claves de la 
   fireEvent.press(screen.getByTestId('ajpref-presu-false'));
   await pulsar('ajpref-guardar');
   expect(f.cliente.editarPreferencia).toHaveBeenCalledWith('p-super', {
-    row_version: 2, tipo_hecho_id: null, categoria_id: 'super', tercero_id: null, entidad_id: null,
+    row_version: 2, tipo_hecho_id: TIPOS.GASTO, categoria_id: 'super', tercero_id: null, entidad_id: null,
     cuenta_default_id: TARJETA, presupuestable_default: false, prioridad: 100,
   });
   expect(await screen.findByTestId('ajpref-detalle')).toBeTruthy();
@@ -431,7 +435,7 @@ test('editar envía el ESTADO COMPLETO (E05) con row_version y las claves de la 
 });
 
 test('editar una preferencia por tipo de gasto (creada por API) conserva su clave de tipo de hecho (E05)', async () => {
-  const porTipo = pref({ id: 'p-tipo', tipo_hecho_id: 't-gasto', cuenta_default_id: EFECTIVO, cuenta_disponible_hoy: true, row_version: 3 });
+  const porTipo = pref({ id: 'p-tipo', tipo_hecho_id: 't-otro', cuenta_default_id: EFECTIVO, cuenta_disponible_hoy: true, row_version: 3 });
   const f = fake([porTipo]);
   await abrir(f.cliente);
   fireEvent.press(screen.getByTestId('ajpref-fila-p-tipo'));
@@ -439,7 +443,7 @@ test('editar una preferencia por tipo de gasto (creada por API) conserva su clav
   fireEvent.press(screen.getByTestId(`ajpref-cuenta-${TARJETA}`));
   await pulsar('ajpref-guardar');
   expect(f.cliente.editarPreferencia).toHaveBeenCalledWith('p-tipo', {
-    row_version: 3, tipo_hecho_id: 't-gasto', categoria_id: null, tercero_id: null, entidad_id: null,
+    row_version: 3, tipo_hecho_id: 't-otro', categoria_id: null, tercero_id: null, entidad_id: null,
     cuenta_default_id: TARJETA, presupuestable_default: null, prioridad: 100,
   });
 });
@@ -489,7 +493,7 @@ test('formulario (dominio): la cuenta no disponible no se envía y el espejo del
   const fo = formularioDesde(GASOLINA, CUENTAS);
   expect(fo.cuenta).toEqual({ noDisponible: REVOLUT });
   expect(faltaFormulario(fo)).toEqual(['CUENTA_NO_DISPONIBLE']);
-  expect(contenidoFormulario(fo, GASOLINA).cuenta_default_id).toBeNull();
+  expect(contenidoFormulario(fo, GASOLINA, TIPOS.GASTO).cuenta_default_id).toBeNull();
   expect(faltaFormulario({ ambito: 'GENERAL', categoriaId: null, cuenta: null, presupuestable: null })).toEqual(['PROPONER']);
   expect(faltaFormulario({ ambito: null, categoriaId: null, cuenta: TARJETA, presupuestable: null })).toEqual(['AMBITO']);
 });

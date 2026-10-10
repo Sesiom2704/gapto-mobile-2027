@@ -64,7 +64,13 @@
 #   preferencia_conflicto_id, que la UI usa en S03/R07). Reutilizados:
 #   AGREGADO_NO_ENCONTRADO (404), VERSION_DESFASADA (409),
 #   IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION (409) y ENTRADA_INVALIDA (422).
-# Version: 0.9.0
+#
+#   v0.10.0 (F05-03/F05-04 J2 §1.5; F05 §46.4 R6, §46.5 E2/E3): codigos de
+#   preferencia nuevos PREFERENCIA_SIN_TIPO y PREFERENCIA_AMBITO_NO_ADMITIDO
+#   (422: dato de entrada) y PREFERENCIA_TERCERO_NO_ELEGIBLE (409). El mensaje
+#   de PREFERENCIA_DIMENSION_DIFERIDA pasa a citar solo la entidad (el
+#   tercero es operativo, E2).
+# Version: 0.10.0
 # ============================================================
 
 from __future__ import annotations
@@ -223,7 +229,10 @@ def rechazo_magnitud(codigo: str, detalle: dict | None = None) -> tuple[int, dic
 
 _RECHAZOS_PREFERENCIA: dict[str, tuple[int, str]] = {
     "PREFERENCIA_SIN_VALOR": (422, "La preferencia debe proponer una cuenta o si cuenta para el presupuesto."),
-    "PREFERENCIA_DIMENSION_DIFERIDA": (422, "Las preferencias por tercero o entidad aún no están disponibles."),
+    "PREFERENCIA_DIMENSION_DIFERIDA": (422, "Las preferencias por entidad aún no están disponibles."),
+    "PREFERENCIA_SIN_TIPO": (422, "Indica si la preferencia es para gastos o para ingresos."),
+    "PREFERENCIA_AMBITO_NO_ADMITIDO": (422, "Una preferencia es para una categoría o para un tercero, no para los dos."),
+    "PREFERENCIA_TERCERO_NO_ELEGIBLE": (409, "Ese tercero no está disponible. Elige otro."),
     "PREFERENCIA_PRIORIDAD_NO_ADMITIDA": (422, "La prioridad indicada no está admitida."),
     "PREFERENCIA_CUENTA_NO_ELEGIBLE": (409, "Esa cuenta no está disponible para registrar gastos. Elige otra."),
     "PREFERENCIA_CATEGORIA_NO_ELEGIBLE": (409, "Esa categoría no está disponible. Elige otra o «Sin categoría»."),

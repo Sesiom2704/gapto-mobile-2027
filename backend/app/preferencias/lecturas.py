@@ -25,7 +25,13 @@
 #   fila de la categoria durante esta transaccion de lectura (nunca el
 #   advisory de categorias ni el de preferencias) y no escribe. Sin categoria
 #   («Sin categoria») no se consulta la guarda.
-# Version: 0.2.0
+#
+#   v0.3.0 (F05-03/F05-04 J2 §1.5; F05 §46.4 R6, §46.5 E2/E3): `propuesta`
+#   recibe el TIPO del registro (GASTO o INGRESO; la guarda C-a se evalua con
+#   esa naturaleza) y el tercero del contexto (None = sin tercero), que pasa
+#   a ser dimension operativa del resolver. `tipos_registro` expone los ids de
+#   GASTO e INGRESO para que el cliente envie siempre el tipo (E3).
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
@@ -39,8 +45,14 @@ from app.core.unidad_trabajo import SesionMotor
 from app.preferencias import repositorio as repo
 from app.preferencias.resolver import cuentas_elegibles_registro, resolver, tipo_hecho_registro
 
-#: Naturaleza del registro VS-01 en la matriz C02 de la guarda C-a.
+#: Naturaleza del registro VS-01 en la matriz C02 de la guarda C-a (por defecto).
 NATURALEZA_REGISTRO = "GASTO"
+#: Tipos de registro con preferencias (ambitos «Todos los gastos / ingresos», E3).
+TIPOS_REGISTRO = ("GASTO", "INGRESO")
+
+
+def tipos_registro(sesion: SesionMotor) -> dict[str, uuid.UUID]:
+    return {codigo: tipo_hecho_registro(sesion, codigo) for codigo in TIPOS_REGISTRO}
 
 
 def listar(sesion: SesionMotor) -> list[dict[str, Any]]:
@@ -57,13 +69,15 @@ def listar(sesion: SesionMotor) -> list[dict[str, Any]]:
     ]
 
 
-def propuesta(sesion: SesionMotor, categoria_id: uuid.UUID | None, fecha: dt.date) -> dict[str, Any] | str:
+def propuesta(sesion: SesionMotor, categoria_id: uuid.UUID | None, fecha: dt.date,
+              tipo: str = NATURALEZA_REGISTRO, tercero_id: uuid.UUID | None = None) -> dict[str, Any] | str:
     """Propuesta por campo, o el codigo CATEGORIA_NO_ELEGIBLE si la categoria
-    no es elegible para GASTO (guarda C-a; nunca una propuesta en ese caso)."""
+    no es elegible para `tipo` (guarda C-a; nunca una propuesta en ese caso)."""
     if categoria_id is not None:
-        rechazo = validar_seleccion_categoria(sesion, categoria_id, NATURALEZA_REGISTRO)
+        rechazo = validar_seleccion_categoria(sesion, categoria_id, tipo)
         if rechazo is not None:
             return rechazo
     return resolver(
-        sesion, tipo_hecho_id=tipo_hecho_registro(sesion), categoria_id=categoria_id, fecha=fecha
+        sesion, tipo_hecho_id=tipo_hecho_registro(sesion, tipo), categoria_id=categoria_id, fecha=fecha,
+        tercero_id=tercero_id,
     )
