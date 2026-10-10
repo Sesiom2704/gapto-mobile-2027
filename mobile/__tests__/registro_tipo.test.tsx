@@ -4,6 +4,7 @@
 // Ruta: mobile/__tests__/registro_tipo.test.tsx
 // Descripción: Inicio HOME-01 v0.3 con la marca del AJUSTE A1 y el registro por tipo (F05-03/F05-04 J2+J3 §2.1–§2.4; láminas HOME-01 v0.3, HOME-QA v0.2 H01–H03, REG-DYN T01/T02/G01–G03/I01/X01/N01 y REG-PLT R01–R06). Inicio: cabecera de marca como UN elemento accesible «GaptoMobile» (sin «2027» ni lema), ilustración decorativa oculta, «Registrar» abre la hoja SIN preselección, accesos (máx. 3) y estado sin accesos. Ingreso cobrado: cuentas para cobrar, categorías por tipo, payload y éxito. Gasto con tercero (propuesta del registro por tipo). Cambio de tipo T02 antes del primer envío y fijado después. «No lo sé» en una obligatoria. Plantilla desde un acceso: chip, origen «De tu plantilla …», «Quitar» y campos tocados no se pisan. «Entre cuentas»: misma cuenta, payload, reintento con la MISMA identidad, FECHA_FUTURA. Éxito: «Guardar como plantilla» (nombre obligatorio y nunca autocompletado) y «Guardar como preferencia» para el tercero o la categoría. SHA de los 18 PNG de marca.
 // Versión: 0.1.0 (F05-03/F05-04 J2+J3 §2.1–§2.4; AJUSTE A1)
+// Versión: 0.2.0 (F05-03/F05-04 J3 §2.7 y §3): corte de Concepto (CNC-18/20) y casos de cierre §45.7-6 (plantilla con magnitud obligatoria) y §46.7-11 (duplicado activo «Usar el existente»).
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
@@ -416,4 +417,38 @@ test('CNC-20: sin nota, tercero ni categoría el título es «Gasto · importe»
   await pulsar('registrar');
   expect(await screen.findByText('Gasto registrado')).toBeTruthy();
   expect(screen.getByTestId('exito-titulo').props.children).toBe('Gasto · 23,50 €');
+}, 30000);
+
+// ------------------------------------------------------------------ casos de cierre (§45.7-6, §46.7-11)
+test('§45.7-6: plantilla cuya categoría exige magnitud obligatoria → se pide el dato (o «No lo sé») antes de registrar', async () => {
+  const origen = { capa: 'PLANTILLA', plantilla_id: 'p2', preferencia_id: null };
+  const c = fake({
+    plantillas: [plt({ id: 'p2', nombre: 'Gasolinera', categoria_id: 'gasolina' })],
+    acciones: [{ id: 'a2', nombre: 'Gasolina', plantilla_registro_id: 'p2', orden: 0, icono_key: null, enabled: true, row_version: 1 }],
+    propuesta: (q) => ({ tipo: q.tipo, campos: { categoria: q.plantillaId ? { valor: 'gasolina', origen } : null, tercero: null, contexto: null, cuenta: q.plantillaId ? { valor: TARJETA, origen } : null, presupuestable: q.plantillaId ? { valor: true, origen } : null }, avisos: [] }),
+  });
+  await montar(c);
+  await pulsar('acceso-a2');
+  await waitFor(() => expect(screen.getByTestId('categoria-valor').props.children).toBe('Gasolina'));
+  fireEvent.changeText(screen.getByTestId('campo-importe'), '50');
+  await waitFor(() => expect(screen.getByTestId(`cuenta-${TARJETA}`).props.accessibilityState.checked).toBe(true));
+  expect(screen.getByTestId('magnitud-litros')).toBeTruthy();
+  expect(screen.getByTestId('registrar')).toBeDisabled();
+  fireEvent.changeText(screen.getByTestId('magnitud-litros'), '35,5');
+  await pulsar('registrar');
+  expect(c.registrarGastoPagado).toHaveBeenCalledWith(expect.objectContaining({ categoria: { estado: 'CATEGORIA', categoria_id: 'gasolina', magnitudes: [{ magnitud_id: 'litros', valor: '35.5' }] } }));
+}, 30000);
+
+test('§46.7-11: alta de tercero con duplicado ACTIVO → «Usar el existente» (sin crear otro)', async () => {
+  const c = fake();
+  c.candidatosTercero = jest.fn(async () => ({ tipo: 'OK', datos: { terceros: [{ id: 'ter-aldi', nombre: 'ALDI', naturaleza: 'EMPRESA', enabled: true, row_version: 1 }] } })) as any;
+  await montar(c);
+  await abrirTipo('GASTO');
+  await pulsar('campo-tercero');
+  fireEvent.changeText(await screen.findByTestId('tercero-filtro'), 'aldi');
+  await pulsar('tercero-crear');
+  expect(await screen.findByTestId('tercero-duplicado-aviso')).toBeTruthy();
+  await pulsar('tercero-usar-existente');
+  expect(screen.getByTestId('tercero-valor').props.children).toBe('ALDI');
+  expect(c.altaTercero).not.toHaveBeenCalled();
 }, 30000);

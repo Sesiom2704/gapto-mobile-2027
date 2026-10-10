@@ -22,6 +22,8 @@
 #     26 reintentos idempotentes y guarda de replay propia de OP-10;
 #     nota canonica (omitida, "", espacios -> NULL en hecho y movimiento).
 # Version: 0.1.0 (F05-03/F05-04 J2 §1.7)
+# Version: 0.2.0 (F05-03/F05-04 J3 §3; AJ-F0504-09 caso 21): sin multicategoria (lista,
+#   campo `categorias` o categoria_id multiple -> 422 en gasto e ingreso, sin efectos).
 # ============================================================
 
 from __future__ import annotations
@@ -404,3 +406,24 @@ def test_fecha_futura_en_ingreso_y_transferencia(t):
                          (TRANSF, transf(corriente, ahorro, fecha_hecho="2099-01-01"))):
         r = cli.post(ruta, json=cuerpo, headers=h.AUTH)
         assert r.status_code == 422 and r.json()["codigo"] == "FECHA_FUTURA" and _nada(owner, cuerpo["intencion_id"])
+
+
+# ------------------------------------------------------------------ caso 21 (AJ-F0504-09): sin multicategoria
+@pytest.mark.parametrize("categoria", [
+    "LISTA",
+    {"estado": "CATEGORIA", "categoria_id": "X", "categorias": ["X", "Y"]},
+    {"estado": "CATEGORIA", "categoria_id": ["X", "Y"]},
+])
+def test_caso21_sin_multicategoria_en_gasto_ni_ingreso(t, categoria):
+    owner, _, cli, corriente, _, _ = t
+    a, b = _cat(owner, "Multi A"), _cat(owner, "Multi B")
+    if categoria == "LISTA":
+        valor = [{"estado": "CATEGORIA", "categoria_id": str(a)}, {"estado": "CATEGORIA", "categoria_id": str(b)}]
+    else:
+        valor = {k: ([str(a), str(b)] if v == ["X", "Y"] else str(a) if v == "X" else v) for k, v in categoria.items()}
+    g = h.intencion(corriente, categoria=valor)
+    i = ingreso(corriente, categoria=valor)
+    for ruta, cuerpo in ((GASTO, g), (INGRESO, i)):
+        r = cli.post(ruta, json=cuerpo, headers=h.AUTH)
+        assert r.status_code == 422, (ruta, r.text)
+        assert _nada(owner, cuerpo["intencion_id"])
