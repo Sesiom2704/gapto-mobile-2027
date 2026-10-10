@@ -27,7 +27,19 @@
 #     L8 onboarding frente a alta manual de categoria (dos ordenes);
 #     L9 ordenes opuestos con 40P01: la UdT reintenta la transaccion
 #        COMPLETA y no queda nada parcial.
-# Version: 0.1.0 (F05-03/F05-04 J2 §3)
+#   Espera de los pasos tras liberar la barrera (_serie): la fija
+#   GAPTO_J2J3_JOIN_TIMEOUT_S (segundos); sin ella, 30 s si la base es
+#   local (socket o localhost/127.0.0.1/::1, la misma regla de host local
+#   que bootstrap_dev_db.py y comun_envdev.py) y 300 s si es un proveedor
+#   remoto (Neon: el onboarding de 93 nodos tarda ~30-85 s por latencia).
+#   Solo cambia cuanto se espera; las aserciones de orden y de resultado
+#   son las mismas. Cada JSON de evidencia anota la espera aplicada y la
+#   duracion de cada paso.
+# Version: 0.2.0 (MANT-190-L8, AJ-J4-01)
+# Historial:
+#   0.1.0 F05-03/F05-04 J2 §3: bateria inicial.
+#   0.2.0 MANT-190-L8 (AJ-J4-01): espera configurable en _serie
+#         (GAPTO_J2J3_JOIN_TIMEOUT_S; 30 s local, 300 s proveedor remoto).
 # ============================================================
 
 from __future__ import annotations
@@ -41,6 +53,7 @@ import uuid
 
 import psycopg
 import pytest
+from psycopg.conninfo import conninfo_to_dict
 
 import f05_01_helpers as fh
 import f05_02_helpers as ph
@@ -50,9 +63,22 @@ pytestmark = pytest.mark.skipif(os.getenv("GAPTO_J2J3_CONCURRENCIA") != "1",
                                 reason="bateria serial fuera de la suite general (GAPTO_J2J3_CONCURRENCIA=1)")
 GASTO = "/v1/intenciones/gasto-pagado"
 TRANSF = "/v1/intenciones/transferencia"
+HOSTS_LOCALES = {"localhost", "127.0.0.1", "::1"}
+ESPERA_LOCAL_S = 30.0
+ESPERA_PROVEEDOR_S = 300.0
 
 
 # ------------------------------------------------------------------ utilidades
+def _espera_join_s() -> float:
+    """Segundos que _serie espera a cada paso tras liberar la barrera."""
+    valor = os.getenv("GAPTO_J2J3_JOIN_TIMEOUT_S")
+    if valor:
+        return float(valor)
+    host = conninfo_to_dict(h.dsn()).get("host", "")
+    local = host == "" or host.startswith("/") or host in HOSTS_LOCALES
+    return ESPERA_LOCAL_S if local else ESPERA_PROVEEDOR_S
+
+
 def _evidencia(nombre: str, datos) -> None:
     carpeta = os.getenv("GAPTO_J2J3_EVIDENCIA")
     if carpeta:
@@ -132,12 +158,20 @@ def _serie(barrera, pasos: list, nombre: str, inspeccion=None) -> dict:
     """Lanza los pasos EN ORDEN (cada uno debe quedar esperando a la barrera
     antes del siguiente), inspecciona y libera. Devuelve {clave: resultado}."""
     salida: dict = {}
+    duraciones: dict = {}
     hilos = []
     evid: dict = {"escenario": nombre, "pasos": [p[0] for p in pasos]}
+
+    def _ejecutar(clave, fn):
+        inicio = time.monotonic()
+        resultado = fn()
+        duraciones[clave] = round(time.monotonic() - inicio, 3)
+        salida[clave] = resultado
+
     try:
         pid_x = fh.pid_servidor(barrera)
         for n, (clave, fn) in enumerate(pasos, start=1):
-            hilo = threading.Thread(target=lambda c=clave, f=fn: salida.update({c: f()}))
+            hilo = threading.Thread(target=_ejecutar, args=(clave, fn))
             hilo.start()
             hilos.append(hilo)
             pids = _bloqueados(pid_x, n)
@@ -149,9 +183,12 @@ def _serie(barrera, pasos: list, nombre: str, inspeccion=None) -> dict:
         barrera.execute("COMMIT")
     finally:
         barrera.close()
+    espera = _espera_join_s()
+    evid["espera_join_s"] = espera
     for hilo in hilos:
-        hilo.join(timeout=30)
+        hilo.join(timeout=espera)
         assert not hilo.is_alive()
+    evid["duracion_s"] = duraciones
     evid["resultado"] = {k: (v.status_code, v.json()) if hasattr(v, "status_code") else repr(v)
                          for k, v in salida.items()}
     _evidencia(nombre, evid)
