@@ -231,7 +231,12 @@
 #   cliente de plantillas: domain/maestros.ts, domain/plantillas.ts y
 #   PlantillasAjustesScreen.tsx (lectura y envio de la clave de la
 #   plantilla; ninguna escribe categorias_financieras).
-# Version: 0.15.0
+#
+#   v0.16.0 (F05-03/F05-04 J2 §2.2–§2.4): SOLO altas. I13a registra los
+#   imports nuevos del registro por tipo; I13b, tres claves `categoria:` de
+#   texto; I7, GuardarPlantilla.tsx. Comprobacion nueva I13f: la categoria
+#   de la plantilla solo se aplica una vez y sobre PENDIENTE o la suya.
+# Version: 0.16.0
 # ============================================================
 
 from __future__ import annotations
@@ -1029,6 +1034,8 @@ MENCIONES_CLIENTE.update({
     "mobile/src/domain/maestros.ts": "resumen de una plantilla: lee su categoria_id para mostrar el nombre (F05-04 J2 §2.5, R)",
     "mobile/src/domain/plantillas.ts": "formulario y contenido completo de la plantilla: su categoria_id propuesto (F05-04 J2 §2.5, R; escribe la plantilla, no la categoria)",
     "mobile/src/screens/PlantillasAjustesScreen.tsx": "Ajustes > Plantillas: muestra la categoria propuesta y su aviso de no disponible (F05-04 J2 §2.5, R)",
+    "mobile/src/components/GuardarPlantilla.tsx": "«Guardar como plantilla» del exito: envia la categoria del registro como propuesta de la plantilla (F05-04 J2 §2.4, R)",
+    "mobile/src/domain/inicio.ts": "accesos de Inicio: lee la categoria de la plantilla para su icono (F05-04 J3 §2.1, R)",
 })
 
 
@@ -1169,6 +1176,26 @@ IMPORTS_CAMINO: dict[str, set[tuple[str, str]]] = {
     },
 }
 
+# F05-03/F05-04 J2 §2.2–§2.4 (alta aditiva): registro por tipo. Hoja de tipos,
+# tercero, contexto, «No lo sé», plantilla y exito. `aplicarCamposPlantilla` es
+# la UNICA via nueva que fija una categoria sin el selector: aplica la categoria
+# que propone la PLANTILLA que el usuario eligio (§45.3, decision explicita del
+# usuario), solo sobre una categoria PENDIENTE o puesta por esa plantilla
+# (test_i13_f). No es un resolver de propuesta ni de ranking.
+IMPORTS_CAMINO[REG] = IMPORTS_CAMINO[REG] | {
+    ("../components/Contextos", "FormularioContexto"), ("../components/Contextos", "SelectorContexto"),
+    ("../components/GuardarPlantilla", "GuardarPlantilla"), ("../components/HojaTipos", "HojaTipos"),
+    ("../components/SelectorTercero", "SelectorTercero"), ("../domain/categoria", "elegible"),
+    ("../domain/intencion", "esDesconocida"), ("../domain/preferencias", "datosRecordablesTipo"),
+    ("../domain/preferencias", "faltanPreferenciasTipo"), ("../domain/preferencias", "propuestaAplicableTipo"),
+    ("../domain/registro", "TITULO_TAREA"), ("../domain/registro", "TipoRegistro"),
+    ("../domain/registro", "aplicarCamposPlantilla"), ("../domain/registro", "avisoCambioDeTipo"),
+    ("../domain/registro", "avisosPlantilla"), ("../domain/registro", "borradorTrasCambioDeTipo"),
+    ("../domain/registro", "cambioDeTipo"), ("../domain/registro", "categoriaDePlantilla"),
+    ("../domain/registro", "notaCanonica"), ("../domain/registro", "quitarPlantilla"),
+    ("../domain/registro", "tituloExito"), ("../domain/registro", "tituloRegistro"),
+}
+
 
 def test_i13_a_imports_del_camino_categorial_registro_cerrado():
     """I13a: cualquier import nuevo (o uno registrado que desaparece) en el
@@ -1200,6 +1227,17 @@ SITIOS_ESTADO_CATEGORIAL: dict[str, str] = {
     "categoria: 'categoría',":
         "etiqueta de la lista «faltan» (R: texto, no estado)",
 }
+
+# F05-03/F05-04 J2 §2.2–§2.4 (alta aditiva): claves `categoria:` de TEXTO (no
+# construyen estado categorial ni escriben el borrador).
+SITIOS_ESTADO_CATEGORIAL.update({
+    "categoria: nodoActual ? { nombre: nodoActual.nombre, ambito: nodoActual.ambito } : null,":
+        "cambio de tipo (T02): nombre y ambito de la categoria actual para decidir si se quita (R: texto, no estado)",
+    "categoria: nombreCategoria,":
+        "titulo calculado de la pantalla de exito (A8; R: texto, no estado)",
+    "{ categoria: nombreCategoria, tercero: b.terceroNombre ?? null },":
+        "nombres de la tarjeta «Guardar como preferencia» (R: texto, no estado)",
+})
 
 
 def _cuerpo_ts(texto: str, cabecera: str) -> str:
@@ -1292,6 +1330,19 @@ def test_i13_e_barrido_textual_corroborante():
     for ruta in CAMINO_CATEGORIAL:
         codigo = [linea for linea in _texto(ruta).splitlines() if not linea.lstrip().startswith(("//", "*", "/*"))]
         assert not [linea for linea in codigo if _PROPUESTA_TEXTUAL.search(linea)], ruta
+
+
+def test_i13_f_la_plantilla_solo_fija_categoria_pendiente_o_suya():
+    """I13f (F05-04 J2 §2.4, alta aditiva): la categoria de una plantilla se
+    aplica UNA vez, tras elegir la plantilla, y solo sobre una categoria
+    PENDIENTE o puesta por esa misma plantilla (lo explicito gana)."""
+    reg = _texto(REG)
+    assert len(re.findall(r"\baplicarCamposPlantilla\(", reg)) == 1
+    assert "if (pendiente) {" in reg and "const pendiente = plantillaPendiente.current;" in reg
+    texto = _texto("mobile/src/domain/registro.ts")
+    dominio = texto[texto.index("export function aplicarCamposPlantilla("): texto.index("export function quitarPlantilla(")]
+    assert "(b.categoria.estado === 'PENDIENTE' || categoriaDePlantilla(b))" in dominio
+    assert "elegible(n, ctx.tipo)" in dominio
 
 
 # ------------------------------------------------------------------ I3 de plantillas (J2 §1.6, aditivo)

@@ -4,13 +4,17 @@
 // Ruta: mobile/src/state/useEnvioGasto.ts
 // Descripción: Máquina de estados del envío VS-01. Separa edición, envío, resultado confirmado por servidor e indeterminado. Reglas: (1) la identidad se genera ANTES de enviar y se sella con el payload; (2) doble tap no duplica (guarda síncrona); (3) ante timeout/red/5xx la intención queda INDETERMINADA: payload sellado inmutable y reintento con la MISMA identidad (UUID quemado, F05-00-A); (4) un RECHAZO definitivo (4xx) libera la edición y el siguiente envío usa identidad nueva; (5) no hay optimistic update: el éxito solo existe tras respuesta del servidor.
 // v0.2.0 (F05-D003): la validación local recibe la fecha de hoy (fecha no futura) y un rechazo PROPUESTA_FINANCIACION_OBSOLETA se expone para recargar la propuesta.
-// Versión: 0.2.0
+// v0.3.0 (F05-03/F05-04 J2 §2.3; D-DYN-08): el mismo ciclo sirve al ingreso cobrado: con `tipo` INGRESO se valida con las reglas del ingreso, se sella con `sellarIngreso` y se envía a POST /v1/intenciones/ingreso-cobrado. GASTO (por defecto) no cambia.
+// Versión: 0.3.0
 // ============================================================
 
 import { useCallback, useRef, useState } from 'react';
 
-import type { ClienteApi, ResultadoRegistro } from '../api/cliente';
-import { Borrador, IntencionSellada, sellar, validar } from '../domain/intencion';
+import type { ClienteApi, ResultadoRegistro, ResultadoRegistroTipo } from '../api/cliente';
+import { Borrador, IntencionIngresoSellada, IntencionSellada, sellar, sellarIngreso, TipoConCategoria, validar } from '../domain/intencion';
+
+/** Intención sellada del gasto (VS-01) o del ingreso (F05-04); `tipo` la distingue. */
+export type Sellada = IntencionSellada | (IntencionIngresoSellada & { readonly ingreso: true });
 
 export type EstadoEnvio =
   | { fase: 'EDITANDO' }
@@ -19,7 +23,7 @@ export type EstadoEnvio =
   | { fase: 'RECHAZADO'; codigo: string; mensaje: string }
   | { fase: 'CONFIRMADO'; sellada: IntencionSellada; resultado: ResultadoRegistro };
 
-export function useEnvioGasto(cliente: ClienteApi, nuevoId: () => string) {
+export function useEnvioGasto(cliente: ClienteApi, nuevoId: () => string, tipo: TipoConCategoria = 'GASTO', nota: () => string | null = () => null) {
   const [estado, setEstado] = useState<EstadoEnvio>({ fase: 'EDITANDO' });
   const enVuelo = useRef(false);
   const selladaRef = useRef<IntencionSellada | null>(null);
@@ -30,9 +34,12 @@ export function useEnvioGasto(cliente: ClienteApi, nuevoId: () => string) {
       enVuelo.current = true;
       setEstado({ fase: 'ENVIANDO', sellada });
       try {
-        const r = await cliente.registrarGastoPagado(sellada.payload);
+        const s2 = sellada as unknown as Sellada;
+        const r = 'ingreso' in s2
+          ? await cliente.registrarIngresoCobrado(s2.payload as never)
+          : await cliente.registrarGastoPagado(sellada.payload);
         if (r.tipo === 'OK') {
-          setEstado({ fase: 'CONFIRMADO', sellada, resultado: r.datos });
+          setEstado({ fase: 'CONFIRMADO', sellada, resultado: r.datos as ResultadoRegistro & Partial<ResultadoRegistroTipo> });
         } else if (r.tipo === 'RECHAZADO') {
           selladaRef.current = null; // definitivo: la identidad no se reutiliza para otra intención
           setEstado({ fase: 'RECHAZADO', codigo: r.codigo, mensaje: r.mensaje });
@@ -55,14 +62,16 @@ export function useEnvioGasto(cliente: ClienteApi, nuevoId: () => string) {
         await enviarSellada(selladaRef.current);
         return {};
       }
-      const errores = validar(b, hoyIso);
+      const errores = validar(b, hoyIso, tipo);
       if (Object.keys(errores).length > 0) return errores;
-      const sellada = sellar(b, nuevoId());
+      // El ingreso viaja con su propio payload; la máquina de estados es la misma.
+      const sellada: IntencionSellada =
+        tipo === 'INGRESO' ? (Object.freeze({ ...sellarIngreso(b, nuevoId(), nota()), ingreso: true }) as unknown as IntencionSellada) : sellar(b, nuevoId());
       selladaRef.current = sellada;
       await enviarSellada(sellada);
       return {};
     },
-    [enviarSellada, nuevoId],
+    [enviarSellada, nuevoId, tipo, nota],
   );
 
   const reintentar = useCallback(async () => {

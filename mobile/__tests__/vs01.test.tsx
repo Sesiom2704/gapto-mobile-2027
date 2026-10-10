@@ -95,7 +95,8 @@ function montar(cliente: ClienteApi) {
 }
 
 async function abrirFormulario() {
-  fireEvent.press(await screen.findByTestId('accion-gasto'));
+  fireEvent.press(await screen.findByTestId('accion-registrar'));
+  fireEvent.press(screen.getByTestId('tipo-GASTO')); // F05-04 §2.2: «Registrar» → hoja de tipos
   await screen.findByTestId('registro-form');
   await screen.findByTestId('origen-cuenta'); // cuentas cargadas (única -> inferida visible)
   await screen.findByTestId('financiacion'); // propuesta conocida para la fecha
@@ -123,7 +124,7 @@ test('Home renderiza el esqueleto HOME-01 sin cifras inventadas', async () => {
   const f = crearFake({ gastos: [gasto('12.40')] });
   montar(f.cliente);
   expect(await screen.findByText('12,40 €')).toBeTruthy();
-  for (const id of ['bloque-liquidez', 'accion-gasto', 'bloque-mes', 'bloque-gasto-parcial', 'bloque-proximos', 'bloque-patrimonio', 'tab-INICIO', 'tab-MAS']) {
+  for (const id of ['bloque-liquidez', 'accion-registrar', 'bloque-mes', 'bloque-gasto-parcial', 'bloque-proximos', 'bloque-patrimonio', 'tab-INICIO', 'tab-MAS']) {
     expect(screen.getByTestId(id)).toBeTruthy();
   }
   // Ningún bloque sin read model muestra un importe
@@ -419,7 +420,8 @@ test('SPEC-08: «Pagado con» cargando bloquea aunque el resto esté completo', 
   const impl = original.getMockImplementation()!;
   original.mockImplementation((fecha: string) => new Promise((res) => { liberar = () => res(impl(fecha)); }));
   montar(f.cliente);
-  fireEvent.press(await screen.findByTestId('accion-gasto'));
+  fireEvent.press(await screen.findByTestId('accion-registrar'));
+  fireEvent.press(screen.getByTestId('tipo-GASTO')); // F05-04 §2.2: «Registrar» → hoja de tipos
   await screen.findByTestId('registro-form');
   rellenar();
   expect(screen.getByText('Cargando…')).toBeTruthy();

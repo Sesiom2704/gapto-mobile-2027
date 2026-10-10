@@ -54,6 +54,8 @@
 #         cada padre desde el selector del registro y se afirma el literal
 #         exacto del aviso de nivel y del subtitulo de fila.
 #   Ambos en Light y Dark. Nuevo argumento obligatorio --run-p7.
+# Version: 0.3.0 (F05-03/F05-04 J3 §2.1/§2.2): Inicio abre el gasto con
+#   «Registrar» + hoja de tipos (accion-registrar, tipo-GASTO).
 # ============================================================
 
 from __future__ import annotations
@@ -264,8 +266,9 @@ def main() -> None:
                 raise SystemExit("FALLO: la app web no carga tras 5 intentos")
 
             def abrir_formulario(concepto: str, importe: str) -> None:
-                cargar_app("accion-gasto")
-                page.get_by_test_id("accion-gasto").click()
+                cargar_app("accion-registrar")
+                page.get_by_test_id("accion-registrar").click()  # F05-04 §2.2: hoja de tipos
+                page.get_by_test_id("tipo-GASTO").click()
                 page.get_by_test_id("financiacion").wait_for(timeout=15000)
                 page.get_by_test_id("campo-importe").fill(importe)
                 page.get_by_test_id("campo-concepto").fill(concepto)

@@ -30,7 +30,9 @@
 #   categoria y magnitudes viven en e2e_regcat.py.
 #   Con --dist <export web> arranca el servidor estatico versionado
 #   scripts/dev/servir_web_e2e.py (loopback, HTTP/1.1) y lo detiene al terminar.
-# Version: 0.4.0
+#   v0.5.0 (F05-03/F05-04 J3 §2.1/§2.2): «Registrar» + hoja de tipos
+#   (accion-registrar, tipo-GASTO); taps de Inicio al formulario: 2 (antes 1).
+# Version: 0.5.0
 # ============================================================
 
 from __future__ import annotations
@@ -142,8 +144,10 @@ def main() -> None:
             shot(page, "01_home_antes")
 
             t0 = time.monotonic()
-            page.get_by_test_id("accion-gasto").click(); metricas["taps"] += 1
-            metricas["taps_home_a_formulario"] = 1
+            # F05-04 §2.2: «Registrar» abre la hoja de tipos (sin preselección) y luego «Gasto».
+            page.get_by_test_id("accion-registrar").click(); metricas["taps"] += 1
+            page.get_by_test_id("tipo-GASTO").click(); metricas["taps"] += 1
+            metricas["taps_home_a_formulario"] = 2
             page.get_by_test_id("origen-cuenta").wait_for()
             page.get_by_test_id("financiacion").wait_for()
             financiacion_visible = page.get_by_test_id("financiacion-texto").inner_text()
@@ -196,7 +200,8 @@ def main() -> None:
             page.emulate_media(color_scheme="dark")
             page.wait_for_timeout(500)
             shot(page, "05_home_dark")
-            page.get_by_test_id("accion-gasto").click()
+            page.get_by_test_id("accion-registrar").click()
+            page.get_by_test_id("tipo-GASTO").click()
             page.get_by_test_id("financiacion").wait_for()
             page.wait_for_timeout(500)
             shot(page, "06_formulario_dark")

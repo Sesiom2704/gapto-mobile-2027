@@ -48,6 +48,9 @@
 #   --web (o --dist), GAPTO_DATABASE_URL (base LOCAL; preparacion y lectura),
 #   GAPTO_DEV_OWNER_USER_ID y GAPTO_DEV_TOKEN (nunca se imprime).
 # Version: 0.1.0 (F05-02 B2)
+#   v0.2.0 (F05-03/F05-04 J3 §2.1/§2.2): Inicio abre el gasto con «Registrar» y
+#   la hoja de tipos (accion-registrar + tipo-GASTO) en lugar de accion-gasto.
+# Version: 0.2.0
 #          0.2.0 (F05-02 B2-V paso 5): escenario R07p (texto R07 del presupuesto y
 #                «Mantener la actual», derivados) con captura clara y oscura.
 #          0.3.0 (F05-02 B3, decision de Moises 2026-10-08; F05-D028 §43.5):
@@ -228,7 +231,8 @@ def main() -> None:
         t = page.get_by_test_id
 
         def abrir_formulario():
-            t("accion-gasto").click()
+            t("accion-registrar").click()  # F05-04 §2.2: «Registrar» -> hoja de tipos
+            t("tipo-GASTO").click()
             t("registro-form").wait_for()
             t(f"cuenta-{tarjeta}").wait_for()
             page.wait_for_timeout(600)
@@ -260,7 +264,7 @@ def main() -> None:
             return str(el.inner_text().startswith("✓")).lower()
 
         # ---------------------------------------------------- R01 + R05
-        t("accion-gasto").wait_for(timeout=30000)
+        t("accion-registrar").wait_for(timeout=30000)
         abrir_formulario()
         res["r01"] = {"cuentas_marcadas": [x for x in (tarjeta, efectivo) if marcado(f"cuenta-{x}") == "true"],
                       "origen_cuenta": t("origen-cuenta").count(), "presupuesto_si": marcado("presupuestable-true")}

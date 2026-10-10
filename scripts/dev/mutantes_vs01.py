@@ -111,7 +111,10 @@
 #   anula la condicion que la activa), U28 (formularioDesde con las cuentas y
 #   los tipos), U31 (textosPropone con el tipo) y U32 (visibleEnRegistro con
 #   el tipo). Mismos discriminantes; censo sin cambios (67).
-# Version: 0.14.0
+#   v0.15.0 (F05-03/F05-04 J2 §2.3): textos protegidos de M10 (la guarda de
+#   fecha futura lleva el texto por tipo) y U03 (la obligatoria vacia NO
+#   declarada «No lo sé»). Mismos discriminantes; censo sin cambios (67).
+# Version: 0.15.0
 # ============================================================
 
 from __future__ import annotations
@@ -166,13 +169,13 @@ MUTANTES = [
     ("M07", "mobile/src/api/cliente.ts", "      return { tipo: 'INDETERMINADO', mensaje: msgIndeterminado };\n    } catch {", "      return { tipo: 'RECHAZADO', codigo: 'X', mensaje: '' } as any;\n    } catch {", "js"),
     ("M08", "mobile/src/domain/importe.ts", "if (dec.length > 2) return { ok: false, motivo: 'DECIMALES' };", "", "js"),
     ('M09', 'mobile/src/domain/intencion.ts', "if (b.propuesta === 'SELF_100' && !b.propuestaRechazada) {", "if (b.propuesta === 'SELF_100') {", 'js'),
-    ('M10', 'mobile/src/domain/intencion.ts', "  else if (b.fechaHecho > hoyIso) e.fecha = 'Solo gastos ya ocurridos: la fecha no puede ser futura.';\n", '', 'js'),
+    ('M10', 'mobile/src/domain/intencion.ts', "  else if (b.fechaHecho > hoyIso) e.fecha = tipo === 'GASTO' ? 'Solo gastos ya ocurridos: la fecha no puede ser futura.' : 'Solo ingresos ya cobrados: la fecha no puede ser futura.';\n", '', 'js'),
     ('M11', 'mobile/src/screens/RegistroGastoScreen.tsx', '  }, [b.fechaHecho]);', '  }, []);', 'js'),
     ('M12', 'mobile/src/screens/HomeScreen.tsx', '          <Columna etiqueta="Gastos">\n            <EstadoDato estado="NO_DISPONIBLE" />\n          </Columna>', '          <Columna etiqueta="Gastos">\n            <CeldaGastos lectura={gasto} onReintentar={cargar} />\n          </Columna>', 'js'),
     # ---------------------------------------------------------------- F05-01 S6-WIRE+UI (cliente de categorias)
     ("U01", "mobile/src/domain/categoria.ts", "  if (elegible(n, naturaleza)) return true;\n  if (n.enabled", "  return true;\n  if (n.enabled", "js"),
     ("U02", "mobile/src/screens/RegistroGastoScreen.tsx", "    if (r.tipo !== 'OK') return setArbol({ fase: 'ERROR' });", "    if (r.tipo !== 'OK') { setB((x) => ({ ...x, categoria: { estado: 'SIN_CATEGORIA' } })); return setArbol({ fase: 'ERROR' }); }", "js"),
-    ("U03", "mobile/src/domain/intencion.ts", "        if (m.obligatoria) em[m.magnitud_id] = ", "        if (false) em[m.magnitud_id] = ", "js"),
+    ("U03", "mobile/src/domain/intencion.ts", "        if (m.obligatoria && !esDesconocida(b, m.magnitud_id)) em[m.magnitud_id] = ", "        if (false) em[m.magnitud_id] = ", "js"),
     ("U04", "mobile/src/domain/intencion.ts", "magnitudes.push(Object.freeze({ magnitud_id: m.magnitud_id, valor: r.valor }));", "magnitudes.push(Object.freeze({ magnitud_id: m.magnitud_id, valor: texto }));", "js"),
     ("U05", "mobile/src/components/SelectorCategorias.tsx", "          {actual && p.esSeleccionable(actual) ? (", "          {actual ? (", "js"),
     ("U06", "mobile/src/screens/NuevaCategoriaScreen.tsx", "        {padre !== null ? (\n          <View testID=\"aviso-d198\"", "        {true ? (\n          <View testID=\"aviso-d198\"", "js"),

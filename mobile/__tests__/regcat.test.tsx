@@ -58,7 +58,8 @@ async function abrir(cliente: ClienteApi) {
       </ProveedorTema>
     </SafeAreaProvider>,
   );
-  fireEvent.press(await screen.findByTestId('accion-gasto'));
+  fireEvent.press(await screen.findByTestId('accion-registrar'));
+  fireEvent.press(screen.getByTestId('tipo-GASTO')); // F05-04 §2.2: «Registrar» → hoja de tipos
   await screen.findByTestId('financiacion');
 }
 

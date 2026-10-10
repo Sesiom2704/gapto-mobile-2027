@@ -5,37 +5,75 @@
 // Descripción: HOME-01 (F09 §4) — esqueleto estructural completo en el orden aprobado: Cabecera, Liquidez, Acciones rápidas, Mes actual, [Requiere atención solo cuando exista], Próximos movimientos, Patrimonio total. Único dato real en VS-01: «Gastos» del mes vía lectura estrecha provisional (candidata F08). Los bloques sin read model autorizado muestran estado «No disponible» (DS-RULE-40) y NUNCA 0 € ni datos mock. Marcados internamente PENDIENTE_READ_MODEL.
 // v0.2.0 (F05-D003 §16.6): el bloque canónico «Este mes» ya no muestra cifras (Ingresos, Gastos, Resultado y presupuesto «No disponible»); la única lectura real va en una tarjeta SEPARADA «Gasto atribuible registrado este mes · parcial», que no es gasto total, resultado, presupuesto ni liquidez.
 // v0.3.0 (F05 — VS-01 · Alineación visual, A1): los bloques dejan de ser tarjetas blancas (F09 §6 «pocas tarjetas y pocos bordes», HOME-01): se asientan sobre el fondo y se separan con una línea estructural; «Acciones rápidas» usa el mismo bloque sin línea porque el hero ya delimita. El hero conserva su contrato (accentSurface, sin degradado ni ilustración: C3b fuera de alcance). La lectura parcial sigue en un bloque SEPARADO de «Este mes» (F05-D003 §16.6). Sin HEX ni tokens nuevos.
-// Versión: 0.3.0
+// v0.4.0 (F05-03/F05-04 J3 §2.1; lámina HOME-01 v0.3; AJUSTE A1 «Marca en Inicio», AJ-MARCA-04 cerrado): cabecera con el símbolo (34 × 34 pt) y el nombre (132,25 × 24 pt, contain) de la entrega F09-MARCA-AJ04_R0, a 8 pt, como UN solo elemento accesible «GaptoMobile» con rol de cabecera; sin «2027» ni lema. Ilustración de Liquidez (112 × 112 pt, a 8 pt del borde derecho, centrada en vertical), decorativa y oculta a VoiceOver. Claro/oscuro por el esquema del sistema (MARK-RULE-01), nunca por el acento; se retira FUENTE_MARCA del nombre. «Acciones rápidas»: «Registrar» (abre la hoja de tipos, sin preselección) y hasta 3 accesos de plantillas (nombre corto e icono, o el de la categoría, o la reserva); sin accesos, «Añadir acceso» y el texto H03; «Editar» lleva a Ajustes › Plantillas. «Resultado» se presentará en verde / rojo con signo (neutro en 0) cuando exista su lectura: los bloques PENDIENTE_READ_MODEL no cambian (siguen «No disponible»).
+// Versión: 0.4.0
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import type { ClienteApi, GastoMes } from '../api/cliente';
-import { EstadoDato, Seccion } from '../components/Basicos';
+import type { AccionRapida, ClienteApi, GastoMes, Plantilla } from '../api/cliente';
+import { BotonTexto, EstadoDato, Seccion } from '../components/Basicos';
 import { fechaCorta, mesLocal, nombreMes } from '../domain/fechas';
 import { formatearEur } from '../domain/importe';
+import { accesosDeInicio, TEXTO_SIN_ACCESOS } from '../domain/inicio';
+import { glifoDe } from '../theme/iconosCategoria';
 import { useTema } from '../theme/tema';
-import { espacio, FUENTE_MARCA, importe, radio, TACTIL_MIN, tipo } from '../theme/tokens';
+import { espacio, importe, radio, TACTIL_MIN, tipo } from '../theme/tokens';
+
+// Assets de marca (entrega F09-MARCA-AJ04_R0; @2x/@3x los resuelve la plataforma, sin reescalar).
+const MARCA = {
+  light: {
+    simbolo: require('../../assets/marca/gm-simbolo-cabecera-claro.png'),
+    nombre: require('../../assets/marca/gm-nombre-claro.png'),
+    ilustracion: require('../../assets/marca/gm-ilustracion-liquidez-claro.png'),
+  },
+  dark: {
+    simbolo: require('../../assets/marca/gm-simbolo-cabecera-oscuro.png'),
+    nombre: require('../../assets/marca/gm-nombre-oscuro.png'),
+    ilustracion: require('../../assets/marca/gm-ilustracion-liquidez-oscuro.png'),
+  },
+} as const;
 
 /** Bloques de HOME-01 cuyo read model no está autorizado en VS-01 (mandato §11). */
 export const PENDIENTE_READ_MODEL = ['LIQUIDEZ', 'MES_INGRESOS', 'MES_GASTOS', 'MES_RESULTADO', 'MES_PRESUPUESTO', 'ATENCION', 'PROXIMOS', 'PATRIMONIO'] as const;
 
 type Lectura = { fase: 'CARGANDO' } | { fase: 'OK'; datos: GastoMes } | { fase: 'ERROR' };
 
-export function HomeScreen(p: { cliente: ClienteApi; ahora: () => Date; refresco: number; onRegistrarGasto: () => void }) {
-  const { c } = useTema();
+export function HomeScreen(p: {
+  cliente: ClienteApi;
+  ahora: () => Date;
+  refresco: number;
+  /** «Registrar»: abre la hoja de tipos. */
+  onRegistrar: () => void;
+  /** Acceso de una plantilla: registro de su tipo con la plantilla aplicada. */
+  onAcceso?: (plantilla: Plantilla) => void;
+  /** «Editar» / «Añadir acceso»: Ajustes › Plantillas. */
+  onEditarAccesos?: () => void;
+}) {
+  const { c, esquema } = useTema();
   const inset = useSafeAreaInsets();
   const hoy = p.ahora();
   const [gasto, setGasto] = useState<Lectura>({ fase: 'CARGANDO' });
+  const [accesos, setAccesos] = useState<{ plantillas: Plantilla[]; acciones: AccionRapida[]; iconos: Map<string, string | null> } | null>(null);
+  const marca = MARCA[esquema === 'dark' ? 'dark' : 'light'];
 
   const cargar = useCallback(async () => {
     setGasto({ fase: 'CARGANDO' });
-    const r = await p.cliente.gastoMes(mesLocal(p.ahora()));
+    const [r, pl] = await Promise.all([p.cliente.gastoMes(mesLocal(p.ahora())), p.cliente.listarPlantillas()]);
     setGasto(r.tipo === 'OK' ? { fase: 'OK', datos: r.datos } : { fase: 'ERROR' });
+    if (pl.tipo !== 'OK') return setAccesos(null);
+    // Icono de la categoría de cada plantilla (solo si algún acceso no tiene icono propio).
+    let iconos = new Map<string, string | null>();
+    if (pl.datos.acciones.some((x) => x.enabled && !x.icono_key)) {
+      const a = await p.cliente.arbolCategorias();
+      if (a.tipo === 'OK') iconos = new Map(a.datos.categorias.map((n) => [n.id, n.icon_key]));
+    }
+    setAccesos({ ...pl.datos, iconos });
   }, [p.cliente, p.ahora]);
+  const lista = accesos ? accesosDeInicio(accesos.plantillas, accesos.acciones, (id) => accesos.iconos.get(id) ?? null) : [];
 
   useEffect(() => {
     void cargar();
@@ -50,11 +88,10 @@ export function HomeScreen(p: { cliente: ClienteApi; ahora: () => Date; refresco
     >
       {/* 1. Cabecera (§4.2): identidad, contexto discreto y perfil */}
       <View style={s.cabecera}>
-        <View style={{ flexShrink: 1 }}>
-          <Text accessibilityRole="header" style={[s.marca, { color: c.textPrimary }]}>
-            GaptoMobile <Text style={{ color: c.textSecondary }}>2027</Text>
-          </Text>
-          <Text style={[tipo.caption, s.lema, { color: c.textSecondary }]}>TUS FINANZAS, EN EQUILIBRIO</Text>
+        {/* Marca (A1): símbolo + nombre, UN elemento accesible «GaptoMobile» con rol de cabecera. */}
+        <View testID="marca-inicio" accessible accessibilityRole="header" accessibilityLabel="GaptoMobile" style={s.marca}>
+          <Image testID="marca-simbolo" source={marca.simbolo} style={s.simbolo} accessible={false} />
+          <Image testID="marca-nombre" source={marca.nombre} style={s.nombre} resizeMode="contain" accessible={false} />
         </View>
         <View style={s.perfil}>
           <Text style={[tipo.footnote, { color: c.textSecondary }]}>{fechaCorta(hoy)}</Text>
@@ -69,25 +106,56 @@ export function HomeScreen(p: { cliente: ClienteApi; ahora: () => Date; refresco
         <Text style={[tipo.titleSmall, { color: c.textPrimary, fontSize: 19 }]}>Liquidez actual</Text>
         <Text style={[tipo.subheadline, { color: c.textSecondary }]}>Solo pagos y cobros reales confirmados.</Text>
         <EstadoDato estado="NO_DISPONIBLE" detalle="Aún no se calcula en esta versión." />
+        {/* Ilustración decorativa (A1): oculta a VoiceOver y TalkBack. */}
+        <View pointerEvents="none" style={s.ilustracionCaja} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+          <Image testID="ilustracion-liquidez" source={marca.ilustracion} style={s.ilustracion} accessible={false} />
+        </View>
       </View>
 
-      {/* 3. Acciones rápidas (§4.4): máx. 4, una fila. VS-01 implementa solo «Gasto». */}
-      <Seccion testID="bloque-acciones" titulo="Acciones rápidas" separada={false}>
+      {/* 3. Acciones rápidas (§4.4; HOME-QA H01–H03): «Registrar» + hasta 3 accesos de plantillas. */}
+      <Seccion
+        testID="bloque-acciones"
+        titulo="Acciones rápidas"
+        separada={false}
+        derecha={p.onEditarAccesos ? <BotonTexto testID="accesos-editar" titulo="Editar" onPress={p.onEditarAccesos} /> : undefined}
+      >
         <View style={s.fila}>
-          <Pressable
-            testID="accion-gasto"
-            accessibilityRole="button"
-            accessibilityLabel="Registrar gasto"
-            onPress={p.onRegistrarGasto}
-            style={s.accion}
-          >
+          <Pressable testID="accion-registrar" accessibilityRole="button" accessibilityLabel="Registrar. Nuevo" onPress={p.onRegistrar} style={s.accion}>
             <View style={[s.circulo, { backgroundColor: c.accentSurface }]}>
               <Ionicons name="add" size={26} color={c.accent} />
             </View>
-            <Text style={[tipo.subheadline, { color: c.textPrimary, fontWeight: '600' }]}>Gasto</Text>
-            <Text style={[tipo.caption, { color: c.textSecondary }]}>Registrar</Text>
+            <Text style={[tipo.subheadline, { color: c.textPrimary, fontWeight: '600' }]}>Registrar</Text>
+            <Text style={[tipo.caption, { color: c.textSecondary }]}>Nuevo</Text>
           </Pressable>
+          {lista.map((a) => (
+            <Pressable
+              key={a.accion.id}
+              testID={`acceso-${a.accion.id}`}
+              accessibilityRole="button"
+              accessibilityLabel={`${a.accion.nombre}. Plantilla`}
+              onPress={() => p.onAcceso?.(a.plantilla)}
+              style={s.accion}
+            >
+              <View style={[s.circulo, { backgroundColor: c.surfaceSecondary }]}>
+                <Ionicons name={glifoDe(a.iconoKey)} size={24} color={c.textPrimary} />
+              </View>
+              <Text numberOfLines={1} style={[tipo.subheadline, { color: c.textPrimary, fontWeight: '600' }]}>{a.accion.nombre}</Text>
+              <Text style={[tipo.caption, { color: c.textSecondary }]}>Plantilla</Text>
+            </Pressable>
+          ))}
+          {accesos && lista.length === 0 && p.onEditarAccesos ? (
+            <Pressable testID="acceso-anadir" accessibilityRole="button" accessibilityLabel="Añadir acceso" onPress={p.onEditarAccesos} style={s.accion}>
+              <View style={[s.circulo, { borderColor: c.borderStandard, borderWidth: 1, borderStyle: 'dashed' }]}>
+                <Ionicons name="add" size={24} color={c.textSecondary} />
+              </View>
+              <Text style={[tipo.subheadline, { color: c.textPrimary, fontWeight: '600' }]}>Añadir</Text>
+              <Text style={[tipo.caption, { color: c.textSecondary }]}>acceso</Text>
+            </Pressable>
+          ) : null}
         </View>
+        {accesos && lista.length === 0 ? (
+          <Text testID="accesos-vacio" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_SIN_ACCESOS}</Text>
+        ) : null}
       </Seccion>
 
       {/* 4. Mes actual (§4.5): Ingresos · Gastos · Resultado + presupuesto */}
@@ -181,11 +249,14 @@ function CeldaGastos({ lectura, onReintentar }: { lectura: Lectura; onReintentar
 const s = StyleSheet.create({
   contenido: { paddingHorizontal: espacio.l, paddingBottom: espacio.xxl, gap: espacio.xl },
   cabecera: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: espacio.m },
-  marca: { fontFamily: FUENTE_MARCA, fontSize: 24 },
-  lema: { letterSpacing: 1.5, marginTop: 2, fontSize: 10 },
+  marca: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 },
+  simbolo: { width: 34, height: 34 },
+  nombre: { width: 132.25, height: 24 },
+  ilustracionCaja: { position: 'absolute', right: 8, top: 0, bottom: 0, justifyContent: 'center' },
+  ilustracion: { width: 112, height: 112 },
   perfil: { flexDirection: 'row', alignItems: 'center', gap: espacio.s },
   avatar: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
-  hero: { borderRadius: radio.l, padding: espacio.l, gap: espacio.s },
+  hero: { borderRadius: radio.l, padding: espacio.l, paddingRight: 112 + 8 + espacio.s, gap: espacio.s, minHeight: 112 + 16, overflow: 'hidden' },
   fila: { flexDirection: 'row' },
   accion: { width: '25%', alignItems: 'center', gap: 2, minHeight: TACTIL_MIN },
   circulo: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', marginBottom: espacio.xs },

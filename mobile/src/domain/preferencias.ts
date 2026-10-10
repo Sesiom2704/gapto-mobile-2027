@@ -6,10 +6,11 @@
 // Versión: 0.1.0 (F05-02 B2)
 // Versión: 0.3.0 (F05-03/F05-04 J2 §1.5; F05 §46.5 E2/E3; F05-D032 C4): se retira la preferencia sin tipo. «Todos los gastos» y «Una categoría» llevan SIEMPRE el tipo GASTO (`tipoGasto`, id que informa GET /v1/preferencias): el alta lo envía y las búsquedas del ámbito lo exigen. Una preferencia sin tipo (anterior a la conversión C4) ya no es de ningún ámbito vigente.
 // Versión: 0.2.0 (F05-02 B3; lámina SET-PREF v0.1 S01–S06, D-PREF-01/04; AJ-B1-10): SOLO altas para Ajustes › Preferencias: ámbito visible (D-PREF-01), grupos y orden de la lista (S01), textos de lo que propone cada preferencia, preferencia existente del mismo ámbito (S03, «nunca crear otra»), estado del formulario (S02/S06) con el espejo del CHECK «propone algo» y el contenido COMPLETO que se envía (E05). Ninguna regla de elegibilidad: las cuentas y categorías ofrecidas son las de REG-01 y la disponibilidad de la cuenta la dice el servidor (`cuenta_disponible_hoy`).
+// Versión: 0.5.0 (F05-03/F05-04 J2 §2.3/§2.4; lámina REG-DYN G01/I01/N01 y REG-PLT R01–R05): propuesta del registro por tipo con la capa plantilla (GET /v1/registro/propuesta): origen visible «De tu plantilla <nombre>.», «Propuesta: tu preferencia para <tercero>.» y, en ingresos, «… para todos los ingresos.»; «Guardar como preferencia» para el tercero O para la categoría (nunca ambos) con la misma lógica de alta / edición / conflicto.
 // Versión: 0.4.0 (F05-03/F05-04 J2 §2.5; F05 §46.4 R6, §46.5 E2/E3; lámina REG-DYN / SET-TH / SET-CTX v0.1 S04): Ajustes › Preferencias con CUATRO ámbitos: «Todos los gastos», «Todos los ingresos», «Una categoría» y «Un tercero»; los dos últimos con tipo Gasto/Ingreso, siempre enviado. Categoría + tercero no se ofrece (PREFERENCIA_AMBITO_NO_ADMITIDO). Grupo nuevo «Por tercero». «Proponer cuenta» del tipo INGRESO usa las cuentas elegibles para cobrar (servidor).
 // ============================================================
 
-import type { ContenidoPreferencia, CuentaPago, OrigenPropuesta, Preferencia, PropuestaRegistro, TiposRegistro } from '../api/cliente';
+import type { ContenidoPreferencia, CuentaPago, OrigenPropuesta, Preferencia, PropuestaRegistro, PropuestaRegistroTipo, TiposRegistro } from '../api/cliente';
 import type { Borrador, OrigenPropuestaCampo, PayloadGastoPagado } from './intencion';
 
 export interface CampoPropuesto<T> {
@@ -27,11 +28,54 @@ export const SIN_PROPUESTA: PropuestaAplicable = Object.freeze({ cuenta: null, p
 
 export const TEXTO_ELEGIDA = 'Elegida por ti.';
 
-/** Texto de origen visible bajo el campo (lámina R02; D-PREF-02). */
-export function textoOrigen(o: OrigenPropuestaCampo, categoria: string | null): string {
+/** Texto de origen visible bajo el campo (lámina R02; D-PREF-02; F05-04: plantilla, tercero e ingresos). */
+export function textoOrigen(
+  o: OrigenPropuestaCampo,
+  categoria: string | null,
+  extra: { tercero?: string | null; plantilla?: string | null; tipo?: 'GASTO' | 'INGRESO' } = {},
+): string {
+  if (o === 'PLANTILLA') return `De tu plantilla ${extra.plantilla ?? ''}.`;
+  if (o === 'PREFERENCIA_TERCERO') return `Propuesta: tu preferencia para ${extra.tercero ?? ''}.`;
   if (o === 'PREFERENCIA_CATEGORIA') return `Propuesta: tu preferencia para ${categoria ?? ''}.`;
-  if (o === 'PREFERENCIA_GENERAL') return 'Propuesta: tu preferencia general.';
+  if (o === 'PREFERENCIA_GENERAL') return extra.tipo === 'INGRESO' ? 'Propuesta: tu preferencia para todos los ingresos.' : 'Propuesta: tu preferencia general.';
   return 'Propuesta: es tu única cuenta disponible.';
+}
+
+// ------------------------------------------------------------------ registro por tipo (F05-04 J2 §2.3/§2.4)
+type OrigenTipo = PropuestaRegistroTipo['campos']['cuenta'] extends infer X ? (X extends { origen: infer O } ? O : never) : never;
+
+/** Origen explicable de un campo de la propuesta por tipo (capa plantilla, preferencia o default). */
+function origenCampoTipo(o: OrigenTipo, campo: 'cuenta' | 'presupuestable', indice: IndicePreferencias | null): OrigenPropuestaCampo | null {
+  if (o.capa === 'PLANTILLA') return 'PLANTILLA';
+  if (o.capa === 'DEFAULT_GENERAL') return campo === 'cuenta' ? 'UNICA' : null;
+  const pref = indice?.get(o.preferencia_id ?? '');
+  if (!pref) return null;
+  if (pref.tercero_id !== null) return 'PREFERENCIA_TERCERO';
+  return pref.categoria_id !== null ? 'PREFERENCIA_CATEGORIA' : 'PREFERENCIA_GENERAL';
+}
+
+/** ¿Hace falta la lista de preferencias para explicar algún origen de la propuesta por tipo? */
+export function faltanPreferenciasTipo(p: PropuestaRegistroTipo, indice: IndicePreferencias | null): boolean {
+  return [p.campos.cuenta?.origen, p.campos.presupuestable?.origen].some(
+    (o) => o !== undefined && o.capa === 'PREFERENCIA' && (indice === null || !indice.has(o.preferencia_id ?? '')),
+  );
+}
+
+/** Propuesta aplicable (cuenta y presupuesto) de GET /v1/registro/propuesta; la cuenta solo si está en la lista visible. */
+export function propuestaAplicableTipo(p: PropuestaRegistroTipo, indice: IndicePreferencias | null, lista: { cuenta_id: string }[]): PropuestaAplicable {
+  let cuenta: CampoPropuesto<string> | null = null;
+  const pc = p.campos.cuenta;
+  if (pc && lista.some((x) => x.cuenta_id === pc.valor)) {
+    const origen = origenCampoTipo(pc.origen, 'cuenta', indice);
+    if (origen) cuenta = { valor: pc.valor, origen };
+  }
+  let presupuestable: CampoPropuesto<boolean> | null = null;
+  const pp = p.campos.presupuestable;
+  if (pp) {
+    const origen = origenCampoTipo(pp.origen, 'presupuestable', indice);
+    if (origen) presupuestable = { valor: pp.valor, origen };
+  }
+  return { cuenta, presupuestable };
 }
 
 export type IndicePreferencias = ReadonlyMap<string, Preferencia>;
@@ -125,6 +169,36 @@ export interface PropuestaVista {
   fecha: string;
   categoriaId: string | null;
   valores: ValoresPropuestos;
+  /** F05-04: tercero y plantilla del contexto de la propuesta (ausentes = ninguno). */
+  terceroId?: string | null;
+  plantillaId?: string | null;
+}
+
+/** Ámbito de «Guardar como preferencia» en el registro por tipo: el tercero O la categoría (nunca ambos). */
+export interface AmbitoRecordable {
+  clave: 'CATEGORIA' | 'TERCERO';
+  id: string;
+  nombre: string;
+}
+
+/**
+ * Datos de la tarjeta para el registro por tipo (F05-04): ámbitos posibles (tercero primero, como la lámina N01:
+ * «Para ALDI / Para Supermercados»), valores finales y casillas. null si no hay ámbito o nada que recordar.
+ */
+export function datosRecordablesTipo(
+  final: { fecha: string; categoriaId: string | null; terceroId: string | null; cuenta: string; presupuestable: boolean },
+  nombres: { categoria: string | null; tercero: string | null },
+  vista: PropuestaVista | null,
+): { ambitos: AmbitoRecordable[]; finales: ValoresFinales; casillas: Casillas } | null {
+  const ambitos: AmbitoRecordable[] = [];
+  if (final.terceroId) ambitos.push({ clave: 'TERCERO', id: final.terceroId, nombre: nombres.tercero ?? 'este tercero' });
+  if (final.categoriaId) ambitos.push({ clave: 'CATEGORIA', id: final.categoriaId, nombre: nombres.categoria ?? 'esta categoría' });
+  if (ambitos.length === 0) return null;
+  const finales = { cuenta: final.cuenta, presupuestable: final.presupuestable };
+  const mismaVista =
+    vista && vista.fecha === final.fecha && vista.categoriaId === final.categoriaId && (vista.terceroId ?? null) === final.terceroId && !vista.plantillaId;
+  const casillas = casillasIniciales(finales, mismaVista ? vista.valores : null);
+  return casillas ? { ambitos, finales, casillas } : null;
 }
 
 export function valoresPropuestos(p: PropuestaRegistro): ValoresPropuestos {
@@ -180,15 +254,29 @@ export function planificarGuardado(
   c: Casillas,
   tipoGasto: string,
 ): PlanGuardado {
+  return planificarGuardadoClave(lista, { categoriaId, terceroId: null }, f, c, tipoGasto);
+}
+
+/** Igual que `planificarGuardado` para la clave (tipo, categoría) o (tipo, tercero) del registro por tipo (F05-04). */
+export function planificarGuardadoClave(
+  lista: Preferencia[],
+  clave: { categoriaId: string | null; terceroId: string | null },
+  f: ValoresFinales,
+  c: Casillas,
+  tipoId: string,
+): PlanGuardado {
   if (!c.cuenta && !c.presupuestable) return { tipo: 'NADA' };
-  const e = preferenciaDeCategoria(lista, categoriaId, tipoGasto);
+  const e =
+    clave.terceroId === null && clave.categoriaId !== null
+      ? preferenciaDeCategoria(lista, clave.categoriaId, tipoId)
+      : preferenciaDeClave(lista, { tipo: tipoId, categoriaId: clave.categoriaId, terceroId: clave.terceroId });
   if (!e) {
     return {
       tipo: 'ALTA',
       contenido: {
-        tipo_hecho_id: tipoGasto,
-        categoria_id: categoriaId,
-        tercero_id: null,
+        tipo_hecho_id: tipoId,
+        categoria_id: clave.categoriaId,
+        tercero_id: clave.terceroId,
         entidad_id: null,
         cuenta_default_id: c.cuenta ? f.cuenta : null,
         presupuestable_default: c.presupuestable ? f.presupuestable : null,
