@@ -46,7 +46,11 @@
 #   (regresion de cuentas_pago, ahora con oraculo R1). PF19 pasa a la guarda
 #   MONEDA de la regla unica: el filtro EUR del resolver queda como defensa
 #   redundante (un mutante sobre el seria equivalente).
-# Version: 0.4.0
+#
+#   v0.5.0 (F05-03/F05-04 J2 §1.2): PF29 se ancla en _tercero_elegible (la
+#   linea protegida de _hoy, retirada por la fecha funcional del owner, ya no
+#   existe). Mismo discriminante (test_170 paquete sin writer de terceros).
+# Version: 0.5.0
 # ============================================================
 
 from __future__ import annotations
@@ -201,9 +205,11 @@ MUTANTES = [
        ' "prioridad",\n')],
      [f"{T170}::test_el_writer_no_escribe_dimensiones_diferidas_ni_prioridad"]),
     ("PF29", "el paquete de preferencias escribe una tabla de terceros",
-     [(SERV, '    return sesion.uno("SELECT current_date")[0]\n',
+     [(SERV, '    """Del owner y habilitado. Inexistente u oculto por RLS: no elegible."""\n'
+             '    fila = sesion.uno(\n        "SELECT enabled FROM gapto.terceros',
+       '    """Del owner y habilitado. Inexistente u oculto por RLS: no elegible."""\n'
        '    sesion.uno("UPDATE gapto.terceros SET nombre = nombre WHERE false")\n'
-       '    return sesion.uno("SELECT current_date")[0]\n')],
+       '    fila = sesion.uno(\n        "SELECT enabled FROM gapto.terceros')],
      [f"{T170}::test_el_paquete_de_preferencias_no_escribe_terceros_ni_otras_tablas"]),
     # --- F05-03/F05-04 J2 §1.5 (R6, E2/E3, C4)
     ("PF30", "writer admite preferencias sin tipo (E3)",

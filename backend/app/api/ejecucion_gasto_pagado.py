@@ -81,7 +81,13 @@
 #   cuenta PASIVO con PAGAR_GASTO paga el gasto (un efecto GASTO y un
 #   movimiento en la cuenta de credito; ningun efecto de deuda). Motivo MONEDA
 #   -> MONEDA_INVALIDA (como antes); cualquier otro -> CUENTA_DESCONOCIDA.
-# Version: 0.6.0
+#
+#   v0.7.0 (F05-03/F05-04 J2 §1.2; F05-D032 C6): la fecha futura se decide
+#   aqui con el «hoy» del OWNER (hoy_owner, reloj inyectable), solo para la
+#   intencion NUEVA y como primera revalidacion (paso 3.0): FECHA_FUTURA es un
+#   rechazo de capa F05 sin escritura. Un reintento de una intencion ya
+#   materializada no se rechaza retrospectivamente.
+# Version: 0.7.0
 # ============================================================
 
 from __future__ import annotations
@@ -93,6 +99,7 @@ from app.api.dto_vs01 import IntencionGastoPagado
 from app.api.elegibilidad_categoria import validar_seleccion_categoria
 from app.api.traductor_gasto_pagado import componer, leer_actor_self, participacion_self_100
 from app.comun.elegibilidad_cuentas import MONEDA, motivo_cuenta
+from app.comun.fecha_funcional import CODIGO_FECHA_FUTURA, Reloj, es_futura, reloj_sistema
 from app.core.contexto import ContextoOperacion
 from app.core.errores import CodigoError, ErrorMotor
 from app.core.modelos_compuesto import DatosHechoCompuesto, ResultadoHechoCompuesto
@@ -141,7 +148,8 @@ def _validar_cuenta_nueva(sesion: SesionMotor, intencion: IntencionGastoPagado) 
 
 
 def registrar_gasto_pagado(
-    unidad: UnidadDeTrabajo, contexto: ContextoOperacion, intencion: IntencionGastoPagado
+    unidad: UnidadDeTrabajo, contexto: ContextoOperacion, intencion: IntencionGastoPagado,
+    reloj: Reloj = reloj_sistema,
 ) -> Registrado | RechazoIntegracion:
     def operacion(sesion: SesionMotor) -> Registrado | RechazoIntegracion:
         # 1. Lock contractual de la cuenta.
@@ -152,6 +160,9 @@ def registrar_gasto_pagado(
         ya_materializada = repo_hechos.leer_estado(sesion, intencion.intencion_id) is not None
 
         if not ya_materializada:
+            # 3.0 Fecha funcional del owner (C6): nada futuro.
+            if es_futura(sesion, intencion.fecha_hecho, reloj):
+                return RechazoIntegracion(CODIGO_FECHA_FUTURA)
             # 3. Intencion nueva: relectura bajo el lock.
             _validar_cuenta_nueva(sesion, intencion)
             # 4. Revalidacion de la propuesta sellada, en la fecha del pago.

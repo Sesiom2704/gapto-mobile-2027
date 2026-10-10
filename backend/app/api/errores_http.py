@@ -70,7 +70,11 @@
 #   (422: dato de entrada) y PREFERENCIA_TERCERO_NO_ELEGIBLE (409). El mensaje
 #   de PREFERENCIA_DIMENSION_DIFERIDA pasa a citar solo la entidad (el
 #   tercero es operativo, E2).
-# Version: 0.10.0
+#
+#   v0.11.0 (F05-03/F05-04 J2 §1.2; F05-D032 C6): rechazo de integracion
+#   FECHA_FUTURA (422, dato de entrada respecto del «hoy» del owner; el
+#   mensaje nombra el campo fecha_hecho, como el 422 de forma).
+# Version: 0.11.0
 # ============================================================
 
 from __future__ import annotations
@@ -139,6 +143,10 @@ def interno() -> tuple[int, dict]:
 
 
 _RECHAZOS_INTEGRACION: dict[str, tuple[int, str]] = {
+    "FECHA_FUTURA": (
+        422,
+        "Revisa los datos: fecha_hecho no puede ser futura (solo se registra lo ya ocurrido).",
+    ),
     "PROPUESTA_FINANCIACION_OBSOLETA": (
         409,
         "La cuenta ha cambiado de titularidad desde que abriste el formulario. "

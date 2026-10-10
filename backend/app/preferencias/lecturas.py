@@ -35,7 +35,11 @@
 #   v0.4.0 (F05-03/F05-04 J2 §1.1; F05 §46.4 R1; F05-D032 C1):
 #   `cuenta_disponible_hoy` se evalua con el contrato unico de elegibilidad
 #   para la operacion del TIPO de cada preferencia.
-# Version: 0.4.0
+#
+#   v0.5.0 (F05-03/F05-04 J2 §1.2; F05-D032 C6): `listar` evalua «hoy» con
+#   hoy_owner (zona del owner, reloj inyectable) y no con current_date de la
+#   sesion (UTC). `propuesta` sigue usando la fecha que recibe.
+# Version: 0.5.0
 # ============================================================
 
 from __future__ import annotations
@@ -45,6 +49,7 @@ import uuid
 from typing import Any
 
 from app.api.elegibilidad_categoria import validar_seleccion_categoria
+from app.comun.fecha_funcional import Reloj, hoy_owner, reloj_sistema
 from app.core.unidad_trabajo import SesionMotor
 from app.preferencias import repositorio as repo
 from app.preferencias.resolver import cuentas_elegibles_registro, operacion_de_tipo, resolver, tipo_hecho_registro
@@ -59,8 +64,8 @@ def tipos_registro(sesion: SesionMotor) -> dict[str, uuid.UUID]:
     return {codigo: tipo_hecho_registro(sesion, codigo) for codigo in TIPOS_REGISTRO}
 
 
-def listar(sesion: SesionMotor) -> list[dict[str, Any]]:
-    hoy = sesion.uno("SELECT current_date")[0]
+def listar(sesion: SesionMotor, reloj: Reloj = reloj_sistema) -> list[dict[str, Any]]:
+    hoy = hoy_owner(sesion, reloj)
     elegibles = {op: set(cuentas_elegibles_registro(sesion, hoy, op)) for op in ("GASTO", "INGRESO")}
     return [
         {

@@ -94,7 +94,12 @@
 #       TRANSFERENCIA_DESTINO) y fecha, con la regla unica de
 #       comun/elegibilidad_cuentas.py. /v1/vs01/cuentas-pago usa la misma
 #       regla (GASTO).
-# Version: 0.13.0
+#
+#   v0.14.0 (F05-03/F05-04 J2 §1.2; F05-D032 C6): `create_app(reloj=...)`
+#   inyecta el reloj de la fecha funcional del owner (por defecto, el del
+#   sistema en UTC) en el registro (FECHA_FUTURA) y en los writers y la lista
+#   de preferencias (elegibilidad de cuenta «hoy»).
+# Version: 0.14.0
 # ============================================================
 
 from __future__ import annotations
@@ -171,6 +176,7 @@ from app.api.dto_vs01 import (
 from app.api.ejecucion_gasto_pagado import RechazoIntegracion, registrar_gasto_pagado
 from app.categorias import lecturas as lect_cat
 from app.comun import elegibilidad_cuentas as eleg
+from app.comun.fecha_funcional import Reloj, reloj_sistema
 from app.categorias import servicio as serv_cat
 from app.magnitudes import lecturas as lect_mag
 from app.magnitudes import servicio as serv_mag
@@ -209,6 +215,7 @@ def create_app(
     *,
     proveedor_conexion: Callable[[], object] | None = None,
     origenes_cors: tuple[str, ...] = (),
+    reloj: Reloj = reloj_sistema,
 ) -> FastAPI:
     cfg = cfg or cargar_desde_entorno()
     proveedor = proveedor_conexion or _proveedor_por_defecto(cfg.dsn)
@@ -484,7 +491,7 @@ def create_app(
     @app.get("/v1/preferencias", response_model=ListaPreferencias, dependencies=[Depends(autorizar)])
     def preferencias() -> dict:
         return unidad.ejecutar(
-            contexto(), lambda s: {"preferencias": lect_pref.listar(s), "tipos": lect_pref.tipos_registro(s)},
+            contexto(), lambda s: {"preferencias": lect_pref.listar(s, reloj), "tipos": lect_pref.tipos_registro(s)},
             nombre="F05-02 listar")
 
     @app.get("/v1/preferencias/propuesta", response_model=PropuestaRegistro, dependencies=[Depends(autorizar)])
@@ -510,7 +517,7 @@ def create_app(
         return _comando_preferencia("alta", lambda s: serv_pref.alta(
             s, preferencia_id=c.id, tipo_hecho_id=c.tipo_hecho_id, categoria_id=c.categoria_id,
             tercero_id=c.tercero_id, entidad_id=c.entidad_id, cuenta_default_id=c.cuenta_default_id,
-            presupuestable_default=c.presupuestable_default, prioridad=c.prioridad))
+            presupuestable_default=c.presupuestable_default, prioridad=c.prioridad, reloj=reloj))
 
     @app.post("/v1/preferencias/{preferencia_id}/editar", **_RP)
     def editar_preferencia(preferencia_id: uuid.UUID, c: EditarPreferencia):
@@ -518,7 +525,7 @@ def create_app(
             s, preferencia_id=preferencia_id, row_version=c.row_version, tipo_hecho_id=c.tipo_hecho_id,
             categoria_id=c.categoria_id, tercero_id=c.tercero_id, entidad_id=c.entidad_id,
             cuenta_default_id=c.cuenta_default_id, presupuestable_default=c.presupuestable_default,
-            prioridad=c.prioridad))
+            prioridad=c.prioridad, reloj=reloj))
 
     @app.post("/v1/preferencias/{preferencia_id}/desactivar", **_RP)
     def desactivar_preferencia(preferencia_id: uuid.UUID, c: DesactivarPreferencia):
@@ -536,7 +543,7 @@ def create_app(
         dependencies=[Depends(autorizar)],
     )
     def gasto_pagado(intencion: IntencionGastoPagado) -> dict:
-        salida = registrar_gasto_pagado(unidad, contexto(), intencion)
+        salida = registrar_gasto_pagado(unidad, contexto(), intencion, reloj)
         if isinstance(salida, RechazoIntegracion):
             status, cuerpo = eh.rechazo_integracion(salida.codigo)
             return JSONResponse(cuerpo, status_code=status)

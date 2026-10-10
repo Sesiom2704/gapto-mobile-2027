@@ -11,7 +11,11 @@
 #   Base local desechable 0001..0330 (estos tests confirman filas).
 #   v0.2.0 (F05 §18): el caso de financiacion reducida se apoya en OP-22
 #   recertificado, sin guarda propia en la capa F05.
-# Version: 0.2.0
+#   v0.3.0 (F05-03/F05-04 J2 §1.2; F05-D032 C6): hoy_referencia() se retira de
+#   dto_vs01; el test calcula el «hoy» del owner (zona por defecto Europe/Madrid)
+#   con comun/fecha_funcional. Mismo oraculo (422 que nombra fecha_hecho; ayer
+#   admitido). Adaptacion mecanica de import (tabla «tests adaptados»).
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
@@ -182,7 +186,10 @@ def test_vigencia_se_evalua_en_la_fecha_del_pago(tenant):
 
 
 def test_fecha_futura_rechazada_y_pasada_admitida(tenant):
-    from app.api.dto_vs01 import hoy_referencia
+    from app.comun.fecha_funcional import ZONA_POR_DEFECTO, hoy_en, zona
+
+    def hoy_referencia():
+        return hoy_en(zona(ZONA_POR_DEFECTO))
 
     owner, _, _, cuenta = tenant
     cli = h.cliente(owner)

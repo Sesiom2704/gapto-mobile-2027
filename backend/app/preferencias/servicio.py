@@ -57,7 +57,11 @@
 #   propuesta se valida con el contrato unico de elegibilidad para la
 #   operacion del TIPO de la preferencia (INGRESO -> RECIBIR_INGRESO; GASTO y
 #   el resto -> PAGAR_GASTO). Ninguna preferencia relaja la matriz.
-# Version: 0.3.0
+#
+#   v0.4.0 (F05-03/F05-04 J2 §1.2; F05-D032 C6): «hoy» para la elegibilidad
+#   de la cuenta es hoy_owner (zona del owner, reloj inyectable), no
+#   current_date de la sesion (UTC). alta y editar reciben `reloj`.
+# Version: 0.4.0
 # ============================================================
 
 from __future__ import annotations
@@ -68,6 +72,7 @@ from typing import Any
 
 import psycopg
 
+from app.comun.fecha_funcional import Reloj, hoy_owner, reloj_sistema
 from app.core.unidad_trabajo import SesionMotor
 from app.preferencias import repositorio as repo
 from app.preferencias.resolver import (
@@ -191,11 +196,7 @@ def _tercero_elegible(sesion: SesionMotor, tercero_id) -> bool:
     return fila is not None and fila[0]
 
 
-def _hoy(sesion: SesionMotor):
-    return sesion.uno("SELECT current_date")[0]
-
-
-def _validar_valores(sesion: SesionMotor, v: dict[str, Any]) -> Rechazo | None:
+def _validar_valores(sesion: SesionMotor, v: dict[str, Any], reloj: Reloj = reloj_sistema) -> Rechazo | None:
     """Validaciones del contenido propuesto, en orden fijo."""
     if dimension_diferida(v):
         return Rechazo(DIMENSION_DIFERIDA)
@@ -214,7 +215,7 @@ def _validar_valores(sesion: SesionMotor, v: dict[str, Any]) -> Rechazo | None:
     if v["tercero_id"] is not None and not _tercero_elegible(sesion, v["tercero_id"]):
         return Rechazo(TERCERO_NO_ELEGIBLE)
     if v["cuenta_default_id"] is not None and v["cuenta_default_id"] not in cuentas_elegibles_registro(
-        sesion, _hoy(sesion), operacion_de_tipo(sesion, v["tipo_hecho_id"])
+        sesion, hoy_owner(sesion, reloj), operacion_de_tipo(sesion, v["tipo_hecho_id"])
     ):
         return Rechazo(CUENTA_NO_ELEGIBLE)
     return None
@@ -258,7 +259,7 @@ _CONTENIDO = ("tipo_hecho_id", "categoria_id", "tercero_id", "cuenta_default_id"
 # ------------------------------------------------------------------ comandos
 def alta(sesion: SesionMotor, *, preferencia_id, tipo_hecho_id=None, categoria_id=None, tercero_id=None,
          entidad_id=None, cuenta_default_id=None, presupuestable_default=None,
-         prioridad: int = PRIORIDAD_V1) -> Resultado | Rechazo:
+         prioridad: int = PRIORIDAD_V1, reloj: Reloj = reloj_sistema) -> Resultado | Rechazo:
     repo.tomar_advisory(sesion)
     v = _valores(tipo_hecho_id=tipo_hecho_id, categoria_id=categoria_id, tercero_id=tercero_id,
                  entidad_id=entidad_id, cuenta_default_id=cuenta_default_id,
@@ -272,7 +273,7 @@ def alta(sesion: SesionMotor, *, preferencia_id, tipo_hecho_id=None, categoria_i
             and all(existente[k] == v[k] for k in v)
         )
         return Resultado(preferencia=existente, idempotente=True) if igual else Rechazo(IDENTIDAD_REUTILIZADA)
-    rechazo = _validar_valores(sesion, v) or _empate(sesion, v, preferencia_id)
+    rechazo = _validar_valores(sesion, v, reloj) or _empate(sesion, v, preferencia_id)
     if rechazo is not None:
         return rechazo
     rechazo = _escribir(sesion, lambda: repo.insertar_preferencia(
@@ -287,7 +288,7 @@ def alta(sesion: SesionMotor, *, preferencia_id, tipo_hecho_id=None, categoria_i
 
 def editar(sesion: SesionMotor, *, preferencia_id, row_version: int, tipo_hecho_id=None, categoria_id=None,
            tercero_id=None, entidad_id=None, cuenta_default_id=None, presupuestable_default=None,
-           prioridad: int = PRIORIDAD_V1) -> Resultado | Rechazo:
+           prioridad: int = PRIORIDAD_V1, reloj: Reloj = reloj_sistema) -> Resultado | Rechazo:
     """Sustituye el contenido completo (claves y valores propuestos)."""
     repo.tomar_advisory(sesion)
     fila = _fila(sesion, preferencia_id, row_version)
@@ -296,7 +297,7 @@ def editar(sesion: SesionMotor, *, preferencia_id, row_version: int, tipo_hecho_
     v = _valores(tipo_hecho_id=tipo_hecho_id, categoria_id=categoria_id, tercero_id=tercero_id,
                  entidad_id=entidad_id, cuenta_default_id=cuenta_default_id,
                  presupuestable_default=presupuestable_default, prioridad=prioridad)
-    rechazo = _validar_valores(sesion, v)
+    rechazo = _validar_valores(sesion, v, reloj)
     if rechazo is not None:
         return rechazo
     cambios = {k: v[k] for k in _CONTENIDO if fila[k] != v[k]}

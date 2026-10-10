@@ -57,7 +57,13 @@
 #
 #   v0.6.0 (F05-03/F05-04 J2 §1.1; F05 §46.4 R1): DTO de lectura
 #   ListaCuentasElegibles (GET /v1/cuentas/elegibles). La intencion no cambia.
-# Version: 0.6.0
+#
+#   v0.7.0 (F05-03/F05-04 J2 §1.2; F05-D032 C6): se RETIRAN hoy_referencia()
+#   y la validacion de fecha futura del DTO: el «hoy» es el del OWNER
+#   (gapto.usuarios.timezone, fallback Europe/Madrid) y el DTO no conoce al
+#   owner. La intencion NUEVA con fecha posterior a hoy_owner la rechaza la
+#   ejecucion con FECHA_FUTURA (comun/fecha_funcional.py).
+# Version: 0.7.0
 # ============================================================
 
 from __future__ import annotations
@@ -67,7 +73,6 @@ import decimal
 import re
 import uuid
 from typing import Annotated, Literal, Union
-from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator, model_validator
 
@@ -76,15 +81,6 @@ AtribucionVs01 = Literal["SOLO_MIO", "SIN_INDICAR"]
 
 class _Estricto(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-
-
-# Zona de referencia para "hoy" (F03-00-B02: default Europe/Madrid). Solo se
-# usa para rechazar fechas futuras; la fecha enviada no se convierte.
-ZONA_HOY = ZoneInfo("Europe/Madrid")
-
-
-def hoy_referencia() -> dt.date:
-    return dt.datetime.now(ZONA_HOY).date()
 
 
 class FinanciacionPropuestaAceptada(_Estricto):
@@ -200,13 +196,6 @@ class IntencionGastoPagado(_Estricto):
         if isinstance(self.categoria, CategoriaSeleccionada):
             return self.categoria.magnitudes
         return ()
-
-    @field_validator("fecha_hecho")
-    @classmethod
-    def _fecha_no_futura(cls, valor: dt.date) -> dt.date:
-        if valor > hoy_referencia():
-            raise ValueError("fecha futura: VS-01 registra gastos ya ocurridos")
-        return valor
 
     @model_validator(mode="after")
     def _importe_financiacion(self) -> "IntencionGastoPagado":

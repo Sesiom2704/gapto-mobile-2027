@@ -21,6 +21,7 @@
 #   Uso: GAPTO_TEST_DATABASE_URL=<base desechable> python scripts/dev/mutantes_f05_j2j3.py [--solo ID,ID]
 #   No ejecutar en paralelo con otro arnes ni con la suite sobre el mismo arbol.
 # Version: 0.1.0 (F05-03/F05-04 J2 §1.1: EL01..EL08)
+# Version: 0.2.0 (F05-03/F05-04 J2 §1.2: FF01..FF05, fecha funcional del owner)
 # ============================================================
 
 from __future__ import annotations
@@ -41,6 +42,10 @@ T174 = "tests/api/test_174_f05_03_elegibilidad_cuentas.py"
 ELEG = "backend/app/comun/elegibilidad_cuentas.py"
 EJEC = "backend/app/api/ejecucion_gasto_pagado.py"
 RES = "backend/app/preferencias/resolver.py"
+T176 = "tests/api/test_176_f05_03_fecha_funcional.py"
+FF = "backend/app/comun/fecha_funcional.py"
+PSERV = "backend/app/preferencias/servicio.py"
+PLECT = "backend/app/preferencias/lecturas.py"
 
 MUTANTES = [
     # --- §1.1 contrato unico de elegibilidad (R1, C1)
@@ -72,6 +77,23 @@ MUTANTES = [
      [(RES, '    return "INGRESO" if fila is not None and fila[0] == "INGRESO" else "GASTO"',
        '    return "GASTO"')],
      [f"{T168}::test_preferencia_de_ingreso_exige_recibir_ingreso"]),
+    # --- §1.2 fecha funcional del owner (C6)
+    ("FF01", "hoy_owner ignora la zona del owner",
+     [(FF, "    return zona(None if fila is None else fila[0])", "    return zona(None)")],
+     [f"{T176}::test_hoy_owner"]),
+    ("FF02", "hoy en UTC (sin convertir a la zona)",
+     [(FF, "    return instante.astimezone(zona_owner_).date()", "    return instante.date()")],
+     [f"{T176}::test_hoy_owner"]),
+    ("FF03", "zona no reconocida cae a UTC y no a Europe/Madrid",
+     [(FF, "    return ZoneInfo(ZONA_POR_DEFECTO)", '    return ZoneInfo("UTC")')],
+     [f"{T176}::test_hoy_owner"]),
+    ("FF04", "lista de preferencias con current_date de la sesion",
+     [(PLECT, "    hoy = hoy_owner(sesion, reloj)", '    hoy = sesion.uno("SELECT current_date")[0]')],
+     [f"{T176}::test_preferencias_evaluan_la_cuenta_con_hoy_owner"]),
+    ("FF05", "writer de preferencias sin el reloj inyectado",
+     [(PSERV, '        sesion, hoy_owner(sesion, reloj), operacion_de_tipo(sesion, v["tipo_hecho_id"])',
+       '        sesion, hoy_owner(sesion), operacion_de_tipo(sesion, v["tipo_hecho_id"])')],
+     [f"{T176}::test_preferencias_evaluan_la_cuenta_con_hoy_owner"]),
 ]
 
 
