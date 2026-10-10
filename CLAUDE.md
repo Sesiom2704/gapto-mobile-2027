@@ -160,7 +160,7 @@ Las dudas que no bloquean se anotan y se resuelven en el handoff, sin detener el
 
 ### Prohibiciones
 - Migrations publicadas (0001..0340) inmutables; ningún DDL sin mandato que lo autorice.
-- Supabase permanece en 0310 (D-179): no aplicar 0320+ ni crear ramas, proyectos o clean-rooms en Supabase. `gappto-staging` (Neon y Supabase) no se toca.
+- Supabase `postgres` alcanzó el head físico certificado `0350` el 2026-10-10 (D-204; D-179-A resuelto). D-179-B permanece vigente: prohibidos bloques que persistan datos, tests no transaccionales sin limpieza demostrada y creación de clean-rooms, ramas o proyectos Supabase adicionales. Toda nueva migration exige gate y autorización específicos para Supabase. No se presume paridad funcional ni de rendimiento con Neon. `gappto-staging` (Neon y Supabase) no se toca.
 - `gapto2027_cleanroom` de Neon: nunca se limpia con DELETE privilegiados ni desactivando guards/RLS; se recrea virgen (autorizado de forma permanente por Moisés) y queda marcada CONSUMIDA tras usarse.
 - Tests que persisten filas: solo en clean-room o desechables, nunca contra bases de referencia.
 - `HEAD_AUTORIZADO_ENVDEV` y `test_044` solo cambian en un cambio revisado.
