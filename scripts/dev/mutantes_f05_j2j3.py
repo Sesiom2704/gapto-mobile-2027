@@ -33,6 +33,9 @@
 #   documentado (RG06): la comprobacion MISMA_CUENTA del adaptador, porque OP-10 rechaza
 #   igual con MISMA_CUENTA. El orden INVERSIONES -> cuenta (RG01) lo discrimina la
 #   bateria serial de locks)
+# Version: 0.6.0 (F05-03/F05-04 J2 §3: RG01, PL01 y EL09, discriminados por la bateria
+#   serial test_190; el arnes debe ejecutarse con GAPTO_J2J3_CONCURRENCIA=1, si no esos
+#   discriminantes se omiten y el mutante sale VIVO)
 # ============================================================
 
 from __future__ import annotations
@@ -66,6 +69,7 @@ REGI = "backend/app/api/ejecucion_registro.py"
 DTOR = "backend/app/api/dto_registro.py"
 CAPM = "backend/app/api/captura_magnitudes.py"
 TRAD = "backend/app/api/traductor_registro.py"
+T190 = "tests/api/test_190_f05_j2j3_concurrencia_serial.py"
 T176 = "tests/api/test_176_f05_03_fecha_funcional.py"
 FF = "backend/app/comun/fecha_funcional.py"
 PSERV = "backend/app/preferencias/servicio.py"
@@ -226,6 +230,18 @@ MUTANTES = [
      [(PPROP, '        categoria_id if categoria_id is not None else (campos["categoria"] or {}).get("valor"))',
        "        categoria_id)")],
      [f"{T179}::test_caso2_solo_categoria_con_cuenta_de_una_preferencia"]),
+    # --- §3 bateria serial de concurrencia y locks (requiere GAPTO_J2J3_CONCURRENCIA=1)
+    ("RG01", "registro con contexto sin INVERSIONES antes de la cuenta",
+     [(EJEC, "        if intencion.contexto_id is not None:\n            tomar_inversiones(sesion)\n", "")],
+     [f"{T190}::test_l1_registro_con_contexto_toma_inversiones_antes_que_la_cuenta"]),
+    ("PL01", "alta de plantilla sin el advisory PLANTILLAS",
+     [(PSRV, '    """Alta (tambien «Guardar como plantilla»: escritura independiente con su UUID)."""\n    repo.tomar_advisory(sesion)\n',
+       '    """Alta (tambien «Guardar como plantilla»: escritura independiente con su UUID)."""\n')],
+     [f"{T190}::test_l7_dos_altas_de_plantilla_mismo_nombre"]),
+    ("EL09", "confirmacion sin FOR SHARE de la capacidad",
+     [(REGI, "    motivo = motivo_cuenta(sesion, cuenta_id, operacion, fecha, bloquear=True)",
+       "    motivo = motivo_cuenta(sesion, cuenta_id, operacion, fecha)")],
+     [f"{T190}::test_l5_transferencia_frente_a_cambio_de_cuenta"]),
     # --- §1.7 registro por tipo (A2..A6, A9; R1..R3; C3)
     ("RG02", "gasto sin revalidar el tercero bajo lock",
      [(EJEC, "            rechazo = validar_tercero(sesion, intencion.tercero_id) or validar_contexto(sesion, intencion.contexto_id)",

@@ -146,7 +146,7 @@ def bloquear_cuenta(sesion: SesionMotor, cuenta_id) -> None:
 
 def _validar_cuenta_nueva(sesion: SesionMotor, intencion: IntencionGastoPagado) -> None:
     """Regla unica R1 (GASTO) bajo el lock de la cuenta, en la fecha del pago."""
-    motivo = motivo_cuenta(sesion, intencion.cuenta_id, "GASTO", intencion.fecha_hecho)
+    motivo = motivo_cuenta(sesion, intencion.cuenta_id, "GASTO", intencion.fecha_hecho, bloquear=True)
     if motivo == MONEDA:
         # VS-01 solo cubre hecho y cuenta en la misma moneda; multidivisa no se
         # simula ni se convierte (D-169/D-170 quedan para slices posteriores).

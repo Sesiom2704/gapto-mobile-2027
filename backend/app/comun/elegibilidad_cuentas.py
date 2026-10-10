@@ -31,6 +31,16 @@
 #   Solo lectura y sin locks propios: la confirmacion toma antes el lock de la
 #   cuenta (FOR NO KEY UPDATE) y llama a `motivo_cuenta` ya bajo el.
 # Version: 0.1.0 (F05-03/F05-04 J2 §1.1)
+# Version: 0.2.0 (F05-03/F05-04 J2 §3, interleaving L5 «transferencia frente a
+#   cambio de capacidad», F05 §46.4 R4): el lock de la cuenta (NO KEY UPDATE)
+#   es COMPATIBLE con el DELETE de una fila de cuenta_capacidades, asi que no
+#   serializa la retirada de una capacidad frente al registro. En la
+#   confirmacion, `motivo_cuenta(..., bloquear=True)` toma ademas FOR SHARE de
+#   la fila de capacidad (orden: cuenta -> capacidad). Un writer de
+#   capacidades (deuda DEU-F05-CAPACIDADES-UI) que la borre espera al registro
+#   y, a la inversa, el registro que llega despues ya no la encuentra
+#   (SIN_CAPACIDAD). Sin ciclo: borrar la capacidad no bloquea la cuenta. Las
+#   lecturas siguen sin locks.
 # ============================================================
 
 from __future__ import annotations
@@ -111,10 +121,15 @@ def cuentas_elegibles(sesion: SesionMotor, operacion: str, fecha: dt.date) -> li
             if c["elegible"]]
 
 
-def motivo_cuenta(sesion: SesionMotor, cuenta_id: uuid.UUID, operacion: str, fecha: dt.date) -> str | None:
+def motivo_cuenta(sesion: SesionMotor, cuenta_id: uuid.UUID, operacion: str, fecha: dt.date,
+                  *, bloquear: bool = False) -> str | None:
     """Motivo de no elegibilidad de UNA cuenta (None = elegible). Para la
-    confirmacion: se invoca con la cuenta ya bloqueada por el llamante."""
+    confirmacion: se invoca con la cuenta ya bloqueada por el llamante y con
+    `bloquear=True`, que toma FOR SHARE de la fila de capacidad."""
     capacidad = _capacidad(operacion)
+    if bloquear:
+        sesion.uno("SELECT id FROM gapto.cuenta_capacidades WHERE cuenta_id = %s AND capacidad_codigo = %s FOR SHARE",
+                   (cuenta_id, capacidad))
     fila = sesion.uno(_SELECT + " AND c.id = %s", (capacidad, cuenta_id))
     if fila is None:
         return NO_ENCONTRADA

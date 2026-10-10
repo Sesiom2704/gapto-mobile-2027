@@ -36,6 +36,8 @@
 #   cuentas, fecha y nota canonicalizada con lo persistido; cualquier
 #   diferencia -> IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION sin efectos.
 # Version: 0.1.0 (F05-03/F05-04 J2 §1.7)
+# Version: 0.2.0 (F05-03/F05-04 J2 §3, L5): la regla R1 bajo el lock toma
+#   tambien FOR SHARE de la fila de capacidad (cuenta -> capacidad).
 # ============================================================
 
 from __future__ import annotations
@@ -97,7 +99,7 @@ def bloquear_cuentas(sesion: SesionMotor, *cuentas: uuid.UUID) -> None:
 def rechazo_cuenta(sesion: SesionMotor, cuenta_id: uuid.UUID, operacion: str, fecha) -> None:
     """Regla unica R1 bajo el lock: MONEDA -> MONEDA_INVALIDA; otro motivo ->
     CUENTA_DESCONOCIDA (codigos F04 ya traducidos por la API)."""
-    motivo = motivo_cuenta(sesion, cuenta_id, operacion, fecha)
+    motivo = motivo_cuenta(sesion, cuenta_id, operacion, fecha, bloquear=True)
     if motivo == MONEDA:
         raise ErrorMotor(CodigoError.MONEDA_INVALIDA, "Solo se admite una cuenta en EUR.")
     if motivo is not None:
