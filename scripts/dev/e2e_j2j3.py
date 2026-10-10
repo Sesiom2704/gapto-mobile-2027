@@ -47,6 +47,8 @@
 #   --web (o --dist), GAPTO_DATABASE_URL (base LOCAL), GAPTO_DEV_OWNER_USER_ID y
 #   GAPTO_DEV_TOKEN (nunca se imprime).
 # Version: 0.1.0 (F05-03/F05-04 J2+J3 §2.8)
+# Version: 0.1.1 (§5): SQL estatico en exigir_base_recreada (inventario I6) y esperas a la carga
+#   de Plantillas/Preferencias y a los accesos de Inicio.
 # ============================================================
 
 from __future__ import annotations
@@ -145,8 +147,14 @@ def comprobar(cond: bool, mensaje: str) -> None:
 
 
 def exigir_base_recreada(dsn: str, owner: str) -> None:
-    for tabla in ("categorias_financieras", "plantillas_registro", "preferencias_registro", "terceros"):
-        if _sql(dsn, owner, "gapto_runtime", f"SELECT 1 FROM gapto.{tabla} LIMIT 1"):
+    consultas = {  # SQL estatico (sin nombres de tabla dinamicos)
+        "categorias_financieras": "SELECT 1 FROM gapto.categorias_financieras LIMIT 1",
+        "plantillas_registro": "SELECT 1 FROM gapto.plantillas_registro LIMIT 1",
+        "preferencias_registro": "SELECT 1 FROM gapto.preferencias_registro LIMIT 1",
+        "terceros": "SELECT 1 FROM gapto.terceros LIMIT 1",
+    }
+    for tabla, sql in consultas.items():
+        if _sql(dsn, owner, "gapto_runtime", sql):
             raise SystemExit(f"FALLO: la base dev ya tiene filas en {tabla}. Recreala con "
                              "scripts/dev/bootstrap_dev_db.py --recrear (sin --seed-categorias) antes del E2E.")
     if _sql(dsn, owner, "gapto_runtime", "SELECT 1 FROM gapto.entidades WHERE tipo_entidad = 'CONTEXTO' LIMIT 1"):

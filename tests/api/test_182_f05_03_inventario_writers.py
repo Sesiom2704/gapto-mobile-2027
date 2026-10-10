@@ -20,6 +20,8 @@
 #   plantillas toma su advisory como PRIMERA llamada (C2). Ningun writer F05
 #   usa SET ROLE, roles privilegiados ni SECURITY DEFINER (D-032.2).
 # Version: 0.1.0 (F05-03/F05-04 J2 §1.10)
+# Version: 0.2.0 (F05-03/F05-04 J2+J3 §2.8): el E2E e2e_j2j3.py da de alta las capacidades
+#   sinteticas de sus cuentas (base LOCAL desechable), como e2e_preferencias.py.
 # ============================================================
 
 from __future__ import annotations
@@ -69,6 +71,7 @@ REGISTRO = {
     "acciones_rapidas": {"backend/app/plantillas/repositorio.py": {"INSERT", "UPDATE"}},
     "terceros": {"backend/app/terceros/repositorio.py": {"INSERT", "UPDATE"}},
     "cuenta_capacidades": {"scripts/dev/bootstrap_dev_db.py": {"INSERT"}, "scripts/dev/e2e_preferencias.py": {"INSERT"},
+                           "scripts/dev/e2e_j2j3.py": {"INSERT"},
                            "scripts/envdev/envdev_capacidades_cuenta.py": {"INSERT"}},
 }
 REGISTRO_F05 = {

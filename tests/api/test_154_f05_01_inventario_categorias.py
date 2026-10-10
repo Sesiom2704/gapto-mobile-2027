@@ -236,7 +236,10 @@
 #   imports nuevos del registro por tipo; I13b, tres claves `categoria:` de
 #   texto; I7, GuardarPlantilla.tsx. Comprobacion nueva I13f: la categoria
 #   de la plantilla solo se aplica una vez y sobre PENDIENTE o la suya.
-# Version: 0.16.0
+#
+#   v0.17.0 (F05-03/F05-04 J2+J3 §2.8): SOLO altas. I1 registra las lecturas
+#   de categoria_id del E2E scripts/dev/e2e_j2j3.py (R).
+# Version: 0.17.0
 # ============================================================
 
 from __future__ import annotations
@@ -407,6 +410,12 @@ REGISTRO: dict[tuple[str, str], tuple[str, str, str]] = {
         "R", "snapshot", "lectura de la version"),
     ("backend/app/repositories/previsiones_repository.py", "<modulo>"): ("R", "tipos SQL", "mapa de columnas"),
 }
+# F05-03/F05-04 J2+J3 §2.8 (alta aditiva): E2E web de J2+J3, solo lectura de
+# categoria_id para verificar por UUID (solo base LOCAL desechable).
+REGISTRO.update({
+    ("scripts/dev/e2e_j2j3.py", "hecho"): ("R", "E2E J2+J3 verificacion", "lee categoria_id de los efectos del hecho por su UUID"),
+    ("scripts/dev/e2e_j2j3.py", "main"): ("R", "E2E J2+J3", "compara el categoria_id leido con el esperado (arbol del onboarding)"),
+})
 
 CLASES = {"A_FRONTERA", "GUARDA", "A_MOTOR", "B", "P", "R", "CATALOGO", "SEED_DEV", "PREFERENCIA"}
 #: v0.12.0 (J2 §1.6): alta aditiva de la clase PLANTILLA.
