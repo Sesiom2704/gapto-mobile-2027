@@ -22,6 +22,12 @@ import { ProveedorTema } from '../src/theme/tema';
 
 import { clienteCategoriasStub, mag, nodo } from './fixtures_categorias';
 
+/** F05-04 §2.7 (corte de Concepto): la nota opcional se escribe en «Más detalles». */
+function escribirNota(t: string) {
+  if (!screen.queryByTestId('campo-nota')) fireEvent.press(screen.getByTestId('abrir-mas-detalles'));
+  fireEvent.changeText(screen.getByTestId('campo-nota'), t);
+}
+
 declare const __dirname: string;
 const fs: { readFileSync(f: string): Uint8Array } = require('fs');
 const path: { join(...p: string[]): string } = require('path');
@@ -211,7 +217,7 @@ test('Gasto con tercero: el tercero viaja, la propuesta es la del registro por t
   await montar(c);
   await abrirTipo('GASTO');
   fireEvent.changeText(screen.getByTestId('campo-importe'), '4');
-  fireEvent.changeText(screen.getByTestId('campo-concepto'), 'Compra');
+  escribirNota('Compra');
   await pulsar('campo-tercero');
   await act(async () => fireEvent.press(await screen.findByTestId('tercero-ter-aldi')));
   expect(screen.getByTestId('tercero-valor').props.children).toBe('ALDI');
@@ -272,7 +278,7 @@ test('A9: «No lo sé» en una obligatoria desbloquea el registro y la declara e
   await montar(c);
   await abrirTipo('GASTO');
   fireEvent.changeText(screen.getByTestId('campo-importe'), '60');
-  fireEvent.changeText(screen.getByTestId('campo-concepto'), 'Gasolina');
+  escribirNota('Gasolina');
   elegirCategoria('coche', 'gasolina');
   fireEvent.press(screen.getByTestId('presupuestable-true'));
   fireEvent.press(await screen.findByTestId(`cuenta-${TARJETA}`));
@@ -359,7 +365,7 @@ test('R06: «Guardar como plantilla…» exige nombre (nunca autocompletado) y g
   await montar(c);
   await abrirTipo('GASTO');
   fireEvent.changeText(screen.getByTestId('campo-importe'), '4');
-  fireEvent.changeText(screen.getByTestId('campo-concepto'), 'Compra');
+  escribirNota('Compra');
   elegirCategoria('alim', 'super');
   fireEvent.press(screen.getByTestId('presupuestable-true'));
   fireEvent.press(await screen.findByTestId(`cuenta-${TARJETA}`));
@@ -376,4 +382,38 @@ test('R06: «Guardar como plantilla…» exige nombre (nunca autocompletado) y g
     cuenta_default_id: TARJETA, presupuestable_default: null,
   });
   expect(screen.getByTestId('plantilla-aviso-ok')).toBeTruthy();
+}, 30000);
+
+// ------------------------------------------------------------------ Corte de Concepto (§2.7; CNC-18/CNC-20)
+test('CNC-18/20: gasto sin nota no envía concepto y el éxito muestra el título calculado (nunca vacío ni «null»)', async () => {
+  const c = fake();
+  await montar(c);
+  await abrirTipo('GASTO');
+  expect(screen.queryByTestId('campo-concepto')).toBeNull(); // ya no hay «Concepto» obligatorio
+  fireEvent.changeText(screen.getByTestId('campo-importe'), '4');
+  elegirCategoria('alim', 'super');
+  fireEvent.press(screen.getByTestId('presupuestable-true'));
+  fireEvent.press(await screen.findByTestId(`cuenta-${TARJETA}`));
+  expect(screen.queryByTestId('faltan')).toBeNull();
+  await pulsar('abrir-mas-detalles');
+  fireEvent.changeText(screen.getByTestId('campo-nota'), '   '); // solo espacios = ausencia
+  await pulsar('registrar');
+  const enviado = (c.registrarGastoPagado as jest.Mock).mock.calls[0][0];
+  expect('concepto' in enviado).toBe(false);
+  expect(await screen.findByText('Gasto registrado')).toBeTruthy();
+  expect(screen.getByTestId('exito-titulo').props.children).toBe('Supermercado');
+}, 30000);
+
+test('CNC-20: sin nota, tercero ni categoría el título es «Gasto · importe»', async () => {
+  const c = fake();
+  await montar(c);
+  await abrirTipo('GASTO');
+  fireEvent.changeText(screen.getByTestId('campo-importe'), '23,5');
+  fireEvent.press(screen.getByTestId('campo-categoria'));
+  fireEvent.press(screen.getByTestId('selector-sin-categoria'));
+  fireEvent.press(screen.getByTestId('presupuestable-false'));
+  fireEvent.press(await screen.findByTestId(`cuenta-${TARJETA}`));
+  await pulsar('registrar');
+  expect(await screen.findByText('Gasto registrado')).toBeTruthy();
+  expect(screen.getByTestId('exito-titulo').props.children).toBe('Gasto · 23,50 €');
 }, 30000);

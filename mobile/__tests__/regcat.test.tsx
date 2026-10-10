@@ -7,6 +7,7 @@
 // Versión: 0.2.0 (F05-01 S6-WIRE+UI, correctivo AJ-S6WIREUI-09): el selector no promete subcategorías seleccionables cuando ningún descendiente es elegible (padre no seleccionable cuyo único hijo visible no es capturable, tipo Gas); caso positivo con hijo elegible; casos de `tieneDescendienteElegible`.
 // Versión: 0.3.0 (F05-01 P7 · N3, Moisés D-P7-05, AJ-P7BAT-12): los tests AJ-09 afirman el literal exacto del aviso de nivel en las cuatro combinaciones {Desactivada, Solo ingresos} × {usables false, true} (las de «Desactivada» con fixture de cliente, PR-01) y del subtítulo de fila en las dos; el de «Solo ingresos» sin descendiente elegible es el discriminante de U17.
 // Versión: 0.4.0 (F05-02 B2): el cliente simulado sirve la propuesta del resolver con la única cuenta (DEFAULT_GENERAL), que sustituye al fallback retirado del cliente (AJ-B1-09). Ningún caso REG-CAT cambia.
+// Versión: 0.5.0 (F05-03/F05-04 J2+J3 §2.2/§2.7): navegación «Registrar» + hoja de tipos y nota opcional en «Más detalles» (corte de Concepto). Ningún oráculo REG-CAT cambia.
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
@@ -21,6 +22,12 @@ import type { PayloadGastoPagado } from '../src/domain/intencion';
 import { ProveedorTema } from '../src/theme/tema';
 
 import { clienteCategoriasStub, LISTA, mag, nodo, propuestaUnica } from './fixtures_categorias';
+
+/** F05-04 §2.7 (corte de Concepto): la nota opcional se escribe en «Más detalles». */
+function escribirNota(t: string) {
+  if (!screen.queryByTestId('campo-nota')) fireEvent.press(screen.getByTestId('abrir-mas-detalles'));
+  fireEvent.changeText(screen.getByTestId('campo-nota'), t);
+}
 
 const CUENTA = 'c0000000-0000-4000-8000-000000000001';
 const AHORA = () => new Date(2026, 8, 24, 10, 0, 0);
@@ -65,7 +72,7 @@ async function abrir(cliente: ClienteApi) {
 
 function basicos() {
   fireEvent.changeText(screen.getByTestId('campo-importe'), '23,40');
-  fireEvent.changeText(screen.getByTestId('campo-concepto'), 'Factura');
+  escribirNota('Factura');
   fireEvent.press(screen.getByTestId('presupuestable-true'));
 }
 

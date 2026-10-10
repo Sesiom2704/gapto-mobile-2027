@@ -50,7 +50,9 @@
 # Version: 0.1.0 (F05-02 B2)
 #   v0.2.0 (F05-03/F05-04 J3 §2.1/§2.2): Inicio abre el gasto con «Registrar» y
 #   la hoja de tipos (accion-registrar + tipo-GASTO) en lugar de accion-gasto.
-# Version: 0.2.0
+#   v0.3.0 (F05-03/F05-04 J3 §2.7): la nota («Compra semanal») se escribe en
+#   «Más detalles» (campo-nota); los hechos ya se localizaban por su UUID.
+# Version: 0.3.0
 #          0.2.0 (F05-02 B2-V paso 5): escenario R07p (texto R07 del presupuesto y
 #                «Mantener la actual», derivados) con captura clara y oscura.
 #          0.3.0 (F05-02 B3, decision de Moises 2026-10-08; F05-D028 §43.5):
@@ -239,7 +241,8 @@ def main() -> None:
 
         def basicos():
             t("campo-importe").fill("42,18")
-            t("campo-concepto").fill(CONCEPTO)
+            t("abrir-mas-detalles").click()  # F05-04 §2.7: la nota opcional va en «Más detalles»
+            t("campo-nota").fill(CONCEPTO)
             t("campo-categoria").click()
             t(f"cat-{cid}").click()
             page.wait_for_timeout(800)

@@ -8,6 +8,7 @@
 // v0.4.0 (F05-01 S6-WIRE+UI (este mandato)): el estado categorial es una decisión bloqueante más (S6-WIRE, F09 §12.97.1). El cliente simulado sirve el árbol de categorías; `rellenar()` elige por defecto «Sin categoría» en el selector (decisión explícita); `faltan` nombra la categoría y la intención sellada lleva {estado:'SIN_CATEGORIA'}. Las pruebas de REG-CAT viven en regcat.test.tsx.
 // v0.5.0 (F05-02 B2): el cliente simulado sirve la propuesta del resolver con la única cuenta (DEFAULT_GENERAL); el fallback del cliente se retira (AJ-B1-09). Los casos VS-01 no cambian; los de preferencias viven en preferencias_registro.test.tsx.
 // Versión: 0.5.0
+// Versión: 0.6.0 (F05-03/F05-04 J2+J3 §2.2/§2.7; tabla «tests adaptados»): Inicio abre el gasto con «Registrar» + hoja de tipos; CORTE DE CONCEPTO (A8): la nota opcional se escribe en «Más detalles» (`escribirNota`) y «concepto» deja de figurar en «faltan» (dos oráculos de SPEC-08 actualizados). El payload con nota es el mismo (`concepto: 'Café'`).
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
@@ -22,6 +23,12 @@ import type { PayloadGastoPagado } from '../src/domain/intencion';
 import { ProveedorTema } from '../src/theme/tema';
 
 import { clienteCategoriasStub, propuestaUnica } from './fixtures_categorias';
+
+/** F05-04 §2.7 (corte de Concepto): la nota opcional se escribe en «Más detalles». */
+function escribirNota(t: string) {
+  if (!screen.queryByTestId('campo-nota')) fireEvent.press(screen.getByTestId('abrir-mas-detalles'));
+  fireEvent.changeText(screen.getByTestId('campo-nota'), t);
+}
 
 const CUENTA = 'c0000000-0000-4000-8000-000000000001';
 const AHORA = () => new Date(2026, 8, 24, 10, 0, 0);
@@ -104,7 +111,7 @@ async function abrirFormulario() {
 
 function rellenar({ importe = '3,50', concepto = 'Café', presupuestable = true as boolean | null, soloMio = true, sinCategoria = true } = {}) {
   fireEvent.changeText(screen.getByTestId('campo-importe'), importe);
-  fireEvent.changeText(screen.getByTestId('campo-concepto'), concepto);
+  escribirNota(concepto);
   if (sinCategoria) elegirSinCategoria();
   if (presupuestable !== null) fireEvent.press(screen.getByTestId(`presupuestable-${presupuestable}`));
   if (soloMio) fireEvent.press(screen.getByTestId('solo-mio'));
@@ -166,7 +173,7 @@ test('la acción rápida abre el registro y oculta la barra inferior (tarea CREA
   expect(screen.queryByTestId('tab-INICIO')).toBeNull();
 });
 
-test('validación local de importe y concepto: botón desactivado, errores al escribir, nada se envía', async () => {
+test('validación local de importe (y nota opcional, A8): botón desactivado, errores al escribir, nada se envía', async () => {
   const f = crearFake();
   montar(f.cliente);
   await abrirFormulario();
@@ -174,14 +181,15 @@ test('validación local de importe y concepto: botón desactivado, errores al es
   fireEvent.press(screen.getByTestId('presupuestable-true'));
   // El error de formato se ve sin pulsar nada (SPEC-08: no depende del botón desactivado).
   expect(screen.getByText('Máximo dos decimales.')).toBeTruthy();
-  expect(screen.getByTestId('faltan').props.children).toBe('Para registrar falta: importe válido, concepto y categoría.');
+  // F05-04 §2.7 (A8): la nota es opcional y nunca figura en «faltan».
+  expect(screen.getByTestId('faltan').props.children).toBe('Para registrar falta: importe válido y categoría.');
   await pulsarBloqueado(f);
   fireEvent.changeText(screen.getByTestId('campo-importe'), '0');
   expect(screen.getByText('El importe debe ser mayor que 0.')).toBeTruthy();
   await pulsarBloqueado(f);
   // Discriminante inverso: completar lo que falta habilita el botón.
   fireEvent.changeText(screen.getByTestId('campo-importe'), '3,50');
-  fireEvent.changeText(screen.getByTestId('campo-concepto'), 'Café');
+  escribirNota('Café');
   expect(screen.getByTestId('faltan').props.children).toBe('Para registrar falta: categoría.');
   await pulsarBloqueado(f);
   elegirSinCategoria();
@@ -299,7 +307,7 @@ test('cancelar con datos pide confirmación; sin datos sale directamente', async
   fireEvent.press(screen.getByTestId('cancelar')); // cuenta única inferida no cuenta como modificación
   expect(await screen.findByTestId('tab-INICIO')).toBeTruthy();
   await abrirFormulario();
-  fireEvent.changeText(screen.getByTestId('campo-concepto'), 'x');
+  escribirNota('x');
   fireEvent.press(screen.getByTestId('cancelar'));
   expect(screen.getByTestId('confirmar-salida')).toBeTruthy();
 });
@@ -408,8 +416,9 @@ test('SPEC-08: al abrir, todo lo bloqueante pendiente se indica y el botón est�
   montar(f.cliente);
   await abrirFormulario();
   expect(screen.getByTestId('registrar')).toBeDisabled();
-  expect(screen.getByTestId('faltan').props.children).toBe('Para registrar falta: importe, concepto, categoría y si cuenta para el presupuesto.');
-  expect(screen.getByTestId('registrar').props.accessibilityHint).toBe('Para registrar falta: importe, concepto, categoría y si cuenta para el presupuesto.');
+  // F05-04 §2.7 (A8): sin «concepto» (nota opcional).
+  expect(screen.getByTestId('faltan').props.children).toBe('Para registrar falta: importe, categoría y si cuenta para el presupuesto.');
+  expect(screen.getByTestId('registrar').props.accessibilityHint).toBe('Para registrar falta: importe, categoría y si cuenta para el presupuesto.');
   await pulsarBloqueado(f);
 });
 

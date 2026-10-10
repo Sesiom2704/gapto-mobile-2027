@@ -72,7 +72,18 @@
 #     - CategoriaSeleccionada.`desconocidas`: magnitudes declaradas «No lo
 #       sé» (A9). Sin repetidas y sin solapar con `magnitudes` (422). No
 #       generan fila en hecho_magnitudes; su admisibilidad la decide C07.
-# Version: 0.8.0
+#
+#   v0.9.0 (F05-03/F05-04 J3 §2.7; F05 §46.3 A8, F05-D022 §36, E1/E4 de
+#   §46.5): CORTE DE CONCEPTO. `concepto` deja de ser obligatorio: es la nota
+#   opcional del gasto («Nota (opcional)» en el cliente). Ausencia canonica
+#   ANTES de componer OP-22 (CNC-18): omitido, null, "" o solo espacios ->
+#   None; si hay texto, recortado. `max_length` (200) se aplica al valor YA
+#   normalizado (validador `before`). El traductor lleva ese mismo valor a
+#   hechos_financieros.concepto y a movimientos_tesoreria.descripcion (NULL
+#   sin nota). El nombre del campo del wire se conserva (`concepto`): el
+#   payload de VS-01 con concepto sigue siendo valido e igual (regresion
+#   VS-01 y test_150 sin cambios). Un tipo no textual sigue siendo 422.
+# Version: 0.9.0
 # ============================================================
 
 from __future__ import annotations
@@ -179,7 +190,8 @@ CategoriaVs01 = Annotated[
 
 class IntencionGastoPagado(_Estricto):
     intencion_id: uuid.UUID
-    concepto: str = Field(min_length=1, max_length=200)
+    # A8: nota opcional del gasto; ausencia canonica None (validador `before`).
+    concepto: str | None = Field(default=None, max_length=200)
     importe: decimal.Decimal = Field(gt=0, max_digits=14, decimal_places=2)
     moneda: Literal["EUR"]
     # Fecha COMUN del gasto y del pago en VS-01 (regla expresa §16.3):
@@ -231,13 +243,13 @@ class IntencionGastoPagado(_Estricto):
             raise ValueError("financiacion.importe debe igualar el importe del gasto")
         return self
 
-    @field_validator("concepto")
+    @field_validator("concepto", mode="before")
     @classmethod
-    def _concepto_no_blanco(cls, valor: str) -> str:
-        limpio = valor.strip()
-        if not limpio:
-            raise ValueError("concepto vacio")
-        return limpio
+    def _concepto_canonico(cls, valor):
+        # CNC-18: se normaliza ANTES de max_length (que mide el valor normalizado).
+        if not isinstance(valor, str):
+            return valor  # None queda None; otro tipo -> 422 por tipo
+        return valor.strip() or None
 
 
 class ResultadoGastoPagado(_Estricto):

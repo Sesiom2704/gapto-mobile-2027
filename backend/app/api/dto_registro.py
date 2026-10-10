@@ -21,6 +21,10 @@
 #   La fecha futura no la decide el DTO: depende del «hoy» del owner y la
 #   rechaza la ejecucion con FECHA_FUTURA (F05-D032 C6).
 # Version: 0.1.0 (F05-03/F05-04 J2 §1.7)
+#   v0.2.0 (F05-03/F05-04 J3 §2.7; CNC-18): la nota se canonicaliza ANTES de
+#   `max_length` (validador `before`), que mide el valor normalizado: una
+#   cadena de espacios larga es ausencia (None), no 422.
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -53,10 +57,11 @@ def nota_canonica(valor: str | None) -> str | None:
 class _ConNota(_Estricto):
     nota: str | None = Field(default=None, max_length=LONGITUD_NOTA)
 
-    @field_validator("nota")
+    @field_validator("nota", mode="before")
     @classmethod
-    def _nota(cls, valor: str | None) -> str | None:
-        return nota_canonica(valor)
+    def _nota(cls, valor):
+        # CNC-18: canonica antes de max_length; un tipo no textual -> 422 por tipo.
+        return nota_canonica(valor) if isinstance(valor, str) else valor
 
 
 class IntencionIngresoCobrado(_ConNota):

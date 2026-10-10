@@ -5,7 +5,8 @@
 // Descripción: Máquina de estados del envío VS-01. Separa edición, envío, resultado confirmado por servidor e indeterminado. Reglas: (1) la identidad se genera ANTES de enviar y se sella con el payload; (2) doble tap no duplica (guarda síncrona); (3) ante timeout/red/5xx la intención queda INDETERMINADA: payload sellado inmutable y reintento con la MISMA identidad (UUID quemado, F05-00-A); (4) un RECHAZO definitivo (4xx) libera la edición y el siguiente envío usa identidad nueva; (5) no hay optimistic update: el éxito solo existe tras respuesta del servidor.
 // v0.2.0 (F05-D003): la validación local recibe la fecha de hoy (fecha no futura) y un rechazo PROPUESTA_FINANCIACION_OBSOLETA se expone para recargar la propuesta.
 // v0.3.0 (F05-03/F05-04 J2 §2.3; D-DYN-08): el mismo ciclo sirve al ingreso cobrado: con `tipo` INGRESO se valida con las reglas del ingreso, se sella con `sellarIngreso` y se envía a POST /v1/intenciones/ingreso-cobrado. GASTO (por defecto) no cambia.
-// Versión: 0.3.0
+// v0.3.1 (F05-03/F05-04 J3 §2.7): la nota del ingreso sale del borrador (campo «Nota»); el parámetro `nota` queda como fuente externa opcional.
+// Versión: 0.3.1
 // ============================================================
 
 import { useCallback, useRef, useState } from 'react';

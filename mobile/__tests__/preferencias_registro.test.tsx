@@ -6,7 +6,8 @@
 // v0.2.0 (F05-02 B2-V): discriminante de M03 (E1 / REG-01): con la propuesta pendiente, fallida o rechazada, «¿Cuenta para el presupuesto?» no está preseleccionado y no se envía sin decisión explícita.
 // v0.3.0 (F05-02 B3, AJ-B2-04): alta aditiva de la rama de D6 «tras VERSION_DESFASADA o un empate, al recargar ya no hay conflicto → se vuelve a la tarjeta», sin R07 y sin otra escritura.
 // v0.4.0 (F05-03/F05-04 J2 §1.5; F05 §46.5 E3; decisión OPCIÓN A2 del STOP 2, tabla «tests adaptados»): toda preferencia lleva tipo. El doble devuelve `tipos` en la lista; las preferencias de «Una categoría» son de tipo GASTO y el alta y la edición de «Guardar como preferencia» esperan `tipo_hecho_id: TIPOS.GASTO` en lugar de null.
-// Versión: 0.4.0
+// v0.5.0 (F05-03/F05-04 J2+J3 §2.2/§2.7): navegación «Registrar» + hoja de tipos y nota opcional en «Más detalles» (corte de Concepto). Ningún oráculo de preferencias cambia.
+// Versión: 0.5.0
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
@@ -30,6 +31,12 @@ import { aplicarPropuesta, indexar, propuestaAplicable } from '../src/domain/pre
 import { ProveedorTema } from '../src/theme/tema';
 
 import { clienteCategoriasStub, nodo } from './fixtures_categorias';
+
+/** F05-04 §2.7 (corte de Concepto): la nota opcional se escribe en «Más detalles». */
+function escribirNota(t: string) {
+  if (!screen.queryByTestId('campo-nota')) fireEvent.press(screen.getByTestId('abrir-mas-detalles'));
+  fireEvent.changeText(screen.getByTestId('campo-nota'), t);
+}
 
 const TARJETA = 'c0000000-0000-4000-8000-00000000000a';
 const EFECTIVO = 'c0000000-0000-4000-8000-00000000000b';
@@ -135,7 +142,7 @@ function sinCategoria() {
 
 function basicos() {
   fireEvent.changeText(screen.getByTestId('campo-importe'), '42,18');
-  fireEvent.changeText(screen.getByTestId('campo-concepto'), 'Compra');
+  escribirNota('Compra');
 }
 
 const seleccionada = (id: string) => screen.getByTestId(id).props.accessibilityState.checked;

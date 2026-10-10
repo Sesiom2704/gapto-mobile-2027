@@ -56,6 +56,10 @@
 #   Ambos en Light y Dark. Nuevo argumento obligatorio --run-p7.
 # Version: 0.3.0 (F05-03/F05-04 J3 §2.1/§2.2): Inicio abre el gasto con
 #   «Registrar» + hoja de tipos (accion-registrar, tipo-GASTO).
+# Version: 0.4.0 (F05-03/F05-04 J3 §2.7; CORTE DE CONCEPTO): la nota opcional se
+#   escribe en «Más detalles» (campo-nota) y CADA hecho se localiza en la BD por
+#   su UUID (intencion_id del POST capturado; en VS-01 hecho_id = intencion_id),
+#   nunca por su concepto.
 # ============================================================
 
 from __future__ import annotations
@@ -122,8 +126,9 @@ def _leer(dsn: str, owner: str, sql: str, params: tuple) -> list[tuple]:
         return cur.fetchall()
 
 
-def hechos_de(dsn: str, owner: str, concepto: str) -> list[dict]:
-    filas = _leer(dsn, owner, "SELECT id FROM gapto.hechos_financieros WHERE concepto = %s", (concepto,))
+def hechos_de(dsn: str, owner: str, ids: list[str]) -> list[dict]:
+    """Hechos por UUID (intencion_id de los POST del escenario), nunca por concepto (§2.7)."""
+    filas = _leer(dsn, owner, "SELECT id FROM gapto.hechos_financieros WHERE id = ANY(%s::uuid[]) ORDER BY id", (list(ids),))
     res = []
     for (hid,) in filas:
         efectos = _leer(dsn, owner, "SELECT tipo_efecto, categoria_id FROM gapto.hecho_efectos WHERE hecho_id = %s", (hid,))
@@ -265,24 +270,27 @@ def main() -> None:
                         recargas["n"] += 1
                 raise SystemExit("FALLO: la app web no carga tras 5 intentos")
 
-            def abrir_formulario(concepto: str, importe: str) -> None:
+            def abrir_formulario(nota: str, importe: str) -> int:
+                """Abre el gasto y escribe importe y nota; devuelve cuántas intenciones había (para su UUID)."""
                 cargar_app("accion-registrar")
                 page.get_by_test_id("accion-registrar").click()  # F05-04 §2.2: hoja de tipos
                 page.get_by_test_id("tipo-GASTO").click()
                 page.get_by_test_id("financiacion").wait_for(timeout=15000)
                 page.get_by_test_id("campo-importe").fill(importe)
-                page.get_by_test_id("campo-concepto").fill(concepto)
+                page.get_by_test_id("abrir-mas-detalles").click()  # F05-04 §2.7: nota opcional
+                page.get_by_test_id("campo-nota").fill(nota)
                 page.get_by_test_id("presupuestable-true").click()
                 cuenta_unica = page.get_by_test_id("origen-cuenta").count()
                 if not cuenta_unica:
                     page.locator("[data-testid^=cuenta-]").first.click()
+                return len(intenciones)
 
             for esquema in ("light", "dark"):
                 page.emulate_media(color_scheme=esquema)
                 sufijo = "L" if esquema == "light" else "D"
                 # ---------------------------------------------------------- (a) Hogar › Luz
                 concepto_a = f"E2E luz {run[-6:]} {sufijo}"
-                abrir_formulario(concepto_a, "61,87")
+                n_a = abrir_formulario(concepto_a, "61,87")
                 comprobar(page.get_by_test_id("categoria-valor").inner_text() == "Elige categoría", "(a) categoría no está Pendiente al abrir")
                 comprobar(page.get_by_test_id("registrar").get_attribute("aria-disabled") == "true", "(a) botón activo con categoría Pendiente")
                 faltan = page.get_by_test_id("faltan").inner_text()
@@ -312,7 +320,7 @@ def main() -> None:
                 page.get_by_test_id("registrar").click()
                 page.get_by_test_id("registro-exito").wait_for(timeout=15000)
                 shot(f"{sufijo}06_exito")
-                bd_a = hechos_de(dsn, owner, concepto_a)
+                bd_a = hechos_de(dsn, owner, intenciones[n_a:])
                 comprobar(len(bd_a) == 1, f"(a) hechos != 1: {bd_a}")
                 if bd_a:
                     comprobar(bd_a[0]["efectos"][0][1] == luz, f"(a) categoria_id no es Luz: {bd_a[0]['efectos']}")
@@ -324,21 +332,21 @@ def main() -> None:
 
                 # ---------------------------------------------------------- (b) Sin categoría
                 concepto_b = f"E2E sin categoria {run[-6:]} {sufijo}"
-                abrir_formulario(concepto_b, "3,50")
+                n_b = abrir_formulario(concepto_b, "3,50")
                 page.get_by_test_id("campo-categoria").click()
                 page.get_by_test_id("selector-sin-categoria").click()
                 comprobar(page.get_by_test_id("categoria-valor").inner_text() == "Sin categoría", "(b) no queda «Sin categoría»")
                 comprobar(page.get_by_test_id("datos-categoria").count() == 0, "(b) aparece sección de datos")
                 page.get_by_test_id("registrar").click()
                 page.get_by_test_id("registro-exito").wait_for(timeout=15000)
-                bd_b = hechos_de(dsn, owner, concepto_b)
+                bd_b = hechos_de(dsn, owner, intenciones[n_b:])
                 comprobar(len(bd_b) == 1 and bd_b[0]["efectos"][0][1] is None and bd_b[0]["hecho_magnitudes"] == [],
                           f"(b) persistencia inesperada: {bd_b}")
                 resultado[f"b_{esquema}"] = bd_b
 
                 # ---------------------------------------------------------- (d) C07 con fixture P7 por API
                 concepto_d = f"E2E P7 C07 {a.run_p7} {run[-6:]} {sufijo}"
-                abrir_formulario(concepto_d, "8,90")
+                n_d = abrir_formulario(concepto_d, "8,90")
                 page.get_by_test_id("campo-categoria").click()
                 page.get_by_test_id(f"cat-{p7['e2e']}").click()
                 page.get_by_test_id("datos-categoria").wait_for()
@@ -351,7 +359,7 @@ def main() -> None:
                 respuestas_d.append({"esquema": esquema, "status": resp_d.value.status, "cuerpo": resp_d.value.json()})
                 page.get_by_test_id("registro-exito").wait_for(timeout=15000)
                 shot(f"{sufijo}09_p7_c07_exito")
-                bd_d = hechos_de(dsn, owner, concepto_d)
+                bd_d = hechos_de(dsn, owner, intenciones[n_d:])
                 comprobar(len(bd_d) == 1, f"(d) hechos != 1: {bd_d}")
                 if bd_d:
                     comprobar(bd_d[0]["efectos"][0][1] == p7["e2e"], f"(d) categoria_id inesperado: {bd_d[0]['efectos']}")
@@ -397,7 +405,7 @@ def main() -> None:
             # -------------------------------------------------------------- (c) desactivada entre carga y confirmación (Light)
             page.emulate_media(color_scheme="light")
             concepto_c = f"E2E rechazo {run[-6:]}"
-            abrir_formulario(concepto_c, "23,40")
+            abrir_formulario(concepto_c, "23,40")  # n_antes se toma justo antes de registrar
             page.get_by_test_id("campo-categoria").click()
             page.get_by_test_id(f"cat-{cat_c}").click()
             arbol = api(a.api, "GET", "/v1/categorias")["categorias"]
@@ -416,7 +424,7 @@ def main() -> None:
             page.get_by_test_id("categoria-invalida").wait_for(timeout=15000)
             comprobar(page.get_by_test_id("error-dominio").count() == 1, "(c) sin aviso de rechazo")
             comprobar(page.get_by_test_id("categoria-valor").inner_text() == "Elige otra categoría", "(c) la categoría no queda marcada")
-            comprobar(hechos_de(dsn, owner, concepto_c) == [], "(c) se creó un hecho con la categoría desactivada")
+            comprobar(hechos_de(dsn, owner, intenciones[n_antes:]) == [], "(c) se creó un hecho con la categoría desactivada")
             comprobar(page.get_by_test_id("campo-importe").input_value() == "23,40", "(c) no se conservan las decisiones")
             shot("L07_recuperacion_rechazo")
             page.get_by_test_id("campo-categoria").click()
@@ -426,7 +434,7 @@ def main() -> None:
             page.get_by_test_id("registro-exito").wait_for(timeout=15000)
             ids_c = intenciones[n_antes:]
             comprobar(len(ids_c) == 2 and ids_c[0] != ids_c[1], f"(c) el segundo registro no usa identidad nueva: {ids_c}")
-            bd_c = hechos_de(dsn, owner, concepto_c)
+            bd_c = hechos_de(dsn, owner, ids_c)
             comprobar(len(bd_c) == 1 and bd_c[0]["efectos"][0][1] is None, f"(c) persistencia final inesperada: {bd_c}")
             resultado["c"] = {"intenciones": ids_c, "bd": bd_c}
 

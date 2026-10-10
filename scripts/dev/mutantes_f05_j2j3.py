@@ -36,6 +36,9 @@
 # Version: 0.6.0 (F05-03/F05-04 J2 §3: RG01, PL01 y EL09, discriminados por la bateria
 #   serial test_190; el arnes debe ejecutarse con GAPTO_J2J3_CONCURRENCIA=1, si no esos
 #   discriminantes se omiten y el mutante sale VIVO)
+# Version: 0.7.0 (F05-03/F05-04 J3 §2.7 y §3: CC01..CC04 corte de Concepto en el
+#   servidor y UI01..UI15 guardas del cliente J3 (Jest). `correr` admite tests
+#   del cliente (`mobile/__tests__/...`), que se ejecutan con jest desde mobile/)
 # ============================================================
 
 from __future__ import annotations
@@ -44,6 +47,7 @@ import hashlib
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 
@@ -70,6 +74,23 @@ DTOR = "backend/app/api/dto_registro.py"
 CAPM = "backend/app/api/captura_magnitudes.py"
 TRAD = "backend/app/api/traductor_registro.py"
 T190 = "tests/api/test_190_f05_j2j3_concurrencia_serial.py"
+T183 = "tests/api/test_183_f05_04_corte_concepto.py"
+DTOV = "backend/app/api/dto_vs01.py"
+TRGP = "backend/app/api/traductor_gasto_pagado.py"
+J_REG = "mobile/__tests__/registro_tipo.test.tsx"
+J_AJM = "mobile/__tests__/ajustes_maestros.test.tsx"
+J_PREF = "mobile/__tests__/ajustes_preferencias.test.tsx"
+M_INT = "mobile/src/domain/intencion.ts"
+M_REGD = "mobile/src/domain/registro.ts"
+M_REG = "mobile/src/screens/RegistroGastoScreen.tsx"
+M_APP = "mobile/App.tsx"
+M_GPL = "mobile/src/components/GuardarPlantilla.tsx"
+M_TRF = "mobile/src/screens/TransferenciaScreen.tsx"
+M_HOME = "mobile/src/screens/HomeScreen.tsx"
+M_PREF = "mobile/src/domain/preferencias.ts"
+M_TER = "mobile/src/screens/TercerosAjustesScreen.tsx"
+M_CAT = "mobile/src/screens/CategoriasAjustesScreen.tsx"
+M_INI = "mobile/src/domain/inicio.ts"
 T176 = "tests/api/test_176_f05_03_fecha_funcional.py"
 FF = "backend/app/comun/fecha_funcional.py"
 PSERV = "backend/app/preferencias/servicio.py"
@@ -289,6 +310,65 @@ MUTANTES = [
      [(REGI, "            if es_futura(sesion, intencion.fecha_hecho, reloj):\n                return RechazoRegistro(CODIGO_FECHA_FUTURA)\n            rechazo_cuenta(sesion, intencion.cuenta_id",
        "            rechazo_cuenta(sesion, intencion.cuenta_id")],
      [f"{T180}::test_fecha_futura_en_ingreso_y_transferencia"]),
+    # ---------------------------------------------------------------- J3 §2.7 corte de Concepto (servidor)
+    ("CC01", "concepto sin canonicalizar (blanco persistido)",
+     [(DTOV, "        return valor.strip() or None", "        return valor")],
+     [f"{T183}::test_cnc18_ausencia_canonica_es_null_en_hecho_y_movimiento"]),
+    ("CC02", "canonicalizacion despues de max_length",
+     [(DTOV, '    @field_validator("concepto", mode="before")', '    @field_validator("concepto", mode="after")')],
+     [f"{T183}::test_cnc18_ausencia_canonica_es_null_en_hecho_y_movimiento"]),
+    ("CC03", "descripcion del movimiento fabricada sin nota",
+     [(TRGP, "        descripcion=intencion.concepto,", '        descripcion=intencion.concepto or "Gasto",')],
+     [f"{T183}::test_cnc18_ausencia_canonica_es_null_en_hecho_y_movimiento"]),
+    ("CC04", "nota de ingreso canonicalizada despues de max_length",
+     [(DTOR, '    @field_validator("nota", mode="before")', '    @field_validator("nota", mode="after")')],
+     [f"{T183}::test_nota_de_ingreso_y_transferencia_canonica_antes_de_max_length"]),
+    # ---------------------------------------------------------------- J3 guardas del cliente (Jest)
+    ("UI01", "la nota vacia viaja como concepto",
+     [(M_INT, "    ...(nota ? { concepto: nota } : {}), // ausencia canónica: no viaja (CNC-18)", "    concepto: nota,")],
+     [J_REG]),
+    ("UI02", "la nota vuelve a bloquear el registro",
+     [(M_INT, "  if (b.concepto.trim().length > 200) e.concepto", "  if (b.concepto.trim().length === 0 || b.concepto.trim().length > 200) e.concepto")],
+     [J_REG]),
+    ("UI03", "hoja de tipos con preseleccion",
+     [(M_APP, "          <HojaTipos\n            onElegir", "          <HojaTipos\n            actual=\"GASTO\"\n            onElegir")],
+     [J_REG]),
+    ("UI04", "cambio de tipo despues del primer envio",
+     [(M_REG, "{!enviado && !bloqueado ? <BotonTexto testID=\"cambiar-tipo\"", "{!bloqueado ? <BotonTexto testID=\"cambiar-tipo\"")],
+     [J_REG]),
+    ("UI05", "la plantilla pisa un tercero elegido por el usuario",
+     [(M_REGD, "  if (ter && ter.origen.capa === 'PLANTILLA' && b.terceroOrigen !== 'USUARIO') {", "  if (ter && ter.origen.capa === 'PLANTILLA') {")],
+     [J_REG]),
+    ("UI06", "Guardar como plantilla autocompleta el nombre",
+     [(M_GPL, "  const [nombre, setNombre] = useState('');", "  const [nombre, setNombre] = useState(v.categoriaNombre ?? '');")],
+     [J_REG]),
+    ("UI07", "entre cuentas admite la misma cuenta",
+     [(M_TRF, "  if (f.desde && f.hacia && f.desde === f.hacia) r.push('dos cuentas distintas');\n", "")],
+     [J_REG]),
+    ("UI08", "reintento de entre cuentas con identidad nueva",
+     [(M_TRF, "onPress={() => void enviarPayload(estado.payload)}", "onPress={() => { sellada.current = null; void registrar(); }}")],
+     [J_REG]),
+    ("UI09", "marca de Inicio no es un unico elemento accesible",
+     [(M_HOME, 'testID="marca-inicio" accessible accessibilityRole="header"', 'testID="marca-inicio" accessibilityRole="header"')],
+     [J_REG]),
+    ("UI10", "ilustracion de Liquidez anunciada a VoiceOver",
+     [(M_HOME, ' accessibilityElementsHidden importantForAccessibility="no-hide-descendants"', "")],
+     [J_REG]),
+    ("UI11", "preferencia de ingresos enviada con el tipo GASTO",
+     [(M_PREF, "    tipo_hecho_id: ids[tipo],", "    tipo_hecho_id: ids.GASTO,")],
+     [J_PREF]),
+    ("UI12", "alta de tercero sin consultar duplicados",
+     [(M_TER, "    if (!actual && !forzar) {", "    if (false) {")],
+     [J_AJM]),
+    ("UI13", "onboarding ofrecido con categorias existentes",
+     [(M_CAT, "        {arbol && arbol.porId.size === 0 && !desdeCero ? (", "        {arbol && !desdeCero ? (")],
+     [J_AJM]),
+    ("UI14", "Inicio sin limite de 3 accesos",
+     [(M_INI, "    .slice(0, MAX_ACCESOS_INICIO);", "    ;")],
+     [J_REG]),
+    ("UI15", "«No lo sé» no viaja en el wire",
+     [(M_INT, "    ...(desconocidas.length > 0 ? { desconocidas: Object.freeze(desconocidas) as string[] } : {}),\n", "")],
+     [J_REG]),
 ]
 
 
@@ -297,8 +377,16 @@ def sha(b: bytes) -> str:
 
 
 def correr(tests: list[str]) -> int:
-    cmd = [sys.executable, "-m", "pytest", *tests, "-q", "-x", "-p", "no:cacheprovider", "--rootdir=tests/api"]
-    return subprocess.run(cmd, cwd=RAIZ, capture_output=True).returncode
+    py = [t for t in tests if not t.startswith("mobile/")]
+    js = [t.removeprefix("mobile/") for t in tests if t.startswith("mobile/")]
+    rc = 0
+    if py:
+        cmd = [sys.executable, "-m", "pytest", *py, "-q", "-x", "-p", "no:cacheprovider", "--rootdir=tests/api"]
+        rc = rc or subprocess.run(cmd, cwd=RAIZ, capture_output=True).returncode
+    if js:
+        npx = shutil.which("npx") or "npx"
+        rc = rc or subprocess.run([npx, "jest", "--silent", *js], cwd=RAIZ / "mobile", capture_output=True).returncode
+    return rc
 
 
 def recuperar_si_pendiente() -> bool:

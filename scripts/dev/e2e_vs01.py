@@ -32,7 +32,11 @@
 #   scripts/dev/servir_web_e2e.py (loopback, HTTP/1.1) y lo detiene al terminar.
 #   v0.5.0 (F05-03/F05-04 J3 §2.1/§2.2): «Registrar» + hoja de tipos
 #   (accion-registrar, tipo-GASTO); taps de Inicio al formulario: 2 (antes 1).
-# Version: 0.5.0
+#   v0.6.0 (F05-03/F05-04 J3 §2.7; CORTE DE CONCEPTO): la nota opcional
+#   (`--concepto`, ahora «Nota») se escribe en «Más detalles» (campo-nota); el
+#   hecho se localiza por su UUID (intencion_id del POST; hecho_id =
+#   intencion_id), nunca por concepto. «faltan» al abrir ya no nombra concepto.
+# Version: 0.6.0
 # ============================================================
 
 from __future__ import annotations
@@ -84,21 +88,22 @@ def servidor_web(dist: str | None, web: str):
         proc.wait(timeout=10)
 
 
-def contar_hechos(dsn: str, owner: str, concepto: str) -> int:
+def contar_hechos(dsn: str, owner: str, ids: list[str]) -> int:
+    """Hechos con esos UUID (intenciones enviadas), nunca por concepto (§2.7)."""
     with psycopg.connect(dsn) as c, c.transaction():
         cur = c.cursor()
         cur.execute("SET LOCAL ROLE gapto_runtime")
         cur.execute("SELECT set_config('gapto.owner_user_id', %s, true)", (owner,))
-        cur.execute("SELECT count(*) FROM gapto.hechos_financieros WHERE concepto=%s", (concepto,))
+        cur.execute("SELECT count(*) FROM gapto.hechos_financieros WHERE id = ANY(%s::uuid[])", (list(ids),))
         return cur.fetchone()[0]
 
 
-def leer_bd(dsn: str, owner: str, concepto: str) -> dict:
+def leer_bd(dsn: str, owner: str, hecho_id: str) -> dict:
     with psycopg.connect(dsn) as c, c.transaction():
         cur = c.cursor()
         cur.execute("SET LOCAL ROLE gapto_runtime")
         cur.execute("SELECT set_config('gapto.owner_user_id', %s, true)", (owner,))
-        cur.execute("SELECT id, importe_total, presupuestable, estado_localizacion, fecha_hecho FROM gapto.hechos_financieros WHERE concepto=%s", (concepto,))
+        cur.execute("SELECT id, importe_total, presupuestable, estado_localizacion, fecha_hecho, concepto FROM gapto.hechos_financieros WHERE id=%s", (hecho_id,))
         hechos = cur.fetchall()
         hid = hechos[0][0]
         def uno(sql):
@@ -137,6 +142,10 @@ def main() -> None:
             page.goto(a.web)
             consola = []
             page.on("console", lambda m: consola.append(m.type) if m.type == "error" else None)
+            # §2.7: UUID de cada intencion enviada (el hecho se localiza por el, nunca por concepto).
+            intenciones: list[str] = []
+            page.on("request", lambda r: intenciones.append(json.loads(r.post_data)["intencion_id"])
+                    if r.method == "POST" and r.url.endswith("/v1/intenciones/gasto-pagado") and r.post_data else None)
             g = page.get_by_test_id("gastos-valor")
             g.wait_for(timeout=30000)
             antes = g.inner_text()
@@ -164,13 +173,14 @@ def main() -> None:
                 raise SystemExit("FALLO SPEC-08: «Registrar gasto» no esta desactivado con decisiones pendientes")
             boton.click(force=True)
             page.wait_for_timeout(800)
-            spec08["hechos_tras_pulsar_desactivado"] = contar_hechos(os.environ["GAPTO_DATABASE_URL"], os.environ["GAPTO_DEV_OWNER_USER_ID"], a.concepto)
+            spec08["hechos_tras_pulsar_desactivado"] = len(intenciones) + contar_hechos(os.environ["GAPTO_DATABASE_URL"], os.environ["GAPTO_DEV_OWNER_USER_ID"], intenciones)
             if spec08["hechos_tras_pulsar_desactivado"] != 0 or page.get_by_test_id("registro-exito").count():
                 raise SystemExit("FALLO SPEC-08: pulsar el boton desactivado ha producido un registro")
             shot(page, "02a_formulario_vacio")
             page.get_by_test_id("campo-importe").fill(a.importe); metricas["campos_escritos"] += 1
-            page.get_by_test_id("campo-concepto").click(); metricas["taps"] += 1
-            page.get_by_test_id("campo-concepto").fill(a.concepto); metricas["campos_escritos"] += 1
+            page.get_by_test_id("abrir-mas-detalles").click(); metricas["taps"] += 1  # §2.7: nota opcional
+            page.get_by_test_id("campo-nota").click(); metricas["taps"] += 1
+            page.get_by_test_id("campo-nota").fill(a.concepto); metricas["campos_escritos"] += 1
             page.get_by_test_id("presupuestable-true").click(); metricas["taps"] += 1; metricas["decisiones_explicitas"] += 1
             page.get_by_test_id("solo-mio").click(); metricas["taps"] += 1; metricas["decisiones_explicitas"] += 1
             if "categoría" not in spec08["faltan_al_abrir"]:
@@ -207,7 +217,9 @@ def main() -> None:
             shot(page, "06_formulario_dark")
             nav.close()
 
-        bd = leer_bd(os.environ["GAPTO_DATABASE_URL"], os.environ["GAPTO_DEV_OWNER_USER_ID"], a.concepto)
+        if len(intenciones) != 1:
+            raise SystemExit(f"FALLO: se esperaba exactamente un POST de registro y hubo {len(intenciones)}")
+        bd = leer_bd(os.environ["GAPTO_DATABASE_URL"], os.environ["GAPTO_DEV_OWNER_USER_ID"], intenciones[0])
         manifest = {"etiqueta": ETIQUETA, "run_id": run, "categoria_elegida": "SIN_CATEGORIA (decision explicita)",
                     "gastos_home_antes": antes, "gastos_home_despues": despues,
                     "financiacion_visible": financiacion_visible, "importes_en_bloque_mes": importes_en_mes, "spec08": spec08,

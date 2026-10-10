@@ -7,7 +7,8 @@
 // v0.3.0 (F05-01 S6-WIRE+UI (este mandato); F05 §22.2 C01/C07, §26.2 AJ-03, §28.2): estado categorial resuelto OBLIGATORIO (PENDIENTE bloquea; «Sin categoría» es decisión explícita) y magnitudes de la categoría elegida. `sellar` envía `categoria` exactamente en el wire de §28.2: {estado:'SIN_CATEGORIA'} sin `magnitudes`, o {estado:'CATEGORIA', categoria_id, magnitudes:[{magnitud_id, valor}]} con valores canónicos con punto, solo las informadas y nunca `unidad`.
 // v0.4.0 (F05-02 B2; F05-D026 E1/E2, lámina REG-PREF R01–R03): `presupuestableOrigen` (USUARIO cuando el usuario lo toca; INFERIDO cuando viene de una preferencia; PENDIENTE sin valor) y el origen VISIBLE de cada propuesta (`cuentaPropuesta`, `presupuestablePropuesta`). La propuesta no cuenta como modificación y se sella como cualquier valor visible; el payload no cambia. Campos nuevos al final del borrador.
 // v0.5.0 (F05-03/F05-04 J2 §2.3/§2.4; F05 §46.3 A5/A6/A9, §45.3): campos ADITIVOS al final del borrador: tercero y contexto (con su origen: USUARIO o INFERIDO por la plantilla), magnitudes declaradas «No lo sé» (`desconocidas`: una obligatoria declarada desconocida NO bloquea y viaja en `categoria.desconocidas`), plantilla aplicada y la categoría que puso la plantilla (para no pisar una categoría tocada por el usuario y para «Quitar»). `validar` y `sellar` reciben el tipo (GASTO por defecto: VS-01 sin cambios); el ingreso se sella con `sellarIngreso` (sin concepto ni financiación; nota en §2.7). El payload del gasto solo lleva `tercero_id`, `contexto_id` y `desconocidas` cuando tienen valor: el de VS-01 no cambia.
-// Versión: 0.5.0
+// v0.6.0 (F05-03/F05-04 J3 §2.7; F05 §46.3 A8, F05-D022; CORTE DE CONCEPTO): `concepto` del borrador es la NOTA OPCIONAL («Nota (opcional)»). Ya no bloquea el registro; solo su longitud (200, sobre el valor recortado). Ausencia canónica: vacía o solo espacios no viaja (el payload del gasto omite `concepto`; el del ingreso, `nota`); con texto viaja recortada. El título de presentación se calcula y nunca se persiste (domain/registro.ts).
+// Versión: 0.6.0
 // ============================================================
 
 import type { MagnitudCategoria } from './categoria';
@@ -99,7 +100,8 @@ export type CategoriaWire =
 
 export interface PayloadGastoPagado {
   intencion_id: string;
-  concepto: string;
+  /** Nota opcional (A8): ausente si no hay texto real. */
+  concepto?: string;
   importe: string;
   moneda: 'EUR';
   fecha_hecho: string;
@@ -209,10 +211,8 @@ export function validar(b: Borrador, hoyIso: string, tipo: TipoConCategoria = 'G
       DECIMALES: 'Máximo dos decimales.',
     }[imp.motivo];
   }
-  if (tipo === 'GASTO') {
-    if (!b.concepto.trim()) e.concepto = 'Indica el concepto.';
-    else if (b.concepto.trim().length > 200) e.concepto = 'Máximo 200 caracteres.';
-  }
+  // A8: la nota es opcional; solo se limita su longitud (sobre el valor recortado).
+  if (b.concepto.trim().length > 200) e.concepto = 'Máximo 200 caracteres.';
   if (b.categoria.estado === 'PENDIENTE') e.categoria = 'Elige una categoría o «Sin categoría».';
   else if (b.categoria.estado === 'CATEGORIA') {
     const em: Record<string, string> = {};
@@ -267,9 +267,10 @@ export function sellar(b: Borrador, intencionId: string): IntencionSellada {
   if (!imp.ok || b.presupuestable === null || !b.cuentaId || b.propuesta === null || b.categoria.estado === 'PENDIENTE') {
     throw new Error('No se sella una intención inválida');
   }
+  const nota = b.concepto.trim();
   const payload: PayloadGastoPagado = Object.freeze({
     intencion_id: intencionId,
-    concepto: b.concepto.trim(),
+    ...(nota ? { concepto: nota } : {}), // ausencia canónica: no viaja (CNC-18)
     importe: imp.valor,
     moneda: 'EUR',
     fecha_hecho: b.fechaHecho,
@@ -292,7 +293,8 @@ function maestrosWire(b: Borrador): { tercero_id?: string; contexto_id?: string 
 }
 
 /** Sellado del ingreso cobrado (D-DYN-08): sin concepto ni financiación; cuenta «Cobrado en» obligatoria. */
-export function sellarIngreso(b: Borrador, intencionId: string, nota: string | null = null): IntencionIngresoSellada {
+export function sellarIngreso(b: Borrador, intencionId: string, notaExterna: string | null = null): IntencionIngresoSellada {
+  const nota = notaExterna ?? (b.concepto.trim() || null);
   const imp = parsearImporte(b.importeTexto);
   if (!imp.ok || b.presupuestable === null || !b.cuentaId || b.categoria.estado === 'PENDIENTE') {
     throw new Error('No se sella una intención inválida');

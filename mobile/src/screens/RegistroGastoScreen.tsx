@@ -8,7 +8,8 @@
 // v0.4.0 (F05-01 S6-WIRE+UI (este mandato); F09 §12.97.1–12.97.3, lámina REG-CAT v1.0 R01–R10): campo «Categoría» inmediatamente después de «Concepto» con tres estados visibles (Pendiente «Elige categoría» · Categoría con icono, nombre y ruta · «Sin categoría»), sin preselección; mientras esté Pendiente «Registrar gasto» sigue desactivado y `faltan` lo nombra (misma `validar` del sellado). El árbol se carga al abrir el formulario y el selector jerárquico filtra con `visibleEnRegistro`; un error de carga nunca selecciona «Sin categoría» (AJ-09). Sección «Datos de <categoría>» con las magnitudes habilitadas: obligatorias sin valor por defecto y con unidad, opcionales «(opcional)», teclado decimal, coma o punto. Al cambiar de categoría se conservan las magnitudes comunes y se confirma antes de descartar valores informados (también al elegir «Sin categoría»). `presupuestable_default` NO rellena «¿Cuenta para el presupuesto?». Rechazo definitivo de categoría o magnitudes tras confirmar: la intención sellada no se reenvía; se conservan las demás decisiones, se recarga el árbol, la categoría queda marcada como no válida con texto y se pide otra; la nueva intención tendrá UUID nuevo.
 // v0.5.0 (F05-02 B2; F05-D026 §41.3/§41.4, E1/E2/E3; F05-D027 §42.7; lámina SET-PREF / REG-PREF v0.1 R01–R07): propuesta de preferencias por campo. Tras cargar las cuentas, y en cada cambio de categoría o de fecha, se pide GET /v1/preferencias/propuesta (categoría o «Sin categoría»; con categoría pendiente, el contexto «Sin categoría») y se aplica SOLO a los campos no tocados, con su origen visible («Propuesta: tu preferencia para <categoría>.» / «… general.» / «Propuesta: es tu única cuenta disponible.»); un campo tocado muestra «Elegida por ti.» y no se recalcula (D-PREF-03). Se ELIMINA el fallback de cuenta única del cliente (AJ-B1-09): la única fuente de la propuesta de cuenta es el resolver, y nunca se preselecciona una cuenta fuera de la lista (AJ-B1-11). `presupuestable` se preselecciona solo con propuesta (E1). El sellado no cambia: el reintento no vuelve a pedir la propuesta y no hay sondeo. Pantalla de éxito: «Guardar como preferencia» (GuardarPreferencia) solo con categoría y si hay algo que recordar (D-PREF-05/06).
 // v0.6.0 (F05-03/F05-04 J2 §2.2–§2.4; F05 §46.3 A1–A9, §45.3; láminas REG-DYN G01–G03/I01/T02/N01 y REG-PLT R01–R06): el formulario sirve a Gasto e Ingreso cobrado (`tipo`). Cabecera «Cancelar · Nuevo gasto | Nuevo ingreso · Tipo»: el cambio de tipo solo antes del primer envío, conserva importe y fecha y quita con aviso lo que no encaja (T02); «Entre cuentas» lo resuelve la raíz. Tercero opcional («Tercero» / «De») con alta mínima y duplicados; «Más detalles» con contexto (alta «Crear y usar») y, en ingresos, nota. Selector de categorías por tipo (A12). «No lo sé» en magnitudes obligatorias (A9). Plantilla: chip «Plantilla: <nombre> ×» con «Quitar», origen por campo («De tu plantilla …»), campos tocados nunca se pisan y avisos de lo que no aplica. Ingresos: cuentas elegibles para cobrar («Cobrado en»), sin financiación. Con tercero, plantilla o en ingresos la propuesta es la del registro por tipo (GET /v1/registro/propuesta); el gasto sin ellos conserva la de F05-02. FECHA_FUTURA con su mensaje. Éxito: «Guardar como preferencia» para el tercero O la categoría y «Guardar como plantilla…».
-// Versión: 0.6.0
+// v0.7.0 (F05-03/F05-04 J3 §2.7; F05 §46.3 A8; CORTE DE CONCEPTO, atómico con el servidor): desaparece el campo obligatorio «Concepto»; la «Nota (opcional)» va en «Más detalles» (contexto, nota) en gasto e ingreso. Vacía o solo espacios no viaja; nunca bloquea ni figura en «faltan». La pantalla de éxito muestra el título CALCULADO (nota > «Tercero · Categoría» > categoría > tercero > «Gasto · importe»), nunca persistido ni vacío.
+// Versión: 0.7.0
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -121,7 +122,6 @@ export function RegistroGastoScreen(p: {
   const [selectorTercero, setSelectorTercero] = useState(false);
   const [selectorContexto, setSelectorContexto] = useState<'LISTA' | 'NUEVO' | null>(null);
   const [masDetalles, setMasDetalles] = useState(false);
-  const [nota, setNota] = useState('');
   const [guardarPlantilla, setGuardarPlantilla] = useState(false);
   /** Primer envío hecho: desde entonces el tipo no se puede cambiar. */
   const [enviado, setEnviado] = useState(false);
@@ -130,10 +130,7 @@ export function RegistroGastoScreen(p: {
   const [cuentas, setCuentas] = useState<Cuentas>({ fase: 'CARGANDO' });
   const [confirmarSalida, setConfirmarSalida] = useState(false);
   const [otraFecha, setOtraFecha] = useState<string | null>(null); // texto dd/mm/aaaa en edición
-  const notaRef = useRef<string | null>(null);
-  notaRef.current = notaCanonica(nota);
-  const { estado, enviar, reintentar, volverAEditar } = useEnvioGasto(p.cliente, p.nuevoId, tipoReg, () => notaRef.current);
-  const conceptoRef = useRef<TextInput>(null);
+  const { estado, enviar, reintentar, volverAEditar } = useEnvioGasto(p.cliente, p.nuevoId, tipoReg);
   const peticion = useRef(0);
   const [arbol, setArbol] = useState<CargaArbol>({ fase: 'CARGANDO' });
   const [selectorAbierto, setSelectorAbierto] = useState(false);
@@ -320,7 +317,7 @@ export function RegistroGastoScreen(p: {
   const modificado =
     b.importeTexto.trim() !== '' || b.concepto.trim() !== '' || b.presupuestableOrigen === 'USUARIO' || b.soloMio || b.cuentaOrigen === 'USUARIO' || b.fechaOrigen === 'USUARIO' || b.propuestaRechazada ||
     b.categoria.estado !== 'PENDIENTE' || Object.values(b.magnitudesTexto).some((v) => v.trim() !== '') ||
-    b.terceroOrigen === 'USUARIO' || b.contextoOrigen === 'USUARIO' || nota.trim() !== '';
+    b.terceroOrigen === 'USUARIO' || b.contextoOrigen === 'USUARIO';
   const cuentaSel = cuentas.fase === 'OK' ? cuentas.lista.find((x) => x.cuenta_id === b.cuentaId) : undefined;
   const nombreCategoria = b.categoria.estado === 'CATEGORIA' ? b.categoria.nombre : null;
 
@@ -482,8 +479,7 @@ export function RegistroGastoScreen(p: {
     const titulo = tituloRegistro({
       tipo: tipoReg,
       importe: r.importe,
-      nota: notaRef.current,
-      concepto: esIngreso ? null : (estado.sellada.payload as { concepto?: string }).concepto ?? null,
+      nota: notaCanonica(b.concepto),
       tercero: b.terceroNombre ?? null,
       categoria: nombreCategoria,
     });
@@ -609,8 +605,6 @@ export function RegistroGastoScreen(p: {
               inputMode="decimal"
               placeholder="0,00"
               placeholderTextColor={c.textSecondary}
-              returnKeyType="next"
-              onSubmitEditing={() => conceptoRef.current?.focus()}
               autoFocus
               style={[importe.hero, s.inputImporte, { color: c.textPrimary }]}
             />
@@ -634,22 +628,6 @@ export function RegistroGastoScreen(p: {
           ) : null}
         </Campo>
 
-        {esIngreso ? null : (
-        <Campo etiqueta="Concepto" error={visibles.concepto}>
-          <TextInput
-            ref={conceptoRef}
-            testID="campo-concepto"
-            accessibilityLabel="Concepto"
-            value={b.concepto}
-            onChangeText={(t) => cambiar({ concepto: t })}
-            editable={!bloqueado}
-            placeholder="Ej. Café"
-            placeholderTextColor={c.textSecondary}
-            maxLength={200}
-            style={[tipo.body, s.input, { color: c.textPrimary, backgroundColor: c.surfacePrimary, borderColor: visibles.concepto ? c.critical : c.borderStandard }]}
-          />
-        </Campo>
-        )}
 
         <Campo etiqueta="Categoría" error={visibles.categoria && !categoriaInvalida ? visibles.categoria : undefined}>
           <Pressable
@@ -861,22 +839,21 @@ export function RegistroGastoScreen(p: {
                 <Text testID="origen-contexto" style={[tipo.footnote, { color: c.textSecondary }]}>{origen('PLANTILLA')}</Text>
               ) : null}
             </Campo>
-            {esIngreso ? (
-              <Campo etiqueta="Nota" opcional>
-                <TextInput
-                  testID="campo-nota"
-                  accessibilityLabel="Nota"
-                  value={nota}
-                  onChangeText={setNota}
-                  editable={!bloqueado}
-                  maxLength={200}
-                  style={[tipo.body, s.input, { color: c.textPrimary, backgroundColor: c.surfacePrimary, borderColor: c.borderStandard }]}
-                />
-              </Campo>
-            ) : null}
+            {/* A8: «Nota (opcional)» en gasto e ingreso; vacía no viaja. */}
+            <Campo etiqueta="Nota" opcional error={visibles.concepto}>
+              <TextInput
+                testID="campo-nota"
+                accessibilityLabel="Nota (opcional)"
+                value={b.concepto}
+                onChangeText={(t) => cambiar({ concepto: t })}
+                editable={!bloqueado}
+                maxLength={200}
+                style={[tipo.body, s.input, { color: c.textPrimary, backgroundColor: c.surfacePrimary, borderColor: visibles.concepto ? c.critical : c.borderStandard }]}
+              />
+            </Campo>
           </View>
         ) : (
-          <BotonTexto testID="abrir-mas-detalles" titulo={esIngreso ? '+ Más detalles (contexto, nota)' : '+ Más detalles (contexto)'} onPress={() => setMasDetalles(true)} />
+          <BotonTexto testID="abrir-mas-detalles" titulo="+ Más detalles (contexto, nota)" onPress={() => setMasDetalles(true)} />
         )}
 
         {estado.fase === 'RECHAZADO' ? (
@@ -1017,7 +994,7 @@ type ClaveFalta = 'importe' | 'concepto' | 'categoria' | 'presupuestable' | 'cue
 
 const NOMBRE_FALTA: Record<ClaveFalta, string> = {
   importe: 'importe',
-  concepto: 'concepto',
+  concepto: 'nota válida (máx. 200 caracteres)',
   categoria: 'categoría',
   presupuestable: 'si cuenta para el presupuesto',
   cuenta: 'cuenta de pago',
