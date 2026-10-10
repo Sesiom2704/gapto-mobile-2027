@@ -120,7 +120,14 @@
 #     POST /v1/acciones-rapidas/{id}/editar | desactivar
 #     GET  /v1/registro/propuesta?tipo=&fecha=&plantilla_id=&categoria_id=
 #          &sin_categoria=&tercero_id=&sin_tercero=   (lectura, sin advisory)
-# Version: 0.16.0
+#
+#   v0.17.0 (F05-03/F05-04 J2 §1.7): escrituras del registro por tipo, cada
+#   una en UNA transaccion del adaptador (ejecucion_registro.py):
+#     POST /v1/intenciones/ingreso-cobrado  -> C-14 via OP-22
+#     POST /v1/intenciones/transferencia    -> OP-10 (guarda de replay propia)
+#   El gasto sigue en /v1/intenciones/gasto-pagado (tercero, contexto y «No
+#   lo sé» aditivos).
+# Version: 0.17.0
 # ============================================================
 
 from __future__ import annotations
@@ -220,7 +227,9 @@ from app.api.dto_vs01 import (
     ListaCuentasPago,
     ResultadoGastoPagado,
 )
+from app.api.dto_registro import IntencionIngresoCobrado, IntencionTransferencia, ResultadoRegistro
 from app.api.ejecucion_gasto_pagado import RechazoIntegracion, registrar_gasto_pagado
+from app.api.ejecucion_registro import RechazoRegistro, registrar_ingreso_cobrado, registrar_transferencia
 from app.categorias import lecturas as lect_cat
 from app.contextos import lecturas as lect_ctx
 from app.plantillas import lecturas as lect_plt
@@ -764,6 +773,27 @@ def create_app(
             "estado_categorial": intencion.estado_categorial,
             "aviso": "API de integracion F05-00-B, pendiente de consolidacion F10",
         }
+
+    def _respuesta_registro(salida, intencion, tipo: str, estado_categorial) -> dict | JSONResponse:
+        if isinstance(salida, RechazoRegistro):
+            status, cuerpo = eh.rechazo_integracion(salida.codigo)
+            return JSONResponse(cuerpo, status_code=status)
+        return {
+            "intencion_id": intencion.intencion_id, "hecho_id": salida.hecho_id, "idempotente": salida.idempotente,
+            "tipo": tipo, "importe": str(intencion.importe.quantize(_CENT)), "moneda": intencion.moneda,
+            "estado_atribucion": salida.estado_atribucion, "estado_categorial": estado_categorial,
+            "aviso": "API de integracion F05, pendiente de consolidacion F10",
+        }
+
+    @app.post("/v1/intenciones/ingreso-cobrado", response_model=ResultadoRegistro, dependencies=[Depends(autorizar)])
+    def ingreso_cobrado(intencion: IntencionIngresoCobrado):
+        salida = registrar_ingreso_cobrado(unidad, contexto(), intencion, reloj)
+        return _respuesta_registro(salida, intencion, "INGRESO", intencion.categoria.estado)
+
+    @app.post("/v1/intenciones/transferencia", response_model=ResultadoRegistro, dependencies=[Depends(autorizar)])
+    def transferencia(intencion: IntencionTransferencia):
+        salida = registrar_transferencia(unidad, contexto(), intencion, reloj)
+        return _respuesta_registro(salida, intencion, "TRANSFERENCIA", None)
 
     return app
 

@@ -208,7 +208,15 @@
 #     hecho_efectos.categoria_id ni escribe el catalogo.
 #   - backend/app/plantillas/ entra en FRONTERA (I3 admite PLANTILLA).
 #   - EXCLUIDOS: el arnes mutantes_f05_j2j3.py (los mutantes son texto).
-# Version: 0.12.0
+#
+#   v0.13.0 (F05-03/F05-04 J2 §1.7; F05 §46.3 A3, A12): SOLO altas. El
+#   registro de INGRESO (ejecucion_registro.py) es el SEGUNDO llamante
+#   productivo de la guarda C-a (por tipo) y de C07, con el mismo contrato
+#   I4: dentro de `not ya_materializada` (identidad antes) y ANTES de
+#   componer (componer_ingreso, A_FRONTERA con un unico llamador). Se anaden
+#   sus entradas al REGISTRO, el llamante a la lista cerrada de C07 y una
+#   comprobacion I4 propia del ingreso. Las reglas I1..I13 no cambian.
+# Version: 0.13.0
 # ============================================================
 
 from __future__ import annotations
@@ -320,6 +328,15 @@ REGISTRO: dict[tuple[str, str], tuple[str, str, str]] = {
         "PLANTILLA", "lista de plantillas", "aviso de categoria no elegible hoy; solo lectura"),
     ("backend/app/plantillas/propuesta.py", "propuesta_registro"): (
         "PLANTILLA", "GET /v1/registro/propuesta", "capa plantilla; categoria explicita por la guarda C-a (lectura)"),
+    # --- F05-04 J2 §1.7: registro de INGRESO (C-14 via OP-22)
+    ("backend/app/api/dto_registro.py", "IntencionIngresoCobrado.categoria_id"): (
+        "R", "DTO F05-04", "lectura derivada del estado categorial sellado"),
+    ("backend/app/api/ejecucion_registro.py", "registrar_ingreso_cobrado.operacion"): (
+        "GUARDA", "F05-04 intencion INGRESO", "C-a + C07 tras la identidad y antes de componer (I4)"),
+    ("backend/app/api/ejecucion_registro.py", "validar_categoria_y_magnitudes"): (
+        "GUARDA", "F05-04 C-a por tipo + C07", "invoca la guarda unica C-a y C07 en ese orden"),
+    ("backend/app/api/traductor_registro.py", "componer_ingreso"): (
+        "A_FRONTERA", "INGRESO -> OP-22", "sella categoria_id en el efecto INGRESO; guardado por I4"),
     # --- motor F04 (certificado, no se modifica)
     ("backend/app/core/modelos_efectos.py", "DatosEfecto"): ("R", "modelo", "campo del DTO interno"),
     ("backend/app/core/modelos_devolucion.py", "DatosDevolucion"): ("R", "modelo", "campo del DTO interno"),
@@ -590,7 +607,30 @@ def test_i4_c07_solo_se_invoca_desde_la_ejecucion():
         for q, n in _funciones(arbol):
             if any(True for _ in _llamadas_directas(n, "validar_magnitudes")):
                 llamadores.append((_rel(p), q))
-    assert llamadores == [("backend/app/api/ejecucion_gasto_pagado.py", "registrar_gasto_pagado.operacion")]
+    # v0.13.0 (J2 §1.7): alta del segundo llamante productivo (registro de INGRESO).
+    assert sorted(llamadores) == sorted([("backend/app/api/ejecucion_gasto_pagado.py", "registrar_gasto_pagado.operacion"),
+                                         ("backend/app/api/ejecucion_registro.py", "validar_categoria_y_magnitudes")])
+
+
+def test_i4_ingreso_guarda_tras_identidad_y_antes_de_componer():
+    """J2 §1.7: mismo contrato I4 en el registro de INGRESO."""
+    fn = _nodo("backend/app/api/ejecucion_registro.py", "registrar_ingreso_cobrado.operacion")
+    guardas = _llamadas(fn, "validar_categoria_y_magnitudes")
+    composiciones = _llamadas(fn, "componer_ingreso")
+    assert len(guardas) == 1 and len(composiciones) == 1
+    assert guardas[0].lineno < composiciones[0].lineno
+    padres = [n for n in ast.walk(fn) if isinstance(n, ast.If) and any(g is guardas[0] for g in ast.walk(n))]
+    assert any(isinstance(i.test, ast.UnaryOp) and isinstance(i.test.op, ast.Not)
+               and isinstance(i.test.operand, ast.Name) and i.test.operand.id == "ya_materializada" for i in padres)
+    aux = _nodo("backend/app/api/ejecucion_registro.py", "validar_categoria_y_magnitudes")
+    c_a, c07 = _llamadas(aux, "validar_seleccion_categoria"), _llamadas(aux, "validar_magnitudes")
+    assert len(c_a) == 1 and len(c07) == 1 and c_a[0].lineno < c07[0].lineno
+    llamadores = []
+    for p in _productivos_py():
+        for q, n in _funciones(ast.parse(p.read_bytes().decode("utf-8"))):
+            if any(True for _ in _llamadas_directas(n, "componer_ingreso")):
+                llamadores.append((_rel(p), q))
+    assert llamadores == [("backend/app/api/ejecucion_registro.py", "registrar_ingreso_cobrado.operacion")]
 
 
 # ------------------------------------------------------------------ I5

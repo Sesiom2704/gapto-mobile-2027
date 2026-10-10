@@ -29,6 +29,10 @@
 #   bloqueo (la lectura posterior ya filtra))
 # Version: 0.4.0 (F05-03/F05-04 J2 §1.6: PL02..PL21 plantillas y acciones; el
 #   advisory PLANTILLAS (PL01) lo discrimina la bateria serial de concurrencia)
+# Version: 0.5.0 (F05-03/F05-04 J2 §1.7: RG02..RG15 registro por tipo. Equivalente
+#   documentado (RG06): la comprobacion MISMA_CUENTA del adaptador, porque OP-10 rechaza
+#   igual con MISMA_CUENTA. El orden INVERSIONES -> cuenta (RG01) lo discrimina la
+#   bateria serial de locks)
 # ============================================================
 
 from __future__ import annotations
@@ -57,6 +61,11 @@ CSERV = "backend/app/contextos/servicio.py"
 T179 = "tests/api/test_179_f05_03_plantillas.py"
 PSRV = "backend/app/plantillas/servicio.py"
 PPROP = "backend/app/plantillas/propuesta.py"
+T180 = "tests/api/test_180_f05_04_registro.py"
+REGI = "backend/app/api/ejecucion_registro.py"
+DTOR = "backend/app/api/dto_registro.py"
+CAPM = "backend/app/api/captura_magnitudes.py"
+TRAD = "backend/app/api/traductor_registro.py"
 T176 = "tests/api/test_176_f05_03_fecha_funcional.py"
 FF = "backend/app/comun/fecha_funcional.py"
 PSERV = "backend/app/preferencias/servicio.py"
@@ -217,6 +226,53 @@ MUTANTES = [
      [(PPROP, '        categoria_id if categoria_id is not None else (campos["categoria"] or {}).get("valor"))',
        "        categoria_id)")],
      [f"{T179}::test_caso2_solo_categoria_con_cuenta_de_una_preferencia"]),
+    # --- §1.7 registro por tipo (A2..A6, A9; R1..R3; C3)
+    ("RG02", "gasto sin revalidar el tercero bajo lock",
+     [(EJEC, "            rechazo = validar_tercero(sesion, intencion.tercero_id) or validar_contexto(sesion, intencion.contexto_id)",
+       "            rechazo = validar_contexto(sesion, intencion.contexto_id)")],
+     [f"{T180}::test_caso17_desactivado_entre_carga_y_confirmacion"]),
+    ("RG03", "gasto sin revalidar el contexto bajo lock",
+     [(EJEC, "            rechazo = validar_tercero(sesion, intencion.tercero_id) or validar_contexto(sesion, intencion.contexto_id)",
+       "            rechazo = validar_tercero(sesion, intencion.tercero_id)")],
+     [f"{T180}::test_caso17_desactivado_entre_carga_y_confirmacion"]),
+    ("RG04", "ingreso sin la capacidad RECIBIR_INGRESO",
+     [(REGI, '            rechazo_cuenta(sesion, intencion.cuenta_id, "INGRESO", intencion.fecha_hecho)\n', "")],
+     [f"{T180}::test_ingreso_exige_recibir_ingreso_y_categoria_de_ingreso"]),
+    ("RG05", "ingreso con la guarda C-a de GASTO",
+     [(REGI, 'validar_categoria_y_magnitudes(sesion, intencion.categoria_id, "INGRESO",',
+       'validar_categoria_y_magnitudes(sesion, intencion.categoria_id, "GASTO",')],
+     [f"{T180}::test_caso3_ingreso_composicion_c14"]),
+    ("RG07", "transferencia sin capacidad de origen",
+     [(REGI, '            rechazo_cuenta(sesion, intencion.cuenta_origen_id, "TRANSFERENCIA_ORIGEN", intencion.fecha_hecho)\n', "")],
+     [f"{T180}::test_caso8_liquidacion_de_la_tarjeta_y_capacidades"]),
+    ("RG08", "transferencia sin capacidad de destino",
+     [(REGI, '            rechazo_cuenta(sesion, intencion.cuenta_destino_id, "TRANSFERENCIA_DESTINO", intencion.fecha_hecho)\n', "")],
+     [f"{T180}::test_caso8_liquidacion_de_la_tarjeta_y_capacidades"]),
+    ("RG09", "transferencia sin la guarda de replay propia",
+     [(REGI, "            if not _replay_transferencia(sesion, intencion):", "            if False:")],
+     [f"{T180}::test_guarda_de_replay_propia_de_op10"]),
+    ("RG10", "guarda de replay que ignora la nota",
+     [(REGI, "        and fila[2] == intencion.nota and fila[3] == intencion.moneda",
+       "        and fila[3] == intencion.moneda"),
+      (REGI, " and fila[9] == intencion.nota and fila[10] == intencion.nota", "")],
+     [f"{T180}::test_guarda_de_replay_propia_de_op10"]),
+    ("RG11", "nota sin canonicalizar",
+     [(DTOR, "    limpio = valor.strip()\n    return limpio or None", "    return valor")],
+     [f"{T180}::test_ingreso_sin_indicar_y_nota_canonica"]),
+    ("RG12", "C07 ignora «No lo sé»",
+     [(CAPM, "    no_lo_se = set(desconocidas)\n", "    no_lo_se = set()\n")],
+     [f"{T180}::test_caso2_y_28_no_lo_se_sin_fila_de_magnitud"]),
+    ("RG13", "contexto vinculado como principal",
+     [(TRAD, '                          tipo_relacion="RELACIONADO_CON", principal=False, efecto_id=None),',
+       '                          tipo_relacion="RELACIONADO_CON", principal=True, efecto_id=None),')],
+     [f"{T180}::test_caso1_y_12_gasto_con_tercero_y_contexto"]),
+    ("RG14", "tercero de ingreso con rol VENDEDOR",
+     [(TRAD, 'ROL_TERCERO = {"GASTO": "VENDEDOR", "INGRESO": "OTRO"}', 'ROL_TERCERO = {"GASTO": "VENDEDOR", "INGRESO": "VENDEDOR"}')],
+     [f"{T180}::test_caso3_ingreso_composicion_c14"]),
+    ("RG15", "ingreso sin la guarda de fecha futura",
+     [(REGI, "            if es_futura(sesion, intencion.fecha_hecho, reloj):\n                return RechazoRegistro(CODIGO_FECHA_FUTURA)\n            rechazo_cuenta(sesion, intencion.cuenta_id",
+       "            rechazo_cuenta(sesion, intencion.cuenta_id")],
+     [f"{T180}::test_fecha_futura_en_ingreso_y_transferencia"]),
 ]
 
 

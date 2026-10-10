@@ -148,7 +148,12 @@
 #   cuenta; discriminante
 #   test_152::test_el_registro_no_toma_el_advisory_del_catalogo (muere por la
 #   asercion de espera, no por excepcion). Censo vigente: 124 + P04 = 125.
-# Version: 0.13.0
+#
+#   v0.14.0 (F05-03/F05-04 J2 §1.7; F05 §46.3 A9): textos protegidos de M04,
+#   M05 (llamada a C07 con las magnitudes «No lo sé») y M09, M11, M12 (C07
+#   considera tambien las desconocidas) actualizados. Mismas mutaciones y
+#   mismos discriminantes; censo sin cambios (125).
+# Version: 0.14.0
 # ============================================================
 
 from __future__ import annotations
@@ -316,9 +321,9 @@ MUTANTES = [
      [(CAP, '"WHERE id = ANY(%s) ORDER BY id FOR SHARE",', '"WHERE id = ANY(%s) ORDER BY id",')], [T158]),
     ("M03", "orden de locks invertido (magnitudes antes que asociaciones)",
      [(CAP, "    asociaciones = _asociaciones(sesion, categoria_id)\n    fichas = _magnitudes(sesion, sorted({a.magnitud_id for a in asociaciones}))\n", "    previas = sesion.conexion.execute(\"SELECT magnitud_id FROM gapto.categoria_magnitudes WHERE categoria_id = %s\", (categoria_id,)).fetchall()\n    fichas = _magnitudes(sesion, sorted({f[0] for f in previas}))\n    asociaciones = _asociaciones(sesion, categoria_id)\n")], [T158]),
-    ("M04", "C07 no invocada", [(EJEC, "                # 3c. C07: magnitudes de la categoria elegida (servidor autoridad).\n                rechazo = validar_magnitudes(sesion, intencion.categoria_id, intencion.magnitudes)\n                if rechazo is not None:\n                    return RechazoIntegracion(rechazo)\n", "")], [T158, T154]),
+    ("M04", "C07 no invocada", [(EJEC, "                # 3c. C07: magnitudes de la categoria elegida (servidor autoridad).\n                rechazo = validar_magnitudes(sesion, intencion.categoria_id, intencion.magnitudes,\n                                             intencion.magnitudes_desconocidas)\n                if rechazo is not None:\n                    return RechazoIntegracion(rechazo)\n", "")], [T158, T154]),
     ("M05", "C07 antes del reconocimiento de identidad",
-     [(EJEC, "                # 3c. C07: magnitudes de la categoria elegida (servidor autoridad).\n                rechazo = validar_magnitudes(sesion, intencion.categoria_id, intencion.magnitudes)\n                if rechazo is not None:\n                    return RechazoIntegracion(rechazo)\n", ""),
+     [(EJEC, "                # 3c. C07: magnitudes de la categoria elegida (servidor autoridad).\n                rechazo = validar_magnitudes(sesion, intencion.categoria_id, intencion.magnitudes,\n                                             intencion.magnitudes_desconocidas)\n                if rechazo is not None:\n                    return RechazoIntegracion(rechazo)\n", ""),
       (EJEC, "        if not ya_materializada:\n", "        if intencion.categoria_id is not None:\n            rechazo = validar_magnitudes(sesion, intencion.categoria_id, intencion.magnitudes)\n            if rechazo is not None:\n                return RechazoIntegracion(rechazo)\n" + "        if not ya_materializada:\n")],
      [T158, T154]),
     ("M06", "precision ignorada (PostgreSQL redondearia)",
@@ -329,14 +334,14 @@ MUTANTES = [
        "    return decimales <= precision_decimales")], [T158]),
     ("M08", "los ceros a la derecha cuentan como precision",
      [(CAP, "d.normalize().as_tuple()", "d.as_tuple()")], [T158]),
-    ("M09", "obligatoria ausente no comprobada", [(CAP, "    if any(a.obligatoria and a.magnitud_id not in enviadas for a in asociaciones):\n        return CODIGO_MAGNITUD_OBLIGATORIA_AUSENTE\n", "")], [T158]),
+    ("M09", "obligatoria ausente no comprobada", [(CAP, "    if any(a.obligatoria and a.magnitud_id not in enviadas and a.magnitud_id not in no_lo_se\n           for a in asociaciones):\n        return CODIGO_MAGNITUD_OBLIGATORIA_AUSENTE\n", "")], [T158]),
     ("M10", "obligatoria deshabilitada no comprobada", [(CAP, "    if any(a.obligatoria and not disponible(a.magnitud_id) for a in asociaciones):\n        return CODIGO_CATEGORIA_MAGNITUD_NO_DISPONIBLE\n", "")], [T158]),
     ("M11", "opcional deshabilitada admitida",
-     [(CAP, "    if any(m not in por_id or not disponible(m) for m in enviadas):\n",
-       "    if any(m not in por_id for m in enviadas):\n")], [T158]),
+     [(CAP, "    if any(m not in por_id or not disponible(m) for m in [*enviadas, *no_lo_se]):\n",
+       "    if any(m not in por_id for m in [*enviadas, *no_lo_se]):\n")], [T158]),
     ("M12", "magnitud no asociada admitida",
-     [(CAP, "    if any(m not in por_id or not disponible(m) for m in enviadas):\n",
-       "    if any(m in por_id and not disponible(m) for m in enviadas):\n")], [T158]),
+     [(CAP, "    if any(m not in por_id or not disponible(m) for m in [*enviadas, *no_lo_se]):\n",
+       "    if any(m in por_id and not disponible(m) for m in [*enviadas, *no_lo_se]):\n")], [T158]),
     ("M13", "orden de codigos 2 <-> 3",
      [(CAP, "        return CODIGO_MAGNITUD_NO_ADMITIDA\n", "        return CODIGO_INTERCAMBIO\n"),
       (CAP, "        return CODIGO_MAGNITUD_OBLIGATORIA_AUSENTE\n", "        return CODIGO_MAGNITUD_NO_ADMITIDA\n"),

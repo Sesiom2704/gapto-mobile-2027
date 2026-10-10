@@ -58,7 +58,14 @@
 #   v0.5.0 (F05-01 S6-WIRE+UI (este mandato); F05 §26.2 AJ-03): se retira el
 #   estado de compatibilidad derivado de la ausencia de `categoria` (solo
 #   comentarios; la composicion no cambia).
-# Version: 0.5.0
+#
+#   v0.6.0 (F05-03/F05-04 J2 §1.7; F05 §46.3 A5/A6/A9): el contexto del hecho
+#   anade, SOLO si la intencion los trae, el tercero (hecho_terceros VENDEDOR,
+#   principal) y el contexto (hecho_entidades RELACIONADO_CON, efecto NULL, no
+#   principal), con identidades uuid5(intencion_id, prefijo VS-01 + rol)
+#   (traductor_registro.contexto_hecho). Sin ellos el agregado es identico al
+#   de antes. Las magnitudes «No lo sé» no generan fila.
+# Version: 0.6.0
 # ============================================================
 
 from __future__ import annotations
@@ -67,6 +74,7 @@ import decimal
 import uuid
 
 from app.api.dto_vs01 import IntencionGastoPagado
+from app.api.traductor_registro import contexto_hecho
 from app.core.errores import CodigoError, ErrorMotor
 from app.core.modelos import DatosCreacionHecho
 from app.core.modelos_compuesto import (
@@ -206,5 +214,6 @@ def componer(intencion: IntencionGastoPagado, actor_self_id: uuid.UUID) -> Datos
         efectos=[efecto],
         pagos=[DatosPagoCompuesto(movimiento=movimiento, conciliacion=conciliacion)],
         aportaciones=list(aportaciones),
-        contexto=DatosContextoHecho(magnitudes=magnitudes),
+        contexto=contexto_hecho(iid, "gapto.vs01.gasto_pagado.", "GASTO", tercero_id=intencion.tercero_id,
+                                contexto_id=intencion.contexto_id, magnitudes=magnitudes),
     )

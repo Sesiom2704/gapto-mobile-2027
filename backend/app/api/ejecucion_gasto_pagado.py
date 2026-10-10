@@ -87,7 +87,17 @@
 #   intencion NUEVA y como primera revalidacion (paso 3.0): FECHA_FUTURA es un
 #   rechazo de capa F05 sin escritura. Un reintento de una intencion ya
 #   materializada no se rechaza retrospectivamente.
-# Version: 0.7.0
+#
+#   v0.8.0 (F05-03/F05-04 J2 §1.7; F05 §46.4 R3/R4; F05-D032 C2): tercero,
+#   contexto y «No lo sé». ORDEN DE LOCKS vinculante:
+#     [advisory INVERSIONES, SOLO si la intencion trae contexto: OP-22 lo
+#      toma al escribir hecho_entidades y el trigger D-080 al COMMIT; tomarlo
+#      ANTES de la cuenta evita la inversion cuenta -> INVERSIONES]
+#     -> cuenta FOR NO KEY UPDATE -> identidad -> categoria FOR SHARE (C-a)
+#     -> C07 FOR SHARE -> tercero / contexto FOR SHARE (paso 3d) -> OP-22.
+#   Tercero o contexto ajeno, inexistente o desactivado ->
+#   TERCERO_NO_DISPONIBLE / CONTEXTO_NO_DISPONIBLE (capa F05, sin escritura).
+# Version: 0.8.0
 # ============================================================
 
 from __future__ import annotations
@@ -98,6 +108,7 @@ from app.api.captura_magnitudes import validar_magnitudes
 from app.api.dto_vs01 import IntencionGastoPagado
 from app.api.elegibilidad_categoria import validar_seleccion_categoria
 from app.api.traductor_gasto_pagado import componer, leer_actor_self, participacion_self_100
+from app.api.ejecucion_registro import tomar_inversiones, validar_contexto, validar_tercero
 from app.comun.elegibilidad_cuentas import MONEDA, motivo_cuenta
 from app.comun.fecha_funcional import CODIGO_FECHA_FUTURA, Reloj, es_futura, reloj_sistema
 from app.core.contexto import ContextoOperacion
@@ -152,6 +163,9 @@ def registrar_gasto_pagado(
     reloj: Reloj = reloj_sistema,
 ) -> Registrado | RechazoIntegracion:
     def operacion(sesion: SesionMotor) -> Registrado | RechazoIntegracion:
+        # 0. INVERSIONES antes que la cuenta, solo con contexto (D-080).
+        if intencion.contexto_id is not None:
+            tomar_inversiones(sesion)
         # 1. Lock contractual de la cuenta.
         bloquear_cuenta(sesion, intencion.cuenta_id)
         actor = leer_actor_self(sesion)
@@ -176,9 +190,14 @@ def registrar_gasto_pagado(
                 if rechazo is not None:
                     return RechazoIntegracion(rechazo)
                 # 3c. C07: magnitudes de la categoria elegida (servidor autoridad).
-                rechazo = validar_magnitudes(sesion, intencion.categoria_id, intencion.magnitudes)
+                rechazo = validar_magnitudes(sesion, intencion.categoria_id, intencion.magnitudes,
+                                             intencion.magnitudes_desconocidas)
                 if rechazo is not None:
                     return RechazoIntegracion(rechazo)
+            # 3d. Tercero y contexto (FOR SHARE), del owner y habilitados.
+            rechazo = validar_tercero(sesion, intencion.tercero_id) or validar_contexto(sesion, intencion.contexto_id)
+            if rechazo is not None:
+                return RechazoIntegracion(rechazo)
 
         # 5. OP-22 adscrito a esta transaccion. La composicion sale SOLO del
         #    payload sellado; si la raiz existe, OP-22 exige igualdad EXACTA

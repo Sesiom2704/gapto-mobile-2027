@@ -63,7 +63,16 @@
 #   (gapto.usuarios.timezone, fallback Europe/Madrid) y el DTO no conoce al
 #   owner. La intencion NUEVA con fecha posterior a hoy_owner la rechaza la
 #   ejecucion con FECHA_FUTURA (comun/fecha_funcional.py).
-# Version: 0.7.0
+#
+#   v0.8.0 (F05-03/F05-04 J2 §1.7; F05 §46.3 A2/A5/A6/A9): campos ADITIVOS y
+#   opcionales (un payload VS-01 anterior sigue siendo valido y compone el
+#   mismo agregado):
+#     - `tercero_id` y `contexto_id` (default null): sin ellos no se crea
+#       ninguna fila de vinculo;
+#     - CategoriaSeleccionada.`desconocidas`: magnitudes declaradas «No lo
+#       sé» (A9). Sin repetidas y sin solapar con `magnitudes` (422). No
+#       generan fila en hecho_magnitudes; su admisibilidad la decide C07.
+# Version: 0.8.0
 # ============================================================
 
 from __future__ import annotations
@@ -143,12 +152,17 @@ class CategoriaSeleccionada(_Estricto):
     categoria_id: uuid.UUID
     # Lista ausente = lista vacia. `null` no es una tupla: 422 por tipo.
     magnitudes: tuple[MagnitudCapturada, ...] = ()
+    # A9 «No lo sé»: magnitudes de la categoria que el usuario declara
+    # desconocidas. Ausencia = ninguna. Nunca un valor ni un cero.
+    desconocidas: tuple[uuid.UUID, ...] = ()
 
     @model_validator(mode="after")
     def _sin_magnitud_repetida(self) -> "CategoriaSeleccionada":
         ids = [m.magnitud_id for m in self.magnitudes]
         if len(ids) != len(set(ids)):
             raise ValueError("magnitud_id repetida en la peticion")
+        if len(self.desconocidas) != len(set(self.desconocidas)) or set(ids) & set(self.desconocidas):
+            raise ValueError("magnitud desconocida repetida o tambien informada")
         return self
 
 
@@ -179,6 +193,10 @@ class IntencionGastoPagado(_Estricto):
     # S6-WIRE (AJ-03): estado categorial resuelto OBLIGATORIO (C01). Ausente
     # -> 422 (campo requerido); `null` -> 422 (no es ninguna variante).
     categoria: CategoriaVs01
+    # F05-04 (A5/A6): tercero («Tercero») y contexto («Mas detalles»)
+    # opcionales; sin ellos no hay fila de vinculo.
+    tercero_id: uuid.UUID | None = None
+    contexto_id: uuid.UUID | None = None
 
     @property
     def estado_categorial(self) -> str:
@@ -195,6 +213,13 @@ class IntencionGastoPagado(_Estricto):
         """Magnitudes selladas; solo existen con estado CATEGORIA."""
         if isinstance(self.categoria, CategoriaSeleccionada):
             return self.categoria.magnitudes
+        return ()
+
+    @property
+    def magnitudes_desconocidas(self) -> tuple[uuid.UUID, ...]:
+        """Magnitudes declaradas «No lo sé» (A9); solo con estado CATEGORIA."""
+        if isinstance(self.categoria, CategoriaSeleccionada):
+            return self.categoria.desconocidas
         return ()
 
     @model_validator(mode="after")

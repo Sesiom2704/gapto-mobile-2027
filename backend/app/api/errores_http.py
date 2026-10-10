@@ -84,7 +84,11 @@
 #   de plantillas y acciones rapidas (422 entrada/tipo/sin valor/icono; 404 no
 #   encontrada; 409 el resto). PLANTILLA_NOMBRE_REPETIDO lleva el detalle
 #   plantilla_id (S04 «Ir a la plantilla»).
-# Version: 0.13.0
+#
+#   v0.14.0 (F05-03/F05-04 J2 §1.7): rechazos de integracion
+#   TERCERO_NO_DISPONIBLE y CONTEXTO_NO_DISPONIBLE (409, sin escritura); el
+#   codigo F04 MISMA_CUENTA (OP-10) con mensaje de campo (422).
+# Version: 0.14.0
 # ============================================================
 
 from __future__ import annotations
@@ -104,6 +108,7 @@ _MAPA: dict[CodigoError, tuple[int, str, bool]] = {
         True,
     ),
     CodigoError.CUENTA_DESCONOCIDA: (422, "La cuenta seleccionada no está disponible.", False),
+    CodigoError.MISMA_CUENTA: (422, "Elige dos cuentas distintas: origen y destino no pueden coincidir.", False),
     CodigoError.MONEDA_INVALIDA: (
         422,
         "La cuenta debe estar en la misma moneda que el gasto.",
@@ -153,6 +158,10 @@ def interno() -> tuple[int, dict]:
 
 
 _RECHAZOS_INTEGRACION: dict[str, tuple[int, str]] = {
+    "TERCERO_NO_DISPONIBLE": (
+        409, "Ese tercero ya no está disponible. Elige otro o quítalo: no se ha guardado nada."),
+    "CONTEXTO_NO_DISPONIBLE": (
+        409, "Ese contexto ya no está disponible. Elige otro o quítalo: no se ha guardado nada."),
     "FECHA_FUTURA": (
         422,
         "Revisa los datos: fecha_hecho no puede ser futura (solo se registra lo ya ocurrido).",

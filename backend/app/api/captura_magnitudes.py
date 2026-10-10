@@ -47,7 +47,14 @@
 #
 #   Los codigos son de la capa F05 y NO forman parte de la taxonomia F04
 #   (core/errores.py no se modifica).
-# Version: 0.1.0
+#
+#   v0.2.0 (F05-03/F05-04 J2 §1.7; F05 §46.3 A9, R14): «No lo sé». La
+#   intencion puede declarar DESCONOCIDAS magnitudes de la categoria: deben
+#   estar asociadas y disponibles (si no, MAGNITUD_NO_ADMITIDA) y una
+#   obligatoria declarada desconocida ya no es MAGNITUD_OBLIGATORIA_AUSENTE.
+#   No generan fila en hecho_magnitudes (sin valor por defecto ni cero). Sin
+#   declararla, la obligatoria ausente sigue rechazandose igual que antes.
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -125,12 +132,14 @@ def _magnitudes(sesion: SesionMotor, ids: list[uuid.UUID]) -> dict[uuid.UUID, _M
 
 
 def validar_magnitudes(
-    sesion: SesionMotor, categoria_id: uuid.UUID, capturadas: Iterable[_Capturada]
+    sesion: SesionMotor, categoria_id: uuid.UUID, capturadas: Iterable[_Capturada],
+    desconocidas: Iterable[uuid.UUID] = (),
 ) -> str | None:
     """C07. Devuelve None si la captura es admisible o el codigo F05 de
     rechazo. No escribe. Debe llamarse en la transaccion que va a persistir,
     tras reconocer la identidad y tras la guarda C-a."""
     enviadas = {c.magnitud_id: c.valor for c in capturadas}
+    no_lo_se = set(desconocidas)
     asociaciones = _asociaciones(sesion, categoria_id)
     fichas = _magnitudes(sesion, sorted({a.magnitud_id for a in asociaciones}))
     por_id = {a.magnitud_id: a for a in asociaciones}
@@ -144,10 +153,11 @@ def validar_magnitudes(
     if any(a.obligatoria and not disponible(a.magnitud_id) for a in asociaciones):
         return CODIGO_CATEGORIA_MAGNITUD_NO_DISPONIBLE
     # 2. Cada enviada debe estar asociada y disponible.
-    if any(m not in por_id or not disponible(m) for m in enviadas):
+    if any(m not in por_id or not disponible(m) for m in [*enviadas, *no_lo_se]):
         return CODIGO_MAGNITUD_NO_ADMITIDA
-    # 3. Toda obligatoria debe venir informada.
-    if any(a.obligatoria and a.magnitud_id not in enviadas for a in asociaciones):
+    # 3. Toda obligatoria debe venir informada o declarada «No lo sé» (A9).
+    if any(a.obligatoria and a.magnitud_id not in enviadas and a.magnitud_id not in no_lo_se
+           for a in asociaciones):
         return CODIGO_MAGNITUD_OBLIGATORIA_AUSENTE
     # 4. Precision y capacidad, sin redondeo.
     if any(not valor_admisible(v, fichas[m].precision_decimales) for m, v in enviadas.items()):
