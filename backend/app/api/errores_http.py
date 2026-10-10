@@ -79,7 +79,12 @@
 #   `rechazo_contexto` traducen los writers de maestros: *_NO_ENCONTRADO
 #   (404), VERSION_DESFASADA e IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION (409),
 #   TERCERO_NATURALEZA_NO_ADMITIDA (409), ENTRADA_INVALIDA (422).
-# Version: 0.12.0
+#
+#   v0.13.0 (F05-03/F05-04 J2 §1.6): `rechazo_plantilla` traduce los writers
+#   de plantillas y acciones rapidas (422 entrada/tipo/sin valor/icono; 404 no
+#   encontrada; 409 el resto). PLANTILLA_NOMBRE_REPETIDO lleva el detalle
+#   plantilla_id (S04 «Ir a la plantilla»).
+# Version: 0.13.0
 # ============================================================
 
 from __future__ import annotations
@@ -272,6 +277,37 @@ _RECHAZOS_CONTEXTO: dict[str, tuple[int, str]] = {
     "IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION": (409, "Este registro ya existe con otros datos. No se ha guardado nada nuevo."),
     "ENTRADA_INVALIDA": (422, "Revisa los datos."),
 }
+
+
+_RECHAZOS_PLANTILLA: dict[str, tuple[int, str]] = {
+    "PLANTILLA_TIPO_NO_ADMITIDO": (422, "Una plantilla solo puede ser de gasto o de ingreso."),
+    "PLANTILLA_SIN_VALOR": (
+        422, "Tiene que guardar al menos una cosa: categoría, cuenta, presupuesto, tercero o contexto."),
+    "PLANTILLA_CATEGORIA_NO_ELEGIBLE": (409, "Esa categoría no está disponible para este tipo. Elige otra."),
+    "PLANTILLA_TERCERO_NO_ELEGIBLE": (409, "Ese tercero no está disponible. Elige otro."),
+    "PLANTILLA_ENTIDAD_NO_CONTEXTO": (409, "Ese contexto no está disponible. Elige otro."),
+    "PLANTILLA_CUENTA_NO_ELEGIBLE": (409, "Esa cuenta no está disponible para este tipo. Elige otra o «No proponer»."),
+    "PLANTILLA_NOMBRE_REPETIDO": (409, "Ya tienes una plantilla con ese nombre. Usa otro nombre o edita la existente."),
+    "PLANTILLA_NO_ENCONTRADA": (404, "No encontrado."),
+    "ACCION_NO_ENCONTRADA": (404, "No encontrado."),
+    "ACCION_PLANTILLA_NO_DISPONIBLE": (409, "Esa plantilla no está disponible para Inicio."),
+    "ACCION_PLANTILLA_YA_EN_INICIO": (409, "Esa plantilla ya está en Inicio."),
+    "ACCION_LIMITE_ALCANZADO": (409, "Inicio ya muestra 3 plantillas. Quita una para añadir esta."),
+    "ICONO_ACCION_NO_VALIDO": (422, "Ese icono no está disponible. Elige otro o el de la categoría."),
+    "CONJUNTO_ACCIONES_DESFASADO": (409, "Los accesos de Inicio han cambiado. Vuelve a cargarlos."),
+    "REFERENCIA_NO_DISPONIBLE": (409, "Alguno de los datos elegidos ya no está disponible. Revísalos."),
+    "VERSION_DESFASADA": (409, "La plantilla ha cambiado desde que la abriste. Vuelve a cargarla."),
+    "IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION": (409, "Este registro ya existe con otros datos. No se ha guardado nada nuevo."),
+    "ENTRADA_INVALIDA": (422, "Revisa los datos."),
+}
+
+
+def rechazo_plantilla(codigo: str, detalle: dict | None = None) -> tuple[int, dict]:
+    status, mensaje = _RECHAZOS_PLANTILLA[codigo]
+    cuerpo = {"codigo": codigo, "mensaje": mensaje, "reintentable": False}
+    if codigo == "PLANTILLA_NOMBRE_REPETIDO" and detalle is not None:
+        cuerpo["detalle"] = {k: str(v) for k, v in detalle.items()}
+    return status, cuerpo
 
 
 def rechazo_tercero(codigo: str, detalle: dict | None = None) -> tuple[int, dict]:

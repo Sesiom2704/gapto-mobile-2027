@@ -27,6 +27,8 @@
 #   contexto (la PK fisica de entidades da el mismo
 #   IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION) y el filtro tipo CONTEXTO del
 #   bloqueo (la lectura posterior ya filtra))
+# Version: 0.4.0 (F05-03/F05-04 J2 §1.6: PL02..PL21 plantillas y acciones; el
+#   advisory PLANTILLAS (PL01) lo discrimina la bateria serial de concurrencia)
 # ============================================================
 
 from __future__ import annotations
@@ -52,6 +54,9 @@ T178 = "tests/api/test_178_f05_04_contextos.py"
 TSERV = "backend/app/terceros/servicio.py"
 TLECT = "backend/app/terceros/lecturas.py"
 CSERV = "backend/app/contextos/servicio.py"
+T179 = "tests/api/test_179_f05_03_plantillas.py"
+PSRV = "backend/app/plantillas/servicio.py"
+PPROP = "backend/app/plantillas/propuesta.py"
 T176 = "tests/api/test_176_f05_03_fecha_funcional.py"
 FF = "backend/app/comun/fecha_funcional.py"
 PSERV = "backend/app/preferencias/servicio.py"
@@ -140,6 +145,78 @@ MUTANTES = [
     ("CX03", "contexto sin control de row_version",
      [(CSERV, '    if fila["row_version"] != row_version:\n        return Rechazo(VERSION_DESFASADA)\n', "")],
      [f"{T178}::test_editar_desactivar_reactivar"]),
+    # --- §1.6 plantillas y acciones rapidas (A1/A2/A3, R1/R3, A11)
+    ("PL02", "plantilla de tipo no admitido",
+     [(PSRV, "    if codigo not in TIPOS_ADMITIDOS:\n        return Rechazo(TIPO_NO_ADMITIDO)\n", "")],
+     [f"{T179}::test_tipos_admitidos_y_rechazados"]),
+    ("PL03", "plantilla sin valor propuesto",
+     [(PSRV, "        return Rechazo(SIN_VALOR)\n", "        pass\n")],
+     [f"{T179}::test_sin_valor_y_campos_no_admitidos"]),
+    ("PL04", "categoria de la plantilla sin ambito por tipo",
+     [(PSRV, "        if fila is None or not fila[0] or not ambito_compatible(codigo, fila[1]):",
+       "        if fila is None or not fila[0]:")],
+     [f"{T179}::test_categoria_por_ambito_del_tipo_y_cuenta_por_capacidad"]),
+    ("PL05", "tercero de la plantilla sin elegibilidad",
+     [(PSRV, "            return Rechazo(TERCERO_NO_ELEGIBLE)\n", "            pass\n")],
+     [f"{T179}::test_tercero_y_contexto_admitidos_y_entidad_solo_contexto"]),
+    ("PL06", "entidad de la plantilla no limitada a CONTEXTO",
+     [(PSRV, '        if fila is None or not fila[0] or fila[1] != "CONTEXTO":\n            return Rechazo(ENTIDAD_NO_CONTEXTO)',
+       '        if fila is None or not fila[0]:\n            return Rechazo(ENTIDAD_NO_CONTEXTO)')],
+     [f"{T179}::test_tercero_y_contexto_admitidos_y_entidad_solo_contexto"]),
+    ("PL07", "cuenta de la plantilla sin la regla unica",
+     [(PSRV, "        return Rechazo(CUENTA_NO_ELEGIBLE)\n", "        pass\n")],
+     [f"{T179}::test_categoria_por_ambito_del_tipo_y_cuenta_por_capacidad"]),
+    ("PL08", "alta sin unicidad de nombre",
+     [(PSRV, "    otra = _repetida(sesion, v[\"nombre\"], plantilla_id)\n    if otra is not None:\n        return Rechazo(NOMBRE_REPETIDO, {\"plantilla_id\": otra[\"id\"]})\n    rechazo = _escribir(sesion, lambda: repo.insertar_plantilla",
+       "    rechazo = _escribir(sesion, lambda: repo.insertar_plantilla")],
+     [f"{T179}::test_caso9_nombre_repetido_normalizado_y_reactivacion"]),
+    ("PL09", "reactivacion sin volver a comprobar el nombre",
+     [(PSRV, "    otra = _repetida(sesion, fila[\"nombre\"], plantilla_id)\n    if otra is not None:\n        return Rechazo(NOMBRE_REPETIDO, {\"plantilla_id\": otra[\"id\"]})\n",
+       "")],
+     [f"{T179}::test_caso9_nombre_repetido_normalizado_y_reactivacion"]),
+    ("PL10", "desactivar plantilla sin cascada a sus acciones",
+     [(PSRV, "    accs = repo.acciones_de_plantilla_bloqueadas(sesion, plantilla_id)\n", "    accs = []\n")],
+     [f"{T179}::test_caso10_desactivar_en_cascada_y_reactivar_sin_volver_a_inicio"]),
+    ("PL11", "acciones sin limite de 3",
+     [(PSRV, "    if len(habilitadas) >= LIMITE_ACCIONES:\n        return Rechazo(ACCION_LIMITE_ALCANZADO)\n", "")],
+     [f"{T179}::test_caso8_limite_de_tres_y_una_por_plantilla"]),
+    ("PL12", "dos accesos de la misma plantilla",
+     [(PSRV, "        return Rechazo(ACCION_PLANTILLA_YA_EN_INICIO)\n", "        pass\n")],
+     [f"{T179}::test_caso8_limite_de_tres_y_una_por_plantilla"]),
+    ("PL13", "acceso a una plantilla desactivada",
+     [(PSRV, '    if plantilla is None or not plantilla["enabled"]:\n        return Rechazo(ACCION_PLANTILLA_NO_DISPONIBLE)',
+       '    if plantilla is None:\n        return Rechazo(ACCION_PLANTILLA_NO_DISPONIBLE)')],
+     [f"{T179}::test_accion_sobre_plantilla_desactivada_o_ajena"]),
+    ("PL14", "icono de acceso sin la biblioteca publicada",
+     [(PSRV, "    if not icono_valido(icono_key):\n        return Rechazo(ICONO_ACCION_NO_VALIDO)\n    habilitadas", "    habilitadas")],
+     [f"{T179}::test_accion_icono_nombre_idempotencia"]),
+    ("PL15", "reordenar sin exigir el conjunto completo",
+     [(PSRV, "    if not pedidas or len(set(pedidas)) != len(pedidas) or set(pedidas) != set(persistidas):",
+       "    if not pedidas or len(set(pedidas)) != len(pedidas) or not set(pedidas) <= set(persistidas):")],
+     [f"{T179}::test_reordenar_atomico_y_conjunto_completo"]),
+    ("PL16", "RLS 42501 sin traduccion estable",
+     [(PSRV, '        if exc.sqlstate == "42501":\n            return Rechazo(REFERENCIA_NO_DISPONIBLE)\n', "")],
+     [f"{T179}::test_rls_traducida_a_codigo_estable_si_falta_la_validacion"]),
+    ("PL17", "idempotencia del alta sin comparar el contenido",
+     [(PSRV, "        return Resultado(plantilla=existente, idempotente=True) if igual else Rechazo(IDENTIDAD_REUTILIZADA)",
+       "        return Resultado(plantilla=existente, idempotente=True)")],
+     [f"{T179}::test_mismo_uuid_con_otro_contenido"]),
+    ("PL18", "propuesta aplica una categoria no elegible",
+     [(PPROP, "            if fila is not None and fila[0] and ambito_compatible(tipo, fila[1]):\n                campos[\"categoria\"]",
+       "            if True:\n                campos[\"categoria\"]")],
+     [f"{T179}::test_caso5_categoria_deshabilitada_queda_pendiente_sin_fallback"]),
+    ("PL19", "propuesta aplica una cuenta no elegible",
+     [(PPROP, "            if motivo_cuenta(sesion, p[\"cuenta_default_id\"], tipo, fecha) is None:",
+       "            if True:")],
+     [f"{T179}::test_caso4_cuenta_no_disponible_cae_a_la_capa_siguiente"]),
+    ("PL20", "propuesta con plantilla de otro tipo o desactivada",
+     [(PPROP, '    if plantilla_id is not None and (p is None or not p["enabled"] or p["tipo_hecho_id"] != tipo_id):',
+       "    if plantilla_id is not None and p is None:")],
+     [f"{T179}::test_plantilla_de_otro_tipo_o_desactivada_no_aplica"]),
+    ("PL21", "preferencias sin el contexto que aplica la plantilla",
+     [(PPROP, '        categoria_id if categoria_id is not None else (campos["categoria"] or {}).get("valor"))',
+       "        categoria_id)")],
+     [f"{T179}::test_caso2_solo_categoria_con_cuenta_de_una_preferencia"]),
 ]
 
 

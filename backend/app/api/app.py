@@ -109,7 +109,18 @@
 #     GET  /v1/contextos                lista
 #     POST /v1/contextos                alta (UUID de cliente)
 #     POST /v1/contextos/{id}/editar | desactivar | reactivar
-# Version: 0.15.0
+#
+#   v0.16.0 (F05-03/F05-04 J2 §1.6/§1.9): plantillas, acciones rapidas y
+#   propuesta del registro con la capa plantilla:
+#     GET  /v1/plantillas                       plantillas (con avisos) + acciones
+#     POST /v1/plantillas                       alta (tambien «Guardar como plantilla»)
+#     POST /v1/plantillas/{id}/editar | desactivar | reactivar
+#     POST /v1/acciones-rapidas                 alta
+#     POST /v1/acciones-rapidas/reordenar       conjunto completo, atomico
+#     POST /v1/acciones-rapidas/{id}/editar | desactivar
+#     GET  /v1/registro/propuesta?tipo=&fecha=&plantilla_id=&categoria_id=
+#          &sin_categoria=&tercero_id=&sin_tercero=   (lectura, sin advisory)
+# Version: 0.16.0
 # ============================================================
 
 from __future__ import annotations
@@ -178,6 +189,20 @@ from app.api.dto_maestros import (
     ResultadoComandoContexto,
     ResultadoComandoTercero,
 )
+from app.api.dto_plantillas import (
+    AltaAccion,
+    AltaPlantilla,
+    EditarAccion,
+    EditarPlantilla,
+    EstadoAccion,
+    EstadoPlantilla,
+    ListaPlantillas,
+    PropuestaRegistroTipo,
+    ReordenarAcciones,
+    ResultadoComandoAccion,
+    ResultadoComandoPlantilla,
+    ResultadoReordenarAcciones,
+)
 from app.api.dto_preferencias import (
     AltaPreferencia,
     DesactivarPreferencia,
@@ -198,6 +223,9 @@ from app.api.dto_vs01 import (
 from app.api.ejecucion_gasto_pagado import RechazoIntegracion, registrar_gasto_pagado
 from app.categorias import lecturas as lect_cat
 from app.contextos import lecturas as lect_ctx
+from app.plantillas import lecturas as lect_plt
+from app.plantillas import propuesta as prop_plt
+from app.plantillas import servicio as serv_plt
 from app.contextos import servicio as serv_ctx
 from app.terceros import lecturas as lect_ter
 from app.terceros import servicio as serv_ter
@@ -630,6 +658,88 @@ def create_app(
     def reactivar_contexto(contexto_id: uuid.UUID, c: EstadoContexto):
         return _comando_maestro("contexto_reactivar", lambda s: serv_ctx.reactivar(
             s, contexto_id=contexto_id, row_version=c.row_version), serv_ctx, eh.rechazo_contexto, "contexto")
+
+    # ------------------------------------------------------------ F05-03 J2 §1.6 plantillas y acciones
+    def _comando_plantilla(nombre_op: str, operacion, clave: str) -> dict | JSONResponse:
+        salida = unidad.ejecutar(contexto(), operacion, nombre=f"F05-03 {nombre_op}")
+        if isinstance(salida, serv_plt.Rechazo):
+            status, cuerpo = eh.rechazo_plantilla(salida.codigo, salida.detalle)
+            return JSONResponse(cuerpo, status_code=status)
+        valor = list(salida.acciones) if clave == "acciones" else getattr(salida, clave)
+        return {clave: valor, "idempotente": salida.idempotente, "modificadas": list(salida.modificadas)}
+
+    _RPL = {"response_model": ResultadoComandoPlantilla, "dependencies": [Depends(autorizar)]}
+    _RAC = {"response_model": ResultadoComandoAccion, "dependencies": [Depends(autorizar)]}
+
+    @app.get("/v1/plantillas", response_model=ListaPlantillas, dependencies=[Depends(autorizar)])
+    def plantillas() -> dict:
+        return unidad.ejecutar(contexto(), lambda s: {"plantillas": lect_plt.listar(s, reloj),
+                                                      "acciones": lect_plt.acciones(s)}, nombre="F05-03 plantillas")
+
+    @app.post("/v1/plantillas", **_RPL)
+    def alta_plantilla(c: AltaPlantilla):
+        return _comando_plantilla("plantilla_alta", lambda s: serv_plt.alta(
+            s, plantilla_id=c.id, nombre=c.nombre, tipo_hecho_id=c.tipo_hecho_id, categoria_id=c.categoria_id,
+            tercero_id=c.tercero_id, entidad_id=c.entidad_id, cuenta_default_id=c.cuenta_default_id,
+            presupuestable_default=c.presupuestable_default, reloj=reloj), "plantilla")
+
+    @app.post("/v1/plantillas/{plantilla_id}/editar", **_RPL)
+    def editar_plantilla(plantilla_id: uuid.UUID, c: EditarPlantilla):
+        return _comando_plantilla("plantilla_editar", lambda s: serv_plt.editar(
+            s, plantilla_id=plantilla_id, row_version=c.row_version, nombre=c.nombre, tipo_hecho_id=c.tipo_hecho_id,
+            categoria_id=c.categoria_id, tercero_id=c.tercero_id, entidad_id=c.entidad_id,
+            cuenta_default_id=c.cuenta_default_id, presupuestable_default=c.presupuestable_default,
+            reloj=reloj), "plantilla")
+
+    @app.post("/v1/plantillas/{plantilla_id}/desactivar", **_RPL)
+    def desactivar_plantilla(plantilla_id: uuid.UUID, c: EstadoPlantilla):
+        return _comando_plantilla("plantilla_desactivar", lambda s: serv_plt.desactivar(
+            s, plantilla_id=plantilla_id, row_version=c.row_version), "plantilla")
+
+    @app.post("/v1/plantillas/{plantilla_id}/reactivar", **_RPL)
+    def reactivar_plantilla(plantilla_id: uuid.UUID, c: EstadoPlantilla):
+        return _comando_plantilla("plantilla_reactivar", lambda s: serv_plt.reactivar(
+            s, plantilla_id=plantilla_id, row_version=c.row_version), "plantilla")
+
+    @app.post("/v1/acciones-rapidas", **_RAC)
+    def alta_accion(c: AltaAccion):
+        return _comando_plantilla("accion_alta", lambda s: serv_plt.alta_accion(
+            s, accion_id=c.id, plantilla_id=c.plantilla_registro_id, nombre=c.nombre, icono_key=c.icono_key),
+            "accion")
+
+    # Ruta literal antes de la parametrizada: /reordenar no es un accion_id.
+    @app.post("/v1/acciones-rapidas/reordenar", response_model=ResultadoReordenarAcciones,
+              dependencies=[Depends(autorizar)])
+    def reordenar_acciones(c: ReordenarAcciones):
+        return _comando_plantilla("accion_reordenar", lambda s: serv_plt.reordenar_acciones(
+            s, acciones=[(a.id, a.row_version) for a in c.acciones]), "acciones")
+
+    @app.post("/v1/acciones-rapidas/{accion_id}/editar", **_RAC)
+    def editar_accion(accion_id: uuid.UUID, c: EditarAccion):
+        return _comando_plantilla("accion_editar", lambda s: serv_plt.editar_accion(
+            s, accion_id=accion_id, row_version=c.row_version, nombre=c.nombre, icono_key=c.icono_key), "accion")
+
+    @app.post("/v1/acciones-rapidas/{accion_id}/desactivar", **_RAC)
+    def desactivar_accion(accion_id: uuid.UUID, c: EstadoAccion):
+        return _comando_plantilla("accion_desactivar", lambda s: serv_plt.desactivar_accion(
+            s, accion_id=accion_id, row_version=c.row_version), "accion")
+
+    @app.get("/v1/registro/propuesta", response_model=PropuestaRegistroTipo, dependencies=[Depends(autorizar)])
+    def propuesta_registro(
+        tipo: Literal["GASTO", "INGRESO"] = Query(...), fecha: dt.date = Query(...),
+        plantilla_id: uuid.UUID | None = Query(None), categoria_id: uuid.UUID | None = Query(None),
+        sin_categoria: bool = Query(False), tercero_id: uuid.UUID | None = Query(None),
+        sin_tercero: bool = Query(False),
+    ):
+        salida = unidad.ejecutar(contexto(), lambda s: prop_plt.propuesta_registro(
+            s, tipo=tipo, fecha=fecha, plantilla_id=plantilla_id, categoria_id=categoria_id,
+            sin_categoria=sin_categoria, tercero_id=tercero_id, sin_tercero=sin_tercero),
+            nombre="F05-03 propuesta_registro")
+        if isinstance(salida, str):
+            status, cuerpo = eh.rechazo_integracion(salida)
+            mensaje = MENSAJE_PROPUESTA_NO_ELEGIBLE if tipo == "GASTO" else MENSAJE_PROPUESTA_NO_ELEGIBLE_INGRESO
+            return JSONResponse({**cuerpo, "mensaje": mensaje}, status_code=status)
+        return salida
 
     @app.post(
         "/v1/intenciones/gasto-pagado",

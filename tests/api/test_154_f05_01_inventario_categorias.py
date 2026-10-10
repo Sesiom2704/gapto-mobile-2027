@@ -196,7 +196,19 @@
 #       categorial del registro (RegistroGastoScreen, SelectorCategorias,
 #       domain/categoria, api/cliente); reutiliza SelectorCategorias sin
 #       modificarlo y sus imports de cliente.ts no cambian.
-# Version: 0.11.0
+#
+#   v0.12.0 (F05-03/F05-04 J2 §1.6/§1.10; F05 §45.4 R3 «test_154 se amplia
+#   de forma aditiva con la clase PLANTILLA y el uso de C-a»): SOLO altas,
+#   ninguna regla ni entrada previa cambia.
+#   - Clase nueva PLANTILLA: el paquete backend/app/plantillas/ usa
+#     `categoria_id` como valor PROPUESTO por una plantilla (writer bajo el
+#     advisory PLANTILLAS; elegibilidad por ambito del tipo sin lock, C-a por
+#     ambito) y como capa de la propuesta del registro (lectura; la categoria
+#     EXPLICITA pasa por la guarda C-a con FOR SHARE, como §43.4). No consume
+#     hecho_efectos.categoria_id ni escribe el catalogo.
+#   - backend/app/plantillas/ entra en FRONTERA (I3 admite PLANTILLA).
+#   - EXCLUIDOS: el arnes mutantes_f05_j2j3.py (los mutantes son texto).
+# Version: 0.12.0
 # ============================================================
 
 from __future__ import annotations
@@ -213,7 +225,8 @@ if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
 APP = BACKEND / "app"
-FRONTERA = ("backend/app/api/", "backend/app/categorias/", "backend/app/magnitudes/", "backend/app/preferencias/")
+FRONTERA = ("backend/app/api/", "backend/app/categorias/", "backend/app/magnitudes/", "backend/app/preferencias/",
+            "backend/app/plantillas/")
 TOKEN = "categoria_id"
 
 # ------------------------------------------------------------------ registro
@@ -292,6 +305,21 @@ REGISTRO: dict[tuple[str, str], tuple[str, str, str]] = {
         "PREFERENCIA", "resolver por campo", "lectura de preferencias; no consume hecho_efectos"),
     **{("backend/app/preferencias/servicio.py", n): ("PREFERENCIA", f"F05-02 {n}", "writer de preferencias bajo advisory")
        for n in ("<modulo>", "_categoria_elegible", "_validar_valores", "_valores", "alta", "editar")},
+    # --- F05-03 J2 §1.6 (PLANTILLA): plantillas de registro y capa plantilla de la propuesta
+    **{("backend/app/api/app.py", f"create_app.{n}"): ("PLANTILLA", "ruta F05-03", "parametro de la ruta de plantillas")
+       for n in ("alta_plantilla", "editar_plantilla", "propuesta_registro")},
+    **{("backend/app/api/dto_plantillas.py", n): ("R", "DTO F05-03", "declaracion de campo de plantilla")
+       for n in ("_ContenidoPlantilla", "PlantillaNodo")},
+    ("backend/app/plantillas/repositorio.py", "<modulo>"): (
+        "PLANTILLA", "columnas de plantillas_registro", "SELECT y lista de columnas"),
+    ("backend/app/plantillas/repositorio.py", "insertar_plantilla"): (
+        "PLANTILLA", "INSERT plantillas_registro", "unico escritor runtime; tras el advisory PLANTILLAS"),
+    **{("backend/app/plantillas/servicio.py", n): ("PLANTILLA", f"F05-03 {n}", "writer de plantillas bajo advisory")
+       for n in ("<modulo>", "_validar", "alta", "editar")},
+    ("backend/app/plantillas/lecturas.py", "_avisos"): (
+        "PLANTILLA", "lista de plantillas", "aviso de categoria no elegible hoy; solo lectura"),
+    ("backend/app/plantillas/propuesta.py", "propuesta_registro"): (
+        "PLANTILLA", "GET /v1/registro/propuesta", "capa plantilla; categoria explicita por la guarda C-a (lectura)"),
     # --- motor F04 (certificado, no se modifica)
     ("backend/app/core/modelos_efectos.py", "DatosEfecto"): ("R", "modelo", "campo del DTO interno"),
     ("backend/app/core/modelos_devolucion.py", "DatosDevolucion"): ("R", "modelo", "campo del DTO interno"),
@@ -341,7 +369,7 @@ REGISTRO: dict[tuple[str, str], tuple[str, str, str]] = {
     ("backend/app/repositories/previsiones_repository.py", "<modulo>"): ("R", "tipos SQL", "mapa de columnas"),
 }
 
-CLASES = {"A_FRONTERA", "GUARDA", "A_MOTOR", "B", "P", "R", "CATALOGO", "SEED_DEV", "PREFERENCIA"}
+CLASES = {"A_FRONTERA", "GUARDA", "A_MOTOR", "B", "P", "R", "CATALOGO", "SEED_DEV", "PREFERENCIA", "PLANTILLA"}
 
 #: Servicios del motor que la frontera NO puede referenciar (I3): tienen
 #: caminos A_MOTOR, B o P con categoria. OP-22 es la unica puerta.
@@ -386,6 +414,7 @@ def _rel(p: pathlib.Path) -> str:
 EXCLUIDOS: dict[str, str] = {
     "scripts/dev/mutantes_f05_01.py": "arnes de mutacion F05-01 (D-181): los mutantes son texto",
     "scripts/dev/mutantes_f05_02.py": "arnes de mutacion F05-02 (D-181): los mutantes son texto",
+    "scripts/dev/mutantes_f05_j2j3.py": "arnes de mutacion F05-03/F05-04 J2J3 (D-181): los mutantes son texto",
 }
 
 
@@ -469,7 +498,7 @@ def test_i2_clases_validas_y_justificadas():
 def test_i3_frontera_solo_r_guarda_o_a_frontera():
     for (ruta, qual), (clase, _, _) in REGISTRO.items():
         if ruta.startswith(FRONTERA):
-            assert clase in {"R", "GUARDA", "A_FRONTERA", "CATALOGO", "PREFERENCIA"}, (ruta, qual, clase)
+            assert clase in {"R", "GUARDA", "A_FRONTERA", "CATALOGO", "PREFERENCIA", "PLANTILLA"}, (ruta, qual, clase)
 
 
 def test_i3_frontera_no_referencia_servicios_con_caminos_a_b_o_p():
