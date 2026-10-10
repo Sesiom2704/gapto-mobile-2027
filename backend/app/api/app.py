@@ -99,7 +99,17 @@
 #   inyecta el reloj de la fecha funcional del owner (por defecto, el del
 #   sistema en UTC) en el registro (FECHA_FUTURA) y en los writers y la lista
 #   de preferencias (elegibilidad de cuenta «hoy»).
-# Version: 0.14.0
+#
+#   v0.15.0 (F05-03/F05-04 J2 §1.3/§1.4/§1.9): rutas /v1 internas de los
+#   maestros del registro, cada comando en UNA transaccion de la UdT:
+#     GET  /v1/terceros                 lista (activos e inactivos, `usos`)
+#     GET  /v1/terceros/candidatos?nombre=   posibles duplicados (C06)
+#     POST /v1/terceros                 alta (UUID de cliente)
+#     POST /v1/terceros/{id}/editar | desactivar | reactivar
+#     GET  /v1/contextos                lista
+#     POST /v1/contextos                alta (UUID de cliente)
+#     POST /v1/contextos/{id}/editar | desactivar | reactivar
+# Version: 0.15.0
 # ============================================================
 
 from __future__ import annotations
@@ -156,6 +166,18 @@ from app.api.dto_magnitudes import (
     ResultadoComandoMagnitud,
     RetirarAsociacion,
 )
+from app.api.dto_maestros import (
+    AltaContexto,
+    AltaTercero,
+    EditarContexto,
+    EditarTercero,
+    EstadoContexto,
+    EstadoTercero,
+    ListaContextos,
+    ListaTerceros,
+    ResultadoComandoContexto,
+    ResultadoComandoTercero,
+)
 from app.api.dto_preferencias import (
     AltaPreferencia,
     DesactivarPreferencia,
@@ -175,6 +197,10 @@ from app.api.dto_vs01 import (
 )
 from app.api.ejecucion_gasto_pagado import RechazoIntegracion, registrar_gasto_pagado
 from app.categorias import lecturas as lect_cat
+from app.contextos import lecturas as lect_ctx
+from app.contextos import servicio as serv_ctx
+from app.terceros import lecturas as lect_ter
+from app.terceros import servicio as serv_ter
 from app.comun import elegibilidad_cuentas as eleg
 from app.comun.fecha_funcional import Reloj, reloj_sistema
 from app.categorias import servicio as serv_cat
@@ -536,6 +562,74 @@ def create_app(
     def reactivar_preferencia(preferencia_id: uuid.UUID, c: ReactivarPreferencia):
         return _comando_preferencia("reactivar", lambda s: serv_pref.reactivar(
             s, preferencia_id=preferencia_id, row_version=c.row_version))
+
+    # ------------------------------------------------------------ F05-04 J2 §1.3/§1.4 maestros
+    def _comando_maestro(nombre_op: str, operacion, modulo, traducir, clave: str) -> dict | JSONResponse:
+        salida = unidad.ejecutar(contexto(), operacion, nombre=f"F05-04 {nombre_op}")
+        if isinstance(salida, modulo.Rechazo):
+            status, cuerpo = traducir(salida.codigo, salida.detalle)
+            return JSONResponse(cuerpo, status_code=status)
+        return {clave: getattr(salida, clave), "idempotente": salida.idempotente,
+                "modificadas": list(salida.modificadas)}
+
+    _RT = {"response_model": ResultadoComandoTercero, "dependencies": [Depends(autorizar)]}
+    _RC = {"response_model": ResultadoComandoContexto, "dependencies": [Depends(autorizar)]}
+
+    @app.get("/v1/terceros", response_model=ListaTerceros, dependencies=[Depends(autorizar)])
+    def terceros() -> dict:
+        return {"terceros": unidad.ejecutar(contexto(), lect_ter.listar, nombre="F05-04 terceros")}
+
+    @app.get("/v1/terceros/candidatos", response_model=ListaTerceros, dependencies=[Depends(autorizar)])
+    def candidatos_tercero(nombre: str = Query(..., max_length=160)) -> dict:
+        return {"terceros": unidad.ejecutar(contexto(), lambda s: lect_ter.candidatos(s, nombre),
+                                            nombre="F05-04 candidatos_tercero")}
+
+    @app.post("/v1/terceros", **_RT)
+    def alta_tercero(c: AltaTercero):
+        return _comando_maestro("tercero_alta", lambda s: serv_ter.alta(
+            s, tercero_id=c.id, nombre=c.nombre, naturaleza=c.naturaleza), serv_ter, eh.rechazo_tercero, "tercero")
+
+    @app.post("/v1/terceros/{tercero_id}/editar", **_RT)
+    def editar_tercero(tercero_id: uuid.UUID, c: EditarTercero):
+        return _comando_maestro("tercero_editar", lambda s: serv_ter.editar(
+            s, tercero_id=tercero_id, row_version=c.row_version, nombre=c.nombre, naturaleza=c.naturaleza),
+            serv_ter, eh.rechazo_tercero, "tercero")
+
+    @app.post("/v1/terceros/{tercero_id}/desactivar", **_RT)
+    def desactivar_tercero(tercero_id: uuid.UUID, c: EstadoTercero):
+        return _comando_maestro("tercero_desactivar", lambda s: serv_ter.desactivar(
+            s, tercero_id=tercero_id, row_version=c.row_version), serv_ter, eh.rechazo_tercero, "tercero")
+
+    @app.post("/v1/terceros/{tercero_id}/reactivar", **_RT)
+    def reactivar_tercero(tercero_id: uuid.UUID, c: EstadoTercero):
+        return _comando_maestro("tercero_reactivar", lambda s: serv_ter.reactivar(
+            s, tercero_id=tercero_id, row_version=c.row_version), serv_ter, eh.rechazo_tercero, "tercero")
+
+    @app.get("/v1/contextos", response_model=ListaContextos, dependencies=[Depends(autorizar)])
+    def contextos() -> dict:
+        return {"contextos": unidad.ejecutar(contexto(), lect_ctx.listar, nombre="F05-04 contextos")}
+
+    @app.post("/v1/contextos", **_RC)
+    def alta_contexto(c: AltaContexto):
+        return _comando_maestro("contexto_alta", lambda s: serv_ctx.alta(
+            s, contexto_id=c.id, nombre=c.nombre, tipo_contexto=c.tipo_contexto, fecha_inicio=c.fecha_inicio,
+            fecha_fin=c.fecha_fin), serv_ctx, eh.rechazo_contexto, "contexto")
+
+    @app.post("/v1/contextos/{contexto_id}/editar", **_RC)
+    def editar_contexto(contexto_id: uuid.UUID, c: EditarContexto):
+        return _comando_maestro("contexto_editar", lambda s: serv_ctx.editar(
+            s, contexto_id=contexto_id, row_version=c.row_version, nombre=c.nombre, tipo_contexto=c.tipo_contexto,
+            fecha_inicio=c.fecha_inicio, fecha_fin=c.fecha_fin), serv_ctx, eh.rechazo_contexto, "contexto")
+
+    @app.post("/v1/contextos/{contexto_id}/desactivar", **_RC)
+    def desactivar_contexto(contexto_id: uuid.UUID, c: EstadoContexto):
+        return _comando_maestro("contexto_desactivar", lambda s: serv_ctx.desactivar(
+            s, contexto_id=contexto_id, row_version=c.row_version), serv_ctx, eh.rechazo_contexto, "contexto")
+
+    @app.post("/v1/contextos/{contexto_id}/reactivar", **_RC)
+    def reactivar_contexto(contexto_id: uuid.UUID, c: EstadoContexto):
+        return _comando_maestro("contexto_reactivar", lambda s: serv_ctx.reactivar(
+            s, contexto_id=contexto_id, row_version=c.row_version), serv_ctx, eh.rechazo_contexto, "contexto")
 
     @app.post(
         "/v1/intenciones/gasto-pagado",

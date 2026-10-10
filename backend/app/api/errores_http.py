@@ -74,7 +74,12 @@
 #   v0.11.0 (F05-03/F05-04 J2 §1.2; F05-D032 C6): rechazo de integracion
 #   FECHA_FUTURA (422, dato de entrada respecto del «hoy» del owner; el
 #   mensaje nombra el campo fecha_hecho, como el 422 de forma).
-# Version: 0.11.0
+#
+#   v0.12.0 (F05-03/F05-04 J2 §1.3/§1.4): `rechazo_tercero` y
+#   `rechazo_contexto` traducen los writers de maestros: *_NO_ENCONTRADO
+#   (404), VERSION_DESFASADA e IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION (409),
+#   TERCERO_NATURALEZA_NO_ADMITIDA (409), ENTRADA_INVALIDA (422).
+# Version: 0.12.0
 # ============================================================
 
 from __future__ import annotations
@@ -251,6 +256,32 @@ _RECHAZOS_PREFERENCIA: dict[str, tuple[int, str]] = {
     "IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION": (409, "Este registro ya existe con otros datos. No se ha guardado nada nuevo."),
     "ENTRADA_INVALIDA": (422, "Revisa los datos."),
 }
+
+
+_RECHAZOS_TERCERO: dict[str, tuple[int, str]] = {
+    "TERCERO_NO_ENCONTRADO": (404, "No encontrado."),
+    "TERCERO_NATURALEZA_NO_ADMITIDA": (
+        409, "Este tercero tiene datos de persona: su naturaleza debe seguir siendo «Persona»."),
+    "VERSION_DESFASADA": (409, "El tercero ha cambiado desde que lo abriste. Vuelve a cargarlo."),
+    "IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION": (409, "Este registro ya existe con otros datos. No se ha guardado nada nuevo."),
+    "ENTRADA_INVALIDA": (422, "Revisa los datos."),
+}
+_RECHAZOS_CONTEXTO: dict[str, tuple[int, str]] = {
+    "CONTEXTO_NO_ENCONTRADO": (404, "No encontrado."),
+    "VERSION_DESFASADA": (409, "El contexto ha cambiado desde que lo abriste. Vuelve a cargarlo."),
+    "IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION": (409, "Este registro ya existe con otros datos. No se ha guardado nada nuevo."),
+    "ENTRADA_INVALIDA": (422, "Revisa los datos."),
+}
+
+
+def rechazo_tercero(codigo: str, detalle: dict | None = None) -> tuple[int, dict]:
+    status, mensaje = _RECHAZOS_TERCERO[codigo]
+    return status, {"codigo": codigo, "mensaje": mensaje, "reintentable": False}
+
+
+def rechazo_contexto(codigo: str, detalle: dict | None = None) -> tuple[int, dict]:
+    status, mensaje = _RECHAZOS_CONTEXTO[codigo]
+    return status, {"codigo": codigo, "mensaje": mensaje, "reintentable": False}
 
 
 def rechazo_preferencia(codigo: str, detalle: dict | None = None) -> tuple[int, dict]:

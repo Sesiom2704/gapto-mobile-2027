@@ -22,6 +22,11 @@
 #   No ejecutar en paralelo con otro arnes ni con la suite sobre el mismo arbol.
 # Version: 0.1.0 (F05-03/F05-04 J2 §1.1: EL01..EL08)
 # Version: 0.2.0 (F05-03/F05-04 J2 §1.2: FF01..FF05, fecha funcional del owner)
+# Version: 0.3.0 (F05-03/F05-04 J2 §1.3/§1.4: TE01..TE07 terceros, CX01..CX03
+#   contextos. Equivalentes documentados: `existe_entidad` en el alta de
+#   contexto (la PK fisica de entidades da el mismo
+#   IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION) y el filtro tipo CONTEXTO del
+#   bloqueo (la lectura posterior ya filtra))
 # ============================================================
 
 from __future__ import annotations
@@ -42,6 +47,11 @@ T174 = "tests/api/test_174_f05_03_elegibilidad_cuentas.py"
 ELEG = "backend/app/comun/elegibilidad_cuentas.py"
 EJEC = "backend/app/api/ejecucion_gasto_pagado.py"
 RES = "backend/app/preferencias/resolver.py"
+T177 = "tests/api/test_177_f05_04_terceros.py"
+T178 = "tests/api/test_178_f05_04_contextos.py"
+TSERV = "backend/app/terceros/servicio.py"
+TLECT = "backend/app/terceros/lecturas.py"
+CSERV = "backend/app/contextos/servicio.py"
 T176 = "tests/api/test_176_f05_03_fecha_funcional.py"
 FF = "backend/app/comun/fecha_funcional.py"
 PSERV = "backend/app/preferencias/servicio.py"
@@ -94,6 +104,42 @@ MUTANTES = [
      [(PSERV, '        sesion, hoy_owner(sesion, reloj), operacion_de_tipo(sesion, v["tipo_hecho_id"])',
        '        sesion, hoy_owner(sesion), operacion_de_tipo(sesion, v["tipo_hecho_id"])')],
      [f"{T176}::test_preferencias_evaluan_la_cuenta_con_hoy_owner"]),
+    # --- §1.3 terceros (C2, R5)
+    ("TE01", "alta de tercero sin el advisory TERCEROS",
+     [(TSERV, "    repo.tomar_advisory(sesion)\n    visible = _validos(nombre, naturaleza)\n    if isinstance(visible, Rechazo):\n        return visible\n    existente",
+       "    visible = _validos(nombre, naturaleza)\n    if isinstance(visible, Rechazo):\n        return visible\n    existente")],
+     [f"{T177}::test_el_writer_toma_el_advisory_terceros"]),
+    ("TE02", "alta de tercero idempotente con otro contenido",
+     [(TSERV, "        return Resultado(tercero=existente, idempotente=True) if igual else Rechazo(IDENTIDAD_REUTILIZADA)",
+       "        return Resultado(tercero=existente, idempotente=True)")],
+     [f"{T177}::test_mismo_uuid_con_otro_contenido"]),
+    ("TE03", "tercero sin control de row_version",
+     [(TSERV, '    if fila["row_version"] != row_version:\n        return Rechazo(VERSION_DESFASADA)\n', "")],
+     [f"{T177}::test_editar_desactivar_reactivar_con_version_y_auditoria"]),
+    ("TE04", "PK de otro owner sin traduccion por identidad",
+     [(TSERV, '_CONSTRAINTS = {"pk_terceros": IDENTIDAD_REUTILIZADA}', "_CONSTRAINTS = {}")],
+     [f"{T177}::test_uuid_de_otro_owner_sin_efectos"]),
+    ("TE05", "trigger de naturaleza sin traduccion por firma",
+     [(TSERV, "        return NATURALEZA_NO_ADMITIDA\n", "        return None\n")],
+     [f"{T177}::test_naturaleza_contra_tercero_personas_traducida_por_firma"]),
+    ("TE06", "candidatos sin los inactivos",
+     [(TLECT, '    return [x for x in _todos(sesion) if normalizar(x["nombre"]) == clave]',
+       '    return [x for x in _todos(sesion) if normalizar(x["nombre"]) == clave and x["enabled"]]')],
+     [f"{T177}::test_candidatos_por_normalizacion_incluidos_inactivos_y_homonimos_validos"]),
+    ("TE07", "tercero sin limite de longitud del nombre",
+     [(TSERV, "LONGITUD_MAXIMA = 160", "LONGITUD_MAXIMA = 1000")],
+     [f"{T177}::test_longitud_del_nombre_es_regla_de_dominio_sin_intentar_escribir"]),
+    # --- §1.4 contextos (C2, R5)
+    ("CX01", "alta de contexto sin el advisory CONTEXTOS",
+     [(CSERV, "    repo.tomar_advisory(sesion)\n    visible = _validos(nombre, tipo_contexto, fecha_inicio, fecha_fin)",
+       "    visible = _validos(nombre, tipo_contexto, fecha_inicio, fecha_fin)")],
+     [f"{T178}::test_advisory_contextos_y_nunca_inversiones"]),
+    ("CX02", "contexto con fechas invertidas",
+     [(CSERV, "    if desde is not None and hasta is not None and hasta < desde:\n        return Rechazo(ENTRADA_INVALIDA)\n", "")],
+     [f"{T178}::test_entrada_invalida"]),
+    ("CX03", "contexto sin control de row_version",
+     [(CSERV, '    if fila["row_version"] != row_version:\n        return Rechazo(VERSION_DESFASADA)\n', "")],
+     [f"{T178}::test_editar_desactivar_reactivar"]),
 ]
 
 
