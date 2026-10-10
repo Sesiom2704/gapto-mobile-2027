@@ -18,7 +18,12 @@
 #   v0.4.0 (F05-01 S7-MAG (F05-D020)): helpers de fixtures y lectura de
 #   magnitudes y asociaciones compartidos por test_162..164 (crear como
 #   gapto_owner, estado persistido de las asociaciones, auditorias S7-MAG).
-# Version: 0.4.0
+#   v0.5.0 (F05-03/F05-04 J2 §1.0; F05-D032 C1): `crear_cuenta` crea las
+#   capacidades EXPLICITAS de la cuenta sintetica en la misma transaccion
+#   (por defecto, las de su tipo segun scripts/dev/capacidades_sinteticas.py;
+#   `capacidades=()` crea una cuenta sin capacidades). Admite tipo y
+#   naturaleza en el alta.
+# Version: 0.5.0
 # ============================================================
 
 from __future__ import annotations
@@ -33,6 +38,11 @@ import psycopg
 RAIZ_BACKEND = pathlib.Path(__file__).resolve().parents[2] / "backend"
 if str(RAIZ_BACKEND) not in sys.path:
     sys.path.insert(0, str(RAIZ_BACKEND))
+SCRIPTS_DEV = pathlib.Path(__file__).resolve().parents[2] / "scripts" / "dev"
+if str(SCRIPTS_DEV) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DEV))
+
+from capacidades_sinteticas import capacidades_de  # noqa: E402
 
 TOKEN = "token-desarrollo-tests-vs01-000000"
 
@@ -86,8 +96,11 @@ def crear_actor_tercero(owner: uuid.UUID) -> uuid.UUID:
     return actor
 
 
-def crear_cuenta(owner: uuid.UUID, participaciones: list[tuple[uuid.UUID, int]], moneda: str = "EUR") -> uuid.UUID:
-    """Cuenta + participaciones en UNA transaccion: la suma 100 % se valida al COMMIT."""
+def crear_cuenta(owner: uuid.UUID, participaciones: list[tuple[uuid.UUID, int]], moneda: str = "EUR", *,
+                 tipo: str = "CORRIENTE", naturaleza: str = "ACTIVO",
+                 capacidades: tuple[str, ...] | None = None) -> uuid.UUID:
+    """Cuenta + capacidades + participaciones en UNA transaccion: la suma
+    100 % se valida al COMMIT. Sin `capacidades`, las de su tipo (C1)."""
     cuenta = uuid.uuid4()
     with psycopg.connect(dsn()) as c:
         with c.transaction():
@@ -97,8 +110,11 @@ def crear_cuenta(owner: uuid.UUID, participaciones: list[tuple[uuid.UUID, int]],
             cur.execute(
                 "INSERT INTO gapto.cuentas (id, owner_user_id, nombre, tipo, naturaleza, moneda, "
                 "computa_liquidez, computa_patrimonio, permite_negativo) VALUES "
-                "(%s, %s, %s, 'CORRIENTE', 'ACTIVO', %s, true, true, false)",
-                (cuenta, owner, f"Cuenta {moneda} sintetica", moneda))
+                "(%s, %s, %s, %s, %s, %s, true, true, false)",
+                (cuenta, owner, f"Cuenta {moneda} sintetica", tipo, naturaleza, moneda))
+            for capacidad in (capacidades_de(tipo) if capacidades is None else capacidades):
+                cur.execute("INSERT INTO gapto.cuenta_capacidades (cuenta_id, capacidad_codigo) VALUES (%s, %s)",
+                            (cuenta, capacidad))
             for actor, pct in participaciones:
                 cur.execute(
                     "INSERT INTO gapto.cuenta_participaciones (cuenta_id, actor_id, porcentaje, vigente_desde) "

@@ -33,7 +33,15 @@
 #   tercero), no elegible sin descender (mas especifica por categoria) y
 #   «Todos los gastos» frente a otro tipo. Nuevos: tipo + tercero consumido
 #   solo con ese tercero y fila sin tipo ignorada.
-# Version: 0.2.0
+#
+#   v0.3.0 (F05-03/F05-04 J2 §1.1; F05-D031 E1/A10, F05 §46.4 R1, F05-D032
+#   C1; decision OPCION A del STOP 1, tabla «tests adaptados»): la
+#   elegibilidad es por capacidad. Caso «pasivo» conservado con el motivo
+#   nuevo (PASIVO sin PAGAR_GASTO -> no elegible); nuevos «sin capacidad» y
+#   «ledger posterior»; positivo «CREDITO con PAGAR_GASTO es elegible». La
+#   regresion de cuentas_pago tiene como oraculo la regla R1 literal (capacidad,
+#   EUR, ledger, cierre, habilitada) en lugar del SQL con naturaleza ACTIVO.
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
@@ -260,16 +268,33 @@ def test_no_elegible_no_desciende_a_la_siguiente_preferencia(t):
     assert ph.resolver(owner, cat)["cuenta"] is None
 
 
-@pytest.mark.parametrize("motivo", ["otra_moneda", "pasivo", "deshabilitada", "cerrada_en_fecha"])
+@pytest.mark.parametrize("motivo", ["otra_moneda", "pasivo", "deshabilitada", "cerrada_en_fecha", "sin_capacidad",
+                                    "ledger_posterior"])
 def test_cuenta_no_elegible_se_ignora_sin_error(t, motivo):
     owner, actor, _ = t
     _dos_cuentas(owner, actor)
-    kw = {"otra_moneda": {"moneda": "USD"}, "pasivo": {"naturaleza": "PASIVO"},
-          "deshabilitada": {"enabled": False}, "cerrada_en_fecha": {"fecha_cierre": ph.FECHA}}[motivo]
+    # R1/C1: «pasivo» = PASIVO SIN PAGAR_GASTO (con la capacidad es elegible, ver el positivo).
+    kw = {"otra_moneda": {"moneda": "USD"}, "pasivo": {"naturaleza": "PASIVO", "capacidades": ("TRANSFERIR_ENTRADA",)},
+          "deshabilitada": {"enabled": False}, "cerrada_en_fecha": {"fecha_cierre": ph.FECHA},
+          "sin_capacidad": {"capacidades": ()}, "ledger_posterior": {}}[motivo]
     mala = ph.cuenta(owner, actor, **kw)
+    if motivo == "ledger_posterior":
+        h.como_owner(owner, "UPDATE gapto.cuentas SET saldo_apertura=0, fecha_inicio_ledger=%s WHERE id=%s",
+                     (ph.FECHA + dt.timedelta(days=1), mala))
     ph.insertar_sql(owner, cuenta=mala, presupuestable=False)
     p = ph.resolver(owner, None)
     assert p["cuenta"] is None and ph.valor(p, "presupuestable") is False
+
+
+def test_credito_con_pagar_gasto_es_elegible(t):
+    """R2/E1: una cuenta de credito (PASIVO) con PAGAR_GASTO es elegible para
+    «Pagado con»: la preferencia hacia ella se propone."""
+    owner, actor, _ = t
+    _dos_cuentas(owner, actor)
+    credito = ph.cuenta(owner, actor, naturaleza="PASIVO")
+    pid = ph.insertar_sql(owner, cuenta=credito)
+    p = ph.resolver(owner, None)
+    assert ph.valor(p, "cuenta") == credito and ph.origen(p, "cuenta") == (PREF, pid)
 
 
 def test_cuenta_con_cierre_posterior_tampoco_es_elegible(t):
@@ -414,8 +439,9 @@ def test_endpoint_propuesta_exige_fecha(t):
 
 # ------------------------------------------------------------------ regresion cuentas_pago
 def test_regresion_cuentas_pago_tras_la_extraccion(t):
-    """La regla extraida conserva el comportamiento de cuentas_pago: mismas
-    cuentas (incluida otra moneda), mismo orden, misma propuesta."""
+    """cuentas_pago aplica la regla UNICA R1 para GASTO (J2 §1.1; E1, C1):
+    mismas cuentas y mismo orden que la regla literal, misma propuesta. Antes
+    el oraculo era el SQL con naturaleza = 'ACTIVO' y sin moneda."""
     owner, actor, cli = t
     otro = h.crear_actor_tercero(owner)
     a = ph.cuenta(owner, actor, nombre="Zeta")
@@ -424,16 +450,29 @@ def test_regresion_cuentas_pago_tras_la_extraccion(t):
     comp = h.crear_cuenta(owner, [(actor, 50), (otro, 50)])
     ph.cuenta(owner, actor, enabled=False)
     ph.cuenta(owner, actor, fecha_cierre=ph.FECHA)
-    ph.cuenta(owner, actor, naturaleza="PASIVO")
+    pasivo_sin = ph.cuenta(owner, actor, naturaleza="PASIVO", capacidades=("TRANSFERIR_ENTRADA",))
+    credito = ph.cuenta(owner, actor, naturaleza="PASIVO", nombre="Tarjeta credito")
+    sin_capacidad = ph.cuenta(owner, actor, capacidades=())
+    con_ledger = ph.cuenta(owner, actor, nombre="Con ledger")
+    ledger_posterior = ph.cuenta(owner, actor, nombre="Ledger posterior")
+    h.como_owner(owner, "UPDATE gapto.cuentas SET saldo_apertura=0, fecha_inicio_ledger=%s WHERE id=%s",
+                 (ph.FECHA, con_ledger))
+    h.como_owner(owner, "UPDATE gapto.cuentas SET saldo_apertura=0, fecha_inicio_ledger=%s WHERE id=%s",
+                 (ph.FECHA + dt.timedelta(days=1), ledger_posterior))
     tardia = ph.cuenta(owner, actor, fecha_cierre=ph.FECHA + dt.timedelta(days=1))
-    # La consulta literal previa a la extraccion (lecturas_vs01 v0.2.0).
-    esperado = h.leer(owner, "SELECT id FROM gapto.cuentas WHERE enabled AND (fecha_cierre IS NULL OR "
-                             "fecha_cierre > %s) AND naturaleza = 'ACTIVO' ORDER BY orden, nombre, id", (ph.FECHA,))
+    # Regla R1 literal para GASTO.
+    esperado = h.leer(owner, "SELECT c.id FROM gapto.cuentas c WHERE c.enabled AND (c.fecha_cierre IS NULL OR "
+                             "c.fecha_cierre > %s) AND (c.fecha_inicio_ledger IS NULL OR c.fecha_inicio_ledger <= %s) "
+                             "AND c.moneda = 'EUR' AND EXISTS (SELECT 1 FROM gapto.cuenta_capacidades k "
+                             "WHERE k.cuenta_id = c.id AND k.capacidad_codigo = 'PAGAR_GASTO') "
+                             "ORDER BY c.orden, c.nombre, c.id", (ph.FECHA, ph.FECHA))
     r = cli.get(f"/v1/vs01/cuentas-pago?fecha={ph.FECHA.isoformat()}", headers=h.AUTH)
     assert r.status_code == 200, r.text
     filas = r.json()["cuentas"]
     assert [f["cuenta_id"] for f in filas] == [str(e[0]) for e in esperado]
-    assert {str(a), str(b), str(usd), str(comp)} <= {f["cuenta_id"] for f in filas}
-    assert str(tardia) not in {f["cuenta_id"] for f in filas}  # deshabilitada (cierre exige enabled=false)
+    ids = {f["cuenta_id"] for f in filas}
+    assert {str(a), str(b), str(comp), str(credito), str(con_ledger)} <= ids
+    for fuera in (usd, pasivo_sin, sin_capacidad, ledger_posterior, tardia):
+        assert str(fuera) not in ids  # tardia: deshabilitada (cierre exige enabled=false)
     prop = {f["cuenta_id"]: f["propuesta_financiacion"] for f in filas}
     assert prop[str(a)] == "SELF_100" and prop[str(comp)] == "NO_DETERMINADA"

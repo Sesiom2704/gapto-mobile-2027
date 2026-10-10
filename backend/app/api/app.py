@@ -87,7 +87,14 @@
 #     GET /v1/preferencias anade `tipos` (ids de GASTO e INGRESO, campo
 #       aditivo) para que el cliente envie siempre el tipo (E3: no hay
 #       preferencia sin tipo).
-# Version: 0.12.0
+#
+#   v0.13.0 (F05-03/F05-04 J2 §1.1/§1.9; F05 §46.4 R1; F05-D032 C1):
+#     GET /v1/cuentas/elegibles?operacion=&fecha= -> cuentas elegibles por
+#       operacion (GASTO | INGRESO | TRANSFERENCIA_ORIGEN |
+#       TRANSFERENCIA_DESTINO) y fecha, con la regla unica de
+#       comun/elegibilidad_cuentas.py. /v1/vs01/cuentas-pago usa la misma
+#       regla (GASTO).
+# Version: 0.13.0
 # ============================================================
 
 from __future__ import annotations
@@ -157,11 +164,13 @@ from app.api.dto_preferencias import (
 from app.api.dto_vs01 import (
     GastoMesVs01,
     IntencionGastoPagado,
+    ListaCuentasElegibles,
     ListaCuentasPago,
     ResultadoGastoPagado,
 )
 from app.api.ejecucion_gasto_pagado import RechazoIntegracion, registrar_gasto_pagado
 from app.categorias import lecturas as lect_cat
+from app.comun import elegibilidad_cuentas as eleg
 from app.categorias import servicio as serv_cat
 from app.magnitudes import lecturas as lect_mag
 from app.magnitudes import servicio as serv_mag
@@ -278,6 +287,15 @@ def create_app(
         # la propuesta de financiacion se evalua en esa fecha (§16.4).
         filas = unidad.ejecutar(contexto(), lambda s: lect.cuentas_pago(s, fecha), nombre="VS01 cuentas_pago")
         return {"cuentas": filas}
+
+    @app.get("/v1/cuentas/elegibles", response_model=ListaCuentasElegibles, dependencies=[Depends(autorizar)])
+    def cuentas_elegibles_operacion(
+        operacion: Literal["GASTO", "INGRESO", "TRANSFERENCIA_ORIGEN", "TRANSFERENCIA_DESTINO"] = Query(...),
+        fecha: dt.date = Query(...),
+    ) -> dict:
+        filas = unidad.ejecutar(contexto(), lambda s: eleg.cuentas_elegibles(s, operacion, fecha),
+                                nombre="F05-03 cuentas_elegibles")
+        return {"operacion": operacion, "cuentas": [{"cuenta_id": f[0], "nombre": f[1], "moneda": f[2]} for f in filas]}
 
     @app.get("/v1/vs01/gasto-mes", response_model=GastoMesVs01, dependencies=[Depends(autorizar)])
     def gasto_mes(mes: str = Query(...)) -> dict:

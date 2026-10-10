@@ -18,7 +18,11 @@
 #   una fila o un alta SIN tipo lo pide expresamente con tipo_hecho_id=None.
 #   `resolver` admite el tercero del contexto (E2). `entidad` crea una entidad
 #   PROPIEDAD sintetica (dimension diferida vigente).
-# Version: 0.2.0
+#
+#   v0.3.0 (F05-03/F05-04 J2 §1.0/§1.1; F05-D032 C1): `cuenta` crea la cuenta
+#   con su tipo (PASIVO -> CREDITO) y sus capacidades explicitas (por defecto,
+#   las del tipo; `capacidades` las fija, p. ej. una PASIVO sin PAGAR_GASTO).
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
@@ -40,12 +44,13 @@ def tenant():
 
 
 def cuenta(owner: uuid.UUID, actor: uuid.UUID, *, moneda: str = "EUR", enabled: bool = True,
-           fecha_cierre: dt.date | None = None, naturaleza: str = "ACTIVO", nombre: str | None = None) -> uuid.UUID:
-    cid = h.crear_cuenta(owner, [(actor, 100)], moneda=moneda)
+           fecha_cierre: dt.date | None = None, naturaleza: str = "ACTIVO", nombre: str | None = None,
+           capacidades: tuple[str, ...] | None = None) -> uuid.UUID:
+    tipo = "CORRIENTE" if naturaleza == "ACTIVO" else "CREDITO"
+    cid = h.crear_cuenta(owner, [(actor, 100)], moneda=moneda, tipo=tipo, naturaleza=naturaleza,
+                         capacidades=capacidades)
     if nombre is not None:
         h.como_owner(owner, "UPDATE gapto.cuentas SET nombre=%s WHERE id=%s", (nombre, cid))
-    if naturaleza != "ACTIVO":
-        h.como_owner(owner, "UPDATE gapto.cuentas SET naturaleza=%s, tipo='CREDITO' WHERE id=%s", (naturaleza, cid))
     if not enabled or fecha_cierre is not None:
         h.como_owner(owner, "UPDATE gapto.cuentas SET enabled=false, fecha_cierre=%s WHERE id=%s", (fecha_cierre, cid))
     return cid

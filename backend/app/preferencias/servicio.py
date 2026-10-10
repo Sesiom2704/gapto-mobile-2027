@@ -52,7 +52,12 @@
 #     con antes/despues (motivo «F05-03 CONVERTIR_SIN_TIPO»). Nunca toca filas
 #     con tipo. Repetirla no hace nada (idempotente por estado). Cualquier
 #     fallo propaga y la UdT revierte TODA la conversion.
-# Version: 0.2.0
+#
+#   v0.3.0 (F05-03/F05-04 J2 §1.1; F05 §46.4 R1; F05-D032 C1): la cuenta
+#   propuesta se valida con el contrato unico de elegibilidad para la
+#   operacion del TIPO de la preferencia (INGRESO -> RECIBIR_INGRESO; GASTO y
+#   el resto -> PAGAR_GASTO). Ninguna preferencia relaja la matriz.
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
@@ -72,6 +77,7 @@ from app.preferencias.resolver import (
     dimension_diferida,
     especificidad,
     pueden_coincidir,
+    operacion_de_tipo,
     sin_tipo,
     tipo_hecho_registro,
 )
@@ -208,7 +214,7 @@ def _validar_valores(sesion: SesionMotor, v: dict[str, Any]) -> Rechazo | None:
     if v["tercero_id"] is not None and not _tercero_elegible(sesion, v["tercero_id"]):
         return Rechazo(TERCERO_NO_ELEGIBLE)
     if v["cuenta_default_id"] is not None and v["cuenta_default_id"] not in cuentas_elegibles_registro(
-        sesion, _hoy(sesion)
+        sesion, _hoy(sesion), operacion_de_tipo(sesion, v["tipo_hecho_id"])
     ):
         return Rechazo(CUENTA_NO_ELEGIBLE)
     return None

@@ -73,7 +73,15 @@
 #   se retira el estado de compatibilidad derivado de la ausencia del campo.
 #   Sin cambios de logica: CATEGORIA pasa por C-a y C07; SIN_CATEGORIA
 #   persiste NULL sin invocar la guarda.
-# Version: 0.5.0
+#
+#   v0.6.0 (F05-03/F05-04 J2 §1.1; F05 §46.4 R1/R2, §46.5 E1; F05-D032 C1):
+#   la relectura de la cuenta bajo el lock (paso 3) usa el contrato unico
+#   comun/elegibilidad_cuentas.py (operacion GASTO: PAGAR_GASTO, EUR, ledger,
+#   cierre, habilitada) en la fecha del pago. Se retira el filtro ACTIVO: una
+#   cuenta PASIVO con PAGAR_GASTO paga el gasto (un efecto GASTO y un
+#   movimiento en la cuenta de credito; ningun efecto de deuda). Motivo MONEDA
+#   -> MONEDA_INVALIDA (como antes); cualquier otro -> CUENTA_DESCONOCIDA.
+# Version: 0.6.0
 # ============================================================
 
 from __future__ import annotations
@@ -84,6 +92,7 @@ from app.api.captura_magnitudes import validar_magnitudes
 from app.api.dto_vs01 import IntencionGastoPagado
 from app.api.elegibilidad_categoria import validar_seleccion_categoria
 from app.api.traductor_gasto_pagado import componer, leer_actor_self, participacion_self_100
+from app.comun.elegibilidad_cuentas import MONEDA, motivo_cuenta
 from app.core.contexto import ContextoOperacion
 from app.core.errores import CodigoError, ErrorMotor
 from app.core.modelos_compuesto import DatosHechoCompuesto, ResultadoHechoCompuesto
@@ -118,21 +127,17 @@ def bloquear_cuenta(sesion: SesionMotor, cuenta_id) -> None:
 
 
 def _validar_cuenta_nueva(sesion: SesionMotor, intencion: IntencionGastoPagado) -> None:
-    fila = sesion.uno(
-        "SELECT moneda, enabled, naturaleza, fecha_cierre FROM gapto.cuentas WHERE id = %s",
-        (intencion.cuenta_id,),
-    )
-    if fila is None or not fila[1] or fila[2] != "ACTIVO" or (
-        fila[3] is not None and fila[3] <= intencion.fecha_hecho
-    ):
-        raise ErrorMotor(CodigoError.CUENTA_DESCONOCIDA, "La cuenta no existe o no esta disponible.")
-    if fila[0] != intencion.moneda:
+    """Regla unica R1 (GASTO) bajo el lock de la cuenta, en la fecha del pago."""
+    motivo = motivo_cuenta(sesion, intencion.cuenta_id, "GASTO", intencion.fecha_hecho)
+    if motivo == MONEDA:
         # VS-01 solo cubre hecho y cuenta en la misma moneda; multidivisa no se
         # simula ni se convierte (D-169/D-170 quedan para slices posteriores).
         raise ErrorMotor(
             CodigoError.MONEDA_INVALIDA,
             "VS-01 solo admite pagar desde una cuenta en la misma moneda del gasto.",
         )
+    if motivo is not None:
+        raise ErrorMotor(CodigoError.CUENTA_DESCONOCIDA, "La cuenta no existe o no esta disponible.")
 
 
 def registrar_gasto_pagado(

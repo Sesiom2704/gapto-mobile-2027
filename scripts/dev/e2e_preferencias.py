@@ -54,6 +54,9 @@
 #                nombres legibles en lo visible, id de ejecucion fuera de los
 #                textos, base recreada exigida (error claro, sin sufijos), hechos
 #                por UUID y escenario AJ de Ajustes › Preferencias.
+#          0.4.0 (F05-03/F05-04 J2 §1.0; F05-D032 C1): las cuentas sinteticas
+#                del escenario nacen con sus capacidades explicitas (CORRIENTE,
+#                capacidades_sinteticas.py).
 # ============================================================
 
 from __future__ import annotations
@@ -73,6 +76,9 @@ import uuid
 
 import psycopg
 from playwright.sync_api import sync_playwright
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from capacidades_sinteticas import capacidades_de  # noqa: E402
 
 ETIQUETA = "EVIDENCIA WEB/VIEWPORT — NO EVIDENCIA iOS"
 SERVIDOR_WEB = pathlib.Path(__file__).resolve().parent / "servir_web_e2e.py"
@@ -127,6 +133,9 @@ def crear_cuenta(dsn: str, owner: str, nombre: str) -> str:
         cur.execute("INSERT INTO gapto.cuentas (id, owner_user_id, nombre, tipo, naturaleza, moneda, computa_liquidez, "
                     "computa_patrimonio, permite_negativo) VALUES (%s, %s, %s, 'CORRIENTE', 'ACTIVO', 'EUR', true, true, false)",
                     (cid, owner, nombre))
+        for capacidad in capacidades_de("CORRIENTE"):
+            cur.execute("INSERT INTO gapto.cuenta_capacidades (cuenta_id, capacidad_codigo) VALUES (%s, %s)",
+                        (cid, capacidad))
         cur.execute("INSERT INTO gapto.cuenta_participaciones (cuenta_id, actor_id, porcentaje, vigente_desde) "
                     "VALUES (%s, %s, 100, DATE '2026-01-01')", (cid, actor))
     return cid

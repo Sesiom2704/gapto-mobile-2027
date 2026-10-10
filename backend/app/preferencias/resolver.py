@@ -58,7 +58,13 @@
 #   - `resolver` recibe el tercero del contexto (None = sin tercero) y
 #     `cuentas_elegibles_registro` sigue siendo la regla de elegibilidad
 #     de cuenta del registro.
-# Version: 0.2.0
+#
+#   v0.3.0 (F05-03/F05-04 J2 §1.1; F05 §46.4 R1, §46.5 E1; F05-D032 C1): la
+#   elegibilidad de la cuenta propuesta es el contrato unico
+#   comun/elegibilidad_cuentas.py con la operacion del TIPO del registro:
+#   INGRESO -> RECIBIR_INGRESO; GASTO (y cualquier otro tipo, que solo existe
+#   por API y no tiene registro) -> PAGAR_GASTO. EUR lo exige la propia regla.
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
@@ -67,7 +73,7 @@ import datetime as dt
 import uuid
 from typing import Any
 
-from app.api.lecturas_vs01 import cuentas_elegibles
+from app.comun.elegibilidad_cuentas import cuentas_elegibles
 from app.core.unidad_trabajo import SesionMotor
 from app.preferencias import repositorio as repo
 
@@ -143,8 +149,17 @@ def tipo_hecho_registro(sesion: SesionMotor, codigo: str = TIPO_HECHO_REGISTRO) 
     return fila[0]
 
 
-def cuentas_elegibles_registro(sesion: SesionMotor, fecha: dt.date) -> list[uuid.UUID]:
-    return [f[0] for f in cuentas_elegibles(sesion, fecha) if f[2] == MONEDA_REGISTRO]
+def operacion_de_tipo(sesion: SesionMotor, tipo_hecho_id: uuid.UUID | None) -> str:
+    """Operacion de elegibilidad (R1) del tipo de un registro o preferencia."""
+    fila = None if tipo_hecho_id is None else sesion.uno(
+        "SELECT codigo FROM gapto.tipos_hecho WHERE id = %s", (tipo_hecho_id,))
+    return "INGRESO" if fila is not None and fila[0] == "INGRESO" else "GASTO"
+
+
+def cuentas_elegibles_registro(sesion: SesionMotor, fecha: dt.date, operacion: str = "GASTO") -> list[uuid.UUID]:
+    """Ids de las cuentas elegibles (R1) para `operacion` en `fecha`; la regla
+    ya exige EUR (MONEDA_REGISTRO)."""
+    return [f[0] for f in cuentas_elegibles(sesion, operacion, fecha) if f[2] == MONEDA_REGISTRO]
 
 
 def _propuesta(valor: Any, capa: str, preferencia_id: uuid.UUID | None = None) -> dict[str, Any]:
@@ -166,7 +181,7 @@ def resolver(
     cuenta unica (E01)."""
     contexto = {"tipo_hecho_id": tipo_hecho_id, "categoria_id": categoria_id, "tercero_id": tercero_id}
     candidatas = [p for p in repo.habilitadas(sesion) if consumible(p) and coincide(p, contexto)]
-    elegibles = cuentas_elegibles_registro(sesion, fecha)
+    elegibles = cuentas_elegibles_registro(sesion, fecha, operacion_de_tipo(sesion, tipo_hecho_id))
 
     cuenta = None
     g = ganadora(candidatas, CAMPOS["cuenta"])

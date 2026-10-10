@@ -57,6 +57,11 @@
 #     python scripts/dev/bootstrap_dev_db.py --seed-categorias \
 #       --dev-dsn "host=127.0.0.1 port=5434 dbname=gapto2027_dev user=<rol>" \
 #       --api-url http://192.168.1.10:8027
+# Version: 0.8.0  -- F05-03/F05-04 J2 §1.0 (F05-D032 C1): la cuenta CORRIENTE
+#                   sintetica nace con sus capacidades EXPLICITAS (PAGAR_GASTO,
+#                   RECIBIR_INGRESO, TRANSFERIR_SALIDA, TRANSFERIR_ENTRADA; matriz de
+#                   datos de capacidades_sinteticas.py). Ningun servicio infiere
+#                   capacidades; sin ellas la cuenta no es elegible.
 # Version: 0.7.0  -- D-201 (B1 0350): HEAD_AUTORIZADO_ENVDEV pasa de "0340" a
 #                   "0350" tras la evidencia de 0350 (replica local D-189, Neon
 #                   test, PASS_BASE_CLEANROOM_F03_0002_0350, mutation gate 8/8 y
@@ -109,6 +114,9 @@ import uuid
 
 import psycopg
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from capacidades_sinteticas import capacidades_de  # noqa: E402
 
 BASE_DEV = "gapto2027_dev"
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
@@ -200,6 +208,11 @@ def _fixtures(dsn_dev: str) -> None:
                 "true, true, false)",
                 (CUENTA, OWNER),
             )
+            for capacidad in capacidades_de("CORRIENTE"):
+                cur.execute(
+                    "INSERT INTO gapto.cuenta_capacidades (cuenta_id, capacidad_codigo) VALUES (%s, %s)",
+                    (CUENTA, capacidad),
+                )
             cur.execute(
                 "INSERT INTO gapto.cuenta_participaciones (id, cuenta_id, actor_id, porcentaje, "
                 "vigente_desde) VALUES (%s, %s, %s, 100, DATE '2026-01-01')",

@@ -33,7 +33,14 @@
 #   alta tipo + tercero admitida, alta sin tipo -> PREFERENCIA_SIN_TIPO,
 #   tercero ajeno/inexistente/desactivado -> PREFERENCIA_TERCERO_NO_ELEGIBLE;
 #   la lista informa los ids de GASTO e INGRESO (`tipos`).
-# Version: 0.3.0
+#
+#   v0.4.0 (F05-03/F05-04 J2 §1.1; F05-D031 E1/A10, F05 §46.4 R1, F05-D032
+#   C1; decision OPCION A del STOP 1, tabla «tests adaptados»): caso «pasivo»
+#   de test_cuenta_no_elegible conservado con el motivo nuevo (PASIVO sin
+#   PAGAR_GASTO); nuevo «sin_capacidad»; positivo: preferencia hacia una
+#   cuenta de credito con PAGAR_GASTO admitida; una preferencia de INGRESO
+#   exige RECIBIR_INGRESO.
+# Version: 0.4.0
 # ============================================================
 
 from __future__ import annotations
@@ -216,7 +223,8 @@ def test_prioridad_100_explicita_admitida(t):
     assert ph.alta(cli, cuenta_default_id=a, prioridad=100)[1].status_code == 200
 
 
-@pytest.mark.parametrize("motivo", ["deshabilitada", "cerrada", "pasivo", "otra_moneda", "ajena", "inexistente"])
+@pytest.mark.parametrize("motivo", ["deshabilitada", "cerrada", "pasivo", "otra_moneda", "ajena", "inexistente",
+                                    "sin_capacidad"])
 def test_cuenta_no_elegible(t, motivo):
     owner, actor, cli, _, _ = t
     if motivo == "ajena":
@@ -225,12 +233,35 @@ def test_cuenta_no_elegible(t, motivo):
     elif motivo == "inexistente":
         c = uuid.uuid4()
     else:
+        # R1/C1: «pasivo» = PASIVO SIN PAGAR_GASTO.
         kw = {"deshabilitada": {"enabled": False}, "cerrada": {"fecha_cierre": ph.FECHA},
-              "pasivo": {"naturaleza": "PASIVO"}, "otra_moneda": {"moneda": "USD"}}[motivo]
+              "pasivo": {"naturaleza": "PASIVO", "capacidades": ("TRANSFERIR_ENTRADA",)}, "otra_moneda": {"moneda": "USD"},
+              "sin_capacidad": {"capacidades": ()}}[motivo]
         c = ph.cuenta(owner, actor, **kw)
     pid, r = ph.alta(cli, cuenta_default_id=c)
     assert r.status_code == 409 and _codigo(r) == "PREFERENCIA_CUENTA_NO_ELEGIBLE"
     _sin_escritura(owner, pid)
+
+
+def test_preferencia_hacia_credito_con_pagar_gasto_admitida(t):
+    """R2/E1: una cuenta de credito (PASIVO) con PAGAR_GASTO es elegible."""
+    owner, actor, cli, _, _ = t
+    credito = ph.cuenta(owner, actor, naturaleza="PASIVO")
+    pid, r = ph.alta(cli, cuenta_default_id=credito)
+    assert r.status_code == 200, r.text
+    assert ph.fila(owner, pid)["cuenta_default_id"] == credito
+
+
+def test_preferencia_de_ingreso_exige_recibir_ingreso(t):
+    """R1: la cuenta de una preferencia de INGRESO necesita RECIBIR_INGRESO;
+    una de credito (solo PAGAR_GASTO y TRANSFERIR_ENTRADA) no vale."""
+    owner, actor, cli, a, _ = t
+    ingreso = h.leer(owner, "SELECT id FROM gapto.tipos_hecho WHERE codigo='INGRESO'")[0][0]
+    credito = ph.cuenta(owner, actor, naturaleza="PASIVO")
+    pid, r = ph.alta(cli, tipo_hecho_id=ingreso, cuenta_default_id=credito)
+    assert r.status_code == 409 and _codigo(r) == "PREFERENCIA_CUENTA_NO_ELEGIBLE"
+    _sin_escritura(owner, pid)
+    assert ph.alta(cli, tipo_hecho_id=ingreso, cuenta_default_id=a)[1].status_code == 200
 
 
 @pytest.mark.parametrize("motivo", ["deshabilitada", "ajena", "inexistente"])

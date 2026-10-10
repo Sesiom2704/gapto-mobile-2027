@@ -31,7 +31,11 @@
 #   esa naturaleza) y el tercero del contexto (None = sin tercero), que pasa
 #   a ser dimension operativa del resolver. `tipos_registro` expone los ids de
 #   GASTO e INGRESO para que el cliente envie siempre el tipo (E3).
-# Version: 0.3.0
+#
+#   v0.4.0 (F05-03/F05-04 J2 §1.1; F05 §46.4 R1; F05-D032 C1):
+#   `cuenta_disponible_hoy` se evalua con el contrato unico de elegibilidad
+#   para la operacion del TIPO de cada preferencia.
+# Version: 0.4.0
 # ============================================================
 
 from __future__ import annotations
@@ -43,7 +47,7 @@ from typing import Any
 from app.api.elegibilidad_categoria import validar_seleccion_categoria
 from app.core.unidad_trabajo import SesionMotor
 from app.preferencias import repositorio as repo
-from app.preferencias.resolver import cuentas_elegibles_registro, resolver, tipo_hecho_registro
+from app.preferencias.resolver import cuentas_elegibles_registro, operacion_de_tipo, resolver, tipo_hecho_registro
 
 #: Naturaleza del registro VS-01 en la matriz C02 de la guarda C-a (por defecto).
 NATURALEZA_REGISTRO = "GASTO"
@@ -57,12 +61,13 @@ def tipos_registro(sesion: SesionMotor) -> dict[str, uuid.UUID]:
 
 def listar(sesion: SesionMotor) -> list[dict[str, Any]]:
     hoy = sesion.uno("SELECT current_date")[0]
-    elegibles = set(cuentas_elegibles_registro(sesion, hoy))
+    elegibles = {op: set(cuentas_elegibles_registro(sesion, hoy, op)) for op in ("GASTO", "INGRESO")}
     return [
         {
             **p,
             "cuenta_disponible_hoy": (
-                None if p["cuenta_default_id"] is None else p["cuenta_default_id"] in elegibles
+                None if p["cuenta_default_id"] is None
+                else p["cuenta_default_id"] in elegibles[operacion_de_tipo(sesion, p["tipo_hecho_id"])]
             ),
         }
         for p in repo.todas(sesion)

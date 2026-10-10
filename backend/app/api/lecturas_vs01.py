@@ -24,7 +24,13 @@
 #   (habilitada, ACTIVO, abierta en `fecha`; mismo orden). La reutilizan
 #   cuentas_pago y el resolver/writers de preferencias (que anaden la misma
 #   moneda del registro, REG-01 campo 5). Regresion: test_167.
-# Version: 0.3.0
+#   v0.4.0 (F05-03/F05-04 J2 §1.1; F05 §46.4 R1, §46.5 E1; F05-D032 C1): se
+#   RETIRA la regla local `cuentas_elegibles` (filtro naturaleza = 'ACTIVO').
+#   cuentas_pago usa el contrato unico comun/elegibilidad_cuentas.py con la
+#   operacion GASTO (capacidad PAGAR_GASTO, EUR, ledger, cierre, habilitada):
+#   una cuenta PASIVO con PAGAR_GASTO aparece; una sin capacidad o en otra
+#   moneda no.
+# Version: 0.4.0
 # ============================================================
 
 from __future__ import annotations
@@ -33,6 +39,7 @@ import datetime as dt
 import decimal
 
 from app.api.traductor_gasto_pagado import leer_actor_self, participacion_self_100
+from app.comun.elegibilidad_cuentas import cuentas_elegibles
 from app.core.unidad_trabajo import SesionMotor
 
 CONTRATO_GASTO_MES = "PROVISIONAL_VS01_CANDIDATO_F08"
@@ -82,28 +89,13 @@ def gasto_mes(sesion: SesionMotor, mes: str) -> dict:
     }
 
 
-def cuentas_elegibles(sesion: SesionMotor, fecha: dt.date) -> list[tuple]:
-    """Regla UNICA de elegibilidad de cuentas de pago en `fecha` (fecha comun
-    de gasto y pago, §16.3): habilitada, ACTIVO y abierta en esa fecha.
-    Devuelve [(id, nombre, moneda)] en orden estable (orden, nombre, id). No
-    filtra moneda: la misma moneda la exige quien compone el registro."""
-    with sesion.conexion.cursor() as cur:
-        cur.execute(
-            "SELECT id, nombre, moneda FROM gapto.cuentas "
-            "WHERE enabled AND (fecha_cierre IS NULL OR fecha_cierre > %s) "
-            "AND naturaleza = 'ACTIVO' ORDER BY orden, nombre, id",
-            (fecha,),
-        )
-        return cur.fetchall()
-
-
 def cuentas_pago(sesion: SesionMotor, fecha: dt.date) -> list[dict]:
-    """Cuentas habilitadas, ACTIVO y abiertas en `fecha` (fecha comun de gasto
-    y pago, §16.3), con la PROPUESTA de financiacion para esa fecha (§16.4):
-    SELF_100 solo si hay una unica participacion vigente, del self, al 100 %.
-    Es una propuesta para mostrar; la ejecucion la revalida bajo lock."""
+    """Cuentas elegibles para GASTO en `fecha` (fecha comun de gasto y pago,
+    §16.3; regla unica R1), con la PROPUESTA de financiacion para esa fecha
+    (§16.4): SELF_100 solo si hay una unica participacion vigente, del self,
+    al 100 %. Es una propuesta para mostrar; la ejecucion la revalida bajo lock."""
     actor = leer_actor_self(sesion)
-    filas = cuentas_elegibles(sesion, fecha)
+    filas = cuentas_elegibles(sesion, "GASTO", fecha)
     return [
         {
             "cuenta_id": f[0],

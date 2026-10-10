@@ -28,7 +28,13 @@
 #   v0.2.0 (F05-02 B3, AJ-B2-05): alta aditiva. La propuesta con categoria no
 #   elegible conserva codigo y status pero lleva un mensaje de lectura (sin
 #   «no se ha guardado nada»); el rechazo de la intencion conserva el suyo.
-# Version: 0.2.0
+#   v0.3.0 (F05-03/F05-04 J2 §1.1; F05-D031 E1/A10, F05 §46.4 R1 «EUR en v1
+#   al ofrecer las opciones», F05-D032 C1; decision OPCION A del STOP 1,
+#   tabla «tests adaptados»): una unica cuenta USD ya NO aparece en
+#   cuentas-pago (antes se listaba); el resto del caso no cambia. Positivo
+#   nuevo: una cuenta de credito con PAGAR_GASTO aparece en cuentas-pago y se
+#   propone como cuenta unica.
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
@@ -312,7 +318,7 @@ def test_unica_cuenta_en_otra_moneda_sin_propuesta_de_cuenta():
     owner, actor, cli = ph.tenant()
     usd = ph.cuenta(owner, actor, moneda="USD")
     cuentas = cli.get("/v1/vs01/cuentas-pago", params={"fecha": ph.FECHA.isoformat()}, headers=h.AUTH).json()["cuentas"]
-    assert [c["cuenta_id"] for c in cuentas] == [str(usd)]  # el antiguo fallback del cliente la habria propuesto
+    assert cuentas == []  # R1: EUR al ofrecer las opciones (antes la listaba)
     assert _propuesta(cli, None) == {"cuenta": None, "presupuestable": None}
     # Ni siquiera una preferencia hacia ella la propone (no elegible para EUR).
     ph.insertar_sql(owner, cuenta=usd)
@@ -321,3 +327,14 @@ def test_unica_cuenta_en_otra_moneda_sin_propuesta_de_cuenta():
     eur = ph.cuenta(owner, actor)
     assert _propuesta(cli, None)["cuenta"] == {"valor": str(eur), "origen": {"capa": "DEFAULT_GENERAL",
                                                                              "preferencia_id": None}}
+
+
+def test_credito_con_pagar_gasto_en_cuentas_pago_y_propuesta():
+    """R2/E1 (J2 §1.1): una cuenta de credito (PASIVO) con PAGAR_GASTO se
+    ofrece en «Pagado con» y, siendo la unica elegible, se propone."""
+    owner, actor, cli = ph.tenant()
+    credito = ph.cuenta(owner, actor, naturaleza="PASIVO")
+    cuentas = cli.get("/v1/vs01/cuentas-pago", params={"fecha": ph.FECHA.isoformat()}, headers=h.AUTH).json()["cuentas"]
+    assert [c["cuenta_id"] for c in cuentas] == [str(credito)]
+    assert _propuesta(cli, None)["cuenta"] == {"valor": str(credito), "origen": {"capa": "DEFAULT_GENERAL",
+                                                                                "preferencia_id": None}}

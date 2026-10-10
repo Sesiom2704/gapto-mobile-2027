@@ -38,7 +38,15 @@
 #   usa el tercero; reactivacion de filas sin tipo; conversion C4 sin
 #   advisory, que toca filas con tipo o sin auditoria. Preflight con test_173.
 #   El «29/29» de §1.5 pasa a ser el conteo vigente PF01..PF38.
-# Version: 0.3.0
+#
+#   v0.4.0 (F05-03/F05-04 J2 §1.1; F05-D031 E1/A10, F05 §46.4 R1, F05-D032
+#   C1; decision OPCION A del STOP 1): PF25 se reescribe sobre la guarda de
+#   capacidad del contrato unico (comun/elegibilidad_cuentas.py): la linea
+#   protegida `naturaleza = 'ACTIVO'` ya no existe; mismo discriminante
+#   (regresion de cuentas_pago, ahora con oraculo R1). PF19 pasa a la guarda
+#   MONEDA de la regla unica: el filtro EUR del resolver queda como defensa
+#   redundante (un mutante sobre el seria equivalente).
+# Version: 0.4.0
 # ============================================================
 
 from __future__ import annotations
@@ -62,7 +70,7 @@ T173 = "tests/api/test_173_f05_03_conversion_preferencias.py"
 REPO = "backend/app/preferencias/repositorio.py"
 SERV = "backend/app/preferencias/servicio.py"
 RES = "backend/app/preferencias/resolver.py"
-LECT = "backend/app/api/lecturas_vs01.py"
+ELEG = "backend/app/comun/elegibilidad_cuentas.py"
 
 CABEZA = (
     '    clave = max((especificidad(p), p["prioridad"]) for p in propias)\n'
@@ -159,9 +167,8 @@ MUTANTES = [
      [(SERV, '    if v["cuenta_default_id"] is not None and v["cuenta_default_id"] not in cuentas_elegibles_registro(',
        '    if False and v["cuenta_default_id"] not in cuentas_elegibles_registro(')],
      [T168]),
-    ("PF19", "elegibilidad sin la misma moneda del registro (D1)",
-     [(RES, "    return [f[0] for f in cuentas_elegibles(sesion, fecha) if f[2] == MONEDA_REGISTRO]",
-       "    return [f[0] for f in cuentas_elegibles(sesion, fecha)]")],
+    ("PF19", "elegibilidad sin la misma moneda del registro (D1; guarda MONEDA de la regla unica R1)",
+     [(ELEG, "    if moneda != MONEDA_REGISTRO:\n        return MONEDA\n", "")],
      [T167]),
     ("PF20", "alta sin auditoria",
      [(SERV, '    _auditar(sesion, preferencia_id, "ALTA", None)\n', "")],
@@ -179,9 +186,8 @@ MUTANTES = [
      [(RES, "    return all(p[d] is None or p[d] == contexto[d] for d in DIMENSIONES)",
        "    return all(p[d] is None or contexto[d] is None or p[d] == contexto[d] for d in DIMENSIONES)")],
      [f"{T167}::test_sin_categoria_solo_coinciden_preferencias_de_categoria_nula"]),
-    ("PF25", "extraccion de cuentas_pago que cambia la regla (sin ACTIVO)",
-     [(LECT, "            \"AND naturaleza = 'ACTIVO' ORDER BY orden, nombre, id\",\n",
-       '            "ORDER BY orden, nombre, id",\n')],
+    ("PF25", "regla de cuentas sin la guarda de capacidad (R1/C1)",
+     [(ELEG, "    if not capacidad:\n        return SIN_CAPACIDAD\n", "")],
      [f"{T167}::test_regresion_cuentas_pago_tras_la_extraccion"]),
     ("PF26", "el resolver y el empate consideran las desactivadas",
      [(REPO, '        cur.execute(_SELECT + " AND enabled ORDER BY id")', '        cur.execute(_SELECT + " ORDER BY id")')],

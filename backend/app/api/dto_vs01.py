@@ -54,7 +54,10 @@
 #   categorial es siempre `categoria.estado` (CATEGORIA | SIN_CATEGORIA). La
 #   union discriminada y las reglas de magnitudes de §28.2 no cambian. La
 #   historia NULL existente no se reinterpreta (sin cambios en lecturas ni OP-22).
-# Version: 0.5.0
+#
+#   v0.6.0 (F05-03/F05-04 J2 §1.1; F05 §46.4 R1): DTO de lectura
+#   ListaCuentasElegibles (GET /v1/cuentas/elegibles). La intencion no cambia.
+# Version: 0.6.0
 # ============================================================
 
 from __future__ import annotations
@@ -247,6 +250,19 @@ class CuentaPago(_Estricto):
 
 class ListaCuentasPago(_Estricto):
     cuentas: list[CuentaPago]
+
+
+class CuentaElegible(_Estricto):
+    cuenta_id: uuid.UUID
+    nombre: str
+    moneda: str
+
+
+class ListaCuentasElegibles(_Estricto):
+    """Cuentas elegibles para una operacion del registro (J2 §1.1, R1)."""
+
+    operacion: Literal["GASTO", "INGRESO", "TRANSFERENCIA_ORIGEN", "TRANSFERENCIA_DESTINO"]
+    cuentas: list[CuentaElegible]
 
 
 class GastoMesVs01(_Estricto):
