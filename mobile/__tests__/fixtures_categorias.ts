@@ -8,6 +8,7 @@
 // Versión: 0.3.0 (F05-02 B2): el stub incluye las preferencias de registro: propuesta SIN propuesta y lista vacía por defecto; alta y edición no esperadas. `propuestaUnica(cuenta)` emula al resolver con una única cuenta elegible (DEFAULT_GENERAL): sustituye al antiguo fallback del cliente (AJ-B1-09).
 // Versión: 0.4.0 (F05-02 B3): el stub incluye desactivar y reactivar preferencia (no esperados por defecto).
 // Versión: 0.5.0 (F05-03/F05-04 J2 §1.5; F05 §46.5 E3): la lista de preferencias del stub informa `tipos` (ids de GASTO e INGRESO).
+// Versión: 0.6.0 (F05-03/F05-04 J2 §2): el stub incluye los métodos nuevos del cliente: lecturas vacías por defecto (terceros, contextos, plantillas, cuentas elegibles, propuesta del registro sin valores) y escrituras no esperadas (lanzan).
 // ============================================================
 
 import type { ClienteApi, ListaPreferencias, PropuestaRegistro, Respuesta } from '../src/api/cliente';
@@ -70,6 +71,32 @@ export function clienteCategoriasStub(
     editarPreferencia: noEsperado('editarPreferencia'),
     desactivarPreferencia: noEsperado('desactivarPreferencia'),
     reactivarPreferencia: noEsperado('reactivarPreferencia'),
+    cuentasElegibles: jest.fn(async (operacion: any) => ({ tipo: 'OK', datos: { operacion, cuentas: [] } }) as any),
+    listarTerceros: jest.fn(async () => ({ tipo: 'OK', datos: { terceros: [] } }) as any),
+    candidatosTercero: jest.fn(async () => ({ tipo: 'OK', datos: { terceros: [] } }) as any),
+    altaTercero: noEsperado('altaTercero'),
+    editarTercero: noEsperado('editarTercero'),
+    desactivarTercero: noEsperado('desactivarTercero'),
+    reactivarTercero: noEsperado('reactivarTercero'),
+    listarContextos: jest.fn(async () => ({ tipo: 'OK', datos: { contextos: [] } }) as any),
+    altaContexto: noEsperado('altaContexto'),
+    editarContexto: noEsperado('editarContexto'),
+    desactivarContexto: noEsperado('desactivarContexto'),
+    reactivarContexto: noEsperado('reactivarContexto'),
+    listarPlantillas: jest.fn(async () => ({ tipo: 'OK', datos: { plantillas: [], acciones: [] } }) as any),
+    altaPlantilla: noEsperado('altaPlantilla'),
+    editarPlantilla: noEsperado('editarPlantilla'),
+    desactivarPlantilla: noEsperado('desactivarPlantilla'),
+    reactivarPlantilla: noEsperado('reactivarPlantilla'),
+    altaAccion: noEsperado('altaAccion'),
+    editarAccion: noEsperado('editarAccion'),
+    desactivarAccion: noEsperado('desactivarAccion'),
+    reordenarAcciones: noEsperado('reordenarAcciones'),
+    propuestaRegistro: jest.fn(async (q: any) => ({ tipo: 'OK', datos: { tipo: q.tipo, campos: { categoria: null, tercero: null, contexto: null, cuenta: null, presupuestable: null }, avisos: [] } }) as any),
+    registrarIngresoCobrado: noEsperado('registrarIngresoCobrado'),
+    registrarTransferencia: noEsperado('registrarTransferencia'),
+    categoriasSugeridas: jest.fn(async () => ({ tipo: 'OK', datos: { version: 1, nodos: [] } }) as any),
+    onboardingCategorias: noEsperado('onboardingCategorias'),
   };
 }
 

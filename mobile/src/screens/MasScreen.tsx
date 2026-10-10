@@ -5,6 +5,7 @@
 // Descripción: Territorio «Más» mínimo (decisión D-UI-03 de Moisés): una entrada «Ajustes» que abre las 10 secciones del árbol funcional cerrado de F09 §12.91.1, en ese orden. Solo «Categorías» es operativa; las otras nueve muestran el estado explícito «No disponible» (EstadoDato NO_DISPONIBLE, DS-RULE-39/40), sin datos ficticios y sin ser pulsables. Pantallas de lista: conservan la barra inferior.
 // Versión: 0.1.0 (F05-01 S6-WIRE+UI (este mandato))
 // Versión: 0.2.0 (F05-02 B3, A1; D-B3-01 ratificada por Moisés): «Preferencias financieras» pasa de «No disponible» a navegable y abre Ajustes › Preferencias. La fila conserva la etiqueta del árbol F09 §12.91.1; el título de la pantalla es «Preferencias» (lámina SET-PREF). Las otras ocho secciones siguen «No disponible».
+// Versión: 0.3.0 (F05-03/F05-04 J2 §2.5; láminas REG-DYN / SET-TH / SET-CTX v0.1 S01/S03 y SET-PLT v0.2 S01): «Terceros» y «Contextos» pasan a navegables; «Plantillas» se añade JUNTO a «Preferencias financieras» (mandato §2.5) como fila propia, sin alterar el árbol cerrado de diez secciones. Las otras seis siguen «No disponible».
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -41,7 +42,14 @@ export function MasScreen(p: { onAjustes: () => void }) {
   );
 }
 
-export function AjustesScreen(p: { onAtras: () => void; onCategorias: () => void; onPreferencias: () => void }) {
+export function AjustesScreen(p: {
+  onAtras: () => void;
+  onCategorias: () => void;
+  onPreferencias: () => void;
+  onTerceros?: () => void;
+  onContextos?: () => void;
+  onPlantillas?: () => void;
+}) {
   const { c } = useTema();
   return (
     <View testID="pantalla-ajustes" style={{ flex: 1, backgroundColor: c.background }}>
@@ -51,7 +59,14 @@ export function AjustesScreen(p: { onAtras: () => void; onCategorias: () => void
           sec === 'Categorías' ? (
             <FilaNavegable key={sec} testID="ajustes-categorias" titulo={sec} onPress={p.onCategorias} />
           ) : sec === 'Preferencias financieras' ? (
-            <FilaNavegable key={sec} testID="ajustes-preferencias" titulo={sec} onPress={p.onPreferencias} />
+            <React.Fragment key={sec}>
+              <FilaNavegable testID="ajustes-preferencias" titulo={sec} onPress={p.onPreferencias} />
+              {p.onPlantillas ? <FilaNavegable testID="ajustes-plantillas" titulo="Plantillas" onPress={p.onPlantillas} /> : null}
+            </React.Fragment>
+          ) : sec === 'Terceros' && p.onTerceros ? (
+            <FilaNavegable key={sec} testID="ajustes-terceros" titulo={sec} onPress={p.onTerceros} />
+          ) : sec === 'Contextos' && p.onContextos ? (
+            <FilaNavegable key={sec} testID="ajustes-contextos" titulo={sec} onPress={p.onContextos} />
           ) : (
             <View
               key={sec}

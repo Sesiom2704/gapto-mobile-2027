@@ -10,7 +10,8 @@
 // v0.6.0 (F05-02 B2; F05-D026 §41.3, F05-D027 §42.7): preferencias de registro. Lectura de la propuesta por campo (GET /v1/preferencias/propuesta, por fecha y categoría o «Sin categoría») y de la lista (GET /v1/preferencias); alta y edición (POST, clasificación 'CAMBIO'). Editar envía SIEMPRE el estado completo (E05): el tipo no admite un parche parcial. Sin imports nuevos.
 // v0.7.0 (F05-02 B3; lámina SET-PREF S04, A2 del mandato B3+B4): desactivar y reactivar una preferencia (`desactivarPreferencia(id, row_version)` y `reactivarPreferencia(id, row_version)`) sobre las rutas existentes de B1, con la clasificación 'CAMBIO' vigente. Sin cambios en rutas ni DTO.
 // v0.8.0 (F05-03/F05-04 J2 §1.5; F05 §46.5 E2/E3): GET /v1/preferencias devuelve también `tipos` (ids de GASTO e INGRESO) para enviar SIEMPRE el tipo de la preferencia (se retira la preferencia sin tipo). Sin rutas nuevas.
-// Versión: 0.8.0
+// v0.9.0 (F05-03/F05-04 J2 §1.9/§2): cuentas elegibles por operación, terceros, contextos, plantillas y acciones rápidas, propuesta del registro con la capa plantilla, registro de ingreso cobrado y entre cuentas, y onboarding de categorías. Escrituras de maestros con clasificación 'CAMBIO'; registros con la de escritura (indeterminado = reintentar el MISMO UUID).
+// Versión: 0.9.0
 // ============================================================
 
 import type { Ambito, CategoriaNodo } from '../domain/categoria';
@@ -197,6 +198,173 @@ export interface ResultadoComandoPreferencia {
   modificadas: string[];
 }
 
+// ------------------------------------------------------------------ F05-03/F05-04 J2 (terceros, contextos, plantillas, registro por tipo)
+export type NaturalezaTercero = 'PERSONA' | 'EMPRESA' | 'ORGANISMO' | 'OTRO';
+export type TipoContexto = 'VIAJE' | 'REFORMA' | 'EVENTO' | 'SOCIAL' | 'PROYECTO' | 'OTRO';
+export type OperacionCuenta = 'GASTO' | 'INGRESO' | 'TRANSFERENCIA_ORIGEN' | 'TRANSFERENCIA_DESTINO';
+
+export interface Tercero {
+  id: string;
+  nombre: string;
+  naturaleza: NaturalezaTercero | null;
+  enabled: boolean;
+  row_version: number;
+  usos?: number;
+}
+
+export interface Contexto {
+  id: string;
+  nombre: string;
+  tipo_contexto: TipoContexto;
+  fecha_inicio: string | null;
+  fecha_fin: string | null;
+  enabled: boolean;
+  row_version: number;
+}
+
+export interface ResultadoComandoTercero {
+  tercero: Tercero;
+  idempotente: boolean;
+  modificadas: string[];
+}
+
+export interface ResultadoComandoContexto {
+  contexto: Contexto;
+  idempotente: boolean;
+  modificadas: string[];
+}
+
+export interface ContenidoPlantilla {
+  nombre: string;
+  tipo_hecho_id: string;
+  categoria_id: string | null;
+  tercero_id: string | null;
+  entidad_id: string | null;
+  cuenta_default_id: string | null;
+  presupuestable_default: boolean | null;
+}
+
+export interface AvisoCampo {
+  campo: string;
+  motivo: string;
+}
+
+export interface Plantilla extends ContenidoPlantilla {
+  id: string;
+  enabled: boolean;
+  row_version: number;
+  tipo?: 'GASTO' | 'INGRESO' | null;
+  avisos?: AvisoCampo[];
+}
+
+export interface AccionRapida {
+  id: string;
+  nombre: string;
+  plantilla_registro_id: string;
+  orden: number;
+  icono_key: string | null;
+  enabled: boolean;
+  row_version: number;
+}
+
+export interface ListaPlantillas {
+  plantillas: Plantilla[];
+  acciones: AccionRapida[];
+}
+
+export interface ResultadoComandoPlantilla {
+  plantilla: Plantilla;
+  idempotente: boolean;
+  modificadas: string[];
+}
+
+export interface ResultadoComandoAccion {
+  accion: AccionRapida;
+  idempotente: boolean;
+  modificadas: string[];
+}
+
+export interface OrigenCampoRegistro {
+  capa: 'PLANTILLA' | 'PREFERENCIA' | 'DEFAULT_GENERAL';
+  plantilla_id: string | null;
+  preferencia_id: string | null;
+}
+
+/** Propuesta del registro con la capa plantilla (GET /v1/registro/propuesta). */
+export interface PropuestaRegistroTipo {
+  tipo: 'GASTO' | 'INGRESO';
+  campos: {
+    categoria: { valor: string; origen: OrigenCampoRegistro } | null;
+    tercero: { valor: string; origen: OrigenCampoRegistro } | null;
+    contexto: { valor: string; origen: OrigenCampoRegistro } | null;
+    cuenta: { valor: string; origen: OrigenCampoRegistro } | null;
+    presupuestable: { valor: boolean; origen: OrigenCampoRegistro } | null;
+  };
+  avisos: AvisoCampo[];
+}
+
+export interface ConsultaPropuestaRegistro {
+  tipo: 'GASTO' | 'INGRESO';
+  fecha: string;
+  plantillaId?: string | null;
+  categoriaId?: string | null;
+  sinCategoria?: boolean;
+  terceroId?: string | null;
+  sinTercero?: boolean;
+}
+
+export interface CuentaElegible {
+  cuenta_id: string;
+  nombre: string;
+  moneda: string;
+}
+
+export interface PayloadIngresoCobrado {
+  intencion_id: string;
+  importe: string;
+  moneda: 'EUR';
+  fecha_hecho: string;
+  cuenta_id: string;
+  presupuestable: boolean;
+  atribucion: 'SOLO_MIO' | 'SIN_INDICAR';
+  categoria: PayloadGastoPagado['categoria'];
+  tercero_id?: string | null;
+  contexto_id?: string | null;
+  nota?: string | null;
+}
+
+export interface PayloadTransferencia {
+  intencion_id: string;
+  importe: string;
+  moneda: 'EUR';
+  fecha_hecho: string;
+  cuenta_origen_id: string;
+  cuenta_destino_id: string;
+  nota?: string | null;
+}
+
+export interface ResultadoRegistroTipo {
+  intencion_id: string;
+  hecho_id: string;
+  idempotente: boolean;
+  tipo: 'GASTO' | 'INGRESO' | 'TRANSFERENCIA';
+  importe: string;
+  moneda: string;
+  estado_atribucion: 'COMPLETA' | 'NO_DISPONIBLE' | null;
+  estado_categorial: 'CATEGORIA' | 'SIN_CATEGORIA' | null;
+}
+
+export interface NodoSugerido {
+  ruta: string;
+  nombre: string;
+  nivel: number;
+  padre: string | null;
+  orden: number;
+  ambito: Ambito;
+  presupuestable_default: boolean;
+  icon_key: string;
+}
+
 export type Respuesta<T> =
   | { tipo: 'OK'; datos: T }
   | { tipo: 'RECHAZADO'; codigo: string; mensaje: string; detalle?: Record<string, unknown> }
@@ -257,11 +425,42 @@ export interface ClienteApi {
   editarPreferencia(id: string, c: { row_version: number } & ContenidoPreferencia): Promise<Respuesta<ResultadoComandoPreferencia>>;
   desactivarPreferencia(id: string, row_version: number): Promise<Respuesta<ResultadoComandoPreferencia>>;
   reactivarPreferencia(id: string, row_version: number): Promise<Respuesta<ResultadoComandoPreferencia>>;
+  // F05-03/F05-04 J2
+  cuentasElegibles(operacion: OperacionCuenta, fecha: string): Promise<Respuesta<{ operacion: OperacionCuenta; cuentas: CuentaElegible[] }>>;
+  listarTerceros(): Promise<Respuesta<{ terceros: Tercero[] }>>;
+  candidatosTercero(nombre: string): Promise<Respuesta<{ terceros: Tercero[] }>>;
+  altaTercero(c: { id: string; nombre: string; naturaleza: NaturalezaTercero | null }): Promise<Respuesta<ResultadoComandoTercero>>;
+  editarTercero(id: string, c: { row_version: number; nombre: string; naturaleza: NaturalezaTercero | null }): Promise<Respuesta<ResultadoComandoTercero>>;
+  desactivarTercero(id: string, row_version: number): Promise<Respuesta<ResultadoComandoTercero>>;
+  reactivarTercero(id: string, row_version: number): Promise<Respuesta<ResultadoComandoTercero>>;
+  listarContextos(): Promise<Respuesta<{ contextos: Contexto[] }>>;
+  altaContexto(c: { id: string; nombre: string; tipo_contexto: TipoContexto; fecha_inicio: string | null; fecha_fin: string | null }): Promise<Respuesta<ResultadoComandoContexto>>;
+  editarContexto(id: string, c: { row_version: number; nombre: string; tipo_contexto: TipoContexto; fecha_inicio: string | null; fecha_fin: string | null }): Promise<Respuesta<ResultadoComandoContexto>>;
+  desactivarContexto(id: string, row_version: number): Promise<Respuesta<ResultadoComandoContexto>>;
+  reactivarContexto(id: string, row_version: number): Promise<Respuesta<ResultadoComandoContexto>>;
+  listarPlantillas(): Promise<Respuesta<ListaPlantillas>>;
+  altaPlantilla(c: { id: string } & ContenidoPlantilla): Promise<Respuesta<ResultadoComandoPlantilla>>;
+  editarPlantilla(id: string, c: { row_version: number } & ContenidoPlantilla): Promise<Respuesta<ResultadoComandoPlantilla>>;
+  desactivarPlantilla(id: string, row_version: number): Promise<Respuesta<ResultadoComandoPlantilla>>;
+  reactivarPlantilla(id: string, row_version: number): Promise<Respuesta<ResultadoComandoPlantilla>>;
+  altaAccion(c: { id: string; plantilla_registro_id: string; nombre: string; icono_key: string | null }): Promise<Respuesta<ResultadoComandoAccion>>;
+  editarAccion(id: string, c: { row_version: number; nombre: string; icono_key: string | null }): Promise<Respuesta<ResultadoComandoAccion>>;
+  desactivarAccion(id: string, row_version: number): Promise<Respuesta<ResultadoComandoAccion>>;
+  reordenarAcciones(acciones: { id: string; row_version: number }[]): Promise<Respuesta<{ acciones: AccionRapida[]; idempotente: boolean; modificadas: string[] }>>;
+  propuestaRegistro(q: ConsultaPropuestaRegistro): Promise<Respuesta<PropuestaRegistroTipo>>;
+  registrarIngresoCobrado(p: PayloadIngresoCobrado): Promise<Respuesta<ResultadoRegistroTipo>>;
+  registrarTransferencia(p: PayloadTransferencia): Promise<Respuesta<ResultadoRegistroTipo>>;
+  categoriasSugeridas(): Promise<Respuesta<{ version: number; nodos: NodoSugerido[] }>>;
+  onboardingCategorias(): Promise<Respuesta<{ creadas: number; idempotente: boolean }>>;
 }
 
 const CAT = '/v1/categorias';
 const MAG = '/v1/magnitudes';
 const PREF = '/v1/preferencias';
+const TER = '/v1/terceros';
+const CTX = '/v1/contextos';
+const PLT = '/v1/plantillas';
+const ACC = '/v1/acciones-rapidas';
 const asoc = (cat: string, a?: string) => `${CAT}/${encodeURIComponent(cat)}/magnitudes${a ? `/${encodeURIComponent(a)}` : ''}`;
 const post = (cuerpo: unknown): RequestInit => ({ method: 'POST', body: JSON.stringify(cuerpo) });
 
@@ -330,5 +529,40 @@ export function crearCliente(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): C
     editarPreferencia: (id, c) => llamar(`${PREF}/${encodeURIComponent(id)}/editar`, post(c), 'CAMBIO'),
     desactivarPreferencia: (id, row_version) => llamar(`${PREF}/${encodeURIComponent(id)}/desactivar`, post({ row_version }), 'CAMBIO'),
     reactivarPreferencia: (id, row_version) => llamar(`${PREF}/${encodeURIComponent(id)}/reactivar`, post({ row_version }), 'CAMBIO'),
+    cuentasElegibles: (operacion, fecha) =>
+      llamar(`/v1/cuentas/elegibles?operacion=${encodeURIComponent(operacion)}&fecha=${encodeURIComponent(fecha)}`, { method: 'GET' }, false),
+    listarTerceros: () => llamar(TER, { method: 'GET' }, false),
+    candidatosTercero: (nombre) => llamar(`${TER}/candidatos?nombre=${encodeURIComponent(nombre)}`, { method: 'GET' }, false),
+    altaTercero: (c) => llamar(TER, post(c), 'CAMBIO'),
+    editarTercero: (id, c) => llamar(`${TER}/${encodeURIComponent(id)}/editar`, post(c), 'CAMBIO'),
+    desactivarTercero: (id, row_version) => llamar(`${TER}/${encodeURIComponent(id)}/desactivar`, post({ row_version }), 'CAMBIO'),
+    reactivarTercero: (id, row_version) => llamar(`${TER}/${encodeURIComponent(id)}/reactivar`, post({ row_version }), 'CAMBIO'),
+    listarContextos: () => llamar(CTX, { method: 'GET' }, false),
+    altaContexto: (c) => llamar(CTX, post(c), 'CAMBIO'),
+    editarContexto: (id, c) => llamar(`${CTX}/${encodeURIComponent(id)}/editar`, post(c), 'CAMBIO'),
+    desactivarContexto: (id, row_version) => llamar(`${CTX}/${encodeURIComponent(id)}/desactivar`, post({ row_version }), 'CAMBIO'),
+    reactivarContexto: (id, row_version) => llamar(`${CTX}/${encodeURIComponent(id)}/reactivar`, post({ row_version }), 'CAMBIO'),
+    listarPlantillas: () => llamar(PLT, { method: 'GET' }, false),
+    altaPlantilla: (c) => llamar(PLT, post(c), 'CAMBIO'),
+    editarPlantilla: (id, c) => llamar(`${PLT}/${encodeURIComponent(id)}/editar`, post(c), 'CAMBIO'),
+    desactivarPlantilla: (id, row_version) => llamar(`${PLT}/${encodeURIComponent(id)}/desactivar`, post({ row_version }), 'CAMBIO'),
+    reactivarPlantilla: (id, row_version) => llamar(`${PLT}/${encodeURIComponent(id)}/reactivar`, post({ row_version }), 'CAMBIO'),
+    altaAccion: (c) => llamar(ACC, post(c), 'CAMBIO'),
+    editarAccion: (id, c) => llamar(`${ACC}/${encodeURIComponent(id)}/editar`, post(c), 'CAMBIO'),
+    desactivarAccion: (id, row_version) => llamar(`${ACC}/${encodeURIComponent(id)}/desactivar`, post({ row_version }), 'CAMBIO'),
+    reordenarAcciones: (acciones) => llamar(`${ACC}/reordenar`, post({ acciones }), 'CAMBIO'),
+    propuestaRegistro: (q) => {
+      const ps = new URLSearchParams({ tipo: q.tipo, fecha: q.fecha });
+      if (q.plantillaId) ps.set('plantilla_id', q.plantillaId);
+      if (q.categoriaId) ps.set('categoria_id', q.categoriaId);
+      if (q.sinCategoria) ps.set('sin_categoria', 'true');
+      if (q.terceroId) ps.set('tercero_id', q.terceroId);
+      if (q.sinTercero) ps.set('sin_tercero', 'true');
+      return llamar(`/v1/registro/propuesta?${ps.toString()}`, { method: 'GET' }, false);
+    },
+    registrarIngresoCobrado: (p) => llamar('/v1/intenciones/ingreso-cobrado', post(p), true),
+    registrarTransferencia: (p) => llamar('/v1/intenciones/transferencia', post(p), true),
+    categoriasSugeridas: () => llamar(`${CAT}/sugeridas`, { method: 'GET' }, false),
+    onboardingCategorias: () => llamar(`${CAT}/onboarding`, post({}), 'CAMBIO'),
   };
 }

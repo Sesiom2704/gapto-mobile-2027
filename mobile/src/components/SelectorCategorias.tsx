@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-01 S6-WIRE+UI (este mandato))
 // Versión: 0.2.0 (F05-01 S6-WIRE+UI, correctivo AJ-S6WIREUI-09): el aviso del nivel no seleccionable y el subtítulo de fila solo afirman que las subcategorías se pueden usar si existe algún descendiente elegible (`tieneDescendienteElegible`, naturaleza GASTO del slice); si no, «Puedes entrar para ver sus subcategorías.» y «tiene subcategorías».
 // Versión: 0.3.0 (F05-01 P7 · N3, Moisés D-P7-05, microcopy AJ-S6WIREUI-09): solo las ramas con usables = false. Aviso de nivel «… Sus subcategorías tampoco se pueden elegir ahora. Elige otra categoría o registra sin categoría.» (motivo «Desactivada» y resto de motivos) y subtítulo de fila «sus subcategorías tampoco se pueden usar». Ramas usables = true y lógica `usables` sin cambios.
+// Versión: 0.4.0 (F05-03/F05-04 J2 §2.3/§2.5): prop opcional `naturaleza` (GASTO por defecto: el comportamiento anterior) para el registro y los ajustes de ingresos; `usables` la usa en lugar de GASTO fijo. Sin imports nuevos.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -56,6 +57,8 @@ export function SelectorCategorias(p: {
   onReintentar?: () => void;
   /** Solo REGISTRO: acción deliberada separada del error de carga. */
   onContinuarSinCategoria?: () => void;
+  /** Naturaleza del registro (GASTO por defecto). */
+  naturaleza?: 'GASTO' | 'INGRESO';
   testID?: string;
 }) {
   const { c } = useTema();
@@ -67,8 +70,8 @@ export function SelectorCategorias(p: {
   const filas = useMemo(() => visiblesDe(nivel), [arbol, nivel, p.esVisible]);
   const actual = arbol && nivel ? arbol.porId.get(nivel) ?? null : null;
   const migas = arbol && actual ? [...ancestros(arbol, actual.id), actual] : [];
-  // AJ-S6WIREUI-09: en este slice la naturaleza del registro es siempre GASTO.
-  const usables = (n: CategoriaNodo) => !!arbol && tieneDescendienteElegible(arbol, n, 'GASTO');
+  // AJ-S6WIREUI-09: naturaleza del registro (GASTO salvo que el llamador diga INGRESO; F05-04).
+  const usables = (n: CategoriaNodo) => !!arbol && tieneDescendienteElegible(arbol, n, p.naturaleza ?? 'GASTO');
 
   const tocar = (n: CategoriaNodo) => {
     if (visiblesDe(n.id).length > 0) return setNivel(n.id);

@@ -6,9 +6,10 @@
 // Versión: 0.1.0 (F05-02 B2)
 // Versión: 0.3.0 (F05-03/F05-04 J2 §1.5; F05 §46.5 E2/E3; F05-D032 C4): se retira la preferencia sin tipo. «Todos los gastos» y «Una categoría» llevan SIEMPRE el tipo GASTO (`tipoGasto`, id que informa GET /v1/preferencias): el alta lo envía y las búsquedas del ámbito lo exigen. Una preferencia sin tipo (anterior a la conversión C4) ya no es de ningún ámbito vigente.
 // Versión: 0.2.0 (F05-02 B3; lámina SET-PREF v0.1 S01–S06, D-PREF-01/04; AJ-B1-10): SOLO altas para Ajustes › Preferencias: ámbito visible (D-PREF-01), grupos y orden de la lista (S01), textos de lo que propone cada preferencia, preferencia existente del mismo ámbito (S03, «nunca crear otra»), estado del formulario (S02/S06) con el espejo del CHECK «propone algo» y el contenido COMPLETO que se envía (E05). Ninguna regla de elegibilidad: las cuentas y categorías ofrecidas son las de REG-01 y la disponibilidad de la cuenta la dice el servidor (`cuenta_disponible_hoy`).
+// Versión: 0.4.0 (F05-03/F05-04 J2 §2.5; F05 §46.4 R6, §46.5 E2/E3; lámina REG-DYN / SET-TH / SET-CTX v0.1 S04): Ajustes › Preferencias con CUATRO ámbitos: «Todos los gastos», «Todos los ingresos», «Una categoría» y «Un tercero»; los dos últimos con tipo Gasto/Ingreso, siempre enviado. Categoría + tercero no se ofrece (PREFERENCIA_AMBITO_NO_ADMITIDO). Grupo nuevo «Por tercero». «Proponer cuenta» del tipo INGRESO usa las cuentas elegibles para cobrar (servidor).
 // ============================================================
 
-import type { ContenidoPreferencia, CuentaPago, OrigenPropuesta, Preferencia, PropuestaRegistro } from '../api/cliente';
+import type { ContenidoPreferencia, CuentaPago, OrigenPropuesta, Preferencia, PropuestaRegistro, TiposRegistro } from '../api/cliente';
 import type { Borrador, OrigenPropuestaCampo, PayloadGastoPagado } from './intencion';
 
 export interface CampoPropuesto<T> {
@@ -208,40 +209,62 @@ export function siNo(v: boolean): string {
 
 // ------------------------------------------------------------------ Ajustes › Preferencias (F05-02 B3; lámina SET-PREF S01–S06)
 /**
- * Ámbito visible (D-PREF-01; E3). GENERAL = «Todos los gastos» (tipo GASTO sin categoría). OTRO = otro tipo sin
- * categoría, o una preferencia sin tipo anterior a la conversión C4: solo creable por API, se lista con los generales.
+ * Ámbito visible (D-PREF-01; E3; F05-04 R6). GENERAL = «Todos los gastos» (tipo GASTO sin categoría ni tercero).
+ * INGRESOS = «Todos los ingresos» (tipo INGRESO sin categoría ni tercero). CATEGORIA = «Una categoría» (con tipo).
+ * TERCERO = «Un tercero» (con tipo). OTRO = otro tipo sin categoría ni tercero, o una preferencia sin tipo anterior
+ * a la conversión C4: solo creable por API, se lista con las generales.
  */
-export type AmbitoPreferencia = 'GENERAL' | 'CATEGORIA' | 'OTRO';
+export type AmbitoPreferencia = 'GENERAL' | 'INGRESOS' | 'CATEGORIA' | 'TERCERO' | 'OTRO';
 
-export function ambitoDe(x: Pick<Preferencia, 'tipo_hecho_id' | 'categoria_id'>, tipoGasto: string | null): AmbitoPreferencia {
+export function ambitoDe(
+  x: Pick<Preferencia, 'tipo_hecho_id' | 'categoria_id'> & Partial<Pick<Preferencia, 'tercero_id'>>,
+  tipoGasto: string | null,
+  tipoIngreso: string | null = null,
+): AmbitoPreferencia {
   if (x.categoria_id !== null) return 'CATEGORIA';
-  return tipoGasto !== null && x.tipo_hecho_id === tipoGasto ? 'GENERAL' : 'OTRO';
+  if (x.tercero_id !== undefined && x.tercero_id !== null) return 'TERCERO';
+  if (tipoGasto !== null && x.tipo_hecho_id === tipoGasto) return 'GENERAL';
+  return tipoIngreso !== null && x.tipo_hecho_id === tipoIngreso ? 'INGRESOS' : 'OTRO';
+}
+
+/** Tipo de registro de una preferencia (null si no es GASTO ni INGRESO). */
+export function tipoDe(x: Pick<Preferencia, 'tipo_hecho_id'>, tipos: TiposRegistro | null): 'GASTO' | 'INGRESO' | null {
+  if (!tipos) return null;
+  return x.tipo_hecho_id === tipos.GASTO ? 'GASTO' : x.tipo_hecho_id === tipos.INGRESO ? 'INGRESO' : null;
 }
 
 export const TITULO_GENERAL = 'General';
+export const TITULO_INGRESOS = 'Todos los ingresos';
 export const TITULO_OTRO = 'Por tipo de gasto'; // DERIVADO (no está en la lámina)
 
 export interface GruposPreferencias {
   todos: Preferencia[];
   categoria: Preferencia[];
+  tercero: Preferencia[];
   desactivadas: Preferencia[];
 }
 
-const ORDEN_AMBITO: Record<AmbitoPreferencia, number> = { GENERAL: 0, OTRO: 1, CATEGORIA: 2 };
+const ORDEN_AMBITO: Record<AmbitoPreferencia, number> = { GENERAL: 0, INGRESOS: 1, OTRO: 2, CATEGORIA: 3, TERCERO: 4 };
 
 /**
- * S01: «Todos los gastos» (habilitadas sin categoría), «Por categoría» (habilitadas con categoría) y «Desactivadas».
- * Orden (decisión de ejecución D2 de B3): por ámbito (General, tipo de gasto, categoría) y, dentro, por el rótulo
- * visible («Padre › Hija») con la colación del español; a igualdad, por id. Es estable y no depende del orden de la API.
+ * S01: «Todos los gastos» (habilitadas sin categoría ni tercero), «Por categoría», «Por tercero» y «Desactivadas».
+ * Orden (decisión de ejecución D2 de B3): por ámbito (General, ingresos, tipo de gasto, categoría, tercero) y, dentro,
+ * por el rótulo visible con la colación del español; a igualdad, por id. Es estable y no depende del orden de la API.
  */
-export function agruparPreferencias(lista: Preferencia[], rotulo: (x: Preferencia) => string, tipoGasto: string | null): GruposPreferencias {
-  const amb = (x: Preferencia) => ambitoDe(x, tipoGasto);
+export function agruparPreferencias(
+  lista: Preferencia[],
+  rotulo: (x: Preferencia) => string,
+  tipoGasto: string | null,
+  tipoIngreso: string | null = null,
+): GruposPreferencias {
+  const amb = (x: Preferencia) => ambitoDe(x, tipoGasto, tipoIngreso);
   const orden = (a: Preferencia, b: Preferencia) =>
     ORDEN_AMBITO[amb(a)] - ORDEN_AMBITO[amb(b)] || rotulo(a).localeCompare(rotulo(b), 'es') || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
   const ordenada = [...lista].sort(orden);
   return {
-    todos: ordenada.filter((x) => x.enabled && amb(x) !== 'CATEGORIA'),
+    todos: ordenada.filter((x) => x.enabled && amb(x) !== 'CATEGORIA' && amb(x) !== 'TERCERO'),
     categoria: ordenada.filter((x) => x.enabled && amb(x) === 'CATEGORIA'),
+    tercero: ordenada.filter((x) => x.enabled && amb(x) === 'TERCERO'),
     desactivadas: ordenada.filter((x) => !x.enabled),
   };
 }
@@ -251,10 +274,14 @@ export function cuentaNoDisponible(x: Pick<Preferencia, 'cuenta_disponible_hoy'>
   return x.cuenta_disponible_hoy === false;
 }
 
-/** Lo que propone, en el orden de la lámina: «Pagar con X», «Presupuesto: Sí/No». */
-export function textosPropone(x: Pick<Preferencia, 'cuenta_default_id' | 'presupuestable_default'>, nombreCuenta: (id: string) => string | null): string[] {
+/** Lo que propone, en el orden de la lámina: «Pagar con X» («Cobrar en X» si es de ingresos), «Presupuesto: Sí/No». */
+export function textosPropone(
+  x: Pick<Preferencia, 'cuenta_default_id' | 'presupuestable_default'>,
+  nombreCuenta: (id: string) => string | null,
+  tipo: 'GASTO' | 'INGRESO' | null = 'GASTO',
+): string[] {
   const r: string[] = [];
-  if (x.cuenta_default_id !== null) r.push(`Pagar con ${nombreCuenta(x.cuenta_default_id) ?? 'una cuenta'}`);
+  if (x.cuenta_default_id !== null) r.push(`${tipo === 'INGRESO' ? 'Cobrar en' : 'Pagar con'} ${nombreCuenta(x.cuenta_default_id) ?? 'una cuenta'}`);
   if (x.presupuestable_default !== null) r.push(`Presupuesto: ${siNo(x.presupuestable_default)}`);
   return r;
 }
@@ -266,10 +293,24 @@ export function preferenciaDeAmbito(
   tipoGasto: string,
   excluirId: string | null = null,
 ): Preferencia | null {
+  return preferenciaDeClave(lista, { tipo: tipoGasto, categoriaId, terceroId: null }, excluirId);
+}
+
+/** Preferencia HABILITADA con la MISMA clave (tipo, categoría, tercero; sin contexto) (S03 con los cuatro ámbitos). */
+export function preferenciaDeClave(
+  lista: Preferencia[],
+  clave: { tipo: string; categoriaId: string | null; terceroId: string | null },
+  excluirId: string | null = null,
+): Preferencia | null {
   return (
     lista.find(
       (x) =>
-        x.id !== excluirId && x.enabled && x.categoria_id === categoriaId && x.tipo_hecho_id === tipoGasto && x.tercero_id === null && x.entidad_id === null,
+        x.id !== excluirId &&
+        x.enabled &&
+        x.tipo_hecho_id === clave.tipo &&
+        x.categoria_id === clave.categoriaId &&
+        x.tercero_id === clave.terceroId &&
+        x.entidad_id === null,
     ) ?? null
   );
 }
@@ -277,27 +318,44 @@ export function preferenciaDeAmbito(
 /** Valor del campo «Proponer cuenta»: una cuenta, «No proponer» (null) o la actual NO disponible (no se puede enviar). */
 export type CuentaFormulario = string | null | { noDisponible: string };
 
+export type AmbitoFormulario = 'GENERAL' | 'INGRESOS' | 'CATEGORIA' | 'TERCERO';
+
 export interface FormularioPreferencia {
-  ambito: 'GENERAL' | 'CATEGORIA' | null;
+  ambito: AmbitoFormulario | null;
   categoriaId: string | null;
   cuenta: CuentaFormulario;
   presupuestable: boolean | null;
+  /** Tercero del ámbito «Un tercero». */
+  terceroId?: string | null;
+  /** Tipo de los ámbitos «Una categoría» y «Un tercero» (GASTO si se omite: el de F05-02). */
+  tipo?: 'GASTO' | 'INGRESO';
 }
 
 export const FORMULARIO_NUEVO: FormularioPreferencia = Object.freeze({ ambito: null, categoriaId: null, cuenta: null, presupuestable: null });
 
+/** Tipo efectivo del formulario: «Todos los ingresos» es INGRESO; «Todos los gastos», GASTO; el resto, el elegido. */
+export function tipoFormulario(f: Pick<FormularioPreferencia, 'ambito' | 'tipo'>): 'GASTO' | 'INGRESO' {
+  if (f.ambito === 'INGRESOS') return 'INGRESO';
+  if (f.ambito === 'GENERAL') return 'GASTO';
+  return f.tipo ?? 'GASTO';
+}
+
 /**
  * Formulario de edición desde la preferencia cargada. Una cuenta que el servidor marca como no disponible hoy, o que
- * no está entre las que ofrece REG-01, queda como «no disponible»: no se reenvía sin una elección explícita.
+ * no está entre las que ofrece el registro de su tipo, queda como «no disponible»: no se reenvía sin una elección explícita.
  */
-export function formularioDesde(x: Preferencia, cuentas: CuentaPago[]): FormularioPreferencia {
+export function formularioDesde(x: Preferencia, cuentas: CuentaPago[] | { cuenta_id: string }[], tipos: TiposRegistro | null = null): FormularioPreferencia {
   const id = x.cuenta_default_id;
   const fuera = id !== null && (cuentaNoDisponible(x) || !cuentas.some((c) => c.cuenta_id === id));
+  const tipo = tipoDe(x, tipos) ?? 'GASTO';
+  const amb = ambitoDe(x, tipos?.GASTO ?? null, tipos?.INGRESO ?? null);
   return {
-    ambito: x.categoria_id === null ? 'GENERAL' : 'CATEGORIA',
+    ambito: amb === 'OTRO' ? 'GENERAL' : amb,
     categoriaId: x.categoria_id,
     cuenta: fuera ? { noDisponible: id } : id,
     presupuestable: x.presupuestable_default,
+    terceroId: x.tercero_id,
+    tipo,
   };
 }
 
@@ -306,20 +364,24 @@ export function proponeAlgo(f: Pick<FormularioPreferencia, 'cuenta' | 'presupues
   return f.cuenta !== null || f.presupuestable !== null;
 }
 
-export type FaltaFormulario = 'AMBITO' | 'CATEGORIA' | 'PROPONER' | 'CUENTA_NO_DISPONIBLE';
+export type FaltaFormulario = 'AMBITO' | 'CATEGORIA' | 'TERCERO' | 'PROPONER' | 'CUENTA_NO_DISPONIBLE';
 
 /** Lo que impide «Guardar», en el orden del formulario; vacío = se puede guardar. */
 export function faltaFormulario(f: FormularioPreferencia): FaltaFormulario[] {
   const r: FaltaFormulario[] = [];
   if (f.ambito === null) r.push('AMBITO');
   if (f.ambito === 'CATEGORIA' && f.categoriaId === null) r.push('CATEGORIA');
+  if (f.ambito === 'TERCERO' && !f.terceroId) r.push('TERCERO');
   if (!proponeAlgo(f)) r.push('PROPONER');
   if (f.cuenta !== null && typeof f.cuenta === 'object') r.push('CUENTA_NO_DISPONIBLE');
   return r;
 }
 
-/** Contenido COMPLETO que se envía (E05): alta con prioridad 100; edición con las claves y la prioridad de la existente. */
-export function contenidoFormulario(f: FormularioPreferencia, base: Preferencia | null, tipoGasto: string): ContenidoPreferencia {
+/**
+ * Contenido COMPLETO que se envía (E05): alta con prioridad 100 y SIEMPRE con tipo (E3); edición con las claves y la
+ * prioridad de la existente. `tipos` admite el id del tipo GASTO (uso de F05-02) o los dos ids de la lista.
+ */
+export function contenidoFormulario(f: FormularioPreferencia, base: Preferencia | null, tipos: string | TiposRegistro): ContenidoPreferencia {
   const cuenta = typeof f.cuenta === 'string' ? f.cuenta : null;
   if (base) {
     return {
@@ -332,10 +394,12 @@ export function contenidoFormulario(f: FormularioPreferencia, base: Preferencia 
       prioridad: base.prioridad,
     };
   }
+  const ids: TiposRegistro = typeof tipos === 'string' ? { GASTO: tipos, INGRESO: tipos } : tipos;
+  const tipo = tipoFormulario(f);
   return {
-    tipo_hecho_id: tipoGasto,
+    tipo_hecho_id: ids[tipo],
     categoria_id: f.ambito === 'CATEGORIA' ? f.categoriaId : null,
-    tercero_id: null,
+    tercero_id: f.ambito === 'TERCERO' ? f.terceroId ?? null : null,
     entidad_id: null,
     cuenta_default_id: cuenta,
     presupuestable_default: f.presupuestable,

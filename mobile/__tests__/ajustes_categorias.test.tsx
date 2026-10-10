@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-01 S6-WIRE+UI (este mandato))
 // Versión: 0.2.0 (F05-01 S6-WIRE+UI (este mandato), commit 2): el detalle ya muestra las acciones EDIT-* (cubiertas en ajustes_edicion.test.tsx); aquí se comprueba que «Editar orden» es de la lista y no del detalle.
 // Versión: 0.3.0 (F05-02 B3, A1): «Preferencias financieras» pasa de «No disponible» a navegable; las ocho restantes siguen «No disponible» y no pulsables.
+// Versión: 0.4.0 (F05-03/F05-04 J2 §2.5; tabla «tests adaptados»): «Terceros» y «Contextos» también navegan y «Plantillas» aparece junto a «Preferencias financieras»; el árbol cerrado de diez secciones no cambia y las seis restantes siguen «No disponible» y no pulsables (antes ocho).
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
@@ -74,12 +75,17 @@ test('Más → Ajustes: 10 secciones de F09 §12.91.1 en orden; solo Categorías
   expect(SECCIONES_AJUSTES).toEqual(['Terceros', 'Categorías', 'Etiquetas', 'Contextos', 'Reglas y recurrencias', 'Preferencias financieras',
     'Apariencia y personalización', 'Preferencias de uso', 'Datos y mantenimiento', 'Cuenta y sistema']);
   // F05-02 B3: «Preferencias financieras» también es operativa (cubierta en ajustes_preferencias.test.tsx).
-  for (const sec of SECCIONES_AJUSTES.filter((x) => x !== 'Categorías' && x !== 'Preferencias financieras')) {
+  // F05-03/F05-04 J2 §2.5: «Terceros» y «Contextos» operativas; «Plantillas» junto a Preferencias (fuera del árbol cerrado).
+  const operativas = ['Categorías', 'Preferencias financieras', 'Terceros', 'Contextos'];
+  expect(screen.getByTestId('ajustes-terceros')).toBeTruthy();
+  expect(screen.getByTestId('ajustes-contextos')).toBeTruthy();
+  expect(screen.getByTestId('ajustes-plantillas')).toBeTruthy();
+  for (const sec of SECCIONES_AJUSTES.filter((x) => !operativas.includes(x))) {
     const fila = screen.getByTestId(`ajustes-seccion-${sec}`);
     expect(fila.props.accessibilityLabel).toBe(`${sec}. No disponible`);
     expect(fila.props.onPress).toBeUndefined(); // no pulsable
   }
-  expect(screen.getAllByText('No disponible')).toHaveLength(8);
+  expect(screen.getAllByText('No disponible')).toHaveLength(6);
   fireEvent.press(screen.getByTestId('ajustes-atras'));
   expect(screen.getByTestId('pantalla-mas')).toBeTruthy(); // «Atrás» al nivel anterior real
 });

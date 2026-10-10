@@ -5,6 +5,7 @@
 // Descripción: Ajustes › Preferencias (F05-02 B3; F05-D026 §41.3; lámina SET-PREF / REG-PREF v0.1, sección B S01–S06 y variante oscura; D-PREF-01..06; AJ-B1-10; D-B3-01). Lista agrupada «Todos los gastos» / «Por categoría» / «Desactivadas» con lo que propone cada preferencia y la marca «No disponible» cuando el servidor dice que la cuenta preferida no es elegible hoy (D-PREF-04: solo aquí, nunca en el registro); estado vacío (S05). Nueva preferencia (S02): ámbitos «Todos los gastos» y «Una categoría» (D-PREF-01); el selector de categoría y la lista de cuentas son la MISMA fuente y componente que REG-01 (SelectorCategorias con visibleEnRegistro / elegibleParaGasto; GET /v1/vs01/cuentas-pago de hoy): sin regla de elegibilidad propia del cliente. «Guardar» desactivado si no se propone nada (espejo del CHECK; el servidor sigue siendo la guarda). Preferencia existente del mismo ámbito o PREFERENCIA_EMPATE_CONTRADICTORIO → S03 «Ir a la preferencia», nunca se crea otra. Detalle (S04) con desactivar / reactivar (el servidor comprueba el empate al reactivar) y sin borrado. Editar envía el ESTADO COMPLETO (E05) con `row_version`; VERSION_DESFASADA → recarga y aviso S06, sin reintento automático (patrón M16 de SET-MAG). INDETERMINADO → se recarga antes de repetir; el alta reutiliza su UUID. Los formularios y el selector son tareas inmersivas (ocultan la barra inferior).
 // Versión: 0.1.0 (F05-02 B3)
 // Versión: 0.2.0 (F05-03/F05-04 J2 §1.5; F05 §46.5 E3): las preferencias nuevas llevan SIEMPRE el tipo GASTO (`tipos.GASTO` de la lista); el ámbito «Todos los gastos» es el tipo GASTO sin categoría.
+// Versión: 0.3.0 (F05-03/F05-04 J2 §2.5; F05 §46.4 R6; lámina REG-DYN / SET-TH / SET-CTX v0.1 S04): cuatro ámbitos «Todos los gastos», «Todos los ingresos», «Una categoría» y «Un tercero»; los dos últimos con tipo Gasto/Ingreso (Gasto marcado al elegir el ámbito: el de F05-02) y SIEMPRE enviado. El selector de categoría filtra por el tipo (el de REG-01 para gastos, el de ingresos para ingresos); el de tercero es el del registro (activos, alta mínima con duplicados). «Proponer cuenta» ofrece las cuentas del registro de ese tipo (cuentas-pago para gastos; GET /v1/cuentas/elegibles?operacion=INGRESO para ingresos). Grupo «Por tercero» en la lista.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -12,13 +13,15 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import type { ClienteApi, CuentaPago, Preferencia, Respuesta, ResultadoComandoPreferencia, TiposRegistro } from '../api/cliente';
+import type { ClienteApi, CuentaElegible, CuentaPago, Preferencia, Respuesta, ResultadoComandoPreferencia, Tercero, TiposRegistro } from '../api/cliente';
 import { BotonPrimario, BotonTexto, CabeceraNavegacion, Chip, EstadoDato, Segmentado } from '../components/Basicos';
 import { BotonSecundario, SelectorCategorias } from '../components/SelectorCategorias';
-import { Arbol, ancestros, construirArbol, elegibleParaGasto, motivoNoSeleccionable, visibleEnRegistro } from '../domain/categoria';
+import { SelectorTercero } from '../components/SelectorTercero';
+import { Arbol, ancestros, construirArbol, elegible, motivoNoSeleccionable, visibleEnRegistro } from '../domain/categoria';
 import { isoLocal } from '../domain/fechas';
 import {
   agruparPreferencias,
+  AmbitoFormulario,
   ambitoDe,
   contenidoFormulario,
   cuentaNoDisponible,
@@ -27,10 +30,13 @@ import {
   FORMULARIO_NUEVO,
   FormularioPreferencia,
   formularioDesde,
-  preferenciaDeAmbito,
+  preferenciaDeClave,
   siNo,
   textosPropone,
+  tipoDe,
+  tipoFormulario,
   TITULO_GENERAL,
+  TITULO_INGRESOS,
   TITULO_OTRO,
 } from '../domain/preferencias';
 import { useTema } from '../theme/tema';
@@ -61,13 +67,14 @@ export const TEXTO_SIN_RECARGA = 'No se han podido cargar tus preferencias. Vuel
 export const TEXTO_FALTA: Record<Exclude<FaltaFormulario, 'PROPONER'>, string> = {
   AMBITO: 'Elige a qué gastos se aplica.',
   CATEGORIA: 'Elige la categoría.',
+  TERCERO: 'Elige el tercero.',
   CUENTA_NO_DISPONIBLE: 'La cuenta actual ya no está disponible: elige otra o «No proponer».',
 };
 
 type Carga =
   | { fase: 'CARGANDO' }
   | { fase: 'ERROR' }
-  | { fase: 'OK'; prefs: Preferencia[]; tipos: TiposRegistro; cuentas: CuentaPago[]; arbol: Arbol };
+  | { fase: 'OK'; prefs: Preferencia[]; tipos: TiposRegistro; cuentas: CuentaPago[]; cuentasIngreso: CuentaElegible[]; terceros: Tercero[]; arbol: Arbol };
 type Datos = Extract<Carga, { fase: 'OK' }>;
 type Vista = { v: 'LISTA' } | { v: 'DETALLE'; id: string } | { v: 'NUEVA' } | { v: 'EDITAR'; id: string };
 type Aviso = { tipo: 'OK' | 'AVISO'; texto: string; irA?: string } | null;
@@ -91,17 +98,21 @@ export function PreferenciasAjustesScreen(p: {
   const [avisoForm, setAvisoForm] = useState<Aviso>(null);
   const [conflicto, setConflicto] = useState<Preferencia | null>(null);
   const [selector, setSelector] = useState(false);
+  const [selectorTercero, setSelectorTercero] = useState(false);
 
   /** Lista, cuentas de REG-01 (hoy) y árbol. En silencio, un fallo conserva lo mostrado y devuelve null. */
   const cargar = useCallback(
     async (silencioso = false): Promise<Datos | null> => {
       if (!silencioso) setCarga({ fase: 'CARGANDO' });
-      const [l, cu, a] = await Promise.all([
+      const hoy = isoLocal(p.ahora());
+      const [l, cu, ci, te, a] = await Promise.all([
         p.cliente.listarPreferencias(),
-        p.cliente.cuentasPago(isoLocal(p.ahora())),
+        p.cliente.cuentasPago(hoy),
+        p.cliente.cuentasElegibles('INGRESO', hoy),
+        p.cliente.listarTerceros(),
         p.cliente.arbolCategorias(),
       ]);
-      if (l.tipo !== 'OK' || cu.tipo !== 'OK' || a.tipo !== 'OK') {
+      if (l.tipo !== 'OK' || cu.tipo !== 'OK' || ci.tipo !== 'OK' || te.tipo !== 'OK' || a.tipo !== 'OK') {
         if (!silencioso) setCarga({ fase: 'ERROR' });
         return null;
       }
@@ -110,6 +121,8 @@ export function PreferenciasAjustesScreen(p: {
         prefs: l.datos.preferencias,
         tipos: l.datos.tipos,
         cuentas: cu.datos.cuentas,
+        cuentasIngreso: ci.datos.cuentas,
+        terceros: te.datos.terceros,
         arbol: construirArbol(a.datos.categorias),
       };
       setCarga(datos);
@@ -130,11 +143,19 @@ export function PreferenciasAjustesScreen(p: {
   const datos = carga.fase === 'OK' ? carga : null;
   const prefs = datos?.prefs ?? [];
   const tipoGasto = datos?.tipos.GASTO ?? null;
-  const ambito = (x: Preferencia) => ambitoDe(x, tipoGasto);
+  const ambito = (x: Preferencia) => ambitoDe(x, tipoGasto, datos?.tipos.INGRESO ?? null);
+  const tipoX = (x: Preferencia) => tipoDe(x, datos?.tipos ?? null);
+  /** Cuentas que ofrece el registro de ese tipo (sin regla propia del cliente). */
+  const cuentasDe = (t: 'GASTO' | 'INGRESO'): { cuenta_id: string; nombre: string }[] =>
+    (t === 'INGRESO' ? datos?.cuentasIngreso : datos?.cuentas) ?? [];
   const porId = (id: string) => prefs.find((x) => x.id === id) ?? null;
 
   // ---------------------------------------------------------------- nombres visibles
-  const nombreCuenta = (id: string) => datos?.cuentas.find((x) => x.cuenta_id === id)?.nombre ?? null;
+  const nombreCuenta = (id: string) =>
+    datos?.cuentas.find((x) => x.cuenta_id === id)?.nombre ?? datos?.cuentasIngreso.find((x) => x.cuenta_id === id)?.nombre ?? null;
+  const nombreTercero = (id: string) => datos?.terceros.find((x) => x.id === id)?.nombre ?? 'Tercero no disponible';
+  /** « · Ingresos» para las de categoría o tercero de tipo INGRESO. */
+  const sufijoTipo = (x: Preferencia) => (tipoX(x) === 'INGRESO' ? ' · Ingresos' : '');
   const nodo = (id: string) => datos?.arbol.porId.get(id) ?? null;
   /** «Padre › Hija» (ruta completa sin «Todas»). */
   const rutaCategoria = (id: string) => {
@@ -143,14 +164,29 @@ export function PreferenciasAjustesScreen(p: {
   };
   const rotulo = (x: Preferencia) => {
     const a = ambito(x);
-    return a === 'CATEGORIA' ? rutaCategoria(x.categoria_id!) : a === 'GENERAL' ? TITULO_GENERAL : TITULO_OTRO;
+    if (a === 'CATEGORIA') return rutaCategoria(x.categoria_id!) + sufijoTipo(x);
+    if (a === 'TERCERO') return nombreTercero(x.tercero_id!) + sufijoTipo(x);
+    return a === 'GENERAL' ? TITULO_GENERAL : a === 'INGRESOS' ? TITULO_INGRESOS : TITULO_OTRO;
   };
   /** Título del detalle (lámina S04: «Supermercado»). */
-  const tituloDe = (x: Preferencia) => (ambito(x) === 'CATEGORIA' ? nodo(x.categoria_id!)?.nombre ?? rutaCategoria(x.categoria_id!) : rotulo(x));
+  const tituloDe = (x: Preferencia) => {
+    const a = ambito(x);
+    if (a === 'CATEGORIA') return nodo(x.categoria_id!)?.nombre ?? rutaCategoria(x.categoria_id!);
+    if (a === 'TERCERO') return nombreTercero(x.tercero_id!);
+    return rotulo(x);
+  };
+  /** «Se aplica a» del formulario fijo y del detalle. */
+  const aplicaA = (x: Preferencia) => {
+    const a = ambito(x);
+    if (a === 'CATEGORIA') return rutaCategoria(x.categoria_id!) + sufijoTipo(x);
+    if (a === 'TERCERO') return `${nombreTercero(x.tercero_id!)} · ${tipoX(x) === 'INGRESO' ? 'Ingresos' : 'Gastos'}`;
+    return a === 'GENERAL' ? 'Todos los gastos' : a === 'INGRESOS' ? 'Todos los ingresos' : TITULO_OTRO;
+  };
   /** «para …» de los avisos S03 y de reactivar. */
   const paraDe = (x: Preferencia) => {
     const a = ambito(x);
-    return a === 'CATEGORIA' ? tituloDe(x) : a === 'GENERAL' ? 'todos los gastos' : 'este tipo de gasto';
+    if (a === 'CATEGORIA' || a === 'TERCERO') return tituloDe(x);
+    return a === 'GENERAL' ? 'todos los gastos' : a === 'INGRESOS' ? 'todos los ingresos' : 'este tipo de gasto';
   };
   /** «que propone …» (lámina S03: «que propone Tarjeta BBVA»). */
   const proponeCorto = (x: Preferencia) =>
@@ -170,7 +206,7 @@ export function PreferenciasAjustesScreen(p: {
     setVista({ v: 'NUEVA' });
   };
   const abrirEditar = (x: Preferencia) => {
-    setForm(formularioDesde(x, datos?.cuentas ?? []));
+    setForm(formularioDesde(x, cuentasDe(tipoX(x) ?? 'GASTO'), datos?.tipos ?? null));
     setAvisoForm(null);
     setConflicto(null);
     setVista({ v: 'EDITAR', id: x.id });
@@ -178,6 +214,7 @@ export function PreferenciasAjustesScreen(p: {
   const abrirDetalle = (id: string, aviso: Aviso = null) => {
     setAvisoDetalle(aviso);
     setSelector(false);
+    setSelectorTercero(false);
     setVista({ v: 'DETALLE', id });
   };
 
@@ -195,8 +232,8 @@ export function PreferenciasAjustesScreen(p: {
   const guardar = async () => {
     if (ocupado || vista.v === 'LISTA' || vista.v === 'DETALLE') return;
     const base = vista.v === 'EDITAR' ? porId(vista.id) : null;
-    if (tipoGasto === null) return;
-    const contenido = contenidoFormulario(form, base, tipoGasto);
+    if (!datos) return;
+    const contenido = contenidoFormulario(form, base, datos.tipos);
     setOcupado(true);
     setAvisoForm(null);
     const r: Respuesta<ResultadoComandoPreferencia> = base
@@ -221,7 +258,8 @@ export function PreferenciasAjustesScreen(p: {
     if (r.codigo === 'VERSION_DESFASADA' && base) {
       const actual = d?.prefs.find((x) => x.id === base.id);
       if (!d || !actual) return setAvisoForm({ tipo: 'AVISO', texto: TEXTO_SIN_RECARGA });
-      setForm(formularioDesde(actual, d.cuentas)); // S06: la versión actual, sin reintento automático
+      const t = tipoDe(actual, d.tipos) ?? 'GASTO';
+      setForm(formularioDesde(actual, t === 'INGRESO' ? d.cuentasIngreso : d.cuentas, d.tipos)); // S06: la versión actual, sin reintento automático
       return setAvisoForm({ tipo: 'AVISO', texto: `${TEXTO_S06_TITULO} ${TEXTO_S06}` });
     }
     if (r.codigo === 'AGREGADO_NO_ENCONTRADO') {
@@ -263,17 +301,34 @@ export function PreferenciasAjustesScreen(p: {
     const base = vista.v === 'EDITAR' ? porId(vista.id) : null;
     const faltas = faltaFormulario(form);
     // S03: ya hay una preferencia habilitada del mismo ámbito → se edita esa, nunca se crea otra.
+    const tipoF = tipoFormulario(form);
+    const claveCompleta =
+      form.ambito === 'GENERAL' || form.ambito === 'INGRESOS' || (form.ambito === 'CATEGORIA' && form.categoriaId !== null) || (form.ambito === 'TERCERO' && !!form.terceroId);
     const existente =
       conflicto ??
-      (vista.v === 'NUEVA' && datos && (form.ambito === 'GENERAL' || (form.ambito === 'CATEGORIA' && form.categoriaId !== null))
-        ? preferenciaDeAmbito(datos.prefs, form.ambito === 'GENERAL' ? null : form.categoriaId, datos.tipos.GASTO)
+      (vista.v === 'NUEVA' && datos && claveCompleta
+        ? preferenciaDeClave(datos.prefs, {
+            tipo: datos.tipos[tipoF],
+            categoriaId: form.ambito === 'CATEGORIA' ? form.categoriaId : null,
+            terceroId: form.ambito === 'TERCERO' ? form.terceroId ?? null : null,
+          })
         : null);
+    const cuentasForm = base ? cuentasDe(tipoX(base) ?? 'GASTO') : cuentasDe(tipoF);
     const puede = faltas.length === 0 && existente === null && !ocupado;
     const cuentaActual = form.cuenta !== null && typeof form.cuenta === 'object' ? form.cuenta.noDisponible : null;
     const titulo = base ? tituloDe(base) : 'Nueva preferencia';
     const cambiar = (parche: Partial<FormularioPreferencia>) => {
-      setForm((f) => ({ ...f, ...parche }));
+      setForm((f) => ajustarAlTipo(f, { ...f, ...parche }));
       setConflicto(null);
+    };
+    /** Al cambiar de tipo se quita lo que el nuevo tipo no admite (categoría de otro ámbito, cuenta no ofrecida). */
+    const ajustarAlTipo = (antes: FormularioPreferencia, f: FormularioPreferencia): FormularioPreferencia => {
+      const t = tipoFormulario(f);
+      if (base || t === tipoFormulario(antes) || !datos) return f;
+      const n = f.categoriaId ? datos.arbol.porId.get(f.categoriaId) : null;
+      const categoriaId = n && elegible(n, t) ? f.categoriaId : null;
+      const cuenta = typeof f.cuenta === 'string' && cuentasDe(t).some((x) => x.cuenta_id === f.cuenta) ? f.cuenta : null;
+      return { ...f, categoriaId, cuenta };
     };
     return (
       <View testID="ajpref-form" style={{ flex: 1, backgroundColor: c.background }}>
@@ -294,23 +349,63 @@ export function PreferenciasAjustesScreen(p: {
           {base ? (
             <Campo etiqueta="Se aplica a">
               <Text testID="ajpref-form-ambito-fijo" style={[tipo.body, { color: c.textPrimary }]}>
-                {ambito(base) === 'CATEGORIA' ? rutaCategoria(base.categoria_id!) : ambito(base) === 'GENERAL' ? 'Todos los gastos' : TITULO_OTRO}
+                {aplicaA(base)}
               </Text>
             </Campo>
           ) : (
             <>
               <Campo etiqueta="Se aplica a">
-                <Segmentado<'GENERAL' | 'CATEGORIA'>
+                <Segmentado<AmbitoFormulario>
                   testIDBase="ajpref-ambito"
                   etiquetaGrupo="Se aplica a"
                   opciones={[
                     { valor: 'GENERAL', etiqueta: 'Todos los gastos' },
+                    { valor: 'INGRESOS', etiqueta: 'Todos los ingresos' },
                     { valor: 'CATEGORIA', etiqueta: 'Una categoría' },
+                    { valor: 'TERCERO', etiqueta: 'Un tercero' },
                   ]}
                   valor={form.ambito}
-                  onCambiar={(v) => cambiar({ ambito: v, categoriaId: v === 'GENERAL' ? null : form.categoriaId })}
+                  onCambiar={(v) =>
+                    cambiar({
+                      ambito: v,
+                      categoriaId: v === 'CATEGORIA' ? form.categoriaId : null,
+                      terceroId: v === 'TERCERO' ? form.terceroId ?? null : null,
+                      tipo: v === 'CATEGORIA' || v === 'TERCERO' ? form.tipo ?? 'GASTO' : undefined,
+                    })
+                  }
                 />
               </Campo>
+              {form.ambito === 'CATEGORIA' || form.ambito === 'TERCERO' ? (
+                <Campo etiqueta="Tipo">
+                  <Segmentado<'GASTO' | 'INGRESO'>
+                    testIDBase="ajpref-tipo"
+                    etiquetaGrupo="Tipo"
+                    opciones={[
+                      { valor: 'GASTO', etiqueta: 'Gasto' },
+                      { valor: 'INGRESO', etiqueta: 'Ingreso' },
+                    ]}
+                    valor={form.tipo ?? 'GASTO'}
+                    onCambiar={(v) => cambiar({ tipo: v })}
+                  />
+                </Campo>
+              ) : null}
+              {form.ambito === 'TERCERO' ? (
+                <Campo etiqueta="Tercero">
+                  <Pressable
+                    testID="ajpref-form-tercero"
+                    accessibilityRole="button"
+                    accessibilityLabel={`Tercero: ${form.terceroId ? nombreTercero(form.terceroId) : 'Elige tercero'}`}
+                    accessibilityHint="Abre el selector de terceros"
+                    onPress={() => setSelectorTercero(true)}
+                    style={[s.campoCategoria, { backgroundColor: c.surfacePrimary, borderColor: c.borderStandard }]}
+                  >
+                    <Text style={[tipo.body, { flex: 1, color: form.terceroId ? c.textPrimary : c.textSecondary }]}>
+                      {form.terceroId ? nombreTercero(form.terceroId) : 'Elige tercero'}
+                    </Text>
+                    <Ionicons name="chevron-forward" size={18} color={c.textSecondary} />
+                  </Pressable>
+                </Campo>
+              ) : null}
               {form.ambito === 'CATEGORIA' ? (
                 <Campo etiqueta="Categoría">
                   <Pressable
@@ -342,7 +437,7 @@ export function PreferenciasAjustesScreen(p: {
                   onPress={() => undefined}
                 />
               ) : null}
-              {(datos?.cuentas ?? []).map((x) => (
+              {cuentasForm.map((x) => (
                 <Chip
                   key={x.cuenta_id}
                   testID={`ajpref-cuenta-${x.cuenta_id}`}
@@ -399,15 +494,30 @@ export function PreferenciasAjustesScreen(p: {
             titulo="Elegir categoría"
             modo="REGISTRO"
             carga={{ fase: 'OK', arbol: datos.arbol }}
-            esVisible={(n) => visibleEnRegistro(datos.arbol, n)}
-            esSeleccionable={elegibleParaGasto}
-            motivo={(n) => motivoNoSeleccionable(n)}
+            esVisible={(n) => visibleEnRegistro(datos.arbol, n, tipoF)}
+            esSeleccionable={(n) => elegible(n, tipoF)}
+            motivo={(n) => motivoNoSeleccionable(n, tipoF)}
             seleccionadaId={form.categoriaId}
             onElegir={(n) => {
               setSelector(false);
               cambiar({ categoriaId: n.id });
             }}
             onCerrar={() => setSelector(false)}
+          />
+        ) : null}
+        {selectorTercero && datos ? (
+          <SelectorTercero
+            cliente={p.cliente}
+            nuevoId={p.nuevoId}
+            seleccionadoId={form.terceroId ?? null}
+            onElegir={(t) => {
+              setSelectorTercero(false);
+              if (!t) return cambiar({ terceroId: null });
+              // Un tercero recién creado o reactivado entra en la lista para mostrar su nombre.
+              if (!datos.terceros.some((x) => x.id === t.id)) setCarga({ ...datos, terceros: [...datos.terceros, t] });
+              cambiar({ terceroId: t.id });
+            }}
+            onCerrar={() => setSelectorTercero(false)}
           />
         ) : null}
       </View>
@@ -417,7 +527,6 @@ export function PreferenciasAjustesScreen(p: {
   if (vista.v === 'DETALLE') {
     const x = porId(vista.id);
     if (!x) return null; // el efecto de recarga vuelve a la lista
-    const ambitoX = ambito(x);
     const nombre = x.cuenta_default_id !== null ? nombreCuenta(x.cuenta_default_id) : null;
     return (
       <View testID="ajpref-detalle" style={{ flex: 1, backgroundColor: c.background }}>
@@ -429,8 +538,7 @@ export function PreferenciasAjustesScreen(p: {
         />
         <ScrollView contentContainerStyle={[s.cuerpo, { paddingBottom: inset.bottom + espacio.xxl }]}>
           <View style={[s.tarjeta, { backgroundColor: c.surfacePrimary, borderColor: c.borderDefault }]}>
-            <FilaDato testID="ajpref-det-ambito" etiqueta="Se aplica a"
-              valor={ambitoX === 'CATEGORIA' ? rutaCategoria(x.categoria_id!) : ambitoX === 'GENERAL' ? 'Todos los gastos' : TITULO_OTRO} />
+            <FilaDato testID="ajpref-det-ambito" etiqueta="Se aplica a" valor={aplicaA(x)} />
             <FilaDato
               testID="ajpref-det-cuenta"
               etiqueta="Cuenta"
@@ -458,7 +566,7 @@ export function PreferenciasAjustesScreen(p: {
   }
 
   // ---------------------------------------------------------------- LISTA (S01 / S05)
-  const grupos = datos ? agruparPreferencias(datos.prefs, rotulo, datos.tipos.GASTO) : null;
+  const grupos = datos ? agruparPreferencias(datos.prefs, rotulo, datos.tipos.GASTO, datos.tipos.INGRESO) : null;
   return (
     <View testID="pantalla-preferencias" style={{ flex: 1, backgroundColor: c.background }}>
       <CabeceraNavegacion
@@ -492,6 +600,7 @@ export function PreferenciasAjustesScreen(p: {
               [
                 ['todos', 'Todos los gastos', grupos.todos],
                 ['categoria', 'Por categoría', grupos.categoria],
+                ['tercero', 'Por tercero', grupos.tercero],
                 ['desactivadas', 'Desactivadas', grupos.desactivadas],
               ] as const
             ).map(([clave, titulo, lista]) =>
@@ -504,7 +613,7 @@ export function PreferenciasAjustesScreen(p: {
                         key={x.id}
                         id={x.id}
                         titulo={rotulo(x)}
-                        propone={textosPropone(x, nombreCuenta).join(' · ')}
+                        propone={textosPropone(x, nombreCuenta, tipoX(x)).join(' · ')}
                         noDisponible={x.cuenta_default_id !== null && cuentaNoDisponible(x)}
                         desactivada={!x.enabled}
                         ultima={i === lista.length - 1}

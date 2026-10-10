@@ -104,7 +104,14 @@
 #   validador del DTO, retirado, a la guarda FECHA_FUTURA de la ejecucion con el
 #   «hoy» del owner (mismo discriminante, test_151); el texto protegido de A12
 #   incluye esa guarda (paso 3.0). Censo sin cambios (67).
-# Version: 0.13.0
+#   v0.14.0 (F05-03/F05-04 J2 §2.5; F05 §46.4 R6): textos protegidos
+#   actualizados por los cuatro ambitos de Ajustes › Preferencias y la
+#   naturaleza del selector: U11 (`usables` con `p.naturaleza ?? 'GASTO'`),
+#   U26 (la deteccion de la existente pasa a `preferenciaDeClave`; el mutante
+#   anula la condicion que la activa), U28 (formularioDesde con las cuentas y
+#   los tipos), U31 (textosPropone con el tipo) y U32 (visibleEnRegistro con
+#   el tipo). Mismos discriminantes; censo sin cambios (67).
+# Version: 0.14.0
 # ============================================================
 
 from __future__ import annotations
@@ -186,7 +193,7 @@ MUTANTES = [
      "js"),
     # ---------------------------------------------------------------- correctivo AJ-S6WIREUI-09
     ("U11", "mobile/src/components/SelectorCategorias.tsx",
-     "  const usables = (n: CategoriaNodo) => !!arbol && tieneDescendienteElegible(arbol, n, 'GASTO');\n",
+     "  const usables = (n: CategoriaNodo) => !!arbol && tieneDescendienteElegible(arbol, n, p.naturaleza ?? 'GASTO');\n",
      "  const usables = (_n: CategoriaNodo) => true;\n",
      "js"),
     # ---------------------------------------------------------------- F05-01 S7-MAG UI (hito 2)
@@ -242,23 +249,23 @@ MUTANTES = [
     ("U25", "mobile/src/domain/preferencias.ts",
      "  return f.cuenta !== null || f.presupuestable !== null;\n", "  return true;\n", "js"),
     ("U26", "mobile/src/screens/PreferenciasAjustesScreen.tsx",
-     "        ? preferenciaDeAmbito(datos.prefs, form.ambito === 'GENERAL' ? null : form.categoriaId, datos.tipos.GASTO)\n",
-     "        ? null\n", "js"),
+     "      (vista.v === 'NUEVA' && datos && claveCompleta\n",
+     "      (false && datos && claveCompleta\n", "js"),
     ("U27", "mobile/src/screens/PreferenciasAjustesScreen.tsx",
      "      if (otra) return setConflicto(otra);\n", "", "js"),
     ("U28", "mobile/src/screens/PreferenciasAjustesScreen.tsx",
-     "      setForm(formularioDesde(actual, d.cuentas)); // S06: la versión actual, sin reintento automático\n",
+     "      setForm(formularioDesde(actual, t === 'INGRESO' ? d.cuentasIngreso : d.cuentas, d.tipos)); // S06: la versión actual, sin reintento automático\n",
      "      return void guardar(); // reintento automatico\n", "js"),
     ("U29", "mobile/src/domain/preferencias.ts",
      "  if (f.cuenta !== null && typeof f.cuenta === 'object') r.push('CUENTA_NO_DISPONIBLE');\n", "", "js"),
     ("U30", "mobile/src/domain/preferencias.ts",
      "    return {\n      tipo_hecho_id: base.tipo_hecho_id,\n", "    return {\n      tipo_hecho_id: null,\n", "js"),
     ("U31", "mobile/src/screens/PreferenciasAjustesScreen.tsx",
-     "                        propone={textosPropone(x, nombreCuenta).join(' · ')}\n                        noDisponible={x.cuenta_default_id !== null && cuentaNoDisponible(x)}\n",
-     "                        propone={textosPropone(x, nombreCuenta).join(' · ')}\n                        noDisponible={x.cuenta_default_id !== null && nombreCuenta(x.cuenta_default_id) === null}\n",
+     "                        propone={textosPropone(x, nombreCuenta, tipoX(x)).join(' · ')}\n                        noDisponible={x.cuenta_default_id !== null && cuentaNoDisponible(x)}\n",
+     "                        propone={textosPropone(x, nombreCuenta, tipoX(x)).join(' · ')}\n                        noDisponible={x.cuenta_default_id !== null && nombreCuenta(x.cuenta_default_id) === null}\n",
      "js"),
     ("U32", "mobile/src/screens/PreferenciasAjustesScreen.tsx",
-     "            esVisible={(n) => visibleEnRegistro(datos.arbol, n)}\n", "            esVisible={() => true}\n", "js"),
+     "            esVisible={(n) => visibleEnRegistro(datos.arbol, n, tipoF)}\n", "            esVisible={() => true}\n", "js"),
     ("U33", "mobile/src/screens/PreferenciasAjustesScreen.tsx",
      "p.cliente.altaPreferencia({ id: idAlta!, ...contenido })", "p.cliente.altaPreferencia({ id: p.nuevoId(), ...contenido })", "js"),
     ("U34", "mobile/src/screens/PreferenciasAjustesScreen.tsx",

@@ -8,6 +8,7 @@
 // Versión: 0.3.0 (F05-01 S7-MAG UI, hito 1; F09 §12.97.10, lámina SET-MAG v0.1): sección plegada «Magnitudes · N» entre «Icono» y «Acciones» (también en desactivadas, P1) con su selector del catálogo y su ficha (MagnitudesCategoria.tsx). El árbol se puede recargar en SILENCIO (sin pasar por «cargando») para que la ficha o la sección no parpadeen tras un comando de magnitudes; si esa recarga falla, se conserva el árbol mostrado y el aviso de la sección lo explica. El selector y las hojas de magnitudes son tareas inmersivas.
 // Versión: 0.4.0 (F05-01 S7-MAG UI, hito 2): el controlador de magnitudes recibe `nuevoId` (identidad del alta rápida) y la ruta visible de cada categoría («Hogar › Luz») para la ficha y el impacto de deshabilitar.
 // Versión: 0.5.0 (F05-01 S7-MAG UI correctivo AJ-S7MAGUI-02): `cargar(true)` devuelve si la lectura del árbol fue OK; en silencio, un fallo conserva el árbol mostrado y el controlador de magnitudes lo identifica como posiblemente desfasado (nunca «estado actualizado» sin verificarlo).
+// Versión: 0.6.0 (F05-03/F05-04 J2 §2.6; lámina SET-PLT / HOME-QA v0.2 O01/O02): sin NINGUNA categoría, la lista ofrece «Empezar con categorías sugeridas» (O02, árbol del servidor y POST /v1/categorias/onboarding) o «Empezar desde cero» (estado vacío habitual con «Nueva categoría»). La oferta es una tarea inmersiva.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -20,6 +21,7 @@ import type { Respuesta } from '../api/cliente';
 import { BotonPrimario, CabeceraNavegacion, EstadoDato, Segmentado } from '../components/Basicos';
 import { HojaAmbito, HojaDesactivar, HojaReactivar, HojaRenombrar, UsoCarga } from '../components/HojasCategoria';
 import { useMagnitudesCategoria } from '../components/MagnitudesCategoria';
+import { CategoriasSugeridas, OfertaOnboarding } from '../components/OnboardingCategorias';
 import { BotonSecundario, CargaArbol, IconoCategoriaVista, SelectorCategorias } from '../components/SelectorCategorias';
 import { SelectorIconos } from '../components/SelectorIconos';
 import { Ambito, CategoriaNodo, ancestros, construirArbol, descendientes, hijosDe, mismoOrden, subcategoriasActivas } from '../domain/categoria';
@@ -52,6 +54,7 @@ type Tarea =
   | { tipo: 'ALTA'; padre: string | null }
   | { tipo: 'ICONO' | 'RENOMBRAR' | 'MOVER' | 'AMBITO' | 'DESACTIVAR' | 'REACTIVAR' }
   | { tipo: 'ORDEN'; padre: string | null }
+  | { tipo: 'ONBOARDING' }
   | null;
 
 /** Aviso común de un resultado: OK sin aviso; indeterminado y conflicto de versión con su texto; el resto, `undefined`. */
@@ -87,6 +90,7 @@ export function CategoriasAjustesScreen(p: {
   const [errorNombre, setErrorNombre] = useState<string | null>(null);
   const [uso, setUso] = useState<UsoCarga>({ fase: 'CARGANDO' });
   const [usoCambiado, setUsoCambiado] = useState(false);
+  const [desdeCero, setDesdeCero] = useState(false);
 
   /** Devuelve si la lectura fue OK: en silencio, un fallo conserva el árbol mostrado y quien recarga lo comunica (AJ-S7MAGUI-02). */
   const cargar = useCallback(async (silencioso = false): Promise<boolean> => {
@@ -237,6 +241,19 @@ export function CategoriasAjustesScreen(p: {
   };
 
   // ------------------------------------------------------------------ tareas inmersivas
+  if (tarea?.tipo === 'ONBOARDING') {
+    return (
+      <CategoriasSugeridas
+        cliente={p.cliente}
+        onCancelar={() => setTarea(null)}
+        onCreadas={() => {
+          setTarea(null);
+          void cargar();
+        }}
+      />
+    );
+  }
+
   if (tarea?.tipo === 'ALTA' && arbol) {
     return (
       <NuevaCategoriaScreen
@@ -470,7 +487,10 @@ export function CategoriasAjustesScreen(p: {
             onPress={() => setDetalleId(nodoNivel.id)}
           />
         ) : null}
-        {carga.fase === 'OK' && filas.length === 0 && !nodoNivel ? (
+        {arbol && arbol.porId.size === 0 && !desdeCero ? (
+          <OfertaOnboarding onSugeridas={() => setTarea({ tipo: 'ONBOARDING' })} onDesdeCero={() => setDesdeCero(true)} />
+        ) : null}
+        {carga.fase === 'OK' && filas.length === 0 && !nodoNivel && !(arbol && arbol.porId.size === 0 && !desdeCero) ? (
           <View testID="categorias-vacio" style={s.estado}>
             <Text style={[tipo.body, { color: c.textSecondary }]}>
               {filtro === 'ACTIVAS' ? 'No tienes categorías activas en este nivel.' : 'Aún no tienes categorías.'}

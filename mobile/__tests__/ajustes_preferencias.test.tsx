@@ -5,6 +5,7 @@
 // Descripción: Ajustes › Preferencias (F05-02 B3; lámina SET-PREF / REG-PREF v0.1, sección B S01–S06 y oscuro; D-PREF-01..06; AJ-B1-10; D-B3-01). Una prueba por pantalla y por regla: entrada desde Ajustes con título «Preferencias»; S05 vacío; S01 lista agrupada y ordenada, «Pagar con X» / «Presupuesto: Sí/No», «Padre › Hija», marca «No disponible» solo con `cuenta_disponible_hoy = false` (D-PREF-04) y pie; S02 alta con solo dos ámbitos (D-PREF-01), cuentas y categorías de la MISMA fuente que REG-01 (sin regla propia: una INGRESO no se puede elegir, AJ-B1-10), «Guardar» desactivado sin propuesta (espejo del CHECK), contenido completo y UUID sellado al abrir; S03 por existente y por carrera (nunca se crea otra); S04 detalle, desactivar y reactivar (empate al reactivar) sin borrado; E05 al editar; S06 VERSION_DESFASADA → recarga y aviso sin reintento; INDETERMINADO con el mismo UUID; cuenta actual no disponible al editar; tareas inmersivas; modo oscuro.
 // Versión: 0.1.0 (F05-02 B3)
 // Versión: 0.2.0 (F05-03/F05-04 J2 §1.5; F05 §46.5 E3; decisión OPCIÓN A2 del STOP 2, tabla «tests adaptados»): toda preferencia lleva tipo. Los dobles devuelven `tipos` en la lista y las preferencias de la lámina son de tipo GASTO (`TIPOS.GASTO`); los altas y ediciones esperan `tipo_hecho_id: TIPOS.GASTO` en lugar de null. La preferencia «por tipo» creada por API pasa a ser de OTRO tipo (`t-otro`): la de tipo GASTO sin categoría es ahora «Todos los gastos».
+// Versión: 0.3.0 (F05-03/F05-04 J2 §2.5; F05 §46.4 R6; tabla «tests adaptados»): S02 ofrece CUATRO ámbitos (antes dos): el caso conserva lo que comprobaba (cuentas de REG-01, espejo del CHECK, «Guardar» desactivado) y cuenta 4 radios en lugar de 2.
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
@@ -239,16 +240,18 @@ test('S01 (dominio): agrupar y ordenar es estable y no depende del orden de la A
 });
 
 // ------------------------------------------------------------------ S02
-test('S02: solo dos ámbitos (D-PREF-01); cuentas de REG-01 tal cual; «Guardar» desactivado sin propuesta con el texto del CHECK', async () => {
+test('S02: cuatro ámbitos (F05-04 R6; antes dos, D-PREF-01); cuentas de REG-01 tal cual; «Guardar» desactivado sin propuesta con el texto del CHECK', async () => {
   const f = fake([]);
   await abrir(f.cliente);
   fireEvent.press(screen.getByTestId('ajpref-vacio-nueva'));
   expect(screen.queryByTestId('tab-INICIO')).toBeNull(); // tarea inmersiva
   expect(screen.getByTestId('ajpref-ambito-GENERAL')).toBeTruthy();
   expect(screen.getByTestId('ajpref-ambito-CATEGORIA')).toBeTruthy();
-  expect(within(screen.getByTestId('ajpref-form')).getAllByRole('radio')).toHaveLength(2);
+  expect(within(screen.getByTestId('ajpref-form')).getAllByRole('radio')).toHaveLength(4);
   expect(screen.getByText('Todos los gastos')).toBeTruthy();
+  expect(screen.getByText('Todos los ingresos')).toBeTruthy();
   expect(screen.getByText('Una categoría')).toBeTruthy();
+  expect(screen.getByText('Un tercero')).toBeTruthy();
   // La misma lista que REG-01 (sin filtro propio del cliente), más «No proponer».
   for (const c of CUENTAS) expect(screen.getByTestId(`ajpref-cuenta-${c.cuenta_id}`)).toBeTruthy();
   expect(marcado('ajpref-cuenta-no')).toBe(true);
@@ -551,4 +554,90 @@ test('modo oscuro: superficies y marca «No disponible» con los tokens oscuros'
   const marca = plana(screen.getByTestId('ajpref-fila-p-gas-no-disponible').props.style);
   expect(marca.backgroundColor).toBe(colores.dark.partialSurface);
   expect(marca.borderColor).toBe(colores.dark.warning);
+});
+
+// ------------------------------------------------------------------ F05-04 J2 §2.5 (R6): cuatro ámbitos y tipo siempre enviado
+const NOMINA_CTA = 'c0000000-0000-4000-8000-0000000000f1';
+const ALDI = { id: 'ter-aldi', nombre: 'ALDI', naturaleza: 'EMPRESA' as const, enabled: true, row_version: 1 };
+
+function conMaestros(f: ReturnType<typeof fake>) {
+  f.cliente.cuentasElegibles = jest.fn(async (operacion: any) =>
+    ({ tipo: 'OK', datos: { operacion, cuentas: operacion === 'INGRESO' ? [{ cuenta_id: NOMINA_CTA, nombre: 'Cuenta nómina', moneda: 'EUR' }] : [] } }) as any);
+  f.cliente.listarTerceros = jest.fn(async () => ({ tipo: 'OK', datos: { terceros: [ALDI] } }) as any);
+  return f;
+}
+
+test('R6 «Todos los ingresos»: cuentas para cobrar del servidor (no las de pago) y alta con el tipo INGRESO', async () => {
+  const f = conMaestros(fake([]));
+  await abrir(f.cliente);
+  expect(f.cliente.cuentasElegibles).toHaveBeenCalledWith('INGRESO', HOY);
+  fireEvent.press(screen.getByTestId('ajpref-vacio-nueva'));
+  fireEvent.press(screen.getByTestId('ajpref-ambito-INGRESOS'));
+  expect(screen.queryByTestId('ajpref-tipo-GASTO')).toBeNull(); // el tipo lo fija el ámbito
+  expect(screen.queryByTestId(`ajpref-cuenta-${TARJETA}`)).toBeNull();
+  fireEvent.press(screen.getByTestId(`ajpref-cuenta-${NOMINA_CTA}`));
+  await pulsar('ajpref-guardar');
+  expect(f.cliente.altaPreferencia).toHaveBeenCalledWith({
+    id: '00000000-0000-4000-8000-000000000001', tipo_hecho_id: TIPOS.INGRESO, categoria_id: null, tercero_id: null, entidad_id: null,
+    cuenta_default_id: NOMINA_CTA, presupuestable_default: null, prioridad: 100,
+  });
+  expect(await screen.findByTestId('ajpref-detalle')).toBeTruthy();
+  expect(plano('ajpref-det-ambito-valor')).toBe('Todos los ingresos');
+});
+
+test('R6 «Una categoría» de ingresos: el selector filtra por el tipo; volver a Gasto quita la categoría de ingresos', async () => {
+  const f = conMaestros(fake([]));
+  await abrir(f.cliente);
+  fireEvent.press(screen.getByTestId('ajpref-vacio-nueva'));
+  fireEvent.press(screen.getByTestId('ajpref-ambito-CATEGORIA'));
+  expect(screen.getByTestId('ajpref-tipo-GASTO').props.accessibilityState.checked).toBe(true);
+  fireEvent.press(screen.getByTestId('ajpref-tipo-INGRESO'));
+  fireEvent.press(screen.getByTestId('ajpref-form-categoria'));
+  const sel = within(screen.getByTestId('ajpref-selector'));
+  expect(sel.queryByTestId('cat-alim')).toBeNull(); // solo gastos: oculta para ingresos
+  fireEvent.press(sel.getByTestId('cat-trabajo'));
+  fireEvent.press(sel.getByTestId('cat-nomina'));
+  expect(plano('ajpref-form-categoria')).toContain('Trabajo › Nómina');
+  fireEvent.press(screen.getByTestId('ajpref-tipo-GASTO'));
+  expect(plano('ajpref-form-categoria')).toContain('Elige categoría');
+  fireEvent.press(screen.getByTestId('ajpref-tipo-INGRESO'));
+  elegirCategoria('trabajo', 'nomina');
+  fireEvent.press(screen.getByTestId('ajpref-presu-false'));
+  await pulsar('ajpref-guardar');
+  expect(f.cliente.altaPreferencia).toHaveBeenCalledWith(expect.objectContaining({ tipo_hecho_id: TIPOS.INGRESO, categoria_id: 'nomina', tercero_id: null }));
+  expect(plano('ajpref-det-ambito-valor')).toBe('Trabajo › Nómina · Ingresos');
+});
+
+test('R6 «Un tercero»: selector de terceros activos, sin categoría, tipo enviado; grupo «Por tercero» y S03 por la misma clave', async () => {
+  const f = conMaestros(fake([]));
+  await abrir(f.cliente);
+  fireEvent.press(screen.getByTestId('ajpref-vacio-nueva'));
+  fireEvent.press(screen.getByTestId('ajpref-ambito-TERCERO'));
+  expect(screen.queryByTestId('ajpref-form-categoria')).toBeNull(); // categoría + tercero no se ofrece
+  expect(screen.getByTestId('ajpref-falta-TERCERO')).toBeTruthy();
+  fireEvent.press(screen.getByTestId('ajpref-form-tercero'));
+  fireEvent.press(await screen.findByTestId('tercero-ter-aldi'));
+  expect(plano('ajpref-form-tercero')).toContain('ALDI');
+  fireEvent.press(screen.getByTestId(`ajpref-cuenta-${TARJETA}`));
+  await pulsar('ajpref-guardar');
+  expect(f.cliente.altaPreferencia).toHaveBeenCalledWith(expect.objectContaining({ tipo_hecho_id: TIPOS.GASTO, categoria_id: null, tercero_id: 'ter-aldi', entidad_id: null }));
+  expect(plano('ajpref-det-ambito-valor')).toBe('ALDI · Gastos');
+  fireEvent.press(screen.getByTestId('ajpref-detalle-atras'));
+  expect(screen.getByTestId('ajpref-grupo-tercero')).toBeTruthy();
+  fireEvent.press(screen.getByTestId('ajpref-nueva'));
+  fireEvent.press(screen.getByTestId('ajpref-ambito-TERCERO'));
+  fireEvent.press(screen.getByTestId('ajpref-form-tercero'));
+  fireEvent.press(await screen.findByTestId('tercero-ter-aldi'));
+  expect(plano('ajpref-existente')).toBe('Ya existe una preferencia para ALDI que propone Tarjeta BBVA. Edítala en lugar de crear otra.');
+  fireEvent.press(screen.getByTestId('ajpref-tipo-INGRESO'));
+  expect(screen.queryByTestId('ajpref-existente')).toBeNull(); // otro tipo, otra clave
+});
+
+test('R6 (dominio): el contenido lleva SIEMPRE tipo; la clave distingue tipo, categoría y tercero', () => {
+  const base = { categoriaId: null, cuenta: TARJETA, presupuestable: null };
+  expect(contenidoFormulario({ ...base, ambito: 'INGRESOS' }, null, TIPOS).tipo_hecho_id).toBe(TIPOS.INGRESO);
+  expect(contenidoFormulario({ ...base, ambito: 'GENERAL' }, null, TIPOS).tipo_hecho_id).toBe(TIPOS.GASTO);
+  expect(contenidoFormulario({ ...base, ambito: 'TERCERO', terceroId: 'ter-aldi', tipo: 'INGRESO' }, null, TIPOS)).toMatchObject({ tipo_hecho_id: TIPOS.INGRESO, tercero_id: 'ter-aldi', categoria_id: null });
+  expect(faltaFormulario({ ...base, ambito: 'TERCERO' })).toEqual(['TERCERO']);
+  expect(formularioDesde(pref({ id: 'x', tercero_id: 'ter-aldi', tipo_hecho_id: TIPOS.INGRESO, presupuestable_default: true }), [], TIPOS)).toMatchObject({ ambito: 'TERCERO', tipo: 'INGRESO', terceroId: 'ter-aldi' });
 });

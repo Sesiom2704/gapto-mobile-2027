@@ -5,7 +5,8 @@
 // Descripción: Raíz del cliente. Navegación mínima propia de VS-01 (decisión de ejecución: sin librería de navegación hasta F11-00): cinco destinos persistentes montados (conservan su contexto al cambiar de pestaña) y una tarea inmersiva CREATE superpuesta que oculta la barra inferior (F09 BLOQUE A). Tras un registro confirmado, Inicio vuelve a leer del backend (sin optimistic update).
 // v0.2.0 (F05-01 S6-WIRE+UI (este mandato); D-UI-03, F09 §12.91.1/§12.97.4): el destino MAS deja de ser territorio pendiente: Más → Ajustes (10 secciones; solo Categorías operativa) → Categorías. Las listas conservan la barra inferior; las tareas inmersivas de Ajustes (alta CREATE-M y selectores) la ocultan, igual que la tarea de registro. «Atrás» vuelve al nivel anterior real; la pila de Más conserva su contexto al cambiar de pestaña. Los otros tres territorios siguen pendientes.
 // v0.3.0 (F05-02 B3, A1; D-B3-01): Ajustes › «Preferencias financieras» abre Ajustes › Preferencias (PreferenciasAjustesScreen) en la pila de Más, como Categorías; sus formularios y el selector de categoría son tareas inmersivas (ocultan la barra inferior).
-// Versión: 0.3.0
+// v0.4.0 (F05-03/F05-04 J2 §2.5): Ajustes › Terceros, Contextos y Plantillas en la pila de Más, como Preferencias; sus formularios y selectores son tareas inmersivas.
+// Versión: 0.4.0
 // ============================================================
 
 import * as Crypto from 'expo-crypto';
@@ -18,6 +19,9 @@ import { ClienteApi, crearCliente } from './src/api/cliente';
 import { configApi } from './src/api/config';
 import { BarraInferior, Destino } from './src/components/BarraInferior';
 import { CategoriasAjustesScreen } from './src/screens/CategoriasAjustesScreen';
+import { ContextosAjustesScreen } from './src/screens/ContextosAjustesScreen';
+import { PlantillasAjustesScreen } from './src/screens/PlantillasAjustesScreen';
+import { TercerosAjustesScreen } from './src/screens/TercerosAjustesScreen';
 import { PreferenciasAjustesScreen } from './src/screens/PreferenciasAjustesScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { AjustesScreen, MasScreen } from './src/screens/MasScreen';
@@ -27,7 +31,7 @@ import { ProveedorTema, useTema } from './src/theme/tema';
 
 const TITULOS: Record<Exclude<Destino, 'INICIO' | 'MAS'>, string> = { DIA: 'Día a día', MES: 'Mes', PATRIMONIO: 'Patrimonio' };
 
-type PantallaMas = 'MAS' | 'AJUSTES' | 'CATEGORIAS' | 'PREFERENCIAS';
+type PantallaMas = 'MAS' | 'AJUSTES' | 'CATEGORIAS' | 'PREFERENCIAS' | 'TERCEROS' | 'CONTEXTOS' | 'PLANTILLAS';
 
 export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () => Date }) {
   const { c, esquema } = useTema();
@@ -61,12 +65,30 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
               onAtras={() => setPantallaMas('MAS')}
               onCategorias={() => setPantallaMas('CATEGORIAS')}
               onPreferencias={() => setPantallaMas('PREFERENCIAS')}
+              onTerceros={() => setPantallaMas('TERCEROS')}
+              onContextos={() => setPantallaMas('CONTEXTOS')}
+              onPlantillas={() => setPantallaMas('PLANTILLAS')}
             />
           ) : null}
           {pantallaMas === 'CATEGORIAS' ? (
             <CategoriasAjustesScreen
               cliente={p.cliente}
               nuevoId={p.nuevoId}
+              onAtras={() => setPantallaMas('AJUSTES')}
+              onInmersiva={setInmersivaMas}
+            />
+          ) : null}
+          {pantallaMas === 'TERCEROS' ? (
+            <TercerosAjustesScreen cliente={p.cliente} nuevoId={p.nuevoId} onAtras={() => setPantallaMas('AJUSTES')} onInmersiva={setInmersivaMas} />
+          ) : null}
+          {pantallaMas === 'CONTEXTOS' ? (
+            <ContextosAjustesScreen cliente={p.cliente} nuevoId={p.nuevoId} onAtras={() => setPantallaMas('AJUSTES')} onInmersiva={setInmersivaMas} />
+          ) : null}
+          {pantallaMas === 'PLANTILLAS' ? (
+            <PlantillasAjustesScreen
+              cliente={p.cliente}
+              nuevoId={p.nuevoId}
+              ahora={p.ahora}
               onAtras={() => setPantallaMas('AJUSTES')}
               onInmersiva={setInmersivaMas}
             />

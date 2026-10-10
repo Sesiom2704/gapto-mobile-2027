@@ -225,7 +225,13 @@
 #   toma el advisory con servicio.tomar_advisory_del_catalogo (el recuento
 #   de cero categorias se hace bajo el advisory): no importa el repositorio
 #   (I8 intacta); comprobacion propia test_i8_onboarding_solo_comandos_de_c06.
-# Version: 0.14.0
+#
+#   v0.15.0 (F05-03/F05-04 J2 §2.5): SOLO altas. I7 registra (con una
+#   sentencia aditiva tras el literal) las menciones de categoria_id del
+#   cliente de plantillas: domain/maestros.ts, domain/plantillas.ts y
+#   PlantillasAjustesScreen.tsx (lectura y envio de la clave de la
+#   plantilla; ninguna escribe categorias_financieras).
+# Version: 0.15.0
 # ============================================================
 
 from __future__ import annotations
@@ -1016,6 +1022,14 @@ MENCIONES_CLIENTE: dict[str, str] = {
     "mobile/src/domain/preferencias.ts": "lee la categoria sellada y la clave de contexto de las preferencias (F05-02 B2, R)",
     "mobile/src/screens/PreferenciasAjustesScreen.tsx": "Ajustes > Preferencias: muestra y envia la clave de categoria de la preferencia por /v1/preferencias (F05-02 B3, R)",
 }
+# F05-03/F05-04 J2 §2.5 (alta aditiva): plantillas en el cliente; leen y envian la
+# clave de categoria de la plantilla por /v1/plantillas (escritor: servicio de
+# plantillas, C-a en servidor). Ninguno escribe categorias_financieras.
+MENCIONES_CLIENTE.update({
+    "mobile/src/domain/maestros.ts": "resumen de una plantilla: lee su categoria_id para mostrar el nombre (F05-04 J2 §2.5, R)",
+    "mobile/src/domain/plantillas.ts": "formulario y contenido completo de la plantilla: su categoria_id propuesto (F05-04 J2 §2.5, R; escribe la plantilla, no la categoria)",
+    "mobile/src/screens/PlantillasAjustesScreen.tsx": "Ajustes > Plantillas: muestra la categoria propuesta y su aviso de no disponible (F05-04 J2 §2.5, R)",
+})
 
 
 def test_i7_cliente_movil_sin_menciones_sin_registrar():
