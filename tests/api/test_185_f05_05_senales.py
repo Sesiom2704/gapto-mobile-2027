@@ -13,6 +13,10 @@
 #   RECIENTE como motivo del primero del tipo, FECHA_FUTURA, tipo invalido y
 #   lectura sin escritura (R5).
 # Version: 0.1.0 (F05-05 K2 §1.2)
+# Version: 0.2.0 (F05-05 K3 §3, mutantes SE03/SE05/SE06/SE09/SE14): hechos
+#   anulados fuera; frecuencia por HECHO (no por efecto); desempate por
+#   recencia antes que por nombre (R6); nunca mas de 3 tambien con el bloque
+#   del tercero; «Recientes» por recencia y no por uso (R4).
 # ============================================================
 
 from __future__ import annotations
@@ -228,3 +232,59 @@ def test_r5_la_lectura_no_escribe(e):
     cli.get(URL_TER, params={"tipo": "GASTO", "fecha": "2026-10-10"}, headers=h.AUTH)
     assert h.leer(owner, "SELECT row_version FROM gapto.terceros WHERE id=%s", (aldi,)) == antes
     assert h.leer(owner, "SELECT count(*) FROM gapto.auditoria") == auditorias
+
+
+# ------------------------------------------------------------------ K3 §3: refuerzo (mutantes)
+def test_hechos_anulados_no_cuentan_como_uso(e):
+    owner, cli, cta, _ = e
+    a, b = x.categoria(owner, "Anulada"), x.categoria(owner, "Vigente")
+    for _ in range(2):
+        x.anular(owner, x.gasto(cli, cta, categoria_id=a, fecha="2026-10-08"))
+    x.gasto(cli, cta, categoria_id=b, fecha="2026-09-01")
+    obtenido, _ = senales(cli)
+    assert [n for n, _ in obtenido] == ["Vigente"]
+
+
+def test_frecuencia_por_hecho_y_no_por_efecto():
+    """Un hecho con dos efectos de la misma categoria es UN uso: 2 hechos de B
+    van antes que 1 hecho (mas reciente) con dos efectos de A."""
+    owner, actor, cli, cta, _ = x.entorno()
+    a, b = x.categoria(owner, "Alfa"), x.categoria(owner, "Beta")
+    x.hecho_motor(owner, [("GASTO", "5.00", "COMPLETA", a, [(actor, "5.00")]),
+                          ("GASTO", "6.00", "COMPLETA", a, [(actor, "6.00")])], fecha="2026-10-09")
+    for _ in range(2):
+        x.gasto(cli, cta, categoria_id=b, fecha="2026-09-01")
+    obtenido, cuerpo = senales(cli)
+    assert [n for n, _ in obtenido] == ["Beta", "Alfa"]
+    assert [c["usos"] for c in cuerpo["candidatas"]] == [2, 1]
+
+
+def test_desempate_por_recencia_antes_que_por_nombre(e):
+    owner, cli, cta, _ = e
+    a, z = x.categoria(owner, "Aaa"), x.categoria(owner, "Zzz")
+    x.gasto(cli, cta, categoria_id=a, fecha="2026-08-01")
+    x.gasto(cli, cta, categoria_id=z, fecha="2026-09-01")  # misma frecuencia, mas reciente
+    obtenido, _ = senales(cli)
+    assert [n for n, _ in obtenido] == ["Zzz", "Aaa"]
+
+
+def test_con_tercero_nunca_mas_de_tres(e):
+    owner, cli, cta, _ = e
+    aldi = x.tercero(cli, "ALDI")
+    for i, nombre in enumerate(["Uno", "Dos", "Tres", "Cuatro"]):
+        cat = x.categoria(owner, nombre)
+        for _ in range(4 - i):
+            x.gasto(cli, cta, categoria_id=cat, tercero_id=aldi, fecha="2026-09-01")
+    obtenido, _ = senales(cli, tercero=aldi)
+    assert [n for n, _ in obtenido] == ["Uno", "Dos", "Tres"]
+
+
+def test_recientes_por_recencia_y_no_por_uso(e):
+    owner, cli, cta, _ = e
+    mucho, ayer = x.tercero(cli, "Mucho uso"), x.tercero(cli, "Usado ayer")
+    for _ in range(3):
+        x.gasto(cli, cta, tercero_id=mucho, fecha="2026-10-05")
+    x.gasto(cli, cta, tercero_id=ayer, fecha="2026-10-09")
+    r = cli.get(URL_TER, params={"tipo": "GASTO", "fecha": "2026-10-10"}, headers=h.AUTH)
+    assert r.status_code == 200, r.text
+    assert [(t["nombre"], t["motivo"]) for t in r.json()["terceros"]] == [("Usado ayer", "RECIENTE"), ("Mucho uso", "RECIENTE")]

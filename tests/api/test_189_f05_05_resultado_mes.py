@@ -21,6 +21,9 @@
 #   Nota (D-RE-1): con efectos PARCIAL, A9 cuenta la parte propia atribuida y
 #   gasto-mes (VS-01) no; por eso el oraculo (1) usa solo datos que F05 captura.
 # Version: 0.1.0 (F05-05 K2 §1.6)
+# Version: 0.2.0 (F05-05 K3 §3, mutantes RE05/RE06): hechos anulados fuera de
+#   todas las cifras; un hecho con DOS efectos pendientes cuenta UNA vez en
+#   «Sin indicar» (con la suma de los dos importes).
 # ============================================================
 
 from __future__ import annotations
@@ -156,3 +159,22 @@ def test_caso27_hola_con_el_nombre_del_owner_y_aislamiento():
     x.gasto(cli_b, cta_b, importe="500.00")
     assert cli_b.get("/v1/yo", headers=h.AUTH).json() == {"nombre": "VS-01 test"}
     assert resultado(cli)["gastos_propios"] == "0.00"  # los hechos de B no cuentan para A
+
+
+# ------------------------------------------------------------------ K3 §3: refuerzo (mutantes)
+def test_hechos_anulados_fuera_de_todas_las_cifras():
+    owner, actor, cli, cta, _ = x.entorno()
+    x.gasto(cli, cta, importe="10.00")
+    x.anular(owner, x.gasto(cli, cta, importe="99.00"))
+    x.anular(owner, x.gasto(cli, cta, importe="7.00", atribucion="SIN_INDICAR"))
+    x.anular(owner, x.ingreso(cli, cta, importe="500.00"))
+    r = resultado(cli)
+    assert (r["gastos_propios"], r["ingresos_propios"], r["resultado"]) == ("10.00", "0.00", "-10.00")
+    assert r["sin_indicar"]["gastos"] == {"n": 0, "importe": "0.00"}
+
+
+def test_dos_efectos_pendientes_de_un_hecho_cuentan_una_vez():
+    owner, actor, cli, cta, _ = x.entorno()
+    a, b = x.categoria(owner, "A"), x.categoria(owner, "B")
+    x.hecho_motor(owner, [("GASTO", "4.00", "NO_DISPONIBLE", a, []), ("GASTO", "6.00", "NO_DISPONIBLE", b, [])])
+    assert resultado(cli)["sin_indicar"]["gastos"] == {"n": 1, "importe": "10.00"}

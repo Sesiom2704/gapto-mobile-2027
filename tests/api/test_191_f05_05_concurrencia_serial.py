@@ -22,9 +22,14 @@
 #            FOR SHARE (el orden vigente) que NO interbloquea;
 #         X2 dos categorias en una transaccion frente a desactivar la rama, y
 #            el control con una sola categoria que NO interbloquea.
+#     AF5 orden R9: mientras el alta espera el tercero, la categoria sigue
+#         libre (sonda FOR UPDATE NOWAIT): la categoria va DESPUES del tercero;
+#     AF6 la categoria se pide FOR SHARE: el alta no espera a quien la lee
+#         FOR SHARE (con NKU esperaria).
 #   Espera de los pasos tras liberar la barrera: GAPTO_F0505_JOIN_TIMEOUT_S
 #   (por defecto 30 s en base local y 300 s en proveedor remoto).
 # Version: 0.1.0 (F05-05 K3 §3)
+# Version: 0.2.0 (F05-05 K3 §3, mutantes AF01/AF02): escenarios AF5 y AF6.
 # ============================================================
 
 from __future__ import annotations
@@ -375,3 +380,49 @@ def test_afx2_dos_categorias_en_una_transaccion_frente_a_desactivar_rama(t, vari
         assert len(errores) == 1 and isinstance(errores[0], _40P01), f"se esperaba 40P01: {errores}"
     else:
         assert errores == [], f"una sola categoria no debe interbloquear: {errores}"
+
+
+# ------------------------------------------------------------------ AF5 / AF6 orden y modo de la categoria (R9)
+def _nowait(owner, sql: str, params: tuple) -> bool:
+    """True si la fila esta bloqueada por otra transaccion (55P03)."""
+    c = fh.sesion_owner(owner)
+    try:
+        c.execute(sql + " NOWAIT", params)
+        return False
+    except psycopg.errors.LockNotAvailable:
+        return True
+    finally:
+        c.rollback()
+        c.close()
+
+
+def test_af5_el_alta_espera_el_tercero_sin_haber_tocado_la_categoria(t):
+    owner, cli, _, tid, cat = t
+    barrera = _barrera_fila(owner, "SELECT id FROM gapto.terceros WHERE id=%s FOR UPDATE", (tid,))
+
+    def inspeccion(evid):
+        tomada = _nowait(owner, "SELECT id FROM gapto.categorias_financieras WHERE id=%s FOR UPDATE", (cat,))
+        assert not tomada, "la categoria ya estaba bloqueada mientras el alta espera el tercero (orden R9 roto)"
+        return {"categoria_libre_mientras_espera_el_tercero": not tomada}
+
+    salida = _serie(barrera, [("alta", _alta(cli, tid, cat))], "AF5_orden_tercero_antes_que_categoria", inspeccion)
+    assert salida["alta"].status_code == 200
+
+
+def test_af6_el_alta_no_espera_a_quien_lee_la_categoria_for_share(t):
+    owner, cli, _, tid, cat = t
+    lector = _barrera_fila(owner, "SELECT id FROM gapto.categorias_financieras WHERE id=%s FOR SHARE", (cat,))
+    salida: dict = {}
+    hilo = threading.Thread(target=lambda: salida.setdefault("alta", _alta(cli, tid, cat)()))
+    hilo.start()
+    hilo.join(timeout=10)
+    espero = hilo.is_alive()
+    evid = {"escenario": "AF6_categoria_for_share", "alta_espero_al_lector": espero}
+    if espero:
+        evid["locks_bloqueados"] = [_locks(p) for p in _bloqueados(fh.pid_servidor(lector), 1, limite=2.0)]
+    lector.rollback()
+    lector.close()
+    hilo.join(timeout=_espera_join_s())
+    _evidencia("AF6_categoria_for_share", evid)
+    assert not espero, "el alta espero a un lector FOR SHARE de la categoria (pide NKU en lugar de FOR SHARE)"
+    assert salida["alta"].status_code == 200

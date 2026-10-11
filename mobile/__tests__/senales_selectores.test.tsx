@@ -4,6 +4,7 @@
 // Ruta: mobile/__tests__/senales_selectores.test.tsx
 // Descripción: K3 de F05-05 (§2.1–§2.4; F05 §49.4 A1–A5, §49.5 R1/R2/R4; lámina SRCH-ACT-AFI v0.2 A1–A8). Dominios SEÑALES, BÚSQUEDA y AFINIDADES en el cliente. Casos de §49.9: 1 (afinidad primero con su motivo), 3 (sugerida, chip y árbol → MISMA intención sellada), 8 («super» y «súper»), 10 («Recordar»: doble toque idempotente y fallo sin afectar al hecho), 21 (chip sin tocar: PENDIENTE y «Registrar» sin habilitar), 34 (búsqueda de terceros en el servidor con «garcía») y homónimos por naturaleza y uso; «Recientes» con su motivo; inactivo con «Reactivar» en línea.
 // Versión: 0.1.0 (F05-05 K3 §2.1–§2.4)
+// Versión: 0.3.0 (F05-05 K3 §3, mutante SE19): con fecha futura no se piden sugerencias ni salen chips (R7).
 // Versión: 0.2.0 (F05-05 K3 §3; casos 6, 7 y 29 de §49.9): con la plantilla aplicada las sugerencias no alteran su propuesta ni salen chips; con la preferencia de cuenta del tercero, elegir por chip o por árbol da la MISMA consulta de propuesta y el MISMO payload; cambio de tercero y de tipo; categoría que deja de ser elegible entre carga y confirmación; reintento con el mismo UUID.
 // ============================================================
 
@@ -439,4 +440,16 @@ test('caso 29: reintento tras un resultado indeterminado → el MISMO UUID y la 
   const [a, b] = enviados(c);
   expect(b).toEqual(a);
   expect(b.categoria).toEqual(SELLADA);
+});
+
+test('R7: con una fecha futura no se piden sugerencias ni salen chips', async () => {
+  const c = fake();
+  await abrirGasto(c);
+  await waitFor(() => expect(screen.getByTestId('chip-sugerida-drogueria')).toBeTruthy());
+  const antes = (c.senalesCategorias as jest.Mock).mock.calls.length;
+  await pulsar('fecha-otra');
+  await act(async () => fireEvent.changeText(screen.getByTestId('campo-fecha'), '12/10/2026'));
+  await act(async () => undefined);
+  expect((c.senalesCategorias as jest.Mock).mock.calls.slice(antes).some(([q]) => q.fecha > HOY)).toBe(false);
+  expect(screen.queryByTestId('chips-sugeridas')).toBeNull();
 });

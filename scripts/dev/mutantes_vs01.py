@@ -114,7 +114,13 @@
 #   v0.15.0 (F05-03/F05-04 J2 §2.3): textos protegidos de M10 (la guarda de
 #   fecha futura lleva el texto por tipo) y U03 (la obligatoria vacia NO
 #   declarada «No lo sé»). Mismos discriminantes; censo sin cambios (67).
-# Version: 0.15.0
+#   v0.16.0 (F05-05 K3 §2.7; F05 §49.4 A9): texto protegido de M12. «Este
+#   mes» tiene ya su read model (Resultado del mes, CeldaMes); la guarda que
+#   M12 protege sigue siendo la misma: la cifra PARCIAL de gasto-mes
+#   (CeldaGastos) nunca se presenta en «Este mes». El mutante la pone en la
+#   columna «Gastos» de ese bloque; lo mata vs01.test.tsx («la cifra real va
+#   en tarjeta PARCIAL separada, nunca en «Este mes»»). Censo sin cambios: 67.
+# Version: 0.16.0
 # ============================================================
 
 from __future__ import annotations
@@ -171,7 +177,7 @@ MUTANTES = [
     ('M09', 'mobile/src/domain/intencion.ts', "if (b.propuesta === 'SELF_100' && !b.propuestaRechazada) {", "if (b.propuesta === 'SELF_100') {", 'js'),
     ('M10', 'mobile/src/domain/intencion.ts', "  else if (b.fechaHecho > hoyIso) e.fecha = tipo === 'GASTO' ? 'Solo gastos ya ocurridos: la fecha no puede ser futura.' : 'Solo ingresos ya cobrados: la fecha no puede ser futura.';\n", '', 'js'),
     ('M11', 'mobile/src/screens/RegistroGastoScreen.tsx', '  }, [b.fechaHecho]);', '  }, []);', 'js'),
-    ('M12', 'mobile/src/screens/HomeScreen.tsx', '          <Columna etiqueta="Gastos">\n            <EstadoDato estado="NO_DISPONIBLE" />\n          </Columna>', '          <Columna etiqueta="Gastos">\n            <CeldaGastos lectura={gasto} onReintentar={cargar} />\n          </Columna>', 'js'),
+    ('M12', 'mobile/src/screens/HomeScreen.tsx', '          <Columna etiqueta="Gastos">\n            <CeldaMes lectura={mes} campo="gastos" onReintentar={cargar} />\n          </Columna>', '          <Columna etiqueta="Gastos">\n            <CeldaGastos lectura={gasto} onReintentar={cargar} />\n          </Columna>', 'js'),
     # ---------------------------------------------------------------- F05-01 S6-WIRE+UI (cliente de categorias)
     ("U01", "mobile/src/domain/categoria.ts", "  if (elegible(n, naturaleza)) return true;\n  if (n.enabled", "  return true;\n  if (n.enabled", "js"),
     ("U02", "mobile/src/screens/RegistroGastoScreen.tsx", "    if (r.tipo !== 'OK') return setArbol({ fase: 'ERROR' });", "    if (r.tipo !== 'OK') { setB((x) => ({ ...x, categoria: { estado: 'SIN_CATEGORIA' } })); return setArbol({ fase: 'ERROR' }); }", "js"),

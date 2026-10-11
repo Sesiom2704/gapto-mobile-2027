@@ -9,6 +9,8 @@
 #   como gapto_owner, igual que vs01_api_helpers.
 #   Reloj fijo: 2026-10-10 12:00 UTC (fecha funcional 2026-10-10 en Madrid).
 # Version: 0.1.0 (F05-05 K2 §1.2)
+# Version: 0.2.0 (F05-05 K3 §3): `anular` (fixture sin writer F05: el hecho pasa a
+#   ANULADO como gapto_owner, patron de test_153).
 # ============================================================
 
 from __future__ import annotations
@@ -148,3 +150,9 @@ def hecho_motor(owner, efectos, *, fecha="2026-10-05", tipo="GASTO", moneda="EUR
     servicio.registrar_hecho_compuesto(ContextoOperacion.de_usuario(owner, request_id=uuid.uuid4()),
                                        DatosHechoCompuesto(hecho=hecho, efectos=lista))
     return hid
+
+
+def anular(owner, hecho_id):
+    """Fixture: el hecho pasa a ANULADO (no hay writer de anulacion en F05; patron de test_153)."""
+    h.como_owner(owner, "UPDATE gapto.hechos_financieros SET estado='ANULADO', anulado_at=now(), "
+                        "motivo_anulacion='test' WHERE id=%s", (hecho_id,))

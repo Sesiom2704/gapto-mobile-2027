@@ -21,6 +21,8 @@
 #   hasta), cursor invalido, detalle con presupuestable y magnitudes.
 # Version: 0.1.0 (F05-05 K2 §1.5)
 # Version: 0.2.0 (F05-05 K2 §1.7; M5-08, A10): lecturas con `nota`; wire de escritura del gasto con `concepto`.
+# Version: 0.3.0 (F05-05 K3 §3, mutantes AC01/AC08): hechos anulados fuera de la lista, del total y del
+#   detalle; con efectos de estados distintos, el estado de reparto es el PEOR (nunca «tu parte» inventada).
 # ============================================================
 
 from __future__ import annotations
@@ -295,3 +297,23 @@ def test_m508_lecturas_exponen_nota_y_el_wire_del_gasto_conserva_concepto(e):
     assert detalle["nota"] == "Cena con amigos" and "concepto" not in detalle
     dto = (pathlib.Path(__file__).resolve().parents[2] / "backend" / "app" / "api" / "dto_f05_05.py").read_text(encoding="utf-8")
     assert "concepto:" not in dto
+
+
+# ------------------------------------------------------------------ K3 §3: refuerzo (mutantes)
+def test_hechos_anulados_fuera_de_la_lista_del_total_y_del_detalle(e):
+    owner, actor, cli, cta, _ = e
+    vivo = x.gasto(cli, cta, importe="10.00")
+    anulado = x.gasto(cli, cta, importe="20.00")
+    x.anular(owner, anulado)
+    p = pagina(cli)
+    assert ids(p) == [str(vivo)] and p["total"] == 1
+    assert cli.get(f"{URL}/{anulado}", headers=h.AUTH).status_code == 404
+
+
+def test_estado_de_reparto_es_el_peor_de_los_efectos(e):
+    owner, actor, cli, _, _ = e
+    a, b = x.categoria(owner, "Comida"), x.categoria(owner, "Bebida")
+    mixto = x.hecho_motor(owner, [("GASTO", "10.00", "COMPLETA", a, [(actor, "10.00")]),
+                                  ("GASTO", "5.00", "NO_DISPONIBLE", b, [])])
+    fila = {f["id"]: f for f in pagina(cli)["filas"]}[str(mixto)]
+    assert fila["estado_reparto"] == "NO_DISPONIBLE" and fila["tu_parte"] is None

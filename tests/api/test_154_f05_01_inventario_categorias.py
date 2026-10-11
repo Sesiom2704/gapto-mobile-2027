@@ -271,7 +271,9 @@
 #     I1 (alta aditiva, §2.11): lecturas y envios de categoria_id del E2E
 #     scripts/dev/e2e_f05_05.py por los writers publicos (R). EXCLUIDOS (§3):
 #     el arnes mutantes_f05_05.py (los mutantes son texto).
-# Version: 0.19.0
+# Version 0.20.0 (F05-05 K3 §3, mutante I13x4): prueba negativa I13 v2 (i)
+#     con una lectura que bloquea plantada en el modulo de senales.
+# Version: 0.20.0
 # ============================================================
 
 from __future__ import annotations
@@ -1679,3 +1681,12 @@ def test_i13_g_negativo_estado_inicial_y_modulo_duplicado(tmp_path):
     (raiz / "backend" / "app" / "api" / "senales_extra.py").write_text("def categorias_candidatas():\n    return []\n", encoding="utf-8")
     v = _violaciones_i13g(raiz)
     assert any(x.startswith("iv:") for x in v) and any(x.startswith("i:") for x in v)
+
+
+def test_i13_g_negativo_modulo_de_senales_que_bloquea(tmp_path):
+    """(i) de I13 v2: el modulo de senales es de solo lectura; una lectura con
+    FOR SHARE (o cualquier escritura) plantada en el se detecta."""
+    raiz = _copia(tmp_path)
+    f = raiz / MODULO_SENALES / "lecturas.py"
+    f.write_bytes((f.read_bytes().decode("utf-8") + '\n_PLANTADA = "SELECT 1 FROM gapto.terceros FOR SHARE"\n').encode("utf-8"))
+    assert any(x.startswith("i:") and "escribe o bloquea" in x for x in _violaciones_i13g(raiz))
