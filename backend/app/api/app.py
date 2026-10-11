@@ -134,13 +134,15 @@
 #                                     categorias (ONBOARDING_NO_APLICABLE si no;
 #                                     idempotente con el arbol exacto)
 #
-#   v0.19.0 (F05-05 K2 §1.2-§1.3; F05 §49.4 A1-A5, §49.5 R1-R10):
+#   v0.19.0 (F05-05 K2 §1.2-§1.4; F05 §49.4 A1-A5, §49.5 R1-R10):
 #     GET  /v1/senales/categorias?tipo=&tercero_id=&fecha=   senales (lectura)
 #     GET  /v1/senales/terceros?tipo=&fecha=                 «Recientes» (lectura)
 #          (nunca «sugeridas»: ya existe para el onboarding)
 #     POST /v1/afinidades                      alta (UUID del cliente idempotente)
 #     POST /v1/afinidades/{id}/retirar         baja (idempotente)
 #     GET  /v1/terceros/{id}/afinidades?tipo=&fecha=  guardadas + segun historial
+#     GET  /v1/terceros?q=&incluir_inactivos=  busqueda ILIKE en servidor; sin `q`,
+#          la lista completa de siempre (activos e inactivos)
 #   Fecha funcional obligatoria en las senales (C6); FECHA_FUTURA si procede.
 # Version: 0.19.0
 # ============================================================
@@ -653,8 +655,11 @@ def create_app(
     _RC = {"response_model": ResultadoComandoContexto, "dependencies": [Depends(autorizar)]}
 
     @app.get("/v1/terceros", response_model=ListaTerceros, dependencies=[Depends(autorizar)])
-    def terceros() -> dict:
-        return {"terceros": unidad.ejecutar(contexto(), lect_ter.listar, nombre="F05-04 terceros")}
+    def terceros(q: str | None = Query(None, max_length=160), incluir_inactivos: bool = Query(False)) -> dict:
+        if q is None:
+            return {"terceros": unidad.ejecutar(contexto(), lect_ter.listar, nombre="F05-04 terceros")}
+        return {"terceros": unidad.ejecutar(contexto(), lambda s: lect_ter.buscar(s, q, incluir_inactivos),
+                                            nombre="F05-05 buscar_terceros")}
 
     @app.get("/v1/terceros/candidatos", response_model=ListaTerceros, dependencies=[Depends(autorizar)])
     def candidatos_tercero(nombre: str = Query(..., max_length=160)) -> dict:

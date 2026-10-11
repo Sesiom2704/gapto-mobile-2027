@@ -10,6 +10,8 @@
 #   - El DTO solo valida la forma (422); el dominio decide (409/404).
 #   - `extra="forbid"`: owner u otros campos colados -> 422.
 # Version: 0.1.0 (F05-03/F05-04 J2 §1.3)
+# Version: 0.2.0 (F05-05 K2 §1.4; F05 §49.4 A4): TerceroLista anade `ultimo_uso`
+#   (fecha del ultimo hecho ACTIVO o null) para distinguir homonimos por uso.
 # ============================================================
 
 from __future__ import annotations
@@ -58,6 +60,7 @@ class TerceroNodo(_Estricto):
 
 class TerceroLista(TerceroNodo):
     usos: int
+    ultimo_uso: dt.date | None = None
 
 
 class ListaTerceros(_Estricto):
