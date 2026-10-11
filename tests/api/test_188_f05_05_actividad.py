@@ -20,6 +20,7 @@
 #   (importe exacto y contexto). Ademas: filtros, total, periodo [desde,
 #   hasta), cursor invalido, detalle con presupuestable y magnitudes.
 # Version: 0.1.0 (F05-05 K2 §1.5)
+# Version: 0.2.0 (F05-05 K2 §1.7; M5-08, A10): lecturas con `nota`; wire de escritura del gasto con `concepto`.
 # ============================================================
 
 from __future__ import annotations
@@ -275,3 +276,22 @@ def test_solo_lectura_y_sin_v_hechos_resumen():
     assert "v_hechos_resumen" not in codigo
     for verbo in ("INSERT ", "UPDATE ", "DELETE ", "FOR UPDATE", "FOR SHARE", "FOR NO KEY"):
         assert verbo not in codigo.upper(), verbo
+
+
+def test_m508_lecturas_exponen_nota_y_el_wire_del_gasto_conserva_concepto(e):
+    """A10 / M5-08: la lectura nueva llama `nota` al dato; el wire de ESCRITURA
+    del gasto sigue siendo `concepto` (deuda DEU-F05-WIRE-CONCEPTO -> F10)."""
+    import pathlib
+
+    owner, actor, cli, cta, _ = e
+    cuerpo = h.intencion(cta, concepto="Cena con amigos", fecha_hecho="2026-10-05")
+    assert cli.post(x.GASTO, json=cuerpo, headers=h.AUTH).status_code == 200
+    con_nota = dict(h.intencion(cta, fecha_hecho="2026-10-05"), nota="Otra")
+    con_nota.pop("concepto")
+    assert cli.post(x.GASTO, json=con_nota, headers=h.AUTH).status_code == 422  # `nota` no existe en el wire del gasto
+    fila = pagina(cli)["filas"][0]
+    assert fila["nota"] == "Cena con amigos" and "concepto" not in fila
+    detalle = cli.get(f"{URL}/{cuerpo['intencion_id']}", headers=h.AUTH).json()
+    assert detalle["nota"] == "Cena con amigos" and "concepto" not in detalle
+    dto = (pathlib.Path(__file__).resolve().parents[2] / "backend" / "app" / "api" / "dto_f05_05.py").read_text(encoding="utf-8")
+    assert "concepto:" not in dto
