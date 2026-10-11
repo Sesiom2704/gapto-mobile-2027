@@ -87,3 +87,5 @@ mobile/.env*
 # CLAUDE.local.md lo carga Claude Code junto a CLAUDE.md; nunca se versiona.
 CLAUDE.local.md
 Claude outputs/
+# F05-05 K3 §3: journal transitorio del arnes de mutantes F05-05 (D-192)
+.mutantes_f05_05.journal.json

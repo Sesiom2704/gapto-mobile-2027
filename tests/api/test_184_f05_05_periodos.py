@@ -15,6 +15,8 @@
 #     se conserva aqui como oraculo y se compara mes a mes; gasto_mes sobre
 #     hechos del dia 1 y del ultimo dia da el mismo resultado.
 # Version: 0.1.0 (F05-05 K2 §1.1)
+# Version: 0.2.0 (F05-05 K3 §3, caso 19): cambio de hora de primavera (29-03-2026,
+#   CET -> CEST) ademas del de otono.
 # ============================================================
 
 from __future__ import annotations
@@ -80,6 +82,8 @@ def test_ventana_semiabierta():
     ("Europe/Madrid", "2026-09-30T22:30:00", ("2026-10-01", "2026-11-01")),  # 00:30 del 1-10 en Madrid; UTC aun en septiembre
     ("Europe/Madrid", "2026-09-30T21:59:00", ("2026-09-01", "2026-10-01")),
     ("Europe/Madrid", "2026-10-24T22:30:00", ("2026-10-01", "2026-11-01")),  # 00:30 CEST del dia del cambio de hora
+    ("Europe/Madrid", "2026-03-31T22:30:00", ("2026-04-01", "2026-05-01")),  # 00:30 CEST del 1-04 (tras el cambio de primavera)
+    ("Europe/Madrid", "2026-02-28T23:30:00", ("2026-03-01", "2026-04-01")),  # 00:30 CET del 1-03 (antes del cambio)
     ("Europe/Madrid", "2026-10-31T22:59:00", ("2026-10-01", "2026-11-01")),  # 23:59 CET del ultimo dia
     ("Europe/Madrid", "2026-10-31T23:00:00", ("2026-11-01", "2026-12-01")),  # 00:00 CET del 1-11
     ("Europe/Istanbul", "2026-10-31T21:30:00", ("2026-11-01", "2026-12-01")),  # UTC+3

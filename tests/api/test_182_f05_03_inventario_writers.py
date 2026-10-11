@@ -23,6 +23,7 @@
 # Version: 0.2.0 (F05-03/F05-04 J2+J3 §2.8): el E2E e2e_j2j3.py da de alta las capacidades
 #   sinteticas de sus cuentas (base LOCAL desechable), como e2e_preferencias.py.
 # Version: 0.3.0 (F05-05 K2 §1.3; F05 §49.4 A5, §49.5 R9): alta aditiva. tercero_afinidades ->
+# Version: 0.4.0 (F05-05 K3 §3): EXCLUIDOS incluye el arnes mutantes_f05_05.py (los mutantes son texto).
 #   SOLO afinidades/repositorio.py (INSERT, DELETE: quitar una afinidad es borrarla; no hay
 #   enabled). terceros sigue con su unico escritor (terceros/repositorio.py): el writer de
 #   afinidades sube row_version por `incrementar_version`. Los comandos alta/baja de
@@ -38,7 +39,8 @@ import re
 
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
 EXCLUIDOS = {"scripts/dev/mutantes_f05_01.py", "scripts/dev/mutantes_f05_02.py", "scripts/dev/mutantes_f05_j2j3.py",
-             "scripts/dev/mutantes_vs01.py", "scripts/dev/mutantes_cierre_f05_02.py"}
+             "scripts/dev/mutantes_vs01.py", "scripts/dev/mutantes_cierre_f05_02.py",
+             "scripts/dev/mutantes_f05_05.py"}
 CAPA_F05 = ("backend/app/api/", "backend/app/comun/", "backend/app/terceros/", "backend/app/contextos/",
             "backend/app/plantillas/", "backend/app/preferencias/", "backend/app/categorias/",
             "backend/app/magnitudes/")

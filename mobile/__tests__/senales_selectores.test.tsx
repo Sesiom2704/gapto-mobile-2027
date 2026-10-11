@@ -4,6 +4,7 @@
 // Ruta: mobile/__tests__/senales_selectores.test.tsx
 // Descripción: K3 de F05-05 (§2.1–§2.4; F05 §49.4 A1–A5, §49.5 R1/R2/R4; lámina SRCH-ACT-AFI v0.2 A1–A8). Dominios SEÑALES, BÚSQUEDA y AFINIDADES en el cliente. Casos de §49.9: 1 (afinidad primero con su motivo), 3 (sugerida, chip y árbol → MISMA intención sellada), 8 («super» y «súper»), 10 («Recordar»: doble toque idempotente y fallo sin afectar al hecho), 21 (chip sin tocar: PENDIENTE y «Registrar» sin habilitar), 34 (búsqueda de terceros en el servidor con «garcía») y homónimos por naturaleza y uso; «Recientes» con su motivo; inactivo con «Reactivar» en línea.
 // Versión: 0.1.0 (F05-05 K3 §2.1–§2.4)
+// Versión: 0.2.0 (F05-05 K3 §3; casos 6, 7 y 29 de §49.9): con la plantilla aplicada las sugerencias no alteran su propuesta ni salen chips; con la preferencia de cuenta del tercero, elegir por chip o por árbol da la MISMA consulta de propuesta y el MISMO payload; cambio de tercero y de tipo; categoría que deja de ser elegible entre carga y confirmación; reintento con el mismo UUID.
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
@@ -295,4 +296,147 @@ test('caso 34 / A4 / A8: búsqueda en el servidor desde 2 caracteres; homónimos
     expect(c.reactivarTercero).toHaveBeenCalledWith('tall', 3);
     await waitFor(() => expect(screen.getByTestId('tercero-valor').props.children).toBe('Talleres García S.L.'));
   }
+});
+
+// ------------------------------------------------------------------ casos 6, 7 y 29 (R1 frente a plantilla, preferencia y cambios)
+const EFECTIVO = 'c0000000-0000-4000-8000-00000000000e';
+const SIN_CAMPOS = { categoria: null, tercero: null, contexto: null, cuenta: null, presupuestable: null };
+const ORIGEN_PLT = { capa: 'PLANTILLA', plantilla_id: 'p1', preferencia_id: null };
+const PLT = {
+  id: 'p1', nombre: 'Súper semanal', tipo_hecho_id: 'tipo-gasto', categoria_id: 'super', tercero_id: 'ter-aldi', entidad_id: null,
+  cuenta_default_id: TARJETA, presupuestable_default: null, enabled: true, row_version: 1, tipo: 'GASTO', avisos: [],
+};
+
+function conDosCuentas(c: ClienteApi) {
+  c.cuentasPago = jest.fn(async () => ({ tipo: 'OK', datos: { cuentas: [
+    { cuenta_id: TARJETA, nombre: 'Tarjeta BBVA', moneda: 'EUR', propuesta_financiacion: 'SELF_100' },
+    { cuenta_id: EFECTIVO, nombre: 'Efectivo', moneda: 'EUR', propuesta_financiacion: 'SELF_100' },
+  ] } }) as Respuesta<{ cuentas: CuentaPago[] }>);
+  return c;
+}
+
+const seleccionada = (id: string) => screen.getByTestId(id).props.accessibilityState?.checked === true;
+const enviados = (c: ClienteApi) => (c.registrarGastoPagado as jest.Mock).mock.calls.map((x) => x[0] as PayloadGastoPagado);
+const sinId = (p: PayloadGastoPagado) => ({ ...p, intencion_id: '' });
+
+test('caso 6 / 29: con la plantilla aplicada, las sugerencias no alteran su propuesta (categoría, tercero y cuenta) ni salen chips', async () => {
+  const c = fake();
+  c.listarPlantillas = jest.fn(async () => ({ tipo: 'OK', datos: { plantillas: [PLT], acciones: [
+    { id: 'a1', nombre: 'Súper', plantilla_registro_id: 'p1', orden: 0, icono_key: null, enabled: true, row_version: 1 }] } })) as any;
+  c.propuestaRegistro = jest.fn(async (q: any) => ({ tipo: 'OK', datos: { tipo: q.tipo, avisos: [], campos: q.plantillaId
+    ? { categoria: { valor: 'super', origen: ORIGEN_PLT }, tercero: { valor: 'ter-aldi', origen: ORIGEN_PLT }, contexto: null, cuenta: { valor: TARJETA, origen: ORIGEN_PLT }, presupuestable: null }
+    : SIN_CAMPOS } })) as any;
+  await montar(c);
+  await pulsar('acceso-a1');
+  await screen.findByTestId('chip-plantilla');
+  await waitFor(() => expect(screen.getByTestId('categoria-valor').props.children).toBe('Supermercado'));
+  await waitFor(() => expect(c.senalesCategorias).toHaveBeenLastCalledWith({ tipo: 'GASTO', fecha: HOY, terceroId: 'ter-aldi' }));
+  await act(async () => undefined);
+  expect(screen.getByTestId('origen-categoria').props.children).toBe('De tu plantilla Súper semanal.');
+  expect(screen.getByTestId('origen-cuenta').props.children).toBe('De tu plantilla Súper semanal.');
+  expect(screen.queryByTestId('chips-sugeridas')).toBeNull(); // la categoría no está pendiente
+  for (const [q] of (c.propuestaRegistro as jest.Mock).mock.calls) {
+    expect(Object.keys(q).some((k) => /senal|suger|candidat/i.test(k))).toBe(false); // las señales no viajan al resolver
+  }
+  fireEvent.changeText(screen.getByTestId('campo-importe'), '48,72');
+  fireEvent.press(screen.getByTestId('presupuestable-true'));
+  await pulsar('registrar');
+  await waitFor(() => expect(c.registrarGastoPagado).toHaveBeenCalledTimes(1));
+  const p = enviados(c)[0];
+  expect(p.categoria).toEqual(SELLADA);
+  expect(p.cuenta_id).toBe(TARJETA);
+});
+
+// Consulta de propuesta y payload capturados por vía (caso 7): se comparan en el test siguiente.
+const PORVIA: Record<string, { consulta: any; payload: PayloadGastoPagado }> = {};
+
+test.each(['chip', 'arbol'] as const)('caso 7 / 29: preferencia de cuenta del tercero vigente; elegir por %s no cambia la cuenta propuesta', async (via) => {
+  const c = conDosCuentas(fake());
+  const pref = { capa: 'PREFERENCIA', preferencia_id: 'pref-aldi', plantilla_id: null };
+  c.listarPreferencias = jest.fn(async () => ({ tipo: 'OK', datos: { tipos: { GASTO: 't-gasto', INGRESO: 't-ingreso' }, preferencias: [{
+    id: 'pref-aldi', tipo_hecho_id: 't-gasto', categoria_id: null, tercero_id: 'ter-aldi', entidad_id: null, cuenta_default_id: EFECTIVO,
+    presupuestable_default: null, prioridad: 100, enabled: true, row_version: 1 }] } })) as any;
+  c.propuestaRegistro = jest.fn(async (q: any) => ({ tipo: 'OK', datos: { tipo: q.tipo, avisos: [], campos: q.terceroId === 'ter-aldi'
+    ? { ...SIN_CAMPOS, cuenta: { valor: EFECTIVO, origen: pref } } : SIN_CAMPOS } })) as any;
+  await abrirGasto(c);
+  await elegirAldi();
+  await waitFor(() => expect(seleccionada(`cuenta-${EFECTIVO}`)).toBe(true));
+  await elegirPor(via);
+  await act(async () => undefined);
+  expect(seleccionada(`cuenta-${EFECTIVO}`)).toBe(true); // la señal no toca la cuenta propuesta
+  fireEvent.changeText(screen.getByTestId('campo-importe'), '48,72');
+  fireEvent.press(screen.getByTestId('presupuestable-true'));
+  await pulsar('registrar');
+  await waitFor(() => expect(c.registrarGastoPagado).toHaveBeenCalledTimes(1));
+  const llamadas = (c.propuestaRegistro as jest.Mock).mock.calls;
+  PORVIA[via] = { consulta: llamadas[llamadas.length - 1][0], payload: enviados(c)[0] };
+  expect(PORVIA[via].payload.cuenta_id).toBe(EFECTIVO);
+  expect(PORVIA[via].payload.categoria).toEqual(SELLADA);
+});
+
+test('caso 7 / R1: por chip y por árbol, la MISMA consulta de propuesta y el MISMO payload (salvo el UUID)', () => {
+  expect(PORVIA.chip && PORVIA.arbol).toBeTruthy();
+  expect(PORVIA.chip.consulta).toEqual(PORVIA.arbol.consulta);
+  expect(sinId(PORVIA.chip.payload)).toEqual(sinId(PORVIA.arbol.payload));
+});
+
+test('caso 29: cambio de tercero → nuevas sugerencias, la categoría sigue PENDIENTE y el chip sella la misma intención que el árbol', async () => {
+  const c = fake();
+  c.listarTerceros = jest.fn(async () => ({ tipo: 'OK', datos: { terceros: [
+    { id: 'ter-aldi', nombre: 'ALDI', naturaleza: 'EMPRESA', enabled: true, row_version: 1 },
+    { id: 'ter-otro', nombre: 'Droguería Paqui', naturaleza: 'EMPRESA', enabled: true, row_version: 1 }] } })) as any;
+  await abrirGasto(c);
+  await elegirAldi();
+  await pulsar('campo-tercero');
+  await waitFor(() => expect(screen.getByTestId('tercero-ter-otro')).toBeTruthy());
+  await pulsar('tercero-ter-otro');
+  await waitFor(() => expect(c.senalesCategorias).toHaveBeenLastCalledWith({ tipo: 'GASTO', fecha: HOY, terceroId: 'ter-otro' }));
+  await waitFor(() => expect(screen.queryByTestId('chip-sugerida-super')).toBeNull());
+  expect(screen.getByTestId('chip-sugerida-drogueria')).toBeTruthy();
+  expect(screen.getByTestId('categoria-valor').props.children).toBe('Elige categoría');
+  await pulsar('chip-sugerida-drogueria');
+  const p = await completarYRegistrar(c);
+  expect(p.categoria).toEqual({ estado: 'CATEGORIA', categoria_id: 'drogueria', magnitudes: [] });
+  expect(p.tercero_id).toBe('ter-otro');
+});
+
+test('caso 29: cambio de tipo antes del envío → las sugerencias se piden para el nuevo tipo y ninguna incompatible sale como chip', async () => {
+  const c = fake();
+  await abrirGasto(c);
+  await waitFor(() => expect(screen.getByTestId('chip-sugerida-drogueria')).toBeTruthy());
+  await pulsar('cambiar-tipo');
+  await pulsar('tipo-INGRESO');
+  await waitFor(() => expect(c.senalesCategorias).toHaveBeenLastCalledWith(expect.objectContaining({ tipo: 'INGRESO' })));
+  await act(async () => undefined);
+  expect(screen.queryByTestId('chip-sugerida-drogueria')).toBeNull(); // Droguería es de gasto: no es elegible en un ingreso
+});
+
+test('caso 29: la categoría deja de ser elegible entre la carga y la confirmación → rechazo visible, sin reenvío ni sustitución por otra sugerencia', async () => {
+  const c = fake();
+  c.registrarGastoPagado = jest.fn(async () => ({ tipo: 'RECHAZADO', codigo: 'CATEGORIA_NO_ELEGIBLE', mensaje: 'x' })) as any;
+  await abrirGasto(c);
+  await elegirAldi();
+  await pulsar('chip-sugerida-super');
+  const p = await completarYRegistrar(c);
+  expect(p.categoria).toEqual(SELLADA);
+  expect(await screen.findByTestId('categoria-invalida')).toBeTruthy();
+  await act(async () => undefined);
+  expect(c.registrarGastoPagado).toHaveBeenCalledTimes(1);
+  expect(screen.getByTestId('categoria-valor').props.children).toBe('Elige otra categoría');
+});
+
+test('caso 29: reintento tras un resultado indeterminado → el MISMO UUID y la MISMA categoría elegida por chip', async () => {
+  let k = 0;
+  const c = fake();
+  c.registrarGastoPagado = jest.fn(async (p: PayloadGastoPagado) => (++k === 1 ? { tipo: 'INDETERMINADO', mensaje: 'x' } : okGasto(p))) as any;
+  await abrirGasto(c);
+  await elegirAldi();
+  await pulsar('chip-sugerida-super');
+  await completarYRegistrar(c);
+  await screen.findByTestId('estado-indeterminado');
+  await pulsar('reintentar');
+  await screen.findByTestId('registro-exito');
+  const [a, b] = enviados(c);
+  expect(b).toEqual(a);
+  expect(b.categoria).toEqual(SELLADA);
 });

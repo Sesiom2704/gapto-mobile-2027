@@ -269,7 +269,8 @@
 #     guardadas y del historial para mostrarlas, marcar «Ya es habitual» y
 #     enviar el par a /v1/afinidades. Escribe la afinidad, nunca la categoria.
 #     I1 (alta aditiva, §2.11): lecturas y envios de categoria_id del E2E
-#     scripts/dev/e2e_f05_05.py por los writers publicos (R).
+#     scripts/dev/e2e_f05_05.py por los writers publicos (R). EXCLUIDOS (§3):
+#     el arnes mutantes_f05_05.py (los mutantes son texto).
 # Version: 0.19.0
 # ============================================================
 
@@ -532,6 +533,7 @@ EXCLUIDOS: dict[str, str] = {
     "scripts/dev/mutantes_f05_01.py": "arnes de mutacion F05-01 (D-181): los mutantes son texto",
     "scripts/dev/mutantes_f05_02.py": "arnes de mutacion F05-02 (D-181): los mutantes son texto",
     "scripts/dev/mutantes_f05_j2j3.py": "arnes de mutacion F05-03/F05-04 J2J3 (D-181): los mutantes son texto",
+    "scripts/dev/mutantes_f05_05.py": "arnes de mutacion F05-05 K3 (D-181): los mutantes son texto",
 }
 
 
