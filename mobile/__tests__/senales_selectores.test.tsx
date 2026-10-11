@@ -4,6 +4,7 @@
 // Ruta: mobile/__tests__/senales_selectores.test.tsx
 // Descripción: K3 de F05-05 (§2.1–§2.4; F05 §49.4 A1–A5, §49.5 R1/R2/R4; lámina SRCH-ACT-AFI v0.2 A1–A8). Dominios SEÑALES, BÚSQUEDA y AFINIDADES en el cliente. Casos de §49.9: 1 (afinidad primero con su motivo), 3 (sugerida, chip y árbol → MISMA intención sellada), 8 («super» y «súper»), 10 («Recordar»: doble toque idempotente y fallo sin afectar al hecho), 21 (chip sin tocar: PENDIENTE y «Registrar» sin habilitar), 34 (búsqueda de terceros en el servidor con «garcía») y homónimos por naturaleza y uso; «Recientes» con su motivo; inactivo con «Reactivar» en línea.
 // Versión: 0.1.0 (F05-05 K3 §2.1–§2.4)
+// Versión: 0.4.0 (F05-05 K4-D, AJ-F0505C-04 / D-A6-1 invariante 5): motivo veraz en chips y «Sugeridas». Con el tercero elegido, una candidata general (FRECUENTE_TIPO, RECIENTE) nunca se presenta como «La guardaste para <tercero>» ni «Sueles usarla con <tercero>», ni en la línea de los chips ni en la fila de «Sugeridas».
 // Versión: 0.3.0 (F05-05 K3 §3, mutante SE19): con fecha futura no se piden sugerencias ni salen chips (R7).
 // Versión: 0.2.0 (F05-05 K3 §3; casos 6, 7 y 29 de §49.9): con la plantilla aplicada las sugerencias no alteran su propuesta ni salen chips; con la preferencia de cuenta del tercero, elegir por chip o por árbol da la MISMA consulta de propuesta y el MISMO payload; cambio de tercero y de tipo; categoría que deja de ser elegible entre carga y confirmación; reintento con el mismo UUID.
 // ============================================================
@@ -452,4 +453,29 @@ test('R7: con una fecha futura no se piden sugerencias ni salen chips', async ()
   await act(async () => undefined);
   expect((c.senalesCategorias as jest.Mock).mock.calls.slice(antes).some(([q]) => q.fecha > HOY)).toBe(false);
   expect(screen.queryByTestId('chips-sugeridas')).toBeNull();
+});
+
+
+// ------------------------------------------------------------------ K4-D: motivo veraz (D-A6-1, invariante 5)
+test('D-A6-1 (5): con tercero elegido, una candidata general nunca se atribuye al tercero (chips y «Sugeridas»)', async () => {
+  const c = fake();
+  c.senalesCategorias = jest.fn(async (q: any) => ({
+    tipo: 'OK',
+    datos: {
+      tipo: q.tipo, fecha: q.fecha, tercero_id: q.terceroId ?? null,
+      candidatas: [cand('super', 'Supermercado', 'Alimentación › Supermercado', 'FRECUENTE_TIPO'), cand('drogueria', 'Droguería', 'Hogar › Droguería', 'RECIENTE')],
+    },
+  })) as any;
+  await abrirGasto(c);
+  await elegirAldi();
+  const texto: string = screen.getByTestId('chips-texto').props.children;
+  expect(texto).toBe('Sugeridas: Supermercado, frecuente en tus gastos; Droguería, usada recientemente. Toca una para elegirla.');
+  expect(texto).not.toMatch(/ALDI|guardaste|sueles/i);
+  await pulsar('campo-categoria');
+  for (const id of ['sugerida-super', 'sugerida-drogueria']) {
+    expect(screen.getByTestId(id).props.accessibilityLabel).not.toMatch(/ALDI|guardaste|sueles/i);
+  }
+  // Dominio: el mismo motivo general con o sin tercero.
+  const v = vistaSugeridas({ tipo: 'GASTO', fecha: HOY, tercero_id: 'ter-aldi', candidatas: [cand('x', 'X', 'R', 'FRECUENTE_TIPO'), cand('y', 'Y', 'R', 'RECIENTE')] as any }, 'ALDI');
+  expect(v.map((s) => s.motivo)).toEqual(['Frecuente en tus gastos', 'Usada recientemente']);
 });

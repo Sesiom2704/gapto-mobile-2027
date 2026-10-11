@@ -13,6 +13,10 @@
 #   RECIENTE como motivo del primero del tipo, FECHA_FUTURA, tipo invalido y
 #   lectura sin escritura (R5).
 # Version: 0.1.0 (F05-05 K2 §1.2)
+# Version: 0.3.0 (F05-05 K4-D, AJ-F0505C-04 / D-A6-1 invariante 5): motivo veraz.
+#   Toda candidata con motivo de tercero (AFINIDAD, FRECUENTE_TERCERO) tiene
+#   afinidad o uso real con ESE tercero; las que completan desde el tipo nunca
+#   llevan motivo de tercero, aunque se usen mucho con otro tercero.
 # Version: 0.2.0 (F05-05 K3 §3, mutantes SE03/SE05/SE06/SE09/SE14): hechos
 #   anulados fuera; frecuencia por HECHO (no por efecto); desempate por
 #   recencia antes que por nombre (R6); nunca mas de 3 tambien con el bloque
@@ -288,3 +292,35 @@ def test_recientes_por_recencia_y_no_por_uso(e):
     r = cli.get(URL_TER, params={"tipo": "GASTO", "fecha": "2026-10-10"}, headers=h.AUTH)
     assert r.status_code == 200, r.text
     assert [(t["nombre"], t["motivo"]) for t in r.json()["terceros"]] == [("Usado ayer", "RECIENTE"), ("Mucho uso", "RECIENTE")]
+
+
+# ------------------------------------------------------------------ K4-D: motivo veraz (D-A6-1, invariante 5)
+def test_motivo_veraz_las_candidatas_generales_nunca_se_atribuyen_al_tercero(e):
+    """Negativo de (5): con ALDI elegido, una categoria muy usada con OTRO tercero
+    (o sin tercero) completa la lista con motivo del TIPO, nunca «sueles usarla
+    con ALDI» ni «la guardaste para ALDI». Y toda candidata con motivo de tercero
+    tiene afinidad o uso real con ALDI."""
+    owner, cli, cta, _ = e
+    aldi, otro = x.tercero(cli, "ALDI"), x.tercero(cli, "Bar Paco")
+    propia, guardada = x.categoria(owner, "Supermercados"), x.categoria(owner, "Droguería")
+    ajena, sin_tercero = x.categoria(owner, "Restaurantes"), x.categoria(owner, "Cine")
+    x.gasto(cli, cta, categoria_id=propia, tercero_id=aldi)
+    for _ in range(6):
+        x.gasto(cli, cta, categoria_id=ajena, tercero_id=otro, fecha="2026-10-09")  # mucho uso, otro tercero
+        x.gasto(cli, cta, categoria_id=sin_tercero, fecha="2026-09-01")             # mucho uso, sin tercero
+    assert cli.post("/v1/afinidades", json={"id": str(uuid.uuid4()), "tercero_id": str(aldi), "categoria_id": str(guardada)},
+                    headers=h.AUTH).status_code == 200
+    _, cuerpo = senales(cli, tercero=aldi)
+    motivo = {c["categoria_id"]: (c["motivo"], c["fuente"]) for c in cuerpo["candidatas"]}
+    assert motivo[str(guardada)] == ("AFINIDAD", "AFINIDAD")
+    assert motivo[str(propia)] == ("FRECUENTE_TERCERO", "HISTORIAL")
+    generales = [cid for cid in (str(ajena), str(sin_tercero)) if cid in motivo]
+    assert generales, "ninguna candidata general completó la lista"
+    for cid in generales:
+        assert motivo[cid][0] in ("FRECUENTE_TIPO", "RECIENTE") and motivo[cid][1] == "HISTORIAL", (cid, motivo[cid])
+    usadas_con_aldi = {str(propia)}
+    for cid, (m, _) in motivo.items():
+        if m == "FRECUENTE_TERCERO":
+            assert cid in usadas_con_aldi, f"{cid} dice «sueles usarla con ALDI» sin uso con ALDI"
+        if m == "AFINIDAD":
+            assert cid == str(guardada), f"{cid} dice «la guardaste para ALDI» sin afinidad"
