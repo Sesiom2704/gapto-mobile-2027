@@ -5,7 +5,8 @@
 // Descripción: Componentes básicos derivados de DS-05 (botón primario/texto, sección, chip, control segmentado) y DS-06 §9 (estado del dato). Consumen solo tokens semánticos.
 // v0.2.0 (F05 — VS-01 · Alineación visual, A1/A2): «Seccion» deja de ser tarjeta (sin superficie propia ni radio): se asienta sobre el fondo y se separa con una única línea estructural `separator` (F09 §6 «pocas tarjetas y pocos bordes»; sin HEX ni tokens nuevos). «BotonPrimario» declara `disabled` nativo y acepta `ayuda` (accessibilityHint) para decir qué falta (REG-SPEC-01 SPEC-08).
 // v0.3.0 (F05-01 S6-WIRE+UI (este mandato)): «Velo» de las hojas modales (láminas REG-CAT R07 y SET-CAT S04/S05) como TRATAMIENTO de tokens existentes (tono oscuro del tema con opacidad), sin color físico ni token nuevo (DS-RULE-12, ds_conformidad). «CabeceraNavegacion» de pantallas de lista (‹ Atrás · título · acción), con «Atrás» al nivel anterior real (lámina SET-CAT S01/S03).
-// Versión: 0.3.0
+// v0.4.0 (F05-05 K3 §2.2; F05 §49.4 A2 bis, D-SRCH-11): `ChipAccion`, chip de ACCIÓN (rol botón, sin estado ni «✓»): un toque ejecuta la acción; nunca representa una selección vigente. Lo usan los chips de sugerencias bajo «Categoría».
+// Versión: 0.4.0
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -127,6 +128,22 @@ export function Chip(p: { etiqueta: string; seleccionado: boolean; onPress: () =
         {p.seleccionado ? '✓ ' : ''}
         {p.etiqueta}
       </Text>
+    </Pressable>
+  );
+}
+
+/** Chip de ACCIÓN (F05-05 A2 bis): rol botón, sin estado; tocarlo ejecuta `onPress`. */
+export function ChipAccion(p: { etiqueta: string; onPress: () => void; testID?: string; accesibilidad?: string }) {
+  const { c } = useTema();
+  return (
+    <Pressable
+      testID={p.testID}
+      accessibilityRole="button"
+      accessibilityLabel={p.accesibilidad ?? p.etiqueta}
+      onPress={p.onPress}
+      style={({ pressed }) => [s.chip, { borderColor: c.borderStandard, backgroundColor: c.surfacePrimary, opacity: pressed ? 0.7 : 1 }]}
+    >
+      <Text style={[tipo.subheadline, { color: c.textPrimary }]}>{p.etiqueta}</Text>
     </Pressable>
   );
 }

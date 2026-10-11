@@ -239,7 +239,31 @@
 #
 #   v0.17.0 (F05-03/F05-04 J2+J3 §2.8): SOLO altas. I1 registra las lecturas
 #   de categoria_id del E2E scripts/dev/e2e_j2j3.py (R).
-# Version: 0.17.0
+#
+#   v0.18.0 — I13 v2 (F05-D035; F05 §49.6 E1, M5-07; AJ-F0505-01). SOLO altas:
+#   I13a-f NO cambian (idénticas por AST; el script de cierre C3 lo comprueba).
+#   - Clases SENAL y AFINIDAD (lectura de senales y writer de afinidades) y
+#     entradas de la Actividad v0 (R) en el REGISTRO de I1, con sentencias
+#     aditivas tras el literal.
+#   - I13a: altas declaradas en IMPORTS_CAMINO para RegistroGastoScreen.tsx
+#     (chips de accion, tarjeta «Recordar» y la logica pura de senales),
+#     SelectorCategorias.tsx (busqueda C06 y el tipo de la sugerida) y
+#     api/cliente.ts (solo el import de los tipos de senales).
+#   - I7: menciones nuevas del cliente (tipos y vistas de senales, Actividad y
+#     afinidades; lectura, nunca escritura del catalogo).
+#   - I13g (contrato I13 v2): (i) existe UN unico modulo de senales,
+#     backend/app/senales, de solo lectura; (ii) sus consumidores moviles son
+#     EXACTAMENTE SelectorCategorias.tsx («Sugeridas»), RegistroGastoScreen.tsx
+#     (chips, que invocan el mismo callback del selector) y SelectorTercero.tsx
+#     («Recientes»), por ruta y funcion; (iii) ningun resolver de propuesta
+#     (backend: preferencias/, plantillas/, api/ejecucion_*, api/traductor_*;
+#     movil: domain/preferencias.ts, domain/registro.ts, domain/plantillas.ts)
+#     importa ni llama a las senales, ni directa ni indirectamente (cierre
+#     transitivo de imports); (iv) el estado inicial del borrador sigue
+#     PENDIENTE y las senales nunca construyen estado categorial. Pruebas
+#     negativas con imports plantados (resolver de preferencias, plantillas por
+#     wrapper y ejecucion_registro) y con un consumidor extra.
+# Version: 0.18.0
 # ============================================================
 
 from __future__ import annotations
@@ -1400,3 +1424,244 @@ def test_i3_plantillas_frontera():
         for imp in (n for n in ast.walk(arbol) if isinstance(n, ast.ImportFrom)):
             nombres |= {a.name for a in imp.names}
         assert not nombres & set(SERVICIOS_VEDADOS_EN_FRONTERA), _rel(p)
+
+
+
+# ------------------------------------------------------------------ I13 v2 (F05-D035 §49.6 E1; altas aditivas)
+SEL_TER = "mobile/src/components/SelectorTercero.tsx"
+SENALES_TS = "mobile/src/domain/senales.ts"
+
+IMPORTS_CAMINO[REG] = IMPORTS_CAMINO[REG] | {
+    ("../components/Basicos", "ChipAccion"), ("../components/RecordarAfinidad", "RecordarAfinidad"),
+    ("../domain/senales", "type SugeridaCategoria"), ("../domain/senales", "textoChips"),
+    ("../domain/senales", "vistaSugeridas"),
+}
+IMPORTS_CAMINO[SEL] = IMPORTS_CAMINO[SEL] | {
+    ("react-native", "TextInput"), ("../domain/maestros", "normalizarNombre"), ("../domain/senales", "type SugeridaCategoria"),
+}
+IMPORTS_CAMINO[CLI] = IMPORTS_CAMINO[CLI] | {
+    ("../domain/senales", "type SenalesCategorias"), ("../domain/senales", "type SenalesTerceros"),
+}
+
+MENCIONES_CLIENTE.update({
+    "mobile/src/domain/senales.ts": "tipos del wire de las senales (categoria_id de cada candidata) y su vista en texto (F05-05, R)",
+    "mobile/src/components/RecordarAfinidad.tsx": "«Recordar» del exito: envia el par tercero/categoria a /v1/afinidades (F05-05 A5, R; escribe la afinidad, no la categoria)",
+    "mobile/src/components/SelectorCategorias.tsx": "«Sugeridas»: localiza en el arbol la categoria_id de cada sugerida (F05-05 A1, R)",
+    "mobile/src/screens/RegistroGastoScreen.tsx": "chips de sugerencias: localiza en el arbol la categoria_id de cada sugerida y elige con el callback del selector (F05-05 A2 bis, R)",
+})
+
+#: Modulo backend de senales y consumidores moviles autorizados (I13 v2).
+MODULO_SENALES = "backend/app/senales/"
+CONSUMIDORES_SENALES = {
+    SEL: "seccion «Sugeridas»: recibe el tipo SugeridaCategoria y usa el mismo onElegir que el arbol",
+    REG: "chips bajo «Categoria»: cargarSugeridas pide las senales; los chips usan selectorCategorias.props.onElegir",
+    SEL_TER: "seccion «Recientes»: cargarRecientes pide las senales de terceros",
+}
+RESOLVERES_BACKEND = ("backend/app/preferencias/", "backend/app/plantillas/", "backend/app/api/ejecucion_",
+                      "backend/app/api/traductor_")
+RESOLVERES_MOVIL = ("mobile/src/domain/preferencias.ts", "mobile/src/domain/registro.ts", "mobile/src/domain/plantillas.ts")
+FUNCIONES_SENALES = ("categorias_candidatas", "terceros_recientes", "historial_tercero")
+_LLAMADA_CLIENTE_SENALES = re.compile(r"\bsenales(Categorias|Terceros)\s*\(")
+_IMPORT_SENALES_TS = re.compile(r"from\s+'(\.\.?/)+(domain/)?senales'")
+
+
+def _modulos_backend(raiz: pathlib.Path) -> dict[str, pathlib.Path]:
+    base = raiz / "backend"
+    out = {}
+    for f in sorted((base / "app").rglob("*.py")):
+        partes = f.relative_to(base).with_suffix("").parts
+        nombre = ".".join(partes[:-1] if partes[-1] == "__init__" else partes)
+        out[nombre] = f
+    return out
+
+
+def _grafo_backend(raiz: pathlib.Path) -> dict[str, set[str]]:
+    modulos = _modulos_backend(raiz)
+    grafo: dict[str, set[str]] = {}
+    for nombre, f in modulos.items():
+        destinos: set[str] = set()
+        for n in ast.walk(ast.parse(f.read_bytes().decode("utf-8"))):
+            if isinstance(n, ast.Import):
+                destinos |= {a.name for a in n.names}
+            elif isinstance(n, ast.ImportFrom) and n.module and n.level == 0:
+                destinos.add(n.module)
+                destinos |= {f"{n.module}.{a.name}" for a in n.names if f"{n.module}.{a.name}" in modulos}
+        grafo[nombre] = {d for d in destinos if d in modulos or any(m.startswith(d + ".") for m in modulos)}
+    return grafo
+
+
+def _cierre(grafo: dict[str, set[str]], origen: str) -> set[str]:
+    vistos, pila = set(), [origen]
+    while pila:
+        actual = pila.pop()
+        if actual in vistos:
+            continue
+        vistos.add(actual)
+        pila.extend(grafo.get(actual, ()))
+    return vistos
+
+
+def _ts(raiz: pathlib.Path) -> dict[str, str]:
+    archivos = sorted((raiz / "mobile" / "src").rglob("*")) + [raiz / "mobile" / "App.tsx"]
+    return {f.relative_to(raiz).as_posix(): f.read_bytes().decode("utf-8")
+            for f in archivos if f.is_file() and f.suffix in {".ts", ".tsx"}}
+
+
+def _imports_relativos(ruta: str, texto: str, existentes: set[str]) -> set[str]:
+    base = pathlib.PurePosixPath(ruta).parent
+    out = set()
+    for m in _IMPORT.finditer(texto):
+        if not m["mod"].startswith("."):
+            continue
+        destino = pathlib.PurePosixPath(*(list(base.parts) + m["mod"].split("/")))
+        partes: list[str] = []
+        for x in destino.parts:
+            if x == "..":
+                partes.pop()
+            elif x != ".":
+                partes.append(x)
+        limpio = "/".join(partes)
+        for ext in (".ts", ".tsx", "/index.ts"):
+            if limpio + ext in existentes:
+                out.add(limpio + ext)
+    return out
+
+
+def _violaciones_i13g(raiz: pathlib.Path) -> list[str]:
+    v: list[str] = []
+    # (i) un unico modulo de senales, de solo lectura
+    paquete = raiz / MODULO_SENALES
+    if sorted(x.name for x in paquete.glob("*.py")) != ["__init__.py", "lecturas.py"]:
+        v.append("i: el paquete de senales no es exactamente __init__.py + lecturas.py")
+    otros = [x.relative_to(raiz).as_posix() for x in (raiz / "backend" / "app").rglob("*")
+             if "senal" in x.name.lower() and not x.relative_to(raiz).as_posix().startswith(MODULO_SENALES.rstrip("/"))]
+    if otros:
+        v.append(f"i: otros modulos de senales: {otros}")
+    escritura = re.compile(r"\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM|MERGE\s+INTO|TRUNCATE)\b|FOR\s+(NO\s+KEY\s+)?UPDATE|FOR\s+SHARE",
+                           re.IGNORECASE)
+    for f in paquete.glob("*.py"):
+        codigo = "\n".join(l for l in f.read_bytes().decode("utf-8").splitlines() if not l.lstrip().startswith("#"))
+        if escritura.search(codigo):
+            v.append(f"i: {f.name} escribe o bloquea")
+    for nombre, f in _modulos_backend(raiz).items():
+        if nombre.startswith("app.senales"):
+            continue
+        definidas = {n.name for n in ast.walk(ast.parse(f.read_bytes().decode("utf-8"))) if isinstance(n, ast.FunctionDef)}
+        if definidas & set(FUNCIONES_SENALES):
+            v.append(f"i: {nombre} define funciones de senales")
+    # (ii) consumidores moviles exactos, por ruta y funcion
+    ts = _ts(raiz)
+    consumidores = {r for r, t in ts.items() if r not in (CLI, SENALES_TS)
+                    and (_IMPORT_SENALES_TS.search(t) or _LLAMADA_CLIENTE_SENALES.search(t))}
+    if consumidores != set(CONSUMIDORES_SENALES):
+        v.append(f"ii: consumidores {sorted(consumidores)}")
+    reg, sel_ter, sel = ts.get(REG, ""), ts.get(SEL_TER, ""), ts.get(SEL, "")
+    if len(_LLAMADA_CLIENTE_SENALES.findall(reg)) != 1 or "p.cliente.senalesCategorias(" not in _bloque(reg, "const cargarSugeridas"):
+        v.append("ii: RegistroGastoScreen pide las senales fuera de cargarSugeridas")
+    if "selectorCategorias.props.onElegir(" not in reg or reg.count("elegirNodo") != 2:
+        v.append("ii: los chips no usan el callback del selector")
+    if len(_LLAMADA_CLIENTE_SENALES.findall(sel_ter)) != 1 or "p.cliente.senalesTerceros(" not in _bloque(sel_ter, "const cargarRecientes"):
+        v.append("ii: SelectorTercero pide las senales fuera de cargarRecientes")
+    if _LLAMADA_CLIENTE_SENALES.search(sel) or {i for i in _imports_ts(sel) if "senales" in i[0]} != {("../domain/senales", "type SugeridaCategoria")}:
+        v.append("ii: SelectorCategorias consume algo mas que el tipo de la sugerida")
+    # (iii) ningun resolver de propuesta alcanza las senales (cierre transitivo)
+    grafo = _grafo_backend(raiz)
+    for nombre, f in _modulos_backend(raiz).items():
+        ruta = f.relative_to(raiz).as_posix()
+        if not ruta.startswith(RESOLVERES_BACKEND):
+            continue
+        if any(m.startswith("app.senales") for m in _cierre(grafo, nombre)):
+            v.append(f"iii: {ruta} alcanza app.senales")
+        texto = f.read_bytes().decode("utf-8")
+        if any(fn in texto for fn in FUNCIONES_SENALES):
+            v.append(f"iii: {ruta} nombra funciones de senales")
+    existentes = set(ts)
+    for origen in RESOLVERES_MOVIL:
+        vistos, pila = set(), [origen]
+        while pila:
+            actual = pila.pop()
+            if actual in vistos or actual not in ts:
+                continue
+            vistos.add(actual)
+            if actual != CLI:  # el cliente HTTP es frontera: sus tipos de senales no son un consumo
+                pila.extend(_imports_relativos(actual, ts[actual], existentes))
+        if SENALES_TS in vistos or any(_LLAMADA_CLIENTE_SENALES.search(ts[x]) for x in vistos if x != CLI):
+            v.append(f"iii: {origen} alcanza las senales")
+    # (iv) estado inicial PENDIENTE; las senales no construyen estado categorial
+    inicial = _cuerpo_ts(ts.get(INT, ""), "export function borradorInicial(") if INT in ts else ""
+    if re.findall(r"\bcategoria:\s*(.*?),?\n", inicial) != ["{ estado: 'PENDIENTE' }"]:
+        v.append("iv: el borrador ya no nace PENDIENTE")
+    if _ESTADO_LITERAL.search(ts.get(SENALES_TS, "")):
+        v.append("iv: el modulo de senales construye estado categorial")
+    return v
+
+
+def _bloque(texto: str, cabecera: str) -> str:
+    if cabecera not in texto:
+        return ""
+    i = texto.index(cabecera)
+    j = texto.index("{", i)
+    nivel = 0
+    for k in range(j, len(texto)):
+        nivel += {"{": 1, "}": -1}.get(texto[k], 0)
+        if nivel == 0:
+            return texto[i: k + 1]
+    return texto[i:]
+
+
+def test_i13_g_contrato_i13_v2_senales():
+    """I13g (F05-D035 E1, I13 v2): un unico modulo de senales, consumidores moviles
+    exactos, ningun resolver de propuesta lo alcanza y el estado inicial sigue PENDIENTE."""
+    assert _violaciones_i13g(RAIZ) == []
+
+
+def _copia(tmp: pathlib.Path) -> pathlib.Path:
+    import shutil
+
+    for rel in ("backend/app", "mobile/src"):
+        shutil.copytree(RAIZ / rel, tmp / rel, ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copy2(RAIZ / "mobile" / "App.tsx", tmp / "mobile" / "App.tsx")
+    return tmp
+
+
+def _plantar(raiz: pathlib.Path, ruta: str, linea: str) -> None:
+    f = raiz / ruta
+    texto = f.read_bytes().decode("utf-8")
+    marca = "\nfrom __future__ import annotations\n"
+    if ruta.endswith(".py") and marca in texto:
+        texto = texto.replace(marca, marca + linea + "\n", 1)
+    else:
+        texto = linea + "\n" + texto
+    f.write_bytes(texto.encode("utf-8"))
+
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize("ruta,linea", [
+    ("backend/app/preferencias/resolver.py", "from app.senales import lecturas as _senales"),
+    ("backend/app/plantillas/propuesta.py", "from app.afinidades import lecturas as _envoltura"),  # wrapper indirecto
+    ("backend/app/api/ejecucion_registro.py", "import app.senales.lecturas"),
+])
+def test_i13_g_negativo_import_plantado_en_un_resolver(tmp_path, ruta, linea):
+    raiz = _copia(tmp_path)
+    _plantar(raiz, ruta, linea)
+    assert any(x.startswith("iii:") and ruta in x for x in _violaciones_i13g(raiz))
+
+
+def test_i13_g_negativo_resolver_movil_y_consumidor_extra(tmp_path):
+    raiz = _copia(tmp_path)
+    _plantar(raiz, "mobile/src/domain/preferencias.ts", "import { textoMotivo } from './senales';")
+    _plantar(raiz, "mobile/src/screens/HomeScreen.tsx", "import type { SugeridaCategoria } from '../domain/senales';")
+    v = _violaciones_i13g(raiz)
+    assert any(x.startswith("iii:") and "preferencias.ts" in x for x in v)
+    assert any(x.startswith("ii:") for x in v)
+
+
+def test_i13_g_negativo_estado_inicial_y_modulo_duplicado(tmp_path):
+    raiz = _copia(tmp_path)
+    f = raiz / INT
+    f.write_bytes(f.read_bytes().decode("utf-8").replace("categoria: { estado: 'PENDIENTE' }", "categoria: { estado: 'SIN_CATEGORIA' }", 1).encode("utf-8"))
+    (raiz / "backend" / "app" / "api" / "senales_extra.py").write_text("def categorias_candidatas():\n    return []\n", encoding="utf-8")
+    v = _violaciones_i13g(raiz)
+    assert any(x.startswith("iv:") for x in v) and any(x.startswith("i:") for x in v)

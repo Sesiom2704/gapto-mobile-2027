@@ -4,9 +4,11 @@
 // Ruta: mobile/src/domain/maestros.ts
 // Descripción: Lógica pura de los maestros del registro (F05-03/F05-04 J2 §2.3/§2.5; láminas REG-DYN / SET-TH / SET-CTX v0.1 P01, P02, S01–S03 y SET-PLT / HOME-QA v0.2 S01–S05, H01–H03). Filtro LOCAL por nombre con la misma normalización que C06 (NFKC, recorte, espacios, minúsculas, sin diacríticos): no es la búsqueda de F05-05. Textos visibles de naturaleza del tercero y tipo de contexto, rango de fechas del contexto, resumen de una plantilla («Supermercado · Tarjeta BBVA · Presupuesto: Sí»), grupos de Ajustes › Plantillas («EN INICIO · n DE 3», «OTRAS PLANTILLAS», «DESACTIVADAS») y huecos libres de Inicio (máximo 3). Las reglas de elegibilidad y unicidad las decide el servidor.
 // Versión: 0.1.0 (F05-03/F05-04 J2 §2)
+// Versión: 0.2.0 (F05-05 K3 §2.3; F05 §49.4 A4, §49.1.2-2; lámina SRCH-ACT-AFI A4): `detalleUso`, segunda línea de un tercero con datos reales: naturaleza, registros y último uso («Persona · 466 registros · último 10 oct»). Sin NIF ni roles (no se capturan en v1).
 // ============================================================
 
 import type { AccionRapida, Contexto, NaturalezaTercero, Plantilla, Tercero, TipoContexto } from '../api/cliente';
+import { diaMesIso } from './fechas';
 
 export const MAX_ACCESOS = 3;
 
@@ -44,6 +46,12 @@ export function detalleTercero(t: Pick<Tercero, 'naturaleza' | 'usos'>): string 
   const n = t.naturaleza === null ? null : textoNaturaleza(t.naturaleza);
   const usos = t.usos === undefined ? null : `${t.usos} ${t.usos === 1 ? 'registro' : 'registros'}`;
   return [n, usos].filter(Boolean).join(' · ');
+}
+
+/** «Persona · 466 registros · último 10 oct» (homónimos por naturaleza y uso, A4). */
+export function detalleUso(t: Pick<Tercero, 'naturaleza' | 'usos' | 'ultimo_uso'>): string {
+  const base = detalleTercero(t);
+  return t.ultimo_uso ? [base, `último ${diaMesIso(t.ultimo_uso)}`].filter(Boolean).join(' · ') : base;
 }
 
 export const TIPOS_CONTEXTO: { valor: TipoContexto; etiqueta: string }[] = [

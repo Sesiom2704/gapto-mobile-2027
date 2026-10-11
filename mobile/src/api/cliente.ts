@@ -11,12 +11,14 @@
 // v0.7.0 (F05-02 B3; lámina SET-PREF S04, A2 del mandato B3+B4): desactivar y reactivar una preferencia (`desactivarPreferencia(id, row_version)` y `reactivarPreferencia(id, row_version)`) sobre las rutas existentes de B1, con la clasificación 'CAMBIO' vigente. Sin cambios en rutas ni DTO.
 // v0.8.0 (F05-03/F05-04 J2 §1.5; F05 §46.5 E2/E3): GET /v1/preferencias devuelve también `tipos` (ids de GASTO e INGRESO) para enviar SIEMPRE el tipo de la preferencia (se retira la preferencia sin tipo). Sin rutas nuevas.
 // v0.9.0 (F05-03/F05-04 J2 §1.9/§2): cuentas elegibles por operación, terceros, contextos, plantillas y acciones rápidas, propuesta del registro con la capa plantilla, registro de ingreso cobrado y entre cuentas, y onboarding de categorías. Escrituras de maestros con clasificación 'CAMBIO'; registros con la de escritura (indeterminado = reintentar el MISMO UUID).
-// Versión: 0.9.0
+// v0.10.0 (F05-05 K3 §2.1–§2.7; F05 §49.4 A1–A9): lecturas de señales (GET /v1/senales/categorias y /v1/senales/terceros; tipos en domain/senales, único import nuevo), búsqueda de terceros en servidor (GET /v1/terceros?q=&incluir_inactivos=), afinidades (lectura del detalle, alta con UUID del cliente y retirada, clasificación 'CAMBIO'), Actividad v0 (página keyset y detalle) y read models de Inicio (yo, Resultado del mes). Las lecturas nuevas llaman `nota` al dato (M5-08); el wire de escritura del gasto no cambia.
+// Versión: 0.10.0
 // ============================================================
 
 import type { Ambito, CategoriaNodo } from '../domain/categoria';
 import type { PayloadGastoPagado } from '../domain/intencion';
 import type { MagnitudCatalogo } from '../domain/magnitud';
+import type { SenalesCategorias, SenalesTerceros } from '../domain/senales';
 
 export interface ConfigApi {
   baseUrl: string;
@@ -210,6 +212,8 @@ export interface Tercero {
   enabled: boolean;
   row_version: number;
   usos?: number;
+  /** Fecha del último hecho activo (homónimos por uso, A4). */
+  ultimo_uso?: string | null;
 }
 
 export interface Contexto {
@@ -365,6 +369,89 @@ export interface NodoSugerido {
   icon_key: string;
 }
 
+// ------------------------------------------------------------------ F05-05 (afinidades, Actividad v0, Inicio)
+export interface AfinidadNodo {
+  id: string;
+  tercero_id: string;
+  categoria_id: string;
+}
+
+export interface ResultadoComandoAfinidad {
+  afinidad: AfinidadNodo | null;
+  idempotente: boolean;
+  aviso: 'AFINIDAD_YA_EXISTE' | null;
+}
+
+export interface DetalleAfinidades {
+  tercero_id: string;
+  tipo: 'GASTO' | 'INGRESO';
+  guardadas: { id: string; categoria_id: string; nombre: string; ruta: string; disponible: boolean }[];
+  segun_historial: { categoria_id: string; nombre: string; ruta: string; usos: number }[];
+  total_registros: number;
+}
+
+export type TipoActividad = 'GASTO' | 'INGRESO' | 'TRANSFERENCIA';
+export interface ReferenciaActividad {
+  id: string;
+  nombre: string;
+  enabled: boolean;
+}
+
+export interface FilaActividad {
+  id: string;
+  fecha_hecho: string;
+  tipo: TipoActividad;
+  nota: string | null;
+  moneda: string;
+  importe_total: string | null;
+  tercero: ReferenciaActividad | null;
+  categoria: (ReferenciaActividad & { ruta: string }) | null;
+  varias: boolean;
+  contexto: ReferenciaActividad | null;
+  cuentas: { cuenta_id: string; nombre: string; rol: 'PAGO' | 'COBRO' | 'ORIGEN' | 'DESTINO'; enabled: boolean }[];
+  estado_reparto: 'COMPLETA' | 'PARCIAL' | 'NO_DISPONIBLE' | null;
+  tu_parte: string | null;
+  pendiente: string | null;
+  maestros_desactivados: ('CATEGORIA' | 'TERCERO' | 'CONTEXTO')[];
+  coincide_en?: ('TERCERO' | 'CATEGORIA' | 'CONTEXTO' | 'NOTA' | 'IMPORTE')[] | null;
+}
+
+export interface PaginaActividad {
+  filas: FilaActividad[];
+  siguiente: string | null;
+  total: number;
+}
+
+export interface DetalleActividad extends FilaActividad {
+  presupuestable: boolean;
+  magnitudes: { magnitud_id: string; nombre: string; valor: string; unidad: string | null }[];
+}
+
+/** Consulta de la Actividad: periodo [desde, hasta) opcional (sin periodo = todo el historial). */
+export interface ConsultaActividad {
+  desde?: string | null;
+  hasta?: string | null;
+  tipos?: TipoActividad[];
+  categoriaId?: string | null;
+  incluirSubcategorias?: boolean;
+  cuentaId?: string | null;
+  terceroId?: string | null;
+  contextoId?: string | null;
+  q?: string | null;
+  importe?: string | null;
+  cursor?: string | null;
+  limite?: number;
+}
+
+export interface ResultadoMes {
+  mes: string;
+  moneda: 'EUR';
+  ingresos_propios: string;
+  gastos_propios: string;
+  resultado: string;
+  sin_indicar: { gastos: { n: number; importe: string }; ingresos: { n: number; importe: string } };
+}
+
 export type Respuesta<T> =
   | { tipo: 'OK'; datos: T }
   | { tipo: 'RECHAZADO'; codigo: string; mensaje: string; detalle?: Record<string, unknown> }
@@ -452,6 +539,17 @@ export interface ClienteApi {
   registrarTransferencia(p: PayloadTransferencia): Promise<Respuesta<ResultadoRegistroTipo>>;
   categoriasSugeridas(): Promise<Respuesta<{ version: number; nodos: NodoSugerido[] }>>;
   onboardingCategorias(): Promise<Respuesta<{ creadas: number; idempotente: boolean }>>;
+  // F05-05
+  senalesCategorias(q: { tipo: 'GASTO' | 'INGRESO'; fecha: string; terceroId?: string | null }): Promise<Respuesta<SenalesCategorias>>;
+  senalesTerceros(tipo: 'GASTO' | 'INGRESO', fecha: string): Promise<Respuesta<SenalesTerceros>>;
+  buscarTerceros(q: string, incluirInactivos: boolean): Promise<Respuesta<{ terceros: Tercero[] }>>;
+  afinidadesTercero(terceroId: string, fecha: string, tipo?: 'GASTO' | 'INGRESO'): Promise<Respuesta<DetalleAfinidades>>;
+  altaAfinidad(c: { id: string; tercero_id: string; categoria_id: string }): Promise<Respuesta<ResultadoComandoAfinidad>>;
+  retirarAfinidad(id: string): Promise<Respuesta<ResultadoComandoAfinidad>>;
+  actividad(q: ConsultaActividad): Promise<Respuesta<PaginaActividad>>;
+  detalleActividad(id: string): Promise<Respuesta<DetalleActividad>>;
+  yo(): Promise<Respuesta<{ nombre: string | null }>>;
+  resultadoMes(fecha: string): Promise<Respuesta<ResultadoMes>>;
 }
 
 const CAT = '/v1/categorias';
@@ -564,5 +662,38 @@ export function crearCliente(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): C
     registrarTransferencia: (p) => llamar('/v1/intenciones/transferencia', post(p), true),
     categoriasSugeridas: () => llamar(`${CAT}/sugeridas`, { method: 'GET' }, false),
     onboardingCategorias: () => llamar(`${CAT}/onboarding`, post({}), 'CAMBIO'),
+    senalesCategorias: (q) => {
+      const ps = new URLSearchParams({ tipo: q.tipo, fecha: q.fecha });
+      if (q.terceroId) ps.set('tercero_id', q.terceroId);
+      return llamar(`/v1/senales/categorias?${ps.toString()}`, { method: 'GET' }, false);
+    },
+    senalesTerceros: (tipo, fecha) =>
+      llamar(`/v1/senales/terceros?tipo=${encodeURIComponent(tipo)}&fecha=${encodeURIComponent(fecha)}`, { method: 'GET' }, false),
+    buscarTerceros: (q, incluirInactivos) =>
+      llamar(`${TER}?q=${encodeURIComponent(q)}${incluirInactivos ? '&incluir_inactivos=1' : ''}`, { method: 'GET' }, false),
+    afinidadesTercero: (terceroId, fecha, tipo = 'GASTO') =>
+      llamar(`${TER}/${encodeURIComponent(terceroId)}/afinidades?fecha=${encodeURIComponent(fecha)}&tipo=${tipo}`, { method: 'GET' }, false),
+    altaAfinidad: (c) => llamar('/v1/afinidades', post(c), 'CAMBIO'),
+    retirarAfinidad: (id) => llamar(`/v1/afinidades/${encodeURIComponent(id)}/retirar`, post({}), 'CAMBIO'),
+    actividad: (q) => {
+      const ps = new URLSearchParams();
+      if (q.desde) ps.set('desde', q.desde);
+      if (q.hasta) ps.set('hasta', q.hasta);
+      for (const t of q.tipos ?? []) ps.append('tipo', t);
+      if (q.categoriaId) ps.set('categoria_id', q.categoriaId);
+      if (q.categoriaId && q.incluirSubcategorias === false) ps.set('incluir_subcategorias', 'false');
+      if (q.cuentaId) ps.set('cuenta_id', q.cuentaId);
+      if (q.terceroId) ps.set('tercero_id', q.terceroId);
+      if (q.contextoId) ps.set('contexto_id', q.contextoId);
+      if (q.q) ps.set('q', q.q);
+      if (q.importe) ps.set('importe', q.importe);
+      if (q.cursor) ps.set('cursor', q.cursor);
+      if (q.limite) ps.set('limite', String(q.limite));
+      const qs = ps.toString();
+      return llamar(`/v1/actividad${qs ? `?${qs}` : ''}`, { method: 'GET' }, false);
+    },
+    detalleActividad: (id) => llamar(`/v1/actividad/${encodeURIComponent(id)}`, { method: 'GET' }, false),
+    yo: () => llamar('/v1/yo', { method: 'GET' }, false),
+    resultadoMes: (fecha) => llamar(`/v1/inicio/resultado-mes?fecha=${encodeURIComponent(fecha)}`, { method: 'GET' }, false),
   };
 }

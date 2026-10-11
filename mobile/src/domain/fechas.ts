@@ -4,7 +4,8 @@
 // Ruta: mobile/src/domain/fechas.ts
 // Descripción: Fechas locales del dispositivo (la fecha del hecho es la fecha LOCAL del usuario, no UTC).
 // v0.2.0 (F05-D003): utilidades para la fecha editable (ayer, dd/mm/aaaa ↔ ISO).
-// Versión: 0.2.0
+// v0.3.0 (F05-05 K3 §2.3/§2.6; F05 §49.4 A4/A7): fechas cortas de una fecha ISO («10 oct», «10 oct 2026», «Octubre 2026») y periodos de la Actividad en mes natural (límites semiabiertos [desde, hasta), mes anterior y siguiente), sin hora (fecha_hecho es date).
+// Versión: 0.3.0
 // ============================================================
 
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
@@ -44,4 +45,35 @@ export function isoADdmmaaaa(iso: string): string {
 export function fechaCortaIso(iso: string): string {
   const [a, m, d] = iso.split('-').map(Number);
   return fechaCorta(new Date(a, m - 1, d));
+}
+
+/** «2026-10-10» → «10 oct». */
+export function diaMesIso(iso: string): string {
+  const [, m, d] = iso.split('-').map(Number);
+  return `${d} ${MESES_CORTOS[m - 1]}`;
+}
+
+/** «2026-10-10» → «10 oct 2026». */
+export function diaMesAnioIso(iso: string): string {
+  const [a, m, d] = iso.split('-').map(Number);
+  return `${d} ${MESES_CORTOS[m - 1]} ${a}`;
+}
+
+/** «2026-10-10» → «Octubre 2026». */
+export function mesAnioIso(iso: string): string {
+  const [a, m] = iso.split('-').map(Number);
+  return nombreMes(new Date(a, m - 1, 1));
+}
+
+/** Mes natural de una fecha ISO como [desde, hasta) («2026-10-01», «2026-11-01»). */
+export function limitesMesIso(iso: string): { desde: string; hasta: string } {
+  const [a, m] = iso.split('-').map(Number);
+  return { desde: `${a}-${dos(m)}-01`, hasta: m === 12 ? `${a + 1}-01-01` : `${a}-${dos(m + 1)}-01` };
+}
+
+/** Primer día del mes anterior (o siguiente, con delta = 1) de una fecha ISO. */
+export function mesDesplazadoIso(iso: string, delta: -1 | 1): string {
+  const [a, m] = iso.split('-').map(Number);
+  const total = a * 12 + (m - 1) + delta;
+  return `${Math.floor(total / 12)}-${dos((total % 12) + 1)}-01`;
 }

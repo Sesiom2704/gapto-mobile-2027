@@ -9,7 +9,8 @@
 // v0.5.0 (F05-02 B2; F05-D026 §41.3/§41.4, E1/E2/E3; F05-D027 §42.7; lámina SET-PREF / REG-PREF v0.1 R01–R07): propuesta de preferencias por campo. Tras cargar las cuentas, y en cada cambio de categoría o de fecha, se pide GET /v1/preferencias/propuesta (categoría o «Sin categoría»; con categoría pendiente, el contexto «Sin categoría») y se aplica SOLO a los campos no tocados, con su origen visible («Propuesta: tu preferencia para <categoría>.» / «… general.» / «Propuesta: es tu única cuenta disponible.»); un campo tocado muestra «Elegida por ti.» y no se recalcula (D-PREF-03). Se ELIMINA el fallback de cuenta única del cliente (AJ-B1-09): la única fuente de la propuesta de cuenta es el resolver, y nunca se preselecciona una cuenta fuera de la lista (AJ-B1-11). `presupuestable` se preselecciona solo con propuesta (E1). El sellado no cambia: el reintento no vuelve a pedir la propuesta y no hay sondeo. Pantalla de éxito: «Guardar como preferencia» (GuardarPreferencia) solo con categoría y si hay algo que recordar (D-PREF-05/06).
 // v0.6.0 (F05-03/F05-04 J2 §2.2–§2.4; F05 §46.3 A1–A9, §45.3; láminas REG-DYN G01–G03/I01/T02/N01 y REG-PLT R01–R06): el formulario sirve a Gasto e Ingreso cobrado (`tipo`). Cabecera «Cancelar · Nuevo gasto | Nuevo ingreso · Tipo»: el cambio de tipo solo antes del primer envío, conserva importe y fecha y quita con aviso lo que no encaja (T02); «Entre cuentas» lo resuelve la raíz. Tercero opcional («Tercero» / «De») con alta mínima y duplicados; «Más detalles» con contexto (alta «Crear y usar») y, en ingresos, nota. Selector de categorías por tipo (A12). «No lo sé» en magnitudes obligatorias (A9). Plantilla: chip «Plantilla: <nombre> ×» con «Quitar», origen por campo («De tu plantilla …»), campos tocados nunca se pisan y avisos de lo que no aplica. Ingresos: cuentas elegibles para cobrar («Cobrado en»), sin financiación. Con tercero, plantilla o en ingresos la propuesta es la del registro por tipo (GET /v1/registro/propuesta); el gasto sin ellos conserva la de F05-02. FECHA_FUTURA con su mensaje. Éxito: «Guardar como preferencia» para el tercero O la categoría y «Guardar como plantilla…».
 // v0.7.0 (F05-03/F05-04 J3 §2.7; F05 §46.3 A8; CORTE DE CONCEPTO, atómico con el servidor): desaparece el campo obligatorio «Concepto»; la «Nota (opcional)» va en «Más detalles» (contexto, nota) en gasto e ingreso. Vacía o solo espacios no viaja; nunca bloquea ni figura en «faltan». La pantalla de éxito muestra el título CALCULADO (nota > «Tercero · Categoría» > categoría > tercero > «Gasto · importe»), nunca persistido ni vacío.
-// Versión: 0.7.0
+// v0.8.0 (F05-05 K3 §2.1/§2.2/§2.4; F05 §49.4 A1/A2/A2 bis/A5, §49.5 R1/R2; D-SRCH-01/05/11; lámina SRCH-ACT-AFI A1, A5, A7): las sugerencias de categoría (GET /v1/senales/categorias por tipo, fecha del formulario y tercero) se muestran en la sección «Sugeridas» del selector (que ahora tiene búsqueda) y como hasta 3 chips de ACCIÓN bajo «Categoría» mientras está pendiente. El selector se construye una vez y los chips invocan su MISMO callback de selección (`props.onElegir`): elegir un chip, una sugerida o el nodo en el árbol produce la misma intención (R1); sin tocar, el estado sigue PENDIENTE y nada habilita «Registrar» (C01). Con categoría elegida por el usuario, «Elegida por ti.». Éxito: tarjeta «¿Recordar <categoría> para <tercero>?» (escritura independiente; un fallo no afecta al hecho).
+// Versión: 0.8.0
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -18,11 +19,12 @@ import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ClienteApi, CuentaPago } from '../api/cliente';
-import { BotonPrimario, BotonTexto, Chip, EstadoDato, Segmentado, Velo } from '../components/Basicos';
+import { BotonPrimario, BotonTexto, Chip, ChipAccion, EstadoDato, Segmentado, Velo } from '../components/Basicos';
 import { FormularioContexto, SelectorContexto } from '../components/Contextos';
 import { GuardarPlantilla } from '../components/GuardarPlantilla';
 import { GuardarPreferencia } from '../components/GuardarPreferencia';
 import { HojaTipos } from '../components/HojaTipos';
+import { RecordarAfinidad } from '../components/RecordarAfinidad';
 import { SelectorTercero } from '../components/SelectorTercero';
 import { BotonSecundario, CargaArbol, IconoCategoriaVista, SelectorCategorias } from '../components/SelectorCategorias';
 import {
@@ -69,6 +71,8 @@ import {
   tituloRegistro,
   TITULO_TAREA,
 } from '../domain/registro';
+import type { SugeridaCategoria } from '../domain/senales';
+import { textoChips, vistaSugeridas } from '../domain/senales';
 import { useEnvioGasto } from '../state/useEnvioGasto';
 import { useTema } from '../theme/tema';
 import { espacio, importe, radio, TACTIL_MIN, tipo } from '../theme/tokens';
@@ -137,6 +141,9 @@ export function RegistroGastoScreen(p: {
   const [cambioPendiente, setCambioPendiente] = useState<CambioPendiente | null>(null);
   /** Categoría que el servidor rechazó tras confirmar (se pide otra). */
   const [categoriaInvalida, setCategoriaInvalida] = useState<{ nombre: string; codigo: string } | null>(null);
+  // F05-05 A1/A2 bis: sugeridas de categoría (lectura; nunca preseleccionan ni cambian orígenes, R1/C01).
+  const [sugeridas, setSugeridas] = useState<SugeridaCategoria[]>([]);
+  const peticionSugeridas = useRef(0);
 
   useEffect(() => {
     if (p.inicial) setB((x) => ({ ...x, importeTexto: p.inicial!.importeTexto, fechaHecho: p.inicial!.fechaHecho, fechaOrigen: p.inicial!.fechaHecho === hoyIso ? 'INFERIDO' : 'USUARIO' }));
@@ -274,6 +281,19 @@ export function RegistroGastoScreen(p: {
   useEffect(() => {
     if (esFechaIso(b.fechaHecho) && b.fechaHecho <= hoyIso) void cargarCuentas(b.fechaHecho);
   }, [b.fechaHecho]);
+
+  // F05-05: sugeridas para el tipo, la fecha del formulario (fecha funcional, R7) y el tercero.
+  const cargarSugeridas = async () => {
+    const n = ++peticionSugeridas.current;
+    const actual = bRef.current;
+    if (!esFechaIso(actual.fechaHecho) || actual.fechaHecho > hoyIso) return setSugeridas([]);
+    const r = await p.cliente.senalesCategorias({ tipo: tipoRef.current, fecha: actual.fechaHecho, terceroId: actual.terceroId ?? null });
+    if (n !== peticionSugeridas.current) return;
+    setSugeridas(r.tipo === 'OK' ? vistaSugeridas(r.datos, actual.terceroNombre ?? null) : []);
+  };
+  useEffect(() => {
+    void cargarSugeridas();
+  }, [b.fechaHecho, b.terceroId, tipoReg]);
 
   // F05-04: nombres de terceros y contextos (para los valores que pone la plantilla).
   const terceros = useRef<Map<string, string>>(new Map());
@@ -499,6 +519,15 @@ export function RegistroGastoScreen(p: {
             </Text>
           )}
         </View>
+        {b.terceroId && b.terceroNombre && b.categoria.estado === 'CATEGORIA' ? (
+          <RecordarAfinidad
+            cliente={p.cliente}
+            nuevoId={p.nuevoId}
+            fecha={estado.sellada.payload.fecha_hecho}
+            tercero={{ id: b.terceroId, nombre: b.terceroNombre }}
+            categoria={{ id: b.categoria.id, nombre: b.categoria.nombre }}
+          />
+        ) : null}
         {recordar ? (
           <GuardarPreferencia
             cliente={p.cliente}
@@ -548,6 +577,41 @@ export function RegistroGastoScreen(p: {
       </View>
     );
   }
+
+  // El selector se construye UNA vez: los chips de sugerencias usan su MISMO callback de selección
+  // (`props.onElegir`) y su misma regla de elegibilidad (R1: misma intención que el árbol).
+  const selectorCategorias = (
+    <SelectorCategorias
+      titulo="Elegir categoría"
+      modo="REGISTRO"
+      carga={arbol}
+      esVisible={(n) => (arbol.fase === 'OK' ? visibleEnRegistro(arbol.arbol, n, tipoReg) : false)}
+      esSeleccionable={esIngreso ? (n) => elegible(n, 'INGRESO') : elegibleParaGasto}
+      motivo={(n) => motivoNoSeleccionable(n, tipoReg)}
+      naturaleza={tipoReg}
+      seleccionadaId={b.categoria.estado === 'CATEGORIA' ? b.categoria.id : null}
+      opcionRaiz={{
+        etiqueta: 'Sin categoría',
+        subtitulo: 'Registrar sin clasificar',
+        seleccionada: b.categoria.estado === 'SIN_CATEGORIA',
+        onPress: () => proponerCategoria({ estado: 'SIN_CATEGORIA' }),
+        testID: 'selector-sin-categoria',
+      }}
+      onElegir={elegirNodo}
+      onCerrar={() => setSelectorAbierto(false)}
+      onReintentar={() => void cargarArbol()}
+      onContinuarSinCategoria={() => proponerCategoria({ estado: 'SIN_CATEGORIA' })}
+      sugeridas={sugeridas}
+      buscar
+    />
+  );
+  // Chips: solo con la categoría pendiente y para nodos del árbol que se pueden elegir.
+  const chips =
+    b.categoria.estado === 'PENDIENTE' && !bloqueado && arbol.fase === 'OK'
+      ? sugeridas
+          .map((x) => arbol.arbol.porId.get(x.categoria_id))
+          .filter((n): n is CategoriaNodo => !!n && selectorCategorias.props.esSeleccionable(n))
+      : [];
 
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: c.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -652,6 +716,27 @@ export function RegistroGastoScreen(p: {
           </Pressable>
           {categoriaDePlantilla(b) ? (
             <Text testID="origen-categoria" style={[tipo.footnote, { color: c.textSecondary }]}>{origen('PLANTILLA')}</Text>
+          ) : null}
+          {b.categoria.estado === 'CATEGORIA' && !categoriaDePlantilla(b) ? (
+            <Text testID="origen-categoria-usuario" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_ELEGIDA}</Text>
+          ) : null}
+          {chips.length > 0 ? (
+            <View testID="chips-sugeridas" style={{ gap: espacio.xs }}>
+              <View style={s.chips}>
+                {chips.map((n) => (
+                  <ChipAccion
+                    key={n.id}
+                    testID={`chip-sugerida-${n.id}`}
+                    etiqueta={n.nombre}
+                    accesibilidad={`Elegir ${n.nombre}`}
+                    onPress={() => selectorCategorias.props.onElegir(n)}
+                  />
+                ))}
+              </View>
+              <Text testID="chips-texto" style={[tipo.caption, { color: c.textSecondary }]}>
+                {textoChips(sugeridas.filter((x) => chips.some((n) => n.id === x.categoria_id)))}
+              </Text>
+            </View>
           ) : null}
           {categoriaInvalida ? (
             <Text testID="categoria-invalida" accessibilityRole="alert" style={[tipo.footnote, { color: c.critical }]}>
@@ -920,29 +1005,7 @@ export function RegistroGastoScreen(p: {
         </View>
       ) : null}
 
-      {selectorAbierto ? (
-        <SelectorCategorias
-          titulo="Elegir categoría"
-          modo="REGISTRO"
-          carga={arbol}
-          esVisible={(n) => (arbol.fase === 'OK' ? visibleEnRegistro(arbol.arbol, n, tipoReg) : false)}
-          esSeleccionable={esIngreso ? (n) => elegible(n, 'INGRESO') : elegibleParaGasto}
-          motivo={(n) => motivoNoSeleccionable(n, tipoReg)}
-          naturaleza={tipoReg}
-          seleccionadaId={b.categoria.estado === 'CATEGORIA' ? b.categoria.id : null}
-          opcionRaiz={{
-            etiqueta: 'Sin categoría',
-            subtitulo: 'Registrar sin clasificar',
-            seleccionada: b.categoria.estado === 'SIN_CATEGORIA',
-            onPress: () => proponerCategoria({ estado: 'SIN_CATEGORIA' }),
-            testID: 'selector-sin-categoria',
-          }}
-          onElegir={elegirNodo}
-          onCerrar={() => setSelectorAbierto(false)}
-          onReintentar={() => void cargarArbol()}
-          onContinuarSinCategoria={() => proponerCategoria({ estado: 'SIN_CATEGORIA' })}
-        />
-      ) : null}
+      {selectorAbierto ? selectorCategorias : null}
 
       {selectorTercero ? (
         <SelectorTercero
@@ -952,6 +1015,8 @@ export function RegistroGastoScreen(p: {
           seleccionadoId={b.terceroId ?? null}
           onElegir={elegirTercero}
           onCerrar={() => setSelectorTercero(false)}
+          tipo={tipoReg}
+          fecha={esFechaIso(b.fechaHecho) && b.fechaHecho <= hoyIso ? b.fechaHecho : undefined}
         />
       ) : null}
       {selectorContexto === 'LISTA' ? (

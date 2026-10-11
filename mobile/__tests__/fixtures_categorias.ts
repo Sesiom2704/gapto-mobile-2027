@@ -9,6 +9,7 @@
 // Versión: 0.4.0 (F05-02 B3): el stub incluye desactivar y reactivar preferencia (no esperados por defecto).
 // Versión: 0.5.0 (F05-03/F05-04 J2 §1.5; F05 §46.5 E3): la lista de preferencias del stub informa `tipos` (ids de GASTO e INGRESO).
 // Versión: 0.6.0 (F05-03/F05-04 J2 §2): el stub incluye los métodos nuevos del cliente: lecturas vacías por defecto (terceros, contextos, plantillas, cuentas elegibles, propuesta del registro sin valores) y escrituras no esperadas (lanzan).
+// Versión: 0.7.0 (F05-05 K3): el stub incluye los métodos de F05-05: señales, búsqueda de terceros, afinidades del tercero, Actividad (página vacía) e Inicio (nombre null y Resultado a cero) por defecto; alta y retirada de afinidad y detalle de la Actividad no esperados (lanzan).
 // ============================================================
 
 import type { ClienteApi, ListaPreferencias, PropuestaRegistro, Respuesta } from '../src/api/cliente';
@@ -97,6 +98,16 @@ export function clienteCategoriasStub(
     registrarTransferencia: noEsperado('registrarTransferencia'),
     categoriasSugeridas: jest.fn(async () => ({ tipo: 'OK', datos: { version: 1, nodos: [] } }) as any),
     onboardingCategorias: noEsperado('onboardingCategorias'),
+    senalesCategorias: jest.fn(async (q: any) => ({ tipo: 'OK', datos: { tipo: q.tipo, fecha: q.fecha, tercero_id: q.terceroId ?? null, candidatas: [] } }) as any),
+    senalesTerceros: jest.fn(async (tipo: any, fecha: any) => ({ tipo: 'OK', datos: { tipo, fecha, terceros: [] } }) as any),
+    buscarTerceros: jest.fn(async () => ({ tipo: 'OK', datos: { terceros: [] } }) as any),
+    afinidadesTercero: jest.fn(async (terceroId: any, _f: any, tipo: any = 'GASTO') => ({ tipo: 'OK', datos: { tercero_id: terceroId, tipo, guardadas: [], segun_historial: [], total_registros: 0 } }) as any),
+    altaAfinidad: noEsperado('altaAfinidad'),
+    retirarAfinidad: noEsperado('retirarAfinidad'),
+    actividad: jest.fn(async () => ({ tipo: 'OK', datos: { filas: [], siguiente: null, total: 0 } }) as any),
+    detalleActividad: noEsperado('detalleActividad'),
+    yo: jest.fn(async () => ({ tipo: 'OK', datos: { nombre: null } }) as any),
+    resultadoMes: jest.fn(async () => ({ tipo: 'OK', datos: { mes: '2026-10', moneda: 'EUR', ingresos_propios: '0.00', gastos_propios: '0.00', resultado: '0.00', sin_indicar: { gastos: { n: 0, importe: '0.00' }, ingresos: { n: 0, importe: '0.00' } } } }) as any),
   };
 }
 

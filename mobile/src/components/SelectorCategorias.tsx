@@ -7,14 +7,17 @@
 // Versión: 0.2.0 (F05-01 S6-WIRE+UI, correctivo AJ-S6WIREUI-09): el aviso del nivel no seleccionable y el subtítulo de fila solo afirman que las subcategorías se pueden usar si existe algún descendiente elegible (`tieneDescendienteElegible`, naturaleza GASTO del slice); si no, «Puedes entrar para ver sus subcategorías.» y «tiene subcategorías».
 // Versión: 0.3.0 (F05-01 P7 · N3, Moisés D-P7-05, microcopy AJ-S6WIREUI-09): solo las ramas con usables = false. Aviso de nivel «… Sus subcategorías tampoco se pueden elegir ahora. Elige otra categoría o registra sin categoría.» (motivo «Desactivada» y resto de motivos) y subtítulo de fila «sus subcategorías tampoco se pueden usar». Ramas usables = true y lógica `usables` sin cambios.
 // Versión: 0.4.0 (F05-03/F05-04 J2 §2.3/§2.5): prop opcional `naturaleza` (GASTO por defecto: el comportamiento anterior) para el registro y los ajustes de ingresos; `usables` la usa en lugar de GASTO fijo. Sin imports nuevos.
+// Versión: 0.5.0 (F05-05 K3 §2.1; F05 §49.4 A1/A2/A3, D-SRCH-01..03; lámina SRCH-ACT-AFI A1, A2, A6, C2): sección «Sugeridas» (prop opcional `sugeridas`, hasta 3, con ruta y motivo) encima del árbol en la raíz; tocar una sugerida invoca el MISMO `onElegir` que el árbol (R1: misma intención) y solo se muestra si el nodo existe y es seleccionable (nada preseleccionado, C01). Búsqueda opcional (`buscar`) sobre todo el árbol con la normalización C06 (`normalizarNombre`: sin mayúsculas ni acentos): resultados con ruta en el orden del árbol (sin reordenar, I13c); lo no seleccionable se ve atenuado con su motivo y no se puede elegir. Imports nuevos declarados en I13a: TextInput, normalizarNombre y el tipo SugeridaCategoria.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
 import React, { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Arbol, CategoriaNodo, ancestros, hijosDe, tieneDescendienteElegible } from '../domain/categoria';
+import { normalizarNombre } from '../domain/maestros';
+import type { SugeridaCategoria } from '../domain/senales';
 import { glifoDe } from '../theme/iconosCategoria';
 import { useTema } from '../theme/tema';
 import { espacio, radio, TACTIL_MIN, tipo } from '../theme/tokens';
@@ -59,11 +62,16 @@ export function SelectorCategorias(p: {
   onContinuarSinCategoria?: () => void;
   /** Naturaleza del registro (GASTO por defecto). */
   naturaleza?: 'GASTO' | 'INGRESO';
+  /** F05-05 A1: hasta 3 sugeridas con ruta y motivo (nunca preseleccionan). */
+  sugeridas?: SugeridaCategoria[];
+  /** F05-05 A2/A3: campo de búsqueda sobre todo el árbol (C06). */
+  buscar?: boolean;
   testID?: string;
 }) {
   const { c } = useTema();
   const inset = useSafeAreaInsets();
   const [nivel, setNivel] = useState<string | null>(null);
+  const [texto, setTexto] = useState('');
   const arbol = p.carga.fase === 'OK' ? p.carga.arbol : null;
 
   const visiblesDe = (padre: string | null) => (arbol ? hijosDe(arbol, padre).filter(p.esVisible) : []);
@@ -72,6 +80,25 @@ export function SelectorCategorias(p: {
   const migas = arbol && actual ? [...ancestros(arbol, actual.id), actual] : [];
   // AJ-S6WIREUI-09: naturaleza del registro (GASTO salvo que el llamador diga INGRESO; F05-04).
   const usables = (n: CategoriaNodo) => !!arbol && tieneDescendienteElegible(arbol, n, p.naturaleza ?? 'GASTO');
+
+  // F05-05 A2: coincidencias en el orden del árbol (recorrido en preorden; sin reordenar).
+  const consulta = p.buscar ? normalizarNombre(texto) : '';
+  const coincidencias = useMemo(() => {
+    if (!arbol || consulta === '') return [];
+    const out: CategoriaNodo[] = [];
+    const visitar = (padre: string | null) => {
+      for (const n of hijosDe(arbol, padre).filter(p.esVisible)) {
+        if (normalizarNombre(n.nombre).includes(consulta)) out.push(n);
+        visitar(n.id);
+      }
+    };
+    visitar(null);
+    return out;
+  }, [arbol, consulta, p.esVisible]);
+  // F05-05 A1: solo las sugeridas que existen en el árbol y se pueden elegir.
+  const sugeridas = (p.sugeridas ?? [])
+    .map((x) => ({ x, n: arbol?.porId.get(x.categoria_id) }))
+    .filter((y): y is { x: SugeridaCategoria; n: CategoriaNodo } => !!y.n && p.esSeleccionable(y.n));
 
   const tocar = (n: CategoriaNodo) => {
     if (visiblesDe(n.id).length > 0) return setNivel(n.id);
@@ -103,7 +130,72 @@ export function SelectorCategorias(p: {
           ) : null}
         </View>
       ) : (
-        <ScrollView contentContainerStyle={{ paddingBottom: inset.bottom + espacio.xl }}>
+        <ScrollView contentContainerStyle={{ paddingBottom: inset.bottom + espacio.xl }} keyboardShouldPersistTaps="handled">
+          {p.buscar && nivel === null ? (
+            <View style={s.buscador}>
+              <TextInput
+                testID="selector-busqueda"
+                accessibilityLabel="Buscar categoría"
+                value={texto}
+                onChangeText={setTexto}
+                placeholder="Buscar categoría"
+                placeholderTextColor={c.textSecondary}
+                autoCorrect={false}
+                style={[tipo.body, s.campoBusqueda, { color: c.textPrimary, backgroundColor: c.surfaceSecondary }]}
+              />
+              {texto ? <BotonTexto testID="selector-busqueda-limpiar" titulo="Borrar" onPress={() => setTexto('')} /> : null}
+            </View>
+          ) : null}
+
+          {consulta !== '' ? (
+            <View testID="selector-resultados">
+              <Text style={[tipo.footnote, s.seccion, { color: c.textSecondary }]}>
+                {coincidencias.length === 1 ? '1 resultado' : `${coincidencias.length} resultados`}
+              </Text>
+              {coincidencias.map((n) => {
+                const sel = p.esSeleccionable(n);
+                const mot = sel ? null : p.motivo(n);
+                return (
+                  <FilaSelector
+                    key={n.id}
+                    testID={`resultado-${n.id}`}
+                    iconKey={n.icon_key}
+                    titulo={n.nombre}
+                    subtitulo={[arbol ? [...ancestros(arbol, n.id), n].map((m) => m.nombre).join(' › ') : null, mot].filter(Boolean).join(' · ')}
+                    apagada={!sel}
+                    elegida={p.seleccionadaId === n.id}
+                    deshabilitada={!sel}
+                    onPress={() => p.onElegir(n)}
+                  />
+                );
+              })}
+              <Text testID="selector-busqueda-nota" style={[tipo.caption, s.seccion, { color: c.textSecondary }]}>
+                Sin distinguir mayúsculas ni acentos.
+              </Text>
+            </View>
+          ) : null}
+
+          {consulta === '' && nivel === null && p.carga.fase === 'OK' && sugeridas.length > 0 ? (
+            <View testID="selector-sugeridas">
+              <Text style={[tipo.footnote, s.seccion, { color: c.textSecondary }]}>Sugeridas</Text>
+              {sugeridas.map(({ x, n }) => (
+                <FilaSelector
+                  key={`s-${n.id}`}
+                  testID={`sugerida-${n.id}`}
+                  iconKey={n.icon_key}
+                  titulo={n.nombre}
+                  subtitulo={x.ruta}
+                  detalle={x.motivo}
+                  elegida={p.seleccionadaId === n.id}
+                  onPress={() => p.onElegir(n)}
+                />
+              ))}
+              <Text style={[tipo.footnote, s.seccion, { color: c.textSecondary }]}>Todas</Text>
+            </View>
+          ) : null}
+
+          {consulta === '' ? (
+          <>
           {nivel === null && p.opcionRaiz ? (
             <FilaSelector
               testID={p.opcionRaiz.testID}
@@ -197,6 +289,8 @@ export function SelectorCategorias(p: {
               />
             );
           })}
+          </>
+          ) : null}
         </ScrollView>
       )}
     </View>
@@ -208,6 +302,8 @@ function FilaSelector(p: {
   iconKey: string | null;
   titulo: string;
   subtitulo?: string;
+  /** F05-05: tercera línea (motivo de una sugerida), en acento. */
+  detalle?: string;
   elegida?: boolean;
   enfasis?: boolean;
   apagada?: boolean;
@@ -221,7 +317,7 @@ function FilaSelector(p: {
       testID={p.testID}
       accessibilityRole="button"
       accessibilityState={{ selected: !!p.elegida, disabled: !!p.deshabilitada }}
-      accessibilityLabel={[p.titulo, p.subtitulo, p.elegida ? 'Elegida' : null].filter(Boolean).join('. ')}
+      accessibilityLabel={[p.titulo, p.subtitulo, p.detalle, p.elegida ? 'Elegida' : null].filter(Boolean).join('. ')}
       disabled={p.deshabilitada}
       onPress={p.onPress}
       style={({ pressed }) => [s.fila, { borderBottomColor: c.separator, opacity: pressed ? 0.7 : 1 }]}
@@ -232,6 +328,7 @@ function FilaSelector(p: {
           {p.titulo}
         </Text>
         {p.subtitulo ? <Text style={[tipo.caption, { color: c.textSecondary }]}>{p.subtitulo}</Text> : null}
+        {p.detalle ? <Text style={[tipo.caption, { color: c.accent }]}>{p.detalle}</Text> : null}
       </View>
       {p.elegida ? (
         <View style={s.elegida}>
@@ -273,5 +370,7 @@ const s = StyleSheet.create({
   seccion: { paddingHorizontal: espacio.l, paddingTop: espacio.l, paddingBottom: espacio.xs },
   vacio: { alignItems: 'center', gap: espacio.s, padding: espacio.xxl },
   elegida: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  buscador: { flexDirection: 'row', alignItems: 'center', gap: espacio.s, paddingHorizontal: espacio.l, paddingTop: espacio.m },
+  campoBusqueda: { flex: 1, minHeight: TACTIL_MIN, borderRadius: radio.m, paddingHorizontal: espacio.m },
   secundario: { minHeight: 52, borderRadius: radio.m, borderWidth: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: espacio.l },
 });
