@@ -268,6 +268,8 @@
 #     (TercerosAjustesScreen.tsx) lee la categoria_id de las afinidades
 #     guardadas y del historial para mostrarlas, marcar «Ya es habitual» y
 #     enviar el par a /v1/afinidades. Escribe la afinidad, nunca la categoria.
+#     I1 (alta aditiva, §2.11): lecturas y envios de categoria_id del E2E
+#     scripts/dev/e2e_f05_05.py por los writers publicos (R).
 # Version: 0.19.0
 # ============================================================
 
@@ -444,6 +446,10 @@ REGISTRO: dict[tuple[str, str], tuple[str, str, str]] = {
 REGISTRO.update({
     ("scripts/dev/e2e_j2j3.py", "hecho"): ("R", "E2E J2+J3 verificacion", "lee categoria_id de los efectos del hecho por su UUID"),
     ("scripts/dev/e2e_j2j3.py", "main"): ("R", "E2E J2+J3", "compara el categoria_id leido con el esperado (arbol del onboarding)"),
+})
+REGISTRO.update({
+    ("scripts/dev/e2e_f05_05.py", "main"): ("R", "E2E F05-05 K3", "lee categoria_id de tercero_afinidades y lo compara con el esperado"),
+    ("scripts/dev/e2e_f05_05.py", "main.gasto"): ("R", "E2E F05-05 K3 preparacion", "envia la categoria del gasto por /v1/intenciones/gasto-pagado (writer publico, C-a en servidor)"),
 })
 
 CLASES = {"A_FRONTERA", "GUARDA", "A_MOTOR", "B", "P", "R", "CATALOGO", "SEED_DEV", "PREFERENCIA"}

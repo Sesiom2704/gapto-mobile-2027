@@ -36,7 +36,11 @@
 #   (`--concepto`, ahora «Nota») se escribe en «Más detalles» (campo-nota); el
 #   hecho se localiza por su UUID (intencion_id del POST; hecho_id =
 #   intencion_id), nunca por concepto. «faltan» al abrir ya no nombra concepto.
-# Version: 0.6.0
+#   v0.7.0 (F05-05 K3 §2.11; F05 §49.4 A9): «Este mes» tiene ya su read model
+#   (Resultado del mes), que sustituye en ESE bloque el «sin cifras» de
+#   F05-D003 §16.6. Se conserva la propiedad de VS-01: la cifra PARCIAL de
+#   gasto-mes va en su tarjeta y nunca aparece en «Este mes».
+# Version: 0.7.0
 # ============================================================
 
 from __future__ import annotations
@@ -201,9 +205,11 @@ def main() -> None:
             page.get_by_test_id("volver-inicio").click(); metricas["taps"] += 1
             page.wait_for_function("(a) => { const e=document.querySelector('[data-testid=gastos-valor]'); return e && e.innerText !== a; }", arg=antes, timeout=15000)
             despues = page.get_by_test_id("gastos-valor").inner_text()
-            importes_en_mes = page.get_by_test_id("bloque-mes").inner_text().count("€")
-            if importes_en_mes:
-                raise SystemExit("FALLO F05-D003 §16.6: el bloque «Este mes» muestra importes")
+            # F05-05 A9: «Este mes» muestra el Resultado del mes; nunca la cifra PARCIAL de gasto-mes.
+            # (la cifra puede coincidir con «Gastos» del Resultado; lo que se exige es que no viva en ese bloque)
+            parcial_en_mes = page.locator("[data-testid=bloque-mes] [data-testid=gastos-valor]").count()
+            if parcial_en_mes or not page.get_by_test_id("mes-gastos").count():
+                raise SystemExit("FALLO F05-D003 §16.6: el bloque «Este mes» muestra la cifra parcial de gasto-mes")
             page.wait_for_timeout(300)
             shot(page, "04_home_refrescada")
             # Esquema oscuro (mismos tokens DS-01 Dark): solo capturas de revision visual.
@@ -222,7 +228,7 @@ def main() -> None:
         bd = leer_bd(os.environ["GAPTO_DATABASE_URL"], os.environ["GAPTO_DEV_OWNER_USER_ID"], intenciones[0])
         manifest = {"etiqueta": ETIQUETA, "run_id": run, "categoria_elegida": "SIN_CATEGORIA (decision explicita)",
                     "gastos_home_antes": antes, "gastos_home_despues": despues,
-                    "financiacion_visible": financiacion_visible, "importes_en_bloque_mes": importes_en_mes, "spec08": spec08,
+                    "financiacion_visible": financiacion_visible, "parcial_en_bloque_mes": parcial_en_mes, "spec08": spec08,
                     "bd": bd, "metricas": metricas, "errores_consola": len(consola), "capturas": capturas}
         (salida / f"VS01_{run}_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
         print(json.dumps(manifest, ensure_ascii=False, indent=2))
