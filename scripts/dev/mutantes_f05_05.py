@@ -23,6 +23,8 @@
 #        python scripts/dev/mutantes_f05_05.py [--solo ID,ID]
 #   No ejecutar en paralelo con otro arnes ni con la suite sobre el mismo arbol.
 # Version: 0.1.0 (F05-05 K3 §3)
+# Version: 0.2.0 (F05-05 K4-E, AJ-F0505C-01 hueco A9): RE12, filtro de tipo de efecto del
+#   Resultado del mes (el reembolso, DERECHO_COBRO, entra como ingreso). Censo: 77.
 # ============================================================
 
 from __future__ import annotations
@@ -242,6 +244,10 @@ MUTANTES: list[tuple[str, str, list[tuple[str, str, str]], list[str]]] = [
     ("RE11", "cliente: linea sin indicar sin importe",
      [(M_INI, "    ...(g.n > 0 ? [`${g.n} ${g.n === 1 ? 'gasto' : 'gastos'} (${formatearEur(g.importe)})`] : []),",
        "    ...(g.n > 0 ? [`${g.n} ${g.n === 1 ? 'gasto' : 'gastos'}`] : []),")], [J_ACT]),
+    ("RE12", "filtro de tipo de efecto: el reembolso (DERECHO_COBRO) cuenta como ingreso (A9: solo GASTO/INGRESO)",
+     [(INI, "    \"SELECT e.hecho_id, e.tipo_efecto, e.importe_delta, e.estado_atribucion, \"",
+       "    \"SELECT e.hecho_id, CASE WHEN e.tipo_efecto = 'DERECHO_COBRO' THEN 'INGRESO' ELSE e.tipo_efecto END, e.importe_delta, e.estado_atribucion, \""),
+      (INI, "    \"AND e.tipo_efecto IN ('GASTO', 'INGRESO')\"", "    \"AND e.tipo_efecto IN ('GASTO', 'INGRESO', 'DERECHO_COBRO')\"")], [T189]),
     # ---------------------------------------------------------------- I13 contrato I13 v2 (producto)
     ("I13a", "un resolver de propuesta importa las senales",
      [(M_PREF, "from __future__ import annotations\n", "from __future__ import annotations\n\nfrom app.senales import lecturas as _senales  # noqa: F401\n")], [T154]),

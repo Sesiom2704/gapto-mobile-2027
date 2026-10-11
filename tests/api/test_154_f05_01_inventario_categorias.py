@@ -275,7 +275,10 @@
 #     con una lectura que bloquea plantada en el modulo de senales.
 # Version 0.21.0 (F05-05 K4-A2, alta aditiva en I1): lecturas y envios de
 #     categoria_id del E2E scripts/dev/e2e_f05_05_manual.py (R).
-# Version: 0.21.0
+# Version 0.22.0 (F05-05 K4-E, hueco A1·ruta de la matriz A/R): la unica ruta HTTP
+#     con «sugeridas» es la del onboarding (/v1/categorias/sugeridas); las senales
+#     viven en /v1/senales/* (F05 §49.4 A1).
+# Version: 0.22.0
 # ============================================================
 
 from __future__ import annotations
@@ -1696,3 +1699,12 @@ def test_i13_g_negativo_modulo_de_senales_que_bloquea(tmp_path):
     f = raiz / MODULO_SENALES / "lecturas.py"
     f.write_bytes((f.read_bytes().decode("utf-8") + '\n_PLANTADA = "SELECT 1 FROM gapto.terceros FOR SHARE"\n').encode("utf-8"))
     assert any(x.startswith("i:") and "escribe o bloquea" in x for x in _violaciones_i13g(raiz))
+
+
+def test_a1_ninguna_ruta_nueva_se_llama_sugeridas():
+    """F05 §49.4 A1: la ruta de las senales no se llama «sugeridas» (ya existe
+    GET /v1/categorias/sugeridas = onboarding). Se leen los decoradores de app.py."""
+    texto = (RAIZ / "backend" / "app" / "api" / "app.py").read_bytes().decode("utf-8")
+    rutas = re.findall(r'@app\.(?:get|post|put|patch|delete)\(\s*"([^"]+)"', texto)
+    assert any(r.startswith("/v1/senales/") for r in rutas), "no hay rutas /v1/senales/*"
+    assert sorted(r for r in rutas if "sugerid" in r.lower()) == ["/v1/categorias/sugeridas"], rutas

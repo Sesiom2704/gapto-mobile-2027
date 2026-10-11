@@ -21,6 +21,8 @@
 #   hasta), cursor invalido, detalle con presupuestable y magnitudes.
 # Version: 0.1.0 (F05-05 K2 §1.5)
 # Version: 0.2.0 (F05-05 K2 §1.7; M5-08, A10): lecturas con `nota`; wire de escritura del gasto con `concepto`.
+# Version: 0.4.0 (F05-05 K4-E, hueco A7·frontera F08 de la matriz A/R): la lista y el
+#   detalle no devuelven campos de metrica, tendencia, presupuesto ni prevision.
 # Version: 0.3.0 (F05-05 K3 §3, mutantes AC01/AC08): hechos anulados fuera de la lista, del total y del
 #   detalle; con efectos de estados distintos, el estado de reparto es el PEOR (nunca «tu parte» inventada).
 # ============================================================
@@ -317,3 +319,35 @@ def test_estado_de_reparto_es_el_peor_de_los_efectos(e):
                                   ("GASTO", "5.00", "NO_DISPONIBLE", b, [])])
     fila = {f["id"]: f for f in pagina(cli)["filas"]}[str(mixto)]
     assert fila["estado_reparto"] == "NO_DISPONIBLE" and fila["tu_parte"] is None
+
+
+# ------------------------------------------------------------------ K4-E: frontera con F08 (A7)
+_PROHIBIDOS_F08 = ("metrica", "tendencia", "prevision", "previsto", "presupuesto_", "media", "acumulado")
+
+
+def _claves(obj, ruta=""):
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            yield f"{ruta}{k}"
+            yield from _claves(v, f"{ruta}{k}.")
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from _claves(v, ruta)
+
+
+def test_frontera_f08_sin_campos_de_metrica_ni_prevision(e):
+    """F05 §49.4 A7: la Actividad consulta hechos registrados; no calcula metricas,
+    tendencias, presupuestos ni previsiones. Ni la lista ni el detalle traen claves
+    con esos prefijos (`presupuestable` es un atributo del hecho, no un presupuesto)."""
+    owner, actor, cli, cta, ahorro = e
+    ids_ = [x.gasto(cli, cta, importe="12.00", concepto="Compra"), x.ingreso(cli, cta, importe="100.00"),
+            x.transferencia(cli, cta, ahorro, importe="50.00")]
+    claves = set(_claves(pagina(cli)))
+    for hid in ids_:
+        r = cli.get(f"{URL}/{hid}", headers=h.AUTH)
+        assert r.status_code == 200, r.text
+        claves |= set(_claves(r.json()))
+    hojas = {c.rsplit(".", 1)[-1] for c in claves}
+    prohibidas = sorted(k for k in hojas if k.lower().startswith(_PROHIBIDOS_F08))
+    assert prohibidas == [], prohibidas
+    assert "presupuestable" in hojas  # el detalle sí trae el atributo del hecho

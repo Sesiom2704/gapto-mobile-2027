@@ -4,6 +4,7 @@
 // Ruta: mobile/__tests__/actividad_inicio.test.tsx
 // Descripción: K3 de F05-05 (§2.5–§2.8; F05 §49.4 A7–A9/A12, §49.5 R11/R12; lámina SRCH-ACT-AFI v0.2 B1–B13, C1–C4, E1). Dominios ACTIVIDAD, AFINIDADES (Ajustes), RESULTADO y TRANSVERSAL (A12). Casos de §49.9: 12 (orden por fecha, transferencia neutra, ingresos con «+»), 14 (título nunca vacío), 15 (maestro desactivado marcado), 16 (cancelar la búsqueda restaura periodo y filtros), 17 (sin «tu parte» inventada), 22 («Ver sus registros» y «Limpiar»), 23 (fallo de red → error con «Reintentar», nunca «No hay registros»), 24 (importe «48,72» y «48.72»), 25/27 (Resultado con «Sin indicar» y «Hola»); detalle de gasto, ingreso y transferencia; filtros con recuento de grupos; «Quitar» con confirmación, «No disponible», «Ya es habitual» y «Guardar» del historial.
 // Versión: 0.1.0 (F05-05 K3 §2.5–§2.8)
+// Versión: 0.3.0 (F05-05 K4-E, huecos A7 de la matriz A/R): hojas «Otro mes» (mes elegido → desde/hasta del mes) y «Entre fechas» (hasta inclusivo → día siguiente en la consulta; desde > hasta bloqueado); filtros de categoría padre (con subcategorías: el cliente no envía incluir_subcategorias=false), tercero y contexto en la consulta.
 // Versión: 0.2.0 (F05-05 K4-C; acta K4-A2 P12, caso 16 / DAY-Q08): «Cancelar» la búsqueda restaura el desplazamiento SOLO cuando la lista posterior ya está cargada (nunca durante «CARGANDO»); sin búsqueda previa no se desplaza.
 // ============================================================
 
@@ -350,6 +351,62 @@ test('P12 (negativo): sin búsqueda previa, un cambio de tamaño de la lista no 
   ((ScrollView.prototype as any).scrollTo as jest.Mock).mockClear();
   fireEvent(screen.getByTestId('actividad-lista'), 'contentSizeChange', 393, 2000);
   expect(scrollsDeLaLista()).toEqual([]);
+});
+
+// ------------------------------------------------------------------ K4-E: periodo «Otro mes» / «Entre fechas» y filtros (A7)
+test('A7 periodo: «Otro mes» consulta el mes elegido y «Entre fechas» envía «hasta» inclusivo como día siguiente', async () => {
+  const c = fake();
+  await irADia(c);
+  await pulsar('actividad-periodo');
+  await pulsar('periodo-OTRO_MES');
+  expect(screen.getByTestId('otro-mes-valor').props.children).toMatch(/septiembre/i); // por defecto, el mes anterior
+  await pulsar('otro-mes-anterior');
+  expect(screen.getByTestId('otro-mes-valor').props.children).toMatch(/agosto/i);
+  await pulsar('otro-mes-siguiente');
+  await pulsar('otro-mes-siguiente');
+  await pulsar('otro-mes-siguiente'); // no pasa del mes en curso
+  expect(screen.getByTestId('otro-mes-valor').props.children).toMatch(/octubre/i);
+  await pulsar('otro-mes-anterior');
+  await pulsar('otro-mes-anterior');
+  await pulsar('otro-mes-usar');
+  await waitFor(() => expect(c.actividad).toHaveBeenLastCalledWith(expect.objectContaining({ desde: '2026-08-01', hasta: '2026-09-01' })));
+  expect(screen.getByTestId('actividad-periodo').props.accessibilityLabel).toMatch(/agosto/i);
+
+  await pulsar('actividad-periodo');
+  await pulsar('periodo-ENTRE_FECHAS');
+  fireEvent.changeText(screen.getByTestId('entre-desde'), '30/09/2026');
+  fireEvent.changeText(screen.getByTestId('entre-hasta'), '05/09/2026');
+  expect(screen.getByTestId('entre-error')).toBeTruthy(); // desde posterior a hasta
+  expect(screen.getByTestId('entre-usar').props.accessibilityState.disabled).toBe(true);
+  fireEvent.changeText(screen.getByTestId('entre-desde'), '05/09/2026');
+  fireEvent.changeText(screen.getByTestId('entre-hasta'), '30/09/2026');
+  expect(screen.queryByTestId('entre-error')).toBeNull();
+  await pulsar('entre-usar');
+  await waitFor(() => expect(c.actividad).toHaveBeenLastCalledWith(expect.objectContaining({ desde: '2026-09-05', hasta: '2026-10-01' })));
+});
+
+test('A7 filtros: categoría padre (con subcategorías), tercero y contexto llegan a la consulta', async () => {
+  const c = fake();
+  c.listarContextos = jest.fn(async () => ({ tipo: 'OK', datos: { contextos: [{ id: 'ctx1', nombre: 'Cumpleaños Tania', enabled: true }] } })) as any;
+  await irADia(c);
+  await pulsar('actividad-filtros');
+  await pulsar('filtro-categoria');
+  await waitFor(() => expect(screen.getByTestId('cat-alim')).toBeTruthy());
+  await pulsar('cat-alim');
+  await pulsar('selector-usar'); // la categoría PADRE, no una hoja
+  await waitFor(() => expect(screen.getByTestId('hoja-filtros')).toBeTruthy());
+  expect(within(screen.getByTestId('filtro-categoria')).getByText('Alimentación (con subcategorías)')).toBeTruthy();
+  await pulsar('filtro-tercero');
+  await waitFor(() => expect(screen.getByTestId('lista-ter-aldi')).toBeTruthy());
+  await pulsar('lista-ter-aldi');
+  await pulsar('filtro-contexto');
+  await waitFor(() => expect(screen.getByTestId('lista-ctx1')).toBeTruthy());
+  await pulsar('lista-ctx1');
+  await pulsar('filtros-ver');
+  await waitFor(() => expect(c.actividad).toHaveBeenLastCalledWith(expect.objectContaining({ categoriaId: 'alim', terceroId: 'ter-aldi', contextoId: 'ctx1', desde: '2026-10-01' })));
+  const q = (c.actividad as jest.Mock).mock.calls.at(-1)![0];
+  expect(q.incluirSubcategorias).not.toBe(false); // el cliente HTTP solo envía incluir_subcategorias=false si se pide
+  expect(within(screen.getByTestId('actividad-filtros')).getByText('Filtros · 3')).toBeTruthy();
 });
 
 declare const __dirname: string;
