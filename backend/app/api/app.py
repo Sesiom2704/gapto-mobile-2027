@@ -150,7 +150,10 @@
 #          (periodo [desde, hasta); sin periodo, todo el historial; keyset
 #          (fecha_hecho DESC, id ASC) con cursor opaco; `total` con los filtros)
 #     GET  /v1/actividad/{id}   detalle rapido (sin posiciones ni acciones)
-# Version: 0.20.0
+#   v0.21.0 (F05-05 K2 §1.6; F05 §49.4 A9, D13): read models de Inicio:
+#     GET  /v1/yo                         nombre del owner (identidad de desarrollo)
+#     GET  /v1/inicio/resultado-mes?fecha= Resultado del mes (contrato de A9)
+# Version: 0.21.0
 # ============================================================
 
 from __future__ import annotations
@@ -250,9 +253,11 @@ from app.api.dto_f05_05 import (
     DetalleActividad,
     DetalleAfinidades,
     PaginaActividad,
+    ResultadoMes,
     ResultadoComandoAfinidad,
     SenalesCategorias,
     SenalesTerceros,
+    Yo,
 )
 from app.api.dto_vs01 import (
     GastoMesVs01,
@@ -269,6 +274,7 @@ from app.afinidades import lecturas as lect_afi
 from app.afinidades import servicio as serv_afi
 from app.categorias import lecturas as lect_cat
 from app.categorias import onboarding as onb
+from app.inicio import lecturas as lect_ini
 from app.contextos import lecturas as lect_ctx
 from app.plantillas import lecturas as lect_plt
 from app.plantillas import propuesta as prop_plt
@@ -940,6 +946,15 @@ def create_app(
             status, cuerpo = eh.rechazo_lectura("HECHO_NO_ENCONTRADO")
             return JSONResponse(cuerpo, status_code=status)
         return salida
+
+    # ------------------------------------------------------------ F05-05 K2 §1.6 Inicio (D13)
+    @app.get("/v1/yo", response_model=Yo, dependencies=[Depends(autorizar)])
+    def yo() -> dict:
+        return unidad.ejecutar(contexto(), lect_ini.yo, nombre="F05-05 yo")
+
+    @app.get("/v1/inicio/resultado-mes", response_model=ResultadoMes, dependencies=[Depends(autorizar)])
+    def resultado_mes(fecha: dt.date = Query(...)):
+        return _lectura_con_fecha("resultado_mes", fecha, lambda s: lect_ini.resultado_mes(s, fecha))
 
     return app
 

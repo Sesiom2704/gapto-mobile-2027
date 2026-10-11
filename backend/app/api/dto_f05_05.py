@@ -11,6 +11,7 @@
 #   - Importes como texto decimal con 2 decimales (sin floats).
 # Version: 0.1.0 (F05-05 K2 §1.2-§1.6)
 # Version: 0.2.0 (F05-05 K2 §1.5): Actividad v0 (fila, detalle, pagina keyset).
+# Version: 0.3.0 (F05-05 K2 §1.6): read models de Inicio (yo, Resultado del mes).
 # ============================================================
 
 from __future__ import annotations
@@ -156,3 +157,27 @@ class MagnitudHecho(_Estricto):
 class DetalleActividad(FilaActividad):
     presupuestable: bool
     magnitudes: list[MagnitudHecho]
+
+
+# ------------------------------------------------------------------ Inicio (§1.6)
+class Yo(_Estricto):
+    nombre: str | None
+
+
+class GrupoSinIndicar(_Estricto):
+    n: int
+    importe: str  # importe pendiente de atribucion, nunca propio
+
+
+class SinIndicar(_Estricto):
+    gastos: GrupoSinIndicar
+    ingresos: GrupoSinIndicar
+
+
+class ResultadoMes(_Estricto):
+    mes: str
+    moneda: Literal["EUR"]
+    ingresos_propios: str
+    gastos_propios: str
+    resultado: str
+    sin_indicar: SinIndicar
