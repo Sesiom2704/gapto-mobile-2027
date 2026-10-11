@@ -4,10 +4,12 @@
 // Ruta: mobile/__tests__/actividad_inicio.test.tsx
 // Descripción: K3 de F05-05 (§2.5–§2.8; F05 §49.4 A7–A9/A12, §49.5 R11/R12; lámina SRCH-ACT-AFI v0.2 B1–B13, C1–C4, E1). Dominios ACTIVIDAD, AFINIDADES (Ajustes), RESULTADO y TRANSVERSAL (A12). Casos de §49.9: 12 (orden por fecha, transferencia neutra, ingresos con «+»), 14 (título nunca vacío), 15 (maestro desactivado marcado), 16 (cancelar la búsqueda restaura periodo y filtros), 17 (sin «tu parte» inventada), 22 («Ver sus registros» y «Limpiar»), 23 (fallo de red → error con «Reintentar», nunca «No hay registros»), 24 (importe «48,72» y «48.72»), 25/27 (Resultado con «Sin indicar» y «Hola»); detalle de gasto, ingreso y transferencia; filtros con recuento de grupos; «Quitar» con confirmación, «No disponible», «Ya es habitual» y «Guardar» del historial.
 // Versión: 0.1.0 (F05-05 K3 §2.5–§2.8)
+// Versión: 0.2.0 (F05-05 K4-C; acta K4-A2 P12, caso 16 / DAY-Q08): «Cancelar» la búsqueda restaura el desplazamiento SOLO cuando la lista posterior ya está cargada (nunca durante «CARGANDO»); sin búsqueda previa no se desplaza.
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
 import React from 'react';
+import { ScrollView } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { Raiz } from '../App';
@@ -304,6 +306,50 @@ test('A12: el icono de «Mes» es el calendario', () => {
   const fuente: string = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'components', 'BarraInferior.tsx'), 'utf8');
   expect(fuente).toContain("{ id: 'MES', etiqueta: 'Mes', icono: 'calendar-outline', activo: 'calendar' }");
   expect(fuente.split('\n').filter((l) => !l.startsWith('//')).join('\n')).not.toContain('stats-chart');
+});
+
+
+// ------------------------------------------------------------------ K4-C (P12): desplazamiento restaurado tras «Cancelar»
+/** Llamadas a scrollTo de la lista de la Actividad (el mock comparte scrollTo entre instancias). */
+function scrollsDeLaLista(): any[] {
+  const m = (ScrollView.prototype as any).scrollTo as jest.Mock;
+  return m.mock.calls.filter((_, i) => m.mock.instances[i]?.props?.testID === 'actividad-lista').map((c) => c[0]);
+}
+
+test('caso 16 / P12: «Cancelar» restaura el desplazamiento cuando la lista ya está cargada, nunca durante «CARGANDO»', async () => {
+  let liberar: (v: any) => void = () => undefined;
+  let diferir = false;
+  const c = fake({
+    actividad: (q: any) => (diferir && !q.q && !q.importe
+      ? new Promise((r) => { liberar = r; })
+      : { tipo: 'OK', datos: { filas: FILAS, siguiente: null, total: FILAS.length } }),
+  });
+  await irADia(c);
+  ((ScrollView.prototype as any).scrollTo as jest.Mock).mockClear();
+  const lista = screen.getByTestId('actividad-lista');
+  fireEvent.scroll(lista, { nativeEvent: { contentOffset: { x: 0, y: 629 }, contentSize: { width: 393, height: 2000 }, layoutMeasurement: { width: 393, height: 700 } } });
+  await pulsar('actividad-buscar');
+  fireEvent.changeText(screen.getByTestId('actividad-busqueda'), 'aldi');
+  await esperar(400);
+  await waitFor(() => expect(c.actividad).toHaveBeenLastCalledWith(expect.objectContaining({ q: 'aldi' })));
+  diferir = true;
+  await pulsar('actividad-cancelar-busqueda');
+  await waitFor(() => expect(screen.getByTestId('actividad-cargando')).toBeTruthy());
+  fireEvent(screen.getByTestId('actividad-lista'), 'contentSizeChange', 393, 300); // esqueleto
+  expect(scrollsDeLaLista()).toEqual([]); // nunca durante «CARGANDO»
+  await act(async () => liberar({ tipo: 'OK', datos: { filas: FILAS, siguiente: null, total: FILAS.length } }));
+  await waitFor(() => expect(screen.getByTestId('fila-g1')).toBeTruthy());
+  fireEvent(screen.getByTestId('actividad-lista'), 'contentSizeChange', 393, 2000); // filas ya cargadas
+  expect(scrollsDeLaLista()).toEqual([{ y: 629, animated: false }]);
+  fireEvent(screen.getByTestId('actividad-lista'), 'contentSizeChange', 393, 2100); // un solo intento
+  expect(scrollsDeLaLista()).toHaveLength(1);
+});
+
+test('P12 (negativo): sin búsqueda previa, un cambio de tamaño de la lista no la desplaza', async () => {
+  await irADia(fake());
+  ((ScrollView.prototype as any).scrollTo as jest.Mock).mockClear();
+  fireEvent(screen.getByTestId('actividad-lista'), 'contentSizeChange', 393, 2000);
+  expect(scrollsDeLaLista()).toEqual([]);
 });
 
 declare const __dirname: string;

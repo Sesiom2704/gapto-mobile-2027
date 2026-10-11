@@ -4,6 +4,7 @@
 // Ruta: mobile/src/screens/ActividadScreen.tsx
 // Descripción: Día a día › Actividad v0 (F05 §49.4 A7/A8, §49.5 R11/R12; D-SRCH-06..09, 12, 13; P-ACT-01..03; F09 DAY-01; lámina SRCH-ACT-AFI v0.2 B1–B13 y C4). Solo lectura. Cabecera «Día a día» con pestañas Actividad / Estadísticas («Próximamente», atenuada), periodo ▾ (este mes por defecto; mes anterior, otro mes, entre fechas), búsqueda y Filtros (recuento de grupos). Lista agrupada por día con el título calculado en la línea principal, la secundaria con lo que el título no dice, el importe con signo solo si describe la magnitud (ingresos «+» neutros, transferencia sin signo) y «Total · reparto sin indicar | parcial» cuando procede; sin hora. Búsqueda en todo el historial con el alcance explícito, agrupada por mes y con el motivo de la coincidencia cuando no es evidente; «Cancelar» restaura periodo, filtros y scroll (DAY-Q08). Filtros por tipo, categoría (con subcategorías), cuenta, tercero y contexto con «Limpiar» y «Ver N resultados»; línea de filtros activos con «Limpiar». Detalle rápido de solo lectura (gasto, ingreso, transferencia) con altura estable. Estados de carga (barras), error con «Reintentar» (nunca «no hay registros») y vacío. Modo «Registros de <tercero>» (C4): filtrada por el tercero, todo el historial y sin totales. Las hojas son inmersivas (`onInmersiva`): el velo cubre la barra inferior.
 // Versión: 0.1.0 (F05-05 K3 §2.6)
+// Versión: 0.2.0 (F05-05 K4-C; acta K4-A2 P12, deuda K-1, CC-05-8 / DAY-Q08): «Cancelar» restaura el desplazamiento cuando la lista posterior a la cancelación ya está cargada (`onContentSizeChange` con la ref `restaurarY`), en lugar de un `setTimeout` que actuaba sobre el esqueleto y se recortaba a 0. Un solo intento; la carga, los filtros y el contrato no cambian.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -94,6 +95,10 @@ export function ActividadScreen(p: {
   const scroll = useRef<ScrollView | null>(null);
   const desplazamiento = useRef(0);
   const guardado = useRef<{ periodo: Periodo; filtros: Filtros; y: number } | null>(null);
+  // K4-C (P12): desplazamiento pendiente de restaurar tras «Cancelar», y la petición vigente al cancelar. Se aplica
+  // una sola vez cuando la lista POSTERIOR a la cancelación ya está cargada (nunca sobre el esqueleto ni sobre los
+  // resultados de la búsqueda que aún se ven hasta que se relanza la carga).
+  const restaurarY = useRef<{ y: number; desde: number } | null>(null);
 
   useEffect(() => {
     p.onInmersiva?.(hoja !== null);
@@ -131,6 +136,7 @@ export function ActividadScreen(p: {
   // ---------------------------------------------------------------- búsqueda (DAY-Q08)
   const abrirBusqueda = () => {
     guardado.current = { periodo, filtros, y: desplazamiento.current };
+    restaurarY.current = null;
     setTexto('');
     setTextoVigente('');
     setBuscando(true);
@@ -143,8 +149,15 @@ export function ActividadScreen(p: {
     if (g) {
       setPeriodo(g.periodo);
       setFiltros(g.filtros);
-      setTimeout(() => scroll.current?.scrollTo({ y: g.y, animated: false }), 0);
+      restaurarY.current = { y: g.y, desde: peticion.current };
     }
+  };
+  // Un solo intento sobre la lista ya cargada; si el contenido es más corto que y, el ScrollView recorta.
+  const restaurarDesplazamiento = () => {
+    const r = restaurarY.current;
+    if (!r || carga.fase !== 'OK' || peticion.current <= r.desde) return;
+    restaurarY.current = null;
+    scroll.current?.scrollTo({ y: r.y, animated: false });
   };
 
   // ---------------------------------------------------------------- filtros (DAY-Q09)
@@ -283,6 +296,7 @@ export function ActividadScreen(p: {
           desplazamiento.current = e.nativeEvent.contentOffset.y;
         }}
         scrollEventThrottle={64}
+        onContentSizeChange={restaurarDesplazamiento}
         contentContainerStyle={{ padding: espacio.l, paddingBottom: inset.bottom + espacio.xxl, gap: espacio.m }}
       >
         {carga.fase === 'CARGANDO' ? (
