@@ -144,7 +144,13 @@
 #     GET  /v1/terceros?q=&incluir_inactivos=  busqueda ILIKE en servidor; sin `q`,
 #          la lista completa de siempre (activos e inactivos)
 #   Fecha funcional obligatoria en las senales (C6); FECHA_FUTURA si procede.
-# Version: 0.19.0
+#   v0.20.0 (F05-05 K2 §1.5; F05 §49.4 A7): Actividad v0, solo lectura:
+#     GET  /v1/actividad?desde=&hasta=&tipo=&categoria_id=&incluir_subcategorias=
+#          &cuenta_id=&tercero_id=&contexto_id=&q=&importe=&cursor=&limite=
+#          (periodo [desde, hasta); sin periodo, todo el historial; keyset
+#          (fecha_hecho DESC, id ASC) con cursor opaco; `total` con los filtros)
+#     GET  /v1/actividad/{id}   detalle rapido (sin posiciones ni acciones)
+# Version: 0.20.0
 # ============================================================
 
 from __future__ import annotations
@@ -241,7 +247,9 @@ from app.api.dto_preferencias import (
 )
 from app.api.dto_f05_05 import (
     AltaAfinidad,
+    DetalleActividad,
     DetalleAfinidades,
+    PaginaActividad,
     ResultadoComandoAfinidad,
     SenalesCategorias,
     SenalesTerceros,
@@ -256,6 +264,7 @@ from app.api.dto_vs01 import (
 from app.api.dto_registro import IntencionIngresoCobrado, IntencionTransferencia, ResultadoRegistro
 from app.api.ejecucion_gasto_pagado import RechazoIntegracion, registrar_gasto_pagado
 from app.api.ejecucion_registro import RechazoRegistro, registrar_ingreso_cobrado, registrar_transferencia
+from app.actividad import lecturas as lect_act
 from app.afinidades import lecturas as lect_afi
 from app.afinidades import servicio as serv_afi
 from app.categorias import lecturas as lect_cat
@@ -895,6 +904,42 @@ def create_app(
     @app.post("/v1/afinidades/{afinidad_id}/retirar", **_RAF)
     def retirar_afinidad(afinidad_id: uuid.UUID):
         return _comando_afinidad("afinidad_baja", lambda s: serv_afi.baja(s, afinidad_id=afinidad_id))
+
+    # ------------------------------------------------------------ F05-05 K2 §1.5 Actividad v0
+    @app.get("/v1/actividad", response_model=PaginaActividad, dependencies=[Depends(autorizar)])
+    def actividad(
+        desde: dt.date | None = Query(None), hasta: dt.date | None = Query(None),
+        tipo: list[Literal["GASTO", "INGRESO", "TRANSFERENCIA"]] | None = Query(None),
+        categoria_id: uuid.UUID | None = Query(None), incluir_subcategorias: bool = Query(True),
+        cuenta_id: uuid.UUID | None = Query(None), tercero_id: uuid.UUID | None = Query(None),
+        contexto_id: uuid.UUID | None = Query(None), q: str | None = Query(None, max_length=200),
+        importe: decimal.Decimal | None = Query(None, max_digits=18, decimal_places=4),
+        cursor: str | None = Query(None, max_length=200),
+        limite: int = Query(lect_act.LIMITE_POR_DEFECTO, ge=1, le=lect_act.LIMITE_MAXIMO),
+    ):
+        if desde is not None and hasta is not None and desde > hasta:
+            status, cuerpo = eh.rechazo_lectura("ENTRADA_INVALIDA")
+            return JSONResponse(cuerpo, status_code=status)
+        texto = q.strip() if q else None
+        filtros = lect_act.Filtros(desde=desde, hasta=hasta, tipos=tuple(tipo or ()), categoria=categoria_id,
+                                   incluir_subcategorias=incluir_subcategorias, cuenta=cuenta_id, tercero=tercero_id,
+                                   contexto=contexto_id, q=texto or None, importe=importe)
+        if cursor is not None:
+            try:
+                lect_act.decodificar_cursor(cursor)
+            except lect_act.CursorInvalido:
+                status, cuerpo = eh.rechazo_lectura("ENTRADA_INVALIDA")
+                return JSONResponse(cuerpo, status_code=status)
+        return unidad.ejecutar(contexto(), lambda s: lect_act.listar(s, filtros, cursor, limite),
+                               nombre="F05-05 actividad")
+
+    @app.get("/v1/actividad/{hecho_id}", response_model=DetalleActividad, dependencies=[Depends(autorizar)])
+    def detalle_actividad(hecho_id: uuid.UUID):
+        salida = unidad.ejecutar(contexto(), lambda s: lect_act.detalle(s, hecho_id), nombre="F05-05 actividad_detalle")
+        if salida is None:
+            status, cuerpo = eh.rechazo_lectura("HECHO_NO_ENCONTRADO")
+            return JSONResponse(cuerpo, status_code=status)
+        return salida
 
     return app
 

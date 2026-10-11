@@ -10,6 +10,7 @@
 #     hecho; el wire de ESCRITURA del gasto conserva `concepto` hasta F10.
 #   - Importes como texto decimal con 2 decimales (sin floats).
 # Version: 0.1.0 (F05-05 K2 §1.2-§1.6)
+# Version: 0.2.0 (F05-05 K2 §1.5): Actividad v0 (fila, detalle, pagina keyset).
 # ============================================================
 
 from __future__ import annotations
@@ -100,3 +101,58 @@ class DetalleAfinidades(_Estricto):
     guardadas: list[AfinidadGuardada]
     segun_historial: list[CategoriaHistorial]
     total_registros: int
+
+
+# ------------------------------------------------------------------ Actividad v0 (§1.5)
+class Referencia(_Estricto):
+    id: uuid.UUID
+    nombre: str
+    enabled: bool
+
+
+class CategoriaFila(Referencia):
+    ruta: str
+
+
+class CuentaFila(_Estricto):
+    cuenta_id: uuid.UUID
+    nombre: str
+    rol: Literal["PAGO", "COBRO", "ORIGEN", "DESTINO"]
+    enabled: bool
+
+
+class FilaActividad(_Estricto):
+    id: uuid.UUID
+    fecha_hecho: dt.date
+    tipo: str
+    nota: str | None
+    moneda: str
+    importe_total: str | None
+    tercero: Referencia | None
+    categoria: CategoriaFila | None
+    varias: bool
+    contexto: Referencia | None
+    cuentas: list[CuentaFila]
+    estado_reparto: Literal["COMPLETA", "PARCIAL", "NO_DISPONIBLE"] | None
+    tu_parte: str | None
+    pendiente: str | None
+    maestros_desactivados: list[Literal["CATEGORIA", "TERCERO", "CONTEXTO"]]
+    coincide_en: list[Literal["TERCERO", "CATEGORIA", "CONTEXTO", "NOTA", "IMPORTE"]] | None = None
+
+
+class PaginaActividad(_Estricto):
+    filas: list[FilaActividad]
+    siguiente: str | None
+    total: int
+
+
+class MagnitudHecho(_Estricto):
+    magnitud_id: uuid.UUID
+    nombre: str
+    valor: str
+    unidad: str | None
+
+
+class DetalleActividad(FilaActividad):
+    presupuestable: bool
+    magnitudes: list[MagnitudHecho]

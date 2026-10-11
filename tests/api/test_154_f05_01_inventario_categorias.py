@@ -444,6 +444,14 @@ REGISTRO.update({
     **{("backend/app/api/dto_f05_05.py", n): ("R", "DTO F05-05", "declaracion de campo")
        for n in ("CandidataCategoria", "AltaAfinidad", "AfinidadNodo", "AfinidadGuardada", "CategoriaHistorial")},
 })
+# F05-05 K2 §1.5 (alta aditiva): Actividad v0, solo lectura (R11); la categoria de la fila sale de los
+# efectos GASTO/INGRESO y nunca se persiste nada.
+REGISTRO.update({
+    ("backend/app/actividad/lecturas.py", "<modulo>"): ("R", "SQL de busqueda de la Actividad", "coincidencia por nombre de categoria"),
+    ("backend/app/actividad/lecturas.py", "_condiciones"): ("R", "filtro por categoria", "categoria (con subcategorias) de los efectos"),
+    ("backend/app/actividad/lecturas.py", "_componer"): ("R", "fila de la Actividad", "categoria de los efectos GASTO/INGRESO; varias"),
+    ("backend/app/api/app.py", "create_app.actividad"): ("R", "GET /v1/actividad", "parametro de filtro de una lectura"),
+})
 
 #: Servicios del motor que la frontera NO puede referenciar (I3): tienen
 #: caminos A_MOTOR, B o P con categoria. OP-22 es la unica puerta.
