@@ -30,7 +30,10 @@
 #   operacion GASTO (capacidad PAGAR_GASTO, EUR, ledger, cierre, habilitada):
 #   una cuenta PASIVO con PAGAR_GASTO aparece; una sin capacidad o en otra
 #   moneda no.
-# Version: 0.4.0
+#   v0.5.0 (F05-05 K2 §1.1; F05 §49.4 A11): `rango_mes` se retira; el mes
+#   natural sale del helper unico comun/fecha_funcional.limites_mes (mismo
+#   resultado: [dia 1, dia 1 del mes siguiente)). Regresion: test_184.
+# Version: 0.5.0
 # ============================================================
 
 from __future__ import annotations
@@ -40,20 +43,15 @@ import decimal
 
 from app.api.traductor_gasto_pagado import leer_actor_self, participacion_self_100
 from app.comun.elegibilidad_cuentas import cuentas_elegibles
+from app.comun.fecha_funcional import limites_mes
 from app.core.unidad_trabajo import SesionMotor
 
 CONTRATO_GASTO_MES = "PROVISIONAL_VS01_CANDIDATO_F08"
 
 
-def rango_mes(mes: str) -> tuple[dt.date, dt.date]:
-    anio, m = (int(p) for p in mes.split("-"))
-    inicio = dt.date(anio, m, 1)
-    fin = dt.date(anio + (m == 12), 1 if m == 12 else m + 1, 1)
-    return inicio, fin
-
-
 def gasto_mes(sesion: SesionMotor, mes: str) -> dict:
-    inicio, fin = rango_mes(mes)
+    anio, m = (int(p) for p in mes.split("-"))
+    inicio, fin = limites_mes(dt.date(anio, m, 1))
     actor = leer_actor_self(sesion)
     fila = sesion.uno(
         """

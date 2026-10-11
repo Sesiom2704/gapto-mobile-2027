@@ -20,7 +20,16 @@
 #     la intencion nueva (registro de hechos ya ocurridos). Codigo de capa F05.
 #   El owner no es parametro: se lee de la GUC del tenant (convencion del
 #   backend: nunca se pasa el owner).
-# Version: 0.1.0 (F05-03/F05-04 J2 §1.2)
+#   v0.2.0 (F05-05 K2 §1.1; F05 §49.4 A11, §49.5 R7): helpers de periodo.
+#   - limites_mes(fecha) -> [inicio, fin): mes natural que contiene `fecha`
+#     (semiabierto; fin = dia 1 del mes siguiente).
+#   - ventana(fecha, dias) -> (fecha - dias, fecha]: ventana de señales;
+#     devuelve (desde_exclusivo, hasta_inclusivo).
+#   - mes_actual_owner(sesion, reloj) -> [inicio, fin) del mes de hoy_owner.
+#     El owner no es parametro (GUC del tenant), como hoy_owner.
+#   Las comparaciones se hacen contra `fecha_hecho` (date): la zona solo
+#   decide cual es «hoy» y, por tanto, el mes en curso.
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
@@ -73,3 +82,22 @@ def hoy_owner(sesion: SesionMotor, reloj: Reloj = reloj_sistema) -> dt.date:
 
 def es_futura(sesion: SesionMotor, fecha: dt.date, reloj: Reloj = reloj_sistema) -> bool:
     return fecha > hoy_owner(sesion, reloj)
+
+
+def limites_mes(fecha: dt.date) -> tuple[dt.date, dt.date]:
+    """Mes natural que contiene `fecha`, semiabierto [inicio, fin)."""
+    inicio = fecha.replace(day=1)
+    fin = dt.date(inicio.year + (inicio.month == 12), 1 if inicio.month == 12 else inicio.month + 1, 1)
+    return inicio, fin
+
+
+def ventana(fecha: dt.date, dias: int) -> tuple[dt.date, dt.date]:
+    """Ventana (fecha - dias, fecha]: devuelve (desde_exclusivo, hasta_inclusivo)."""
+    if dias < 1:
+        raise ValueError("la ventana debe tener al menos un dia")
+    return fecha - dt.timedelta(days=dias), fecha
+
+
+def mes_actual_owner(sesion: SesionMotor, reloj: Reloj = reloj_sistema) -> tuple[dt.date, dt.date]:
+    """[inicio, fin) del mes natural en curso en la zona del owner del contexto."""
+    return limites_mes(hoy_owner(sesion, reloj))
