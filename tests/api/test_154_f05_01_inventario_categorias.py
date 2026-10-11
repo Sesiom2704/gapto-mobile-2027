@@ -273,7 +273,9 @@
 #     el arnes mutantes_f05_05.py (los mutantes son texto).
 # Version 0.20.0 (F05-05 K3 §3, mutante I13x4): prueba negativa I13 v2 (i)
 #     con una lectura que bloquea plantada en el modulo de senales.
-# Version: 0.20.0
+# Version 0.21.0 (F05-05 K4-A2, alta aditiva en I1): lecturas y envios de
+#     categoria_id del E2E scripts/dev/e2e_f05_05_manual.py (R).
+# Version: 0.21.0
 # ============================================================
 
 from __future__ import annotations
@@ -453,6 +455,10 @@ REGISTRO.update({
 REGISTRO.update({
     ("scripts/dev/e2e_f05_05.py", "main"): ("R", "E2E F05-05 K3", "lee categoria_id de tercero_afinidades y lo compara con el esperado"),
     ("scripts/dev/e2e_f05_05.py", "main.gasto"): ("R", "E2E F05-05 K3 preparacion", "envia la categoria del gasto por /v1/intenciones/gasto-pagado (writer publico, C-a en servidor)"),
+})
+REGISTRO.update({
+    ("scripts/dev/e2e_f05_05_manual.py", "main"): ("R", "E2E F05-05 K4-A2", "lee categoria_id de tercero_afinidades y lo compara con el esperado"),
+    ("scripts/dev/e2e_f05_05_manual.py", "main.gasto"): ("R", "E2E F05-05 K4-A2 preparacion", "envia la categoria del gasto por /v1/intenciones/gasto-pagado (writer publico, C-a en servidor)"),
 })
 
 CLASES = {"A_FRONTERA", "GUARDA", "A_MOTOR", "B", "P", "R", "CATALOGO", "SEED_DEV", "PREFERENCIA"}
