@@ -421,6 +421,30 @@ CLASES = {"A_FRONTERA", "GUARDA", "A_MOTOR", "B", "P", "R", "CATALOGO", "SEED_DE
 #: v0.12.0 (J2 §1.6): alta aditiva de la clase PLANTILLA.
 CLASES = CLASES | {"PLANTILLA"}
 
+# F05-05 K2 (F05-D035 §49.4 A1/A5; alta aditiva, ninguna regla ni entrada previa cambia):
+#   SENAL     lectura de senales: consume hecho_efectos.categoria_id para contar
+#             frecuencia/recencia y lee tercero_afinidades; nunca escribe ni entra
+#             en un resolver de propuesta (I13 v2, test_i13_g).
+#   AFINIDAD  writer y lectura de tercero_afinidades: usa categoria_id como clave de
+#             la afinidad; lee la categoria FOR SHARE (R9); no escribe el catalogo.
+CLASES = CLASES | {"SENAL", "AFINIDAD"}
+REGISTRO.update({
+    ("backend/app/senales/lecturas.py", "<modulo>"): (
+        "SENAL", "SQL de senales", "frecuencia por categoria de efectos del tipo; afinidades del tercero"),
+    ("backend/app/senales/lecturas.py", "_candidata"): ("SENAL", "candidata de senal", "copia categoria_id a la salida"),
+    ("backend/app/afinidades/repositorio.py", "<modulo>"): ("AFINIDAD", "columnas de tercero_afinidades", "lista de columnas"),
+    **{("backend/app/afinidades/repositorio.py", n): ("AFINIDAD", f"repositorio de afinidades {n}",
+                                                     "unico escritor runtime de tercero_afinidades (test_182)")
+       for n in ("leer", "leer_par", "leer_categoria_compartida", "insertar_afinidad")},
+    **{("backend/app/afinidades/servicio.py", n): ("AFINIDAD", f"F05-05 afinidad {n}",
+                                                  "writer bajo el advisory TERCEROS; categoria FOR SHARE (R9)")
+       for n in ("alta", "baja")},
+    ("backend/app/afinidades/lecturas.py", "detalle"): ("AFINIDAD", "GET /v1/terceros/{id}/afinidades", "lectura de guardadas e historial"),
+    ("backend/app/api/app.py", "create_app.alta_afinidad"): ("R", "POST /v1/afinidades", "pasa categoria_id al writer de afinidades"),
+    **{("backend/app/api/dto_f05_05.py", n): ("R", "DTO F05-05", "declaracion de campo")
+       for n in ("CandidataCategoria", "AltaAfinidad", "AfinidadNodo", "AfinidadGuardada", "CategoriaHistorial")},
+})
+
 #: Servicios del motor que la frontera NO puede referenciar (I3): tienen
 #: caminos A_MOTOR, B o P con categoria. OP-22 es la unica puerta.
 SERVICIOS_VEDADOS_EN_FRONTERA = (

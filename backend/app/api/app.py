@@ -133,7 +133,16 @@
 #     POST /v1/categorias/onboarding  crea el arbol si el owner tiene cero
 #                                     categorias (ONBOARDING_NO_APLICABLE si no;
 #                                     idempotente con el arbol exacto)
-# Version: 0.18.0
+#
+#   v0.19.0 (F05-05 K2 §1.2-§1.3; F05 §49.4 A1-A5, §49.5 R1-R10):
+#     GET  /v1/senales/categorias?tipo=&tercero_id=&fecha=   senales (lectura)
+#     GET  /v1/senales/terceros?tipo=&fecha=                 «Recientes» (lectura)
+#          (nunca «sugeridas»: ya existe para el onboarding)
+#     POST /v1/afinidades                      alta (UUID del cliente idempotente)
+#     POST /v1/afinidades/{id}/retirar         baja (idempotente)
+#     GET  /v1/terceros/{id}/afinidades?tipo=&fecha=  guardadas + segun historial
+#   Fecha funcional obligatoria en las senales (C6); FECHA_FUTURA si procede.
+# Version: 0.19.0
 # ============================================================
 
 from __future__ import annotations
@@ -228,6 +237,13 @@ from app.api.dto_preferencias import (
     ReactivarPreferencia,
     ResultadoComandoPreferencia,
 )
+from app.api.dto_f05_05 import (
+    AltaAfinidad,
+    DetalleAfinidades,
+    ResultadoComandoAfinidad,
+    SenalesCategorias,
+    SenalesTerceros,
+)
 from app.api.dto_vs01 import (
     GastoMesVs01,
     IntencionGastoPagado,
@@ -238,6 +254,8 @@ from app.api.dto_vs01 import (
 from app.api.dto_registro import IntencionIngresoCobrado, IntencionTransferencia, ResultadoRegistro
 from app.api.ejecucion_gasto_pagado import RechazoIntegracion, registrar_gasto_pagado
 from app.api.ejecucion_registro import RechazoRegistro, registrar_ingreso_cobrado, registrar_transferencia
+from app.afinidades import lecturas as lect_afi
+from app.afinidades import servicio as serv_afi
 from app.categorias import lecturas as lect_cat
 from app.categorias import onboarding as onb
 from app.contextos import lecturas as lect_ctx
@@ -248,12 +266,13 @@ from app.contextos import servicio as serv_ctx
 from app.terceros import lecturas as lect_ter
 from app.terceros import servicio as serv_ter
 from app.comun import elegibilidad_cuentas as eleg
-from app.comun.fecha_funcional import Reloj, reloj_sistema
+from app.comun.fecha_funcional import Reloj, es_futura, reloj_sistema
 from app.categorias import servicio as serv_cat
 from app.magnitudes import lecturas as lect_mag
 from app.magnitudes import servicio as serv_mag
 from app.preferencias import lecturas as lect_pref
 from app.preferencias import servicio as serv_pref
+from app.senales import lecturas as senales
 from app.core.contexto import ContextoOperacion
 from app.core.errores import ErrorMotor
 from app.core.unidad_trabajo import UnidadDeTrabajo
@@ -815,6 +834,62 @@ def create_app(
     def transferencia(intencion: IntencionTransferencia):
         salida = registrar_transferencia(unidad, contexto(), intencion, reloj)
         return _respuesta_registro(salida, intencion, "TRANSFERENCIA", None)
+
+    # ------------------------------------------------------------ F05-05 K2 §1.2-§1.4
+    def _lectura_con_fecha(nombre_op: str, fecha: dt.date, operacion) -> dict | JSONResponse:
+        """Lectura con fecha funcional (C6): FECHA_FUTURA y TERCERO_NO_ENCONTRADO
+        se devuelven con su codigo; si no, el resultado de la operacion."""
+        def _op(s):
+            if es_futura(s, fecha, reloj):
+                return "FECHA_FUTURA"
+            return operacion(s)
+        salida = unidad.ejecutar(contexto(), _op, nombre=f"F05-05 {nombre_op}")
+        if isinstance(salida, str):
+            status, cuerpo = eh.rechazo_lectura(salida)
+            return JSONResponse(cuerpo, status_code=status)
+        return salida
+
+    @app.get("/v1/senales/categorias", response_model=SenalesCategorias, dependencies=[Depends(autorizar)])
+    def senales_categorias(tipo: Literal["GASTO", "INGRESO"] = Query(...), fecha: dt.date = Query(...),
+                           tercero_id: uuid.UUID | None = Query(None)):
+        def _op(s):
+            if tercero_id is not None and not senales.tercero_visible(s, tercero_id):
+                return "TERCERO_NO_ENCONTRADO"
+            return {"tipo": tipo, "fecha": fecha, "tercero_id": tercero_id,
+                    "candidatas": senales.categorias_candidatas(s, tipo, tercero_id, fecha)}
+        return _lectura_con_fecha("senales_categorias", fecha, _op)
+
+    @app.get("/v1/senales/terceros", response_model=SenalesTerceros, dependencies=[Depends(autorizar)])
+    def senales_terceros(tipo: Literal["GASTO", "INGRESO"] = Query(...), fecha: dt.date = Query(...)):
+        return _lectura_con_fecha("senales_terceros", fecha, lambda s: {
+            "tipo": tipo, "fecha": fecha, "terceros": senales.terceros_recientes(s, tipo, fecha)})
+
+    @app.get("/v1/terceros/{tercero_id}/afinidades", response_model=DetalleAfinidades,
+             dependencies=[Depends(autorizar)])
+    def afinidades_tercero(tercero_id: uuid.UUID, fecha: dt.date = Query(...),
+                           tipo: Literal["GASTO", "INGRESO"] = Query("GASTO")):
+        def _op(s):
+            salida = lect_afi.detalle(s, tercero_id, tipo, fecha)
+            return "TERCERO_NO_ENCONTRADO" if salida is None else salida
+        return _lectura_con_fecha("afinidades_tercero", fecha, _op)
+
+    def _comando_afinidad(nombre_op: str, operacion) -> dict | JSONResponse:
+        salida = unidad.ejecutar(contexto(), operacion, nombre=f"F05-05 {nombre_op}")
+        if isinstance(salida, serv_afi.Rechazo):
+            status, cuerpo = eh.rechazo_afinidad(salida.codigo, salida.detalle)
+            return JSONResponse(cuerpo, status_code=status)
+        return {"afinidad": salida.afinidad, "idempotente": salida.idempotente, "aviso": salida.aviso}
+
+    _RAF = {"response_model": ResultadoComandoAfinidad, "dependencies": [Depends(autorizar)]}
+
+    @app.post("/v1/afinidades", **_RAF)
+    def alta_afinidad(c: AltaAfinidad):
+        return _comando_afinidad("afinidad_alta", lambda s: serv_afi.alta(
+            s, afinidad_id=c.id, tercero_id=c.tercero_id, categoria_id=c.categoria_id))
+
+    @app.post("/v1/afinidades/{afinidad_id}/retirar", **_RAF)
+    def retirar_afinidad(afinidad_id: uuid.UUID):
+        return _comando_afinidad("afinidad_baja", lambda s: serv_afi.baja(s, afinidad_id=afinidad_id))
 
     return app
 

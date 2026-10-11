@@ -91,7 +91,12 @@
 #
 #   v0.15.0 (F05-03 J2 §1.8): ONBOARDING_NO_APLICABLE (409) en los rechazos
 #   de categoria (el owner ya tiene categorias).
-# Version: 0.15.0
+#   v0.16.0 (F05-05 K2 §1.2-§1.6): rechazos de afinidades (TERCERO_NO_ELEGIBLE,
+#   CATEGORIA_NO_ELEGIBLE, REFERENCIA_NO_DISPONIBLE con el sqlstate en el
+#   detalle, IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION) y de las lecturas de
+#   F05-05 (TERCERO_NO_ENCONTRADO 404, FECHA_FUTURA 422; sin «no se ha
+#   guardado nada», porque son lecturas).
+# Version: 0.16.0
 # ============================================================
 
 from __future__ import annotations
@@ -339,3 +344,33 @@ def rechazo_preferencia(codigo: str, detalle: dict | None = None) -> tuple[int, 
     if codigo == "PREFERENCIA_EMPATE_CONTRADICTORIO" and detalle is not None:
         cuerpo["detalle"] = {k: str(v) for k, v in detalle.items()}
     return status, cuerpo
+
+
+_RECHAZOS_AFINIDAD: dict[str, tuple[int, str]] = {
+    "TERCERO_NO_ELEGIBLE": (409, "Ese tercero no está disponible. Elige otro."),
+    "CATEGORIA_NO_ELEGIBLE": (409, "Esa categoría no está disponible. Elige otra."),
+    "REFERENCIA_NO_DISPONIBLE": (409, "Alguno de los datos elegidos no está disponible. Revísalos."),
+    "IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION": (409, "Este registro ya existe con otros datos. No se ha guardado nada nuevo."),
+    "ENTRADA_INVALIDA": (422, "Revisa los datos."),
+}
+
+
+def rechazo_afinidad(codigo: str, detalle: dict | None = None) -> tuple[int, dict]:
+    status, mensaje = _RECHAZOS_AFINIDAD[codigo]
+    cuerpo = {"codigo": codigo, "mensaje": mensaje, "reintentable": False}
+    if codigo == "REFERENCIA_NO_DISPONIBLE" and detalle is not None:
+        cuerpo["detalle"] = {k: str(v) for k, v in detalle.items()}
+    return status, cuerpo
+
+
+_RECHAZOS_LECTURA: dict[str, tuple[int, str]] = {
+    "TERCERO_NO_ENCONTRADO": (404, "No encontrado."),
+    "HECHO_NO_ENCONTRADO": (404, "No encontrado."),
+    "FECHA_FUTURA": (422, "Revisa los datos: la fecha no puede ser futura."),
+    "ENTRADA_INVALIDA": (422, "Revisa los datos."),
+}
+
+
+def rechazo_lectura(codigo: str) -> tuple[int, dict]:
+    status, mensaje = _RECHAZOS_LECTURA[codigo]
+    return status, {"codigo": codigo, "mensaje": mensaje, "reintentable": False}

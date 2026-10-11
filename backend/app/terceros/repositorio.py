@@ -13,6 +13,11 @@
 #   - Solo se escriben `nombre`, `naturaleza` y `enabled`: los datos fiscales,
 #     de contacto y notas quedan fuera del alcance del registro.
 # Version: 0.1.0 (F05-03/F05-04 J2 §1.3)
+# Version: 0.2.0 (F05-05 K2 §1.3; F05 §49.4 A5, §49.5 R9): `incrementar_version`
+#   sube SOLO row_version y updated_at de un tercero ya bloqueado (FOR NO KEY
+#   UPDATE) bajo el advisory (TERCEROS, owner). La invoca el writer de
+#   afinidades (backend/app/afinidades/servicio.py), que toma el mismo advisory
+#   primero; ningun campo de negocio del tercero cambia (oraculo en test_186).
 # ============================================================
 
 from __future__ import annotations
@@ -84,4 +89,14 @@ def actualizar_tercero(sesion: SesionMotor, tercero_id: uuid.UUID, cambios: dict
         f"UPDATE gapto.terceros SET {asignaciones}, "
         "row_version = row_version + 1, updated_at = now() WHERE id = %s RETURNING id",
         tuple(cambios[c] for c in columnas) + (tercero_id,),
+    )
+
+
+def incrementar_version(sesion: SesionMotor, tercero_id: uuid.UUID) -> None:
+    """UPDATE de row_version + 1 y updated_at, sin ningun otro campo, sobre la
+    fila ya bloqueada (writer de afinidades, F05 §49.4 A5)."""
+    sesion.uno(
+        "UPDATE gapto.terceros SET row_version = row_version + 1, updated_at = now() "
+        "WHERE id = %s RETURNING id",
+        (tercero_id,),
     )

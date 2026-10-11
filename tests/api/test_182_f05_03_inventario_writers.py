@@ -22,6 +22,12 @@
 # Version: 0.1.0 (F05-03/F05-04 J2 §1.10)
 # Version: 0.2.0 (F05-03/F05-04 J2+J3 §2.8): el E2E e2e_j2j3.py da de alta las capacidades
 #   sinteticas de sus cuentas (base LOCAL desechable), como e2e_preferencias.py.
+# Version: 0.3.0 (F05-05 K2 §1.3; F05 §49.4 A5, §49.5 R9): alta aditiva. tercero_afinidades ->
+#   SOLO afinidades/repositorio.py (INSERT, DELETE: quitar una afinidad es borrarla; no hay
+#   enabled). terceros sigue con su unico escritor (terceros/repositorio.py): el writer de
+#   afinidades sube row_version por `incrementar_version`. Los comandos alta/baja de
+#   afinidades/servicio.py toman el advisory primero; afinidades/ y senales/ entran en la
+#   capa F05 (sin roles privilegiados).
 # ============================================================
 
 from __future__ import annotations
@@ -74,6 +80,9 @@ REGISTRO = {
                            "scripts/dev/e2e_j2j3.py": {"INSERT"},
                            "scripts/envdev/envdev_capacidades_cuenta.py": {"INSERT"}},
 }
+#: F05-05 K2 §1.3 (alta aditiva).
+REGISTRO["tercero_afinidades"] = {"backend/app/afinidades/repositorio.py": {"INSERT", "DELETE"}}
+CAPA_F05 = CAPA_F05 + ("backend/app/afinidades/", "backend/app/senales/")
 REGISTRO_F05 = {
     "entidades": {"backend/app/contextos/repositorio.py": {"INSERT", "UPDATE"}},
     "contextos": {"backend/app/contextos/repositorio.py": {"INSERT", "UPDATE"}},
@@ -102,6 +111,7 @@ def test_comandos_toman_su_advisory_primero():
         "backend/app/contextos/servicio.py": ("alta", "editar", "desactivar", "reactivar"),
         "backend/app/plantillas/servicio.py": ("alta", "editar", "desactivar", "reactivar", "alta_accion",
                                                "editar_accion", "desactivar_accion", "reordenar_acciones"),
+        "backend/app/afinidades/servicio.py": ("alta", "baja"),  # F05-05 K2 §1.3
     }.items():
         arbol = ast.parse((RAIZ / ruta).read_bytes().decode("utf-8"))
         funciones = {n.name: n for n in arbol.body if isinstance(n, ast.FunctionDef)}
