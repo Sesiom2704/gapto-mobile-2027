@@ -8,6 +8,7 @@
 // v0.4.0 (F05-01 S6-WIRE+UI (este mandato)): el estado categorial es una decisión bloqueante más (S6-WIRE, F09 §12.97.1). El cliente simulado sirve el árbol de categorías; `rellenar()` elige por defecto «Sin categoría» en el selector (decisión explícita); `faltan` nombra la categoría y la intención sellada lleva {estado:'SIN_CATEGORIA'}. Las pruebas de REG-CAT viven en regcat.test.tsx.
 // v0.5.0 (F05-02 B2): el cliente simulado sirve la propuesta del resolver con la única cuenta (DEFAULT_GENERAL); el fallback del cliente se retira (AJ-B1-09). Los casos VS-01 no cambian; los de preferencias viven en preferencias_registro.test.tsx.
 // Versión: 0.5.0
+// Versión: 0.7.0 (F05-05 K3 §2.7; F05 §49.4 A9, D13, M5-06; tabla «tests adaptados»): «Este mes» pasa a tener read model (Resultado del mes de A9), que sustituye en ESE bloque el «sin cifras» de F05-D003 §16.6. Se conservan las propiedades de VS-01: los bloques que siguen sin read model no muestran importes, la cifra PARCIAL de gasto-mes va en su tarjeta separada (nunca en «Este mes») y un fallo de gasto-mes nunca se presenta como 0 €; las aserciones se acotan al bloque correspondiente.
 // Versión: 0.6.0 (F05-03/F05-04 J2+J3 §2.2/§2.7; tabla «tests adaptados»): Inicio abre el gasto con «Registrar» + hoja de tipos; CORTE DE CONCEPTO (A8): la nota opcional se escribe en «Más detalles» (`escribirNota`) y «concepto» deja de figurar en «faltan» (dos oráculos de SPEC-08 actualizados). El payload con nota es el mismo (`concepto: 'Café'`).
 // ============================================================
 
@@ -134,17 +135,21 @@ test('Home renderiza el esqueleto HOME-01 sin cifras inventadas', async () => {
   for (const id of ['bloque-liquidez', 'accion-registrar', 'bloque-mes', 'bloque-gasto-parcial', 'bloque-proximos', 'bloque-patrimonio', 'tab-INICIO', 'tab-MAS']) {
     expect(screen.getByTestId(id)).toBeTruthy();
   }
-  // Ningún bloque sin read model muestra un importe
-  expect(screen.queryAllByText(/€$/).length).toBe(1);
-  expect(screen.getAllByText('No disponible').length).toBeGreaterThanOrEqual(6);
+  // Ningún bloque sin read model muestra un importe (F05-05 A9: «Este mes» ya lo tiene)
+  for (const id of ['bloque-liquidez', 'bloque-proximos', 'bloque-patrimonio']) {
+    expect(within(screen.getByTestId(id)).queryAllByText(/€/)).toHaveLength(0);
+  }
+  expect(within(screen.getByTestId('bloque-gasto-parcial')).queryAllByText(/€$/)).toHaveLength(1);
+  expect(screen.getAllByText('No disponible').length).toBeGreaterThanOrEqual(4);
 });
 
 test('Home (F05-D003 §16.6): la cifra real va en tarjeta PARCIAL separada, nunca en «Este mes»', async () => {
   const f = crearFake({ gastos: [gasto('12.40')] });
   montar(f.cliente);
   await screen.findByText('12,40 €');
-  expect(within(screen.getByTestId('bloque-mes')).queryAllByText(/€/)).toHaveLength(0);
-  expect(within(screen.getByTestId('bloque-mes')).getAllByText('No disponible').length).toBe(4);
+  // F05-05 A9: «Este mes» muestra el Resultado del mes (su propio read model), nunca la cifra parcial de gasto-mes.
+  expect(within(screen.getByTestId('bloque-mes')).queryByText('12,40 €')).toBeNull();
+  expect(within(screen.getByTestId('bloque-mes')).getAllByText('No disponible').length).toBe(1); // presupuesto
   const tarjeta = within(screen.getByTestId('bloque-gasto-parcial'));
   expect(tarjeta.getByText('12,40 €')).toBeTruthy();
   expect(tarjeta.getByTestId('gastos-parcial')).toBeTruthy(); // siempre marcada como parcial
@@ -162,7 +167,7 @@ test('Home: fallo de lectura es parcial y reintentable, no 0 €', async () => {
   const f = crearFake({ gastos: [{ tipo: 'INDETERMINADO', mensaje: 'x' }, gasto('1.00')] });
   montar(f.cliente);
   expect(await screen.findByTestId('gastos-error')).toBeTruthy();
-  expect(screen.queryByText('0,00 €')).toBeNull();
+  expect(within(screen.getByTestId('bloque-gasto-parcial')).queryByText('0,00 €')).toBeNull();
   fireEvent.press(screen.getByTestId('gastos-error'));
   expect(await screen.findByText('1,00 €')).toBeTruthy();
 });
@@ -289,7 +294,7 @@ test('error de dominio no muestra éxito ni vuelve a Home; el siguiente envío u
 test('éxito: confirmación inequívoca y Home refrescada desde el backend (sin optimistic update)', async () => {
   const f = crearFake({ gastos: [gasto('0.00'), gasto('3.50')] });
   montar(f.cliente);
-  expect(await screen.findByText('0,00 €')).toBeTruthy();
+  expect(await within(screen.getByTestId('bloque-gasto-parcial')).findByText('0,00 €')).toBeTruthy();
   await abrirFormulario();
   rellenar();
   await act(async () => fireEvent.press(screen.getByTestId('registrar')));

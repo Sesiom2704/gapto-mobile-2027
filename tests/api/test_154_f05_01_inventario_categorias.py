@@ -264,6 +264,11 @@
 #     negativas con imports plantados (resolver de preferencias, plantillas por
 #     wrapper y ejecucion_registro) y con un consumidor extra.
 # Version: 0.18.0
+# Version 0.19.0 (F05-05 K3 §2.6, alta aditiva en I7): Ajustes > Terceros
+#     (TercerosAjustesScreen.tsx) lee la categoria_id de las afinidades
+#     guardadas y del historial para mostrarlas, marcar «Ya es habitual» y
+#     enviar el par a /v1/afinidades. Escribe la afinidad, nunca la categoria.
+# Version: 0.19.0
 # ============================================================
 
 from __future__ import annotations
@@ -1448,6 +1453,7 @@ MENCIONES_CLIENTE.update({
     "mobile/src/components/RecordarAfinidad.tsx": "«Recordar» del exito: envia el par tercero/categoria a /v1/afinidades (F05-05 A5, R; escribe la afinidad, no la categoria)",
     "mobile/src/components/SelectorCategorias.tsx": "«Sugeridas»: localiza en el arbol la categoria_id de cada sugerida (F05-05 A1, R)",
     "mobile/src/screens/RegistroGastoScreen.tsx": "chips de sugerencias: localiza en el arbol la categoria_id de cada sugerida y elige con el callback del selector (F05-05 A2 bis, R)",
+    "mobile/src/screens/TercerosAjustesScreen.tsx": "Ajustes > Terceros: categorias habituales y «Segun tu historial» por categoria_id; envia el par a /v1/afinidades (F05-05 K3 C1-C3, R; escribe la afinidad, no la categoria)",
 })
 
 #: Modulo backend de senales y consumidores moviles autorizados (I13 v2).

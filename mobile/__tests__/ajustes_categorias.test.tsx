@@ -7,6 +7,7 @@
 // Versión: 0.2.0 (F05-01 S6-WIRE+UI (este mandato), commit 2): el detalle ya muestra las acciones EDIT-* (cubiertas en ajustes_edicion.test.tsx); aquí se comprueba que «Editar orden» es de la lista y no del detalle.
 // Versión: 0.3.0 (F05-02 B3, A1): «Preferencias financieras» pasa de «No disponible» a navegable; las ocho restantes siguen «No disponible» y no pulsables.
 // Versión: 0.4.0 (F05-03/F05-04 J2 §2.5; tabla «tests adaptados»): «Terceros» y «Contextos» también navegan y «Plantillas» aparece junto a «Preferencias financieras»; el árbol cerrado de diez secciones no cambia y las seis restantes siguen «No disponible» y no pulsables (antes ocho).
+// Versión: 0.5.0 (F05-05 K3 §2.9; F05 §49.4 A13, AJ-S7MAGUI-06): sin avisos `act(`. Causas: (1) cada `Icon` de @expo/vector-icons carga su fuente de forma asíncrona y actualiza su estado fuera de `act` (en jest la fuente nunca consta como cargada): este fichero declara la fuente cargada (`expo-font.isLoaded`), cambio del ENTORNO de test, no de ninguna aserción; (2) las lecturas iniciales de los destinos persistentes (Inicio y, desde F05-05, Día a día) terminan después del montaje: `irACategorias` las deja terminar dentro de `act` antes de navegar. Mismos tests y mismas aserciones.
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
@@ -20,6 +21,9 @@ import { SECCIONES_AJUSTES } from '../src/screens/MasScreen';
 import { ProveedorTema } from '../src/theme/tema';
 
 import { clienteCategoriasStub, LISTA, nodo } from './fixtures_categorias';
+
+// A13: la fuente de los iconos consta como cargada (sin carga asíncrona fuera de act).
+jest.mock('expo-font', () => ({ ...jest.requireActual('expo-font'), isLoaded: () => true }));
 
 function resultado(n: CategoriaNodo): Respuesta<ResultadoComandoCategoria> {
   const { magnitudes: _m, capturable: _c, motivo_no_capturable: _mc, ...cat } = n;
@@ -49,6 +53,8 @@ async function irACategorias(cliente: ClienteApi) {
       </ProveedorTema>
     </SafeAreaProvider>,
   );
+  // A13: las lecturas iniciales de Inicio y Día a día terminan dentro de act.
+  for (let i = 0; i < 3; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
   fireEvent.press(screen.getByTestId('tab-MAS'));
   fireEvent.press(screen.getByTestId('mas-ajustes'));
   fireEvent.press(screen.getByTestId('ajustes-categorias'));
@@ -68,6 +74,8 @@ test('Más → Ajustes: 10 secciones de F09 §12.91.1 en orden; solo Categorías
       </ProveedorTema>
     </SafeAreaProvider>,
   );
+  // A13: las lecturas iniciales de Inicio y Día a día terminan dentro de act.
+  for (let i = 0; i < 3; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
   fireEvent.press(screen.getByTestId('tab-MAS'));
   expect(screen.getByTestId('pantalla-mas')).toBeTruthy();
   expect(screen.getByTestId('tab-INICIO')).toBeTruthy(); // lista: conserva la barra

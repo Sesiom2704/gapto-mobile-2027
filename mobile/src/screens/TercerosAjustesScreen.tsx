@@ -4,18 +4,22 @@
 // Ruta: mobile/src/screens/TercerosAjustesScreen.tsx
 // Descripción: Ajustes › Terceros (F05-03 J2 §2.5; F05 §46.3 A5, §46.4 R5; lámina REG-DYN / SET-TH / SET-CTX v0.1 S01, S02, P02). Lista con «Todos / Activos / Inactivos» y filtro LOCAL por nombre (normalización C06); fila nombre + naturaleza, «Inactivo» en los desactivados. Alta y edición (S02): Nombre y Naturaleza (Persona, Empresa, Organismo, Otro o «No lo sé»); «Los gastos ya registrados no cambian…». Antes del alta se consultan los posibles duplicados (P02: «Usar el existente», «Reactivar» o «Crear otro»; homónimos válidos, sin fusión). Desactivar / reactivar con row_version y sin borrado. VERSION_DESFASADA → recarga y aviso, sin reintento automático; INDETERMINADO → recarga; el alta reutiliza su UUID.
 // Versión: 0.1.0 (F05-03/F05-04 J2 §2.5)
+// Versión: 0.2.0 (F05-05 K3 §2.5; F05 §49.4 A5/A8, D-SRCH-10/12; lámina SRCH-ACT-AFI C1–C3): en la ficha del tercero (la misma vista de edición, para no cambiar la navegación de F05-04), «Uso en Gapto · N registros · último <fecha>» con «Ver sus registros ›» (Actividad filtrada por el tercero, todo el historial); «Categorías habituales» (afinidades guardadas: «Quitar» con confirmación C3, o «No disponible» si la categoría está desactivada; «+ Añadir categoría» con el selector jerárquico y búsqueda, solo activas, la ya habitual marcada «Ya es habitual»); «Según tu historial» con «Guardar» («N de tus M gastos en <tercero>»). Cada alta o retirada es una escritura independiente con su UUID; los errores se muestran y se recarga, sin reintento automático.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import type { ClienteApi, NaturalezaTercero, Respuesta, ResultadoComandoTercero, Tercero } from '../api/cliente';
+import type { ClienteApi, DetalleAfinidades, NaturalezaTercero, Respuesta, ResultadoComandoTercero, Tercero } from '../api/cliente';
 import { BotonPrimario, CabeceraNavegacion, Chip, EstadoDato, Segmentado } from '../components/Basicos';
 import { AvisoCaja, CabeceraTarea, Caja, Campo, CampoTexto, estilosFormulario as ef, FilaLista, Tarjeta } from '../components/Formulario';
+import { BotonCritico, Hoja } from '../components/HojasCategoria';
 import { TEXTO_DUPLICADO, TEXTO_INACTIVO } from '../components/SelectorTercero';
-import { BotonSecundario } from '../components/SelectorCategorias';
+import { BotonSecundario, CargaArbol, SelectorCategorias } from '../components/SelectorCategorias';
+import { construirArbol } from '../domain/categoria';
+import { diaMesIso, isoLocal } from '../domain/fechas';
 import { detalleTercero, filtrar, NATURALEZAS } from '../domain/maestros';
 import { useTema } from '../theme/tema';
 import { espacio, TACTIL_MIN, tipo } from '../theme/tokens';
@@ -38,7 +42,20 @@ interface Form {
   naturaleza: NaturalezaTercero | null;
 }
 
-export function TercerosAjustesScreen(p: { cliente: ClienteApi; nuevoId: () => string; onAtras: () => void; onInmersiva: (x: boolean) => void }) {
+export const TEXTO_HABITUALES = (t: string) => `Las categorías habituales se sugieren primero al registrar con ${t}. Nunca se eligen solas.`;
+export const TEXTO_QUITAR = (t: string) => `Dejará de sugerirse como guardada. Puede seguir apareciendo si la usas a menudo con ${t}. Tus registros no cambian.`;
+
+export function TercerosAjustesScreen(p: {
+  cliente: ClienteApi;
+  nuevoId: () => string;
+  onAtras: () => void;
+  onInmersiva: (x: boolean) => void;
+  /** F05-05: fecha funcional (ventana del historial) y «Ver sus registros». */
+  ahora?: () => Date;
+  onVerRegistros?: (t: { id: string; nombre: string }) => void;
+  /** F05-05: al volver de «Registros de», reabre la ficha de este tercero. */
+  volverA?: string | null;
+}) {
   const { c } = useTema();
   const inset = useSafeAreaInsets();
   const [carga, setCarga] = useState<Carga>({ fase: 'CARGANDO' });
@@ -50,6 +67,11 @@ export function TercerosAjustesScreen(p: { cliente: ClienteApi; nuevoId: () => s
   const [aviso, setAviso] = useState<AvisoCaja>(null);
   const [candidatos, setCandidatos] = useState<Tercero[] | null>(null);
   const [ocupado, setOcupado] = useState(false);
+  const [afinidades, setAfinidades] = useState<{ fase: 'CARGANDO' } | { fase: 'ERROR' } | { fase: 'OK'; d: DetalleAfinidades }>({ fase: 'CARGANDO' });
+  const [quitar, setQuitar] = useState<{ id: string; nombre: string } | null>(null);
+  const [anadir, setAnadir] = useState(false);
+  const [arbol, setArbol] = useState<CargaArbol>({ fase: 'CARGANDO' });
+  const hoyIso = isoLocal((p.ahora ?? (() => new Date()))());
 
   const cargar = useCallback(
     async (silencioso = false): Promise<Tercero[] | null> => {
@@ -78,6 +100,48 @@ export function TercerosAjustesScreen(p: { cliente: ClienteApi; nuevoId: () => s
     return filtrar(base, texto).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es') || (a.id < b.id ? -1 : 1));
   }, [lista, filtro, texto]);
   const actual = vista.v === 'EDITAR' ? lista.find((t) => t.id === vista.id) ?? null : null;
+
+  // F05-05 (C1): afinidades del tercero de la ficha.
+  const cargarAfinidades = useCallback(
+    async (id: string) => {
+      setAfinidades({ fase: 'CARGANDO' });
+      const r = await p.cliente.afinidadesTercero(id, hoyIso);
+      setAfinidades(r.tipo === 'OK' ? { fase: 'OK', d: r.datos } : { fase: 'ERROR' });
+    },
+    [p.cliente, hoyIso],
+  );
+  const idFicha = vista.v === 'EDITAR' ? vista.id : null;
+  useEffect(() => {
+    if (idFicha) void cargarAfinidades(idFicha);
+  }, [idFicha]);
+  // Al volver de «Registros de <tercero>», se reabre su ficha una vez.
+  const reabierto = useRef(false);
+  useEffect(() => {
+    if (reabierto.current || !p.volverA || carga.fase !== 'OK') return;
+    reabierto.current = true;
+    const t = carga.lista.find((x) => x.id === p.volverA);
+    if (t) abrirEditar(t);
+  }, [carga]);
+
+  const escribirAfinidad = async (accion: () => Promise<Respuesta<unknown>>) => {
+    if (!actual || ocupado) return;
+    setOcupado(true);
+    setAviso(null);
+    const r = await accion();
+    setOcupado(false);
+    if (r.tipo === 'INDETERMINADO') setAviso({ tipo: 'AVISO', texto: TEXTO_INDETERMINADO });
+    else if (r.tipo === 'RECHAZADO') setAviso({ tipo: 'AVISO', texto: r.mensaje || TEXTO_INDETERMINADO });
+    await cargarAfinidades(actual.id);
+  };
+  const guardarAfinidad = (categoriaId: string) =>
+    escribirAfinidad(() => p.cliente.altaAfinidad({ id: p.nuevoId(), tercero_id: actual!.id, categoria_id: categoriaId }));
+  const abrirAnadir = async () => {
+    setAnadir(true);
+    if (arbol.fase !== 'OK') {
+      const r = await p.cliente.arbolCategorias();
+      setArbol(r.tipo === 'OK' ? { fase: 'OK', arbol: construirArbol(r.datos.categorias) } : { fase: 'ERROR' });
+    }
+  };
 
   const abrirNuevo = () => {
     setForm({ nombre: '', naturaleza: null });
@@ -190,7 +254,102 @@ export function TercerosAjustesScreen(p: { cliente: ClienteApi; nuevoId: () => s
               <BotonSecundario testID="ajter-reactivar" titulo="Reactivar" onPress={() => void cambiarEstado(actual, 'REACTIVAR')} />
             )
           ) : null}
+          {actual ? (
+            <View testID="ajter-uso" style={{ gap: espacio.xs }}>
+              <Text style={[tipo.footnote, { color: c.textSecondary, fontWeight: '600' }]}>Uso en Gapto</Text>
+              <Text testID="ajter-uso-texto" style={[tipo.body, { color: c.textPrimary }]}>
+                {actual.usos ? `${actual.usos} ${actual.usos === 1 ? 'registro' : 'registros'}${actual.ultimo_uso ? ` · último ${diaMesIso(actual.ultimo_uso)}` : ''}` : 'Sin registros'}
+              </Text>
+              {p.onVerRegistros ? (
+                <Pressable testID="ajter-ver-registros" accessibilityRole="link" onPress={() => p.onVerRegistros?.({ id: actual.id, nombre: actual.nombre })}
+                  style={{ minHeight: TACTIL_MIN, justifyContent: 'center' }}>
+                  <Text style={[tipo.body, { color: c.accent }]}>Ver sus registros ›</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          ) : null}
+          {actual ? (
+            <View testID="ajter-habituales" style={{ gap: espacio.s }}>
+              <Text accessibilityRole="header" style={[tipo.footnote, { color: c.textSecondary, fontWeight: '600' }]}>Categorías habituales</Text>
+              {afinidades.fase === 'CARGANDO' ? <EstadoDato estado="CARGANDO" /> : null}
+              {afinidades.fase === 'ERROR' ? (
+                <Pressable testID="ajter-habituales-error" accessibilityRole="button" onPress={() => void cargarAfinidades(actual.id)} style={{ minHeight: TACTIL_MIN }}>
+                  <EstadoDato estado="ERROR_CARGA" detalle="Tocar para reintentar" />
+                </Pressable>
+              ) : null}
+              {afinidades.fase === 'OK' ? (
+                <>
+                  {afinidades.d.guardadas.length > 0 ? (
+                    <Tarjeta>
+                      {afinidades.d.guardadas.map((g, i) => (
+                        <View key={g.id} testID={`habitual-${g.categoria_id}`} style={[ef.chips, { alignItems: 'center', justifyContent: 'space-between', paddingVertical: espacio.s,
+                          borderBottomWidth: i === afinidades.d.guardadas.length - 1 ? 0 : 1, borderBottomColor: c.separator }]}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={[tipo.body, { color: g.disponible ? c.textPrimary : c.textSecondary }]}>{g.nombre}</Text>
+                            <Text style={[tipo.caption, { color: c.textSecondary }]}>{g.ruta}</Text>
+                          </View>
+                          {g.disponible ? (
+                            <Pressable testID={`habitual-quitar-${g.categoria_id}`} accessibilityRole="button" accessibilityLabel={`Quitar ${g.nombre}`}
+                              onPress={() => setQuitar({ id: g.id, nombre: g.nombre })} style={{ minHeight: TACTIL_MIN, justifyContent: 'center' }}>
+                              <Text style={[tipo.subheadline, { color: c.critical }]}>Quitar</Text>
+                            </Pressable>
+                          ) : (
+                            <Text testID={`habitual-no-disponible-${g.categoria_id}`} style={[tipo.caption, { color: c.warning }]}>No disponible</Text>
+                          )}
+                        </View>
+                      ))}
+                    </Tarjeta>
+                  ) : null}
+                  <Pressable testID="ajter-anadir-categoria" accessibilityRole="button" onPress={() => void abrirAnadir()} style={{ minHeight: TACTIL_MIN, justifyContent: 'center' }}>
+                    <Text style={[tipo.body, { color: c.accent }]}>+ Añadir categoría</Text>
+                  </Pressable>
+                  {afinidades.d.segun_historial.length > 0 ? (
+                    <View testID="ajter-historial" style={{ gap: espacio.xs }}>
+                      <Text style={[tipo.footnote, { color: c.textSecondary, fontWeight: '600' }]}>Según tu historial</Text>
+                      {afinidades.d.segun_historial.map((h) => (
+                        <View key={h.categoria_id} testID={`historial-${h.categoria_id}`} style={[ef.chips, { alignItems: 'center', justifyContent: 'space-between' }]}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={[tipo.body, { color: c.textPrimary }]}>{h.nombre}</Text>
+                            <Text style={[tipo.caption, { color: c.textSecondary }]}>
+                              {`${h.usos} de tus ${afinidades.d.total_registros} ${afinidades.d.tipo === 'INGRESO' ? 'ingresos' : 'gastos'} en ${actual.nombre}`}
+                            </Text>
+                          </View>
+                          <Pressable testID={`historial-guardar-${h.categoria_id}`} accessibilityRole="button" accessibilityLabel={`Guardar ${h.nombre}`}
+                            onPress={() => void guardarAfinidad(h.categoria_id)} style={{ minHeight: TACTIL_MIN, justifyContent: 'center' }}>
+                            <Text style={[tipo.subheadline, { color: c.accent }]}>Guardar</Text>
+                          </Pressable>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
+                  <Text style={[tipo.caption, { color: c.textSecondary }]}>{TEXTO_HABITUALES(actual.nombre)}</Text>
+                </>
+              ) : null}
+            </View>
+          ) : null}
         </ScrollView>
+        {quitar && actual ? (
+          <Hoja titulo={`¿Quitar ${quitar.nombre} de ${actual.nombre}?`} testID="ajter-quitar">
+            <Text style={[tipo.subheadline, { color: c.textPrimary }]}>{TEXTO_QUITAR(actual.nombre)}</Text>
+            <BotonCritico testID="ajter-quitar-confirmar" titulo="Quitar"
+              onPress={() => { const id = quitar.id; setQuitar(null); void escribirAfinidad(() => p.cliente.retirarAfinidad(id)); }} />
+            <BotonSecundario testID="ajter-quitar-cancelar" titulo="Cancelar" onPress={() => setQuitar(null)} />
+          </Hoja>
+        ) : null}
+        {anadir && actual ? (
+          <SelectorCategorias
+            titulo="Añadir categoría"
+            modo="AJUSTES"
+            carga={arbol}
+            esVisible={(n) => n.enabled}
+            esSeleccionable={(n) => n.enabled && !(afinidades.fase === 'OK' && afinidades.d.guardadas.some((g) => g.categoria_id === n.id))}
+            motivo={(n) => (afinidades.fase === 'OK' && afinidades.d.guardadas.some((g) => g.categoria_id === n.id) ? 'Ya es habitual' : n.enabled ? null : 'Desactivada')}
+            seleccionadaId={null}
+            onElegir={(n) => { setAnadir(false); void guardarAfinidad(n.id); }}
+            onCerrar={() => setAnadir(false)}
+            buscar
+          />
+        ) : null}
       </View>
     );
   }

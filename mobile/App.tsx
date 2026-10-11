@@ -7,7 +7,8 @@
 // v0.3.0 (F05-02 B3, A1; D-B3-01): Ajustes › «Preferencias financieras» abre Ajustes › Preferencias (PreferenciasAjustesScreen) en la pila de Más, como Categorías; sus formularios y el selector de categoría son tareas inmersivas (ocultan la barra inferior).
 // v0.4.0 (F05-03/F05-04 J2 §2.5): Ajustes › Terceros, Contextos y Plantillas en la pila de Más, como Preferencias; sus formularios y selectores son tareas inmersivas.
 // v0.5.0 (F05-03/F05-04 J2+J3 §2.1–§2.4): «Registrar» de Inicio abre la hoja de tipos (sin preselección); Gasto e Ingreso abren el registro con ese tipo, «Entre cuentas» la pantalla de transferencia. Un acceso de Inicio abre el registro del tipo de su plantilla con la plantilla aplicada. El cambio de tipo antes del primer envío que cruza a/desde «Entre cuentas» cambia de pantalla conservando importe y fecha (y su aviso T02). «Editar» / «Añadir acceso» llevan a Ajustes › Plantillas.
-// Versión: 0.5.0
+// v0.6.0 (F05-05 K3 §2.5/§2.6; F05 §49.4 A7/A8, D-SRCH-06/12): «Día a día» deja de ser territorio pendiente: monta la Actividad v0 (ActividadScreen) de forma PERSISTENTE, como Más (conserva periodo, filtros y scroll al cambiar de pestaña); sus hojas son inmersivas (el velo cubre la barra inferior). Tras un registro confirmado la Actividad vuelve a leer. Ajustes › Terceros › «Ver sus registros» abre en la pila de Más la Actividad filtrada por el tercero con todo el historial («‹ <tercero>» vuelve a la ficha). Mes y Patrimonio siguen pendientes.
+// Versión: 0.6.0
 // ============================================================
 
 import * as Crypto from 'expo-crypto';
@@ -28,14 +29,15 @@ import { TercerosAjustesScreen } from './src/screens/TercerosAjustesScreen';
 import { PreferenciasAjustesScreen } from './src/screens/PreferenciasAjustesScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { AjustesScreen, MasScreen } from './src/screens/MasScreen';
+import { ActividadScreen } from './src/screens/ActividadScreen';
 import { RegistroGastoScreen } from './src/screens/RegistroGastoScreen';
 import { TerritorioPendiente } from './src/screens/TerritorioPendiente';
 import { TransferenciaScreen } from './src/screens/TransferenciaScreen';
 import { ProveedorTema, useTema } from './src/theme/tema';
 
-const TITULOS: Record<Exclude<Destino, 'INICIO' | 'MAS'>, string> = { DIA: 'Día a día', MES: 'Mes', PATRIMONIO: 'Patrimonio' };
+const TITULOS: Record<Exclude<Destino, 'INICIO' | 'MAS' | 'DIA'>, string> = { MES: 'Mes', PATRIMONIO: 'Patrimonio' };
 
-type PantallaMas = 'MAS' | 'AJUSTES' | 'CATEGORIAS' | 'PREFERENCIAS' | 'TERCEROS' | 'CONTEXTOS' | 'PLANTILLAS';
+type PantallaMas = 'MAS' | 'AJUSTES' | 'CATEGORIAS' | 'PREFERENCIAS' | 'TERCEROS' | 'CONTEXTOS' | 'PLANTILLAS' | 'REGISTROS_TERCERO';
 
 /** Tarea inmersiva de registro (F05-04): tipo, plantilla del acceso y lo conservado de otro tipo. */
 type TareaRegistro = {
@@ -53,6 +55,9 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
   const [refresco, setRefresco] = useState(0);
   const [pantallaMas, setPantallaMas] = useState<PantallaMas>('MAS');
   const [inmersivaMas, setInmersivaMas] = useState(false);
+  const [inmersivaDia, setInmersivaDia] = useState(false);
+  /** C4: tercero cuyos registros se ven desde Ajustes › Terceros. */
+  const [registrosDe, setRegistrosDe] = useState<{ id: string; nombre: string } | null>(null);
 
   const cerrarTarea = useCallback((registrado: boolean) => {
     setTarea(null);
@@ -76,6 +81,10 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
               setDestino('MAS');
             }}
           />
+        </View>
+        {/* Día a día: Actividad v0 montada de forma persistente (conserva periodo, filtros y scroll). */}
+        <View style={[s.raiz, destino !== 'DIA' && s.oculto]}>
+          <ActividadScreen cliente={p.cliente} ahora={p.ahora} refresco={refresco} onRegistrar={() => setHojaTipos(true)} onInmersiva={setInmersivaDia} />
         </View>
         {(Object.keys(TITULOS) as (keyof typeof TITULOS)[]).map((d) =>
           destino === d ? <TerritorioPendiente key={d} titulo={TITULOS[d]} /> : null,
@@ -102,7 +111,34 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
             />
           ) : null}
           {pantallaMas === 'TERCEROS' ? (
-            <TercerosAjustesScreen cliente={p.cliente} nuevoId={p.nuevoId} onAtras={() => setPantallaMas('AJUSTES')} onInmersiva={setInmersivaMas} />
+            <TercerosAjustesScreen
+              cliente={p.cliente}
+              nuevoId={p.nuevoId}
+              ahora={p.ahora}
+              onAtras={() => setPantallaMas('AJUSTES')}
+              onInmersiva={setInmersivaMas}
+              volverA={registrosDe?.id ?? null}
+              onVerRegistros={(t) => {
+                setRegistrosDe(t);
+                setPantallaMas('REGISTROS_TERCERO');
+              }}
+            />
+          ) : null}
+          {pantallaMas === 'REGISTROS_TERCERO' && registrosDe ? (
+            <ActividadScreen
+              cliente={p.cliente}
+              ahora={p.ahora}
+              refresco={refresco}
+              onInmersiva={setInmersivaMas}
+              tercero={{
+                ...registrosDe,
+                onAtras: () => setPantallaMas('TERCEROS'),
+                onLimpiar: () => {
+                  setPantallaMas('TERCEROS');
+                  setDestino('DIA');
+                },
+              }}
+            />
           ) : null}
           {pantallaMas === 'CONTEXTOS' ? (
             <ContextosAjustesScreen cliente={p.cliente} nuevoId={p.nuevoId} onAtras={() => setPantallaMas('AJUSTES')} onInmersiva={setInmersivaMas} />
@@ -164,7 +200,7 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
           />
         ) : null}
       </View>
-      {tarea === null && !hojaTipos && !(destino === 'MAS' && inmersivaMas) ? <BarraInferior actual={destino} onCambiar={setDestino} /> : null}
+      {tarea === null && !hojaTipos && !(destino === 'MAS' && inmersivaMas) && !(destino === 'DIA' && inmersivaDia) ? <BarraInferior actual={destino} onCambiar={setDestino} /> : null}
     </View>
   );
 }

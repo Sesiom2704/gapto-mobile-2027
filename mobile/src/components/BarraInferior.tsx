@@ -4,6 +4,7 @@
 // Ruta: mobile/src/components/BarraInferior.tsx
 // Descripción: Barra inferior con los cinco destinos estables de F09 BLOQUE A (Inicio, Día a día, Mes, Patrimonio, Más). Silenciosa (HOME-01 §6). Se oculta en tareas CREATE/EDIT: la oculta App, no este componente.
 // Versión: 0.1.0
+// Versión: 0.2.0 (F05-05 K3 §2.8; F05 §49.4 A12): el icono de «Mes» se alinea con HOME-01 v0.3 (calendario: `calendar-outline` / `calendar`) en lugar de `stats-chart`.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -19,7 +20,7 @@ export type Destino = 'INICIO' | 'DIA' | 'MES' | 'PATRIMONIO' | 'MAS';
 const DESTINOS: { id: Destino; etiqueta: string; icono: keyof typeof Ionicons.glyphMap; activo: keyof typeof Ionicons.glyphMap }[] = [
   { id: 'INICIO', etiqueta: 'Inicio', icono: 'home-outline', activo: 'home' },
   { id: 'DIA', etiqueta: 'Día a día', icono: 'list-outline', activo: 'list' },
-  { id: 'MES', etiqueta: 'Mes', icono: 'stats-chart-outline', activo: 'stats-chart' },
+  { id: 'MES', etiqueta: 'Mes', icono: 'calendar-outline', activo: 'calendar' },
   { id: 'PATRIMONIO', etiqueta: 'Patrimonio', icono: 'pie-chart-outline', activo: 'pie-chart' },
   { id: 'MAS', etiqueta: 'Más', icono: 'ellipsis-horizontal', activo: 'ellipsis-horizontal' },
 ];
