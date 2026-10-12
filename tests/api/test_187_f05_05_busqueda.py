@@ -19,6 +19,12 @@
 #   desglosada: mediana HTTP - mediana de apertura de conexion < 50 ms). Los
 #   tres valores van al mensaje del assert y, si GAPTO_K5_EVIDENCIA apunta a
 #   una carpeta, a un JSON de evidencia. Ningun otro test cambia.
+# Version: 0.3.0 (MANT-K5-AJ; dictamen AJ-MK5-02/-03): guarda de la via real de
+#   conexion (9b solo descuenta la apertura si el endpoint abre por
+#   `_proveedor_por_defecto` y por ninguna otra via); evidencia con entorno
+#   (plataforma, server_version, lc_collate), numero de muestras y todas las
+#   muestras; en 9b una diferencia negativa es MUESTRA INCOHERENTE: se repite una
+#   vez y, si persiste, el test falla. 9a sigue siendo la asercion principal.
 # ============================================================
 
 from __future__ import annotations
@@ -26,6 +32,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import platform
 import statistics
 import time
 import uuid
@@ -36,6 +43,7 @@ import pytest
 
 import f05_05_helpers as x
 import vs01_api_helpers as h
+import app.api.app as adaptador
 from app.api.app import _proveedor_por_defecto
 from app.core.contexto import ContextoOperacion
 from app.core.unidad_trabajo import UnidadDeTrabajo
@@ -140,8 +148,18 @@ def test_limite_50_en_orden_normalizado(e):
 # coste es del entorno (≈ 47 ms en local el 2026-10-12, ≈ 277 ms en Neon), no
 # de la busqueda. 9a mide la busqueda; 9b mide la peticion HTTP y descuenta la
 # apertura de conexion medida por la MISMA via que usa el adaptador.
+# 9a es la ASERCION PRINCIPAL del caso 9; 9b es una guarda diagnostica adicional
+# (dictamen MANT-K5, P1).
+#
+# REGLA (AJ-MK5-02): 9b descuenta la apertura de conexion medida por
+# `app.api.app._proveedor_por_defecto` SOLO porque el endpoint abre su conexion
+# por esa via y por ninguna otra. `test_caso9b_guarda_via_de_conexion` lo
+# comprueba. Si el adaptador cambia de via (pooling, otra fabrica, proveedor
+# inyectado), esa guarda falla y 9b ha de revisarse ANTES de reutilizar su
+# certificacion.
 REPETICIONES = 7
 UMBRAL_MS = 50
+INCOHERENTE = "muestra incoherente: revisar el entorno o la via de conexion"
 
 
 def _preparar_caso9(owner, cli):
@@ -157,6 +175,14 @@ def _mediana_ms(fn, n=REPETICIONES):
         ultimo = fn()
         tiempos.append((time.perf_counter() - t0) * 1000)
     return statistics.median(tiempos), tiempos, ultimo
+
+
+def _entorno_medida() -> dict:
+    with psycopg.connect(h.dsn()) as c:
+        version = c.execute("SHOW server_version").fetchone()[0]
+        collate = c.execute("SELECT datcollate FROM pg_database WHERE datname = current_database()").fetchone()[0]
+    return {"platform": platform.platform(), "python": platform.python_version(),
+            "server_version": version, "lc_collate": collate}
 
 
 def _evidencia(nombre, datos):
@@ -185,7 +211,8 @@ def test_caso9a_busqueda_con_tres_mil_terceros_por_debajo_de_50_ms(e):
         contexto = ContextoOperacion.de_usuario(owner)
         mediana, tiempos, filas = _mediana_ms(
             lambda: unidad.ejecutar(contexto, lambda s: lect_ter.buscar(s, "merca", False), nombre="K-5 caso 9a"))
-    datos = {"caso": "9a", "consulta_mediana_ms": round(mediana, 2), "consulta_ms": [round(t, 2) for t in tiempos]}
+    datos = {"caso": "9a", "entorno": _entorno_medida(), "muestras": len(tiempos),
+             "consulta_mediana_ms": round(mediana, 2), "consulta_ms": [round(t, 2) for t in tiempos]}
     _evidencia("caso9a", datos)
     assert [t["nombre"] for t in filas] == ["Mercadona"]
     assert mediana < UMBRAL_MS, datos
@@ -195,23 +222,69 @@ def test_caso9b_peticion_http_descontando_la_apertura_de_conexion(e):
     """(i) Peticion HTTP completa como el caso 9 original; (ii) apertura de una conexion
     vacia por la MISMA via que la unidad de trabajo del adaptador (`_proveedor_por_defecto`:
     abrir + SELECT 1 + cerrar). La peticion no se omite: lo que excede a la conexion
-    debe quedar por debajo del umbral de la busqueda."""
+    debe quedar por debajo del umbral de la busqueda. Una diferencia negativa es
+    incoherente (la peticion incluye una conexion): se repite UNA vez y, si persiste,
+    el test falla; nunca se da por buena."""
     owner, cli, _ = e
     _preparar_caso9(owner, cli)
-    http, t_http, filas = _mediana_ms(lambda: buscar(cli, "merca"))
     abrir = _proveedor_por_defecto(h.dsn())
 
     def conexion_vacia():
         with abrir() as c:
             c.execute("SELECT 1").fetchone()
 
-    conexion, t_con, _ = _mediana_ms(conexion_vacia)
-    datos = {"caso": "9b", "http_mediana_ms": round(http, 2), "conexion_mediana_ms": round(conexion, 2),
-             "http_menos_conexion_ms": round(http - conexion, 2),
-             "http_ms": [round(t, 2) for t in t_http], "conexion_ms": [round(t, 2) for t in t_con]}
+    rondas = []
+    for _ in range(2):
+        http, t_http, filas = _mediana_ms(lambda: buscar(cli, "merca"))
+        conexion, t_con, _ = _mediana_ms(conexion_vacia)
+        rondas.append({"http_mediana_ms": round(http, 2), "conexion_mediana_ms": round(conexion, 2),
+                       "http_menos_conexion_ms": round(http - conexion, 2),
+                       "http_ms": [round(t, 2) for t in t_http], "conexion_ms": [round(t, 2) for t in t_con]})
+        if http - conexion >= 0:
+            break
+    incoherente = http - conexion < 0
+    datos = {"caso": "9b", "entorno": _entorno_medida(), "muestras": len(t_http),
+             "repeticiones": len(rondas), "muestra_incoherente": incoherente, **rondas[-1], "rondas": rondas}
     _evidencia("caso9b", datos)
     assert [t["nombre"] for t in filas] == ["Mercadona"]
+    assert not incoherente, (INCOHERENTE, datos)
     assert http - conexion < UMBRAL_MS, datos
+
+
+def test_caso9b_guarda_via_de_conexion(e, monkeypatch):
+    """AJ-MK5-02. El cliente se construye como el de 9b (configuracion por defecto, sin
+    `proveedor_conexion` inyectado) DESPUES de instalar dos espias: uno sobre
+    `app.api.app._proveedor_por_defecto` y otro sobre `psycopg.connect`. Durante
+    `GET /v1/terceros?q=merca` toda conexion abierta debe pasar por el proveedor por
+    defecto (al menos una, y ninguna por otra via)."""
+    owner, _, _ = e
+    aperturas = {"proveedor": 0, "connect": 0}
+    original_proveedor, original_connect = adaptador._proveedor_por_defecto, psycopg.connect
+
+    def proveedor_espia(dsn):
+        abrir = original_proveedor(dsn)
+
+        @contextmanager
+        def _abrir():
+            aperturas["proveedor"] += 1
+            with abrir() as c:
+                yield c
+        return _abrir
+
+    def connect_espia(*a, **k):
+        aperturas["connect"] += 1
+        return original_connect(*a, **k)
+
+    monkeypatch.setattr(adaptador, "_proveedor_por_defecto", proveedor_espia)
+    monkeypatch.setattr(psycopg, "connect", connect_espia)
+    cli = h.cliente(owner, reloj=x.reloj())  # misma construccion que el cliente de 9b (x.entorno)
+    x.tercero(cli, "Mercadona")
+    aperturas.update(proveedor=0, connect=0)
+    filas = buscar(cli, "merca")
+    assert [t["nombre"] for t in filas] == ["Mercadona"]
+    assert aperturas["proveedor"] >= 1 and aperturas["connect"] == aperturas["proveedor"], (
+        "El endpoint ya no abre su conexion (solo) por app.api.app._proveedor_por_defecto: 9b ha de "
+        f"revisarse antes de reutilizar su certificacion (AJ-MK5-02). Aperturas: {aperturas}")
 
 
 def test_caso18_terceros_de_otro_owner_invisibles(e):
