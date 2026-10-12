@@ -11,6 +11,8 @@
 #   - `clave_orden`: (nombre normalizado C06, id) para desempates
 #     deterministas (F05 §49.5 R6).
 # Version: 0.1.0 (F05-05 K2 §1.2)
+# Version: 0.2.0 (F05-06 K-7, F05 §51.8): el catalogo trae tambien `icon_key`
+#   (aditivo, misma lectura) para el icono de la categoria en la Actividad.
 # ============================================================
 
 from __future__ import annotations
@@ -28,10 +30,11 @@ def catalogo(sesion: SesionMotor) -> dict[uuid.UUID, dict[str, Any]]:
     """Todas las categorias del owner (habilitadas o no) con `ruta`."""
     with sesion.conexion.cursor() as cur:
         cur.execute(
-            "SELECT id, parent_id, nombre, ambito, enabled FROM gapto.categorias_financieras "
+            "SELECT id, parent_id, nombre, ambito, enabled, icon_key FROM gapto.categorias_financieras "
             "WHERE owner_user_id = current_setting('gapto.owner_user_id')::uuid"
         )
-        nodos = {f[0]: {"id": f[0], "parent_id": f[1], "nombre": f[2], "ambito": f[3], "enabled": f[4]}
+        nodos = {f[0]: {"id": f[0], "parent_id": f[1], "nombre": f[2], "ambito": f[3], "enabled": f[4],
+                       "icon_key": f[5]}
                  for f in cur.fetchall()}
     for nodo in nodos.values():
         nombres, vistos, actual = [], set(), nodo

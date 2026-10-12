@@ -12,6 +12,7 @@
 // v0.8.0 (F05-03/F05-04 J2 §1.5; F05 §46.5 E2/E3): GET /v1/preferencias devuelve también `tipos` (ids de GASTO e INGRESO) para enviar SIEMPRE el tipo de la preferencia (se retira la preferencia sin tipo). Sin rutas nuevas.
 // v0.9.0 (F05-03/F05-04 J2 §1.9/§2): cuentas elegibles por operación, terceros, contextos, plantillas y acciones rápidas, propuesta del registro con la capa plantilla, registro de ingreso cobrado y entre cuentas, y onboarding de categorías. Escrituras de maestros con clasificación 'CAMBIO'; registros con la de escritura (indeterminado = reintentar el MISMO UUID).
 // v0.10.0 (F05-05 K3 §2.1–§2.7; F05 §49.4 A1–A9): lecturas de señales (GET /v1/senales/categorias y /v1/senales/terceros; tipos en domain/senales, único import nuevo), búsqueda de terceros en servidor (GET /v1/terceros?q=&incluir_inactivos=), afinidades (lectura del detalle, alta con UUID del cliente y retirada, clasificación 'CAMBIO'), Actividad v0 (página keyset y detalle) y read models de Inicio (yo, Resultado del mes). Las lecturas nuevas llaman `nota` al dato (M5-08); el wire de escritura del gasto no cambia.
+// v0.11.0 (F05-06 K-7; F05 §51.8): la categoría de la fila y del detalle de la Actividad trae `icon_key` (tipo aditivo, opcional). Sin rutas nuevas.
 // Versión: 0.10.0
 // ============================================================
 
@@ -405,7 +406,7 @@ export interface FilaActividad {
   moneda: string;
   importe_total: string | null;
   tercero: ReferenciaActividad | null;
-  categoria: (ReferenciaActividad & { ruta: string }) | null;
+  categoria: (ReferenciaActividad & { ruta: string; icon_key?: string | null }) | null;
   varias: boolean;
   contexto: ReferenciaActividad | null;
   cuentas: { cuenta_id: string; nombre: string; rol: 'PAGO' | 'COBRO' | 'ORIGEN' | 'DESTINO'; enabled: boolean }[];

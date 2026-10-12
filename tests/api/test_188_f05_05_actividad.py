@@ -25,6 +25,8 @@
 #   detalle no devuelven campos de metrica, tendencia, presupuesto ni prevision.
 # Version: 0.3.0 (F05-05 K3 §3, mutantes AC01/AC08): hechos anulados fuera de la lista, del total y del
 #   detalle; con efectos de estados distintos, el estado de reparto es el PEOR (nunca «tu parte» inventada).
+# Version: 0.5.0 (F05-06 K-7, F05 §51.8): la categoria de la fila y del detalle trae `icon_key`
+#   (null sin icono); «Varias» y sin categoria siguen con `categoria` null; aislamiento intacto.
 # ============================================================
 
 from __future__ import annotations
@@ -351,3 +353,34 @@ def test_frontera_f08_sin_campos_de_metrica_ni_prevision(e):
     prohibidas = sorted(k for k in hojas if k.lower().startswith(_PROHIBIDOS_F08))
     assert prohibidas == [], prohibidas
     assert "presupuestable" in hojas  # el detalle sí trae el atributo del hecho
+
+
+def test_k7_icon_key_de_la_categoria_en_lista_y_detalle(e):
+    """F05-06 K-7 (F05 §51.8; F09 §12.104 B1/B4): el icono sale del catalogo de categorias
+    ya leido. Con icono -> su clave; sin icono -> null; «Varias» y sin categoria -> categoria null."""
+    owner, actor, cli, cta, ahorro = e
+    con_icono = x.categoria(owner, "Supermercados", icon_key="compras.carrito")
+    sin_icono = x.categoria(owner, "Varios")
+    otra = x.categoria(owner, "Bebida", icon_key="comida.cafe")
+    g1 = x.gasto(cli, cta, fecha="2026-10-05", importe="48.72", categoria_id=con_icono)
+    g2 = x.gasto(cli, cta, fecha="2026-10-05", importe="3.00", categoria_id=sin_icono)
+    g3 = x.gasto(cli, cta, fecha="2026-10-05", importe="4.00")
+    varias = x.hecho_motor(owner, [("GASTO", "10.00", "COMPLETA", con_icono, [(actor, "10.00")]),
+                                   ("GASTO", "5.00", "COMPLETA", otra, [(actor, "5.00")])])
+    t = x.transferencia(cli, cta, ahorro)
+    filas = {f["id"]: f for f in pagina(cli)["filas"]}
+    assert filas[str(g1)]["categoria"]["icon_key"] == "compras.carrito"
+    assert filas[str(g2)]["categoria"]["icon_key"] is None and "icon_key" in filas[str(g2)]["categoria"]
+    assert filas[str(g3)]["categoria"] is None
+    assert filas[str(varias)]["varias"] is True and filas[str(varias)]["categoria"] is None
+    assert filas[str(t)]["categoria"] is None
+    d = cli.get(f"{URL}/{g1}", headers=h.AUTH).json()
+    assert d["categoria"]["icon_key"] == "compras.carrito" and d["categoria"]["ruta"] == "Supermercados"
+    assert cli.get(f"{URL}/{g2}", headers=h.AUTH).json()["categoria"]["icon_key"] is None
+    # Aislamiento: otro owner con su propia categoria con icono no ve nada de este ni al reves.
+    owner_b, _, cli_b, cta_b, _ = x.entorno()
+    ajena = x.gasto(cli_b, cta_b, categoria_id=x.categoria(owner_b, "Ajena", icon_key="hogar.casa"))
+    assert str(ajena) not in {f["id"] for f in pagina(cli)["filas"]}
+    assert {f["id"] for f in pagina(cli_b)["filas"]} == {str(ajena)}
+    assert pagina(cli_b)["filas"][0]["categoria"]["icon_key"] == "hogar.casa"
+    assert cli.get(f"{URL}/{ajena}", headers=h.AUTH).status_code == 404

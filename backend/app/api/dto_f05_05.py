@@ -12,6 +12,7 @@
 # Version: 0.1.0 (F05-05 K2 §1.2-§1.6)
 # Version: 0.2.0 (F05-05 K2 §1.5): Actividad v0 (fila, detalle, pagina keyset).
 # Version: 0.3.0 (F05-05 K2 §1.6): read models de Inicio (yo, Resultado del mes).
+# Version: 0.4.0 (F05-06 K-7, F05 §51.8): `CategoriaFila.icon_key` (aditivo).
 # ============================================================
 
 from __future__ import annotations
@@ -113,6 +114,7 @@ class Referencia(_Estricto):
 
 class CategoriaFila(Referencia):
     ruta: str
+    icon_key: str | None = None
 
 
 class CuentaFila(_Estricto):

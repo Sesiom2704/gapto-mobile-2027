@@ -5,9 +5,11 @@
 // Descripción: K3 de F05-05 (§2.5–§2.8; F05 §49.4 A7–A9/A12, §49.5 R11/R12; lámina SRCH-ACT-AFI v0.2 B1–B13, C1–C4, E1). Dominios ACTIVIDAD, AFINIDADES (Ajustes), RESULTADO y TRANSVERSAL (A12). Casos de §49.9: 12 (orden por fecha, transferencia neutra, ingresos con «+»), 14 (título nunca vacío), 15 (maestro desactivado marcado), 16 (cancelar la búsqueda restaura periodo y filtros), 17 (sin «tu parte» inventada), 22 («Ver sus registros» y «Limpiar»), 23 (fallo de red → error con «Reintentar», nunca «No hay registros»), 24 (importe «48,72» y «48.72»), 25/27 (Resultado con «Sin indicar» y «Hola»); detalle de gasto, ingreso y transferencia; filtros con recuento de grupos; «Quitar» con confirmación, «No disponible», «Ya es habitual» y «Guardar» del historial.
 // Versión: 0.1.0 (F05-05 K3 §2.5–§2.8)
 // Versión: 0.3.0 (F05-05 K4-E, huecos A7 de la matriz A/R): hojas «Otro mes» (mes elegido → desde/hasta del mes) y «Entre fechas» (hasta inclusivo → día siguiente en la consulta; desde > hasta bloqueado); filtros de categoría padre (con subcategorías: el cliente no envía incluir_subcategorias=false), tercero y contexto en la consulta.
+// Versión: 0.4.0 (F05-06 K-7; F05 §51.8, F09 §12.104 B1/B4): icono de la categoría en la fila y en la cabecera del detalle (`categoria.icon_key` → `IconoCategoriaVista`); transferencia con el icono de intercambio; «Varias» y sin categoría con el de reserva.
 // Versión: 0.2.0 (F05-05 K4-C; acta K4-A2 P12, caso 16 / DAY-Q08): «Cancelar» la búsqueda restaura el desplazamiento SOLO cuando la lista posterior ya está cargada (nunca durante «CARGANDO»); sin búsqueda previa no se desplaza.
 // ============================================================
 
+import { Ionicons } from '@expo/vector-icons';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
 import React from 'react';
 import { ScrollView } from 'react-native';
@@ -17,6 +19,7 @@ import { Raiz } from '../App';
 import type { ClienteApi, DetalleActividad, FilaActividad } from '../src/api/cliente';
 import { consulta, importeDeBusqueda, SIN_FILTROS, tituloFila } from '../src/domain/actividad';
 import { textoSinIndicar } from '../src/domain/inicio';
+import { categoriaIconoFallback, glifoDe } from '../src/theme/iconosCategoria';
 import { ProveedorTema } from '../src/theme/tema';
 
 import { clienteCategoriasStub, nodo } from './fixtures_categorias';
@@ -407,6 +410,45 @@ test('A7 filtros: categoría padre (con subcategorías), tercero y contexto lleg
   const q = (c.actividad as jest.Mock).mock.calls.at(-1)![0];
   expect(q.incluirSubcategorias).not.toBe(false); // el cliente HTTP solo envía incluir_subcategorias=false si se pide
   expect(within(screen.getByTestId('actividad-filtros')).getByText('Filtros · 3')).toBeTruthy();
+});
+
+// ------------------------------------------------------------------ K-7 icono de categoría
+const FILAS_K7: FilaActividad[] = [
+  fila({ id: 'k1', nota: 'Compra semanal', categoria: { id: 'super', nombre: 'Supermercados', ruta: 'Alimentación › Supermercados', enabled: true, icon_key: 'compras.carrito' } }),
+  fila({ id: 'k2', categoria: { id: 'otra', nombre: 'Otra', ruta: 'Otra', enabled: true, icon_key: null } }),
+  fila({ id: 'k3', tipo: 'TRANSFERENCIA', importe_total: '500.00', estado_reparto: null, tu_parte: null,
+    cuentas: [{ cuenta_id: 'a', nombre: 'Cuenta nómina', rol: 'ORIGEN', enabled: true }, { cuenta_id: 'b', nombre: 'Ahorro', rol: 'DESTINO', enabled: true }] }),
+  fila({ id: 'k4', varias: true, categoria: null, tercero: { id: 'amz', nombre: 'Amazon', enabled: true } }),
+  fila({ id: 'k5', categoria: null }),
+];
+// El icono va oculto a la accesibilidad (decorativo): se consulta incluyendo elementos ocultos.
+const glifo = (testID: string) => within(screen.getByTestId(testID, { includeHiddenElements: true })).UNSAFE_getByType(Ionicons).props.name;
+
+test('K-7: la fila y el detalle muestran el icono de su categoría; transferencia con intercambio; «Varias» y sin categoría con reserva', async () => {
+  const c = fake({
+    actividad: () => ({ tipo: 'OK', datos: { filas: FILAS_K7, siguiente: null, total: FILAS_K7.length } }),
+    detalle: (id) => ({ tipo: 'OK', datos: { ...FILAS_K7.find((f) => f.id === id)!, presupuestable: true, magnitudes: [] } }),
+  });
+  await montar(c);
+  await pulsar('tab-DIA');
+  await waitFor(() => expect(screen.getByTestId('fila-k1')).toBeTruthy());
+  expect(glifoDe('compras.carrito')).toBe('cart-outline');
+  expect(glifo('fila-icono-k1')).toBe('cart-outline');
+  expect(glifo('fila-icono-k2')).toBe(categoriaIconoFallback);
+  expect(glifo('fila-icono-k3')).toBe('swap-horizontal');
+  expect(glifo('fila-icono-k4')).toBe(categoriaIconoFallback);
+  expect(glifo('fila-icono-k5')).toBe(categoriaIconoFallback);
+  await pulsar('fila-k1');
+  await waitFor(() => expect(screen.getByTestId('detalle-contenido')).toBeTruthy());
+  expect(glifo('detalle-icono')).toBe('cart-outline');
+  await pulsar('detalle-cerrar');
+  await pulsar('fila-k3');
+  await waitFor(() => expect(screen.getByTestId('detalle-contenido')).toBeTruthy());
+  expect(glifo('detalle-icono')).toBe('swap-horizontal');
+  await pulsar('detalle-cerrar');
+  await pulsar('fila-k5');
+  await waitFor(() => expect(screen.getByTestId('detalle-contenido')).toBeTruthy());
+  expect(glifo('detalle-icono')).toBe(categoriaIconoFallback);
 });
 
 declare const __dirname: string;

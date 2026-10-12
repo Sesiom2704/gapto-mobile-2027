@@ -5,6 +5,7 @@
 // Descripción: Día a día › Actividad v0 (F05 §49.4 A7/A8, §49.5 R11/R12; D-SRCH-06..09, 12, 13; P-ACT-01..03; F09 DAY-01; lámina SRCH-ACT-AFI v0.2 B1–B13 y C4). Solo lectura. Cabecera «Día a día» con pestañas Actividad / Estadísticas («Próximamente», atenuada), periodo ▾ (este mes por defecto; mes anterior, otro mes, entre fechas), búsqueda y Filtros (recuento de grupos). Lista agrupada por día con el título calculado en la línea principal, la secundaria con lo que el título no dice, el importe con signo solo si describe la magnitud (ingresos «+» neutros, transferencia sin signo) y «Total · reparto sin indicar | parcial» cuando procede; sin hora. Búsqueda en todo el historial con el alcance explícito, agrupada por mes y con el motivo de la coincidencia cuando no es evidente; «Cancelar» restaura periodo, filtros y scroll (DAY-Q08). Filtros por tipo, categoría (con subcategorías), cuenta, tercero y contexto con «Limpiar» y «Ver N resultados»; línea de filtros activos con «Limpiar». Detalle rápido de solo lectura (gasto, ingreso, transferencia) con altura estable. Estados de carga (barras), error con «Reintentar» (nunca «no hay registros») y vacío. Modo «Registros de <tercero>» (C4): filtrada por el tercero, todo el historial y sin totales. Las hojas son inmersivas (`onInmersiva`): el velo cubre la barra inferior.
 // Versión: 0.1.0 (F05-05 K3 §2.6)
 // Versión: 0.2.0 (F05-05 K4-C; acta K4-A2 P12, deuda K-1, CC-05-8 / DAY-Q08): «Cancelar» restaura el desplazamiento cuando la lista posterior a la cancelación ya está cargada (`onContentSizeChange` con la ref `restaurarY`), en lugar de un `setTimeout` que actuaba sobre el esqueleto y se recortaba a 0. Un solo intento; la carga, los filtros y el contrato no cambian.
+// Versión: 0.3.0 (F05-06 K-7; F05 §51.8, F09 §12.104 B1/B4): la fila y la cabecera del detalle muestran el icono de la categoría (`categoria.icon_key`); transferencia con el icono de intercambio; «Varias» y sin categoría, icono de reserva. Fondo neutro (tinte C3b pendiente). Nada más cambia.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -498,13 +499,7 @@ function FilaVista(p: { f: FilaActividad; conFecha: boolean; ultima: boolean; on
       onPress={p.onPress}
       style={({ pressed }) => [s.fila, { borderBottomColor: c.separator, borderBottomWidth: p.ultima ? 0 : StyleSheet.hairlineWidth, opacity: pressed ? 0.7 : 1 }]}
     >
-      {f.tipo === 'TRANSFERENCIA' ? (
-        <View style={[s.icono, { backgroundColor: c.surfaceSecondary }]}>
-          <Ionicons name="swap-horizontal" size={18} color={c.textSecondary} />
-        </View>
-      ) : (
-        <IconoCategoriaVista iconKey={null} />
-      )}
+      <IconoFila f={f} testID={`fila-icono-${f.id}`} />
       <View style={{ flex: 1, gap: 2 }}>
         <Text style={[tipo.body, { color: c.textPrimary }]} numberOfLines={1}>{titulo}</Text>
         {secundaria ? <Text style={[tipo.caption, { color: c.textSecondary }]} numberOfLines={1}>{secundaria}</Text> : null}
@@ -516,6 +511,18 @@ function FilaVista(p: { f: FilaActividad; conFecha: boolean; ultima: boolean; on
       </View>
     </Pressable>
   );
+}
+
+function IconoFila({ f, testID }: { f: FilaActividad; testID: string }) {
+  const { c } = useTema();
+  if (f.tipo === 'TRANSFERENCIA') {
+    return (
+      <View testID={testID} style={[s.icono, { backgroundColor: c.surfaceSecondary }]}>
+        <Ionicons name="swap-horizontal" size={18} color={c.textSecondary} />
+      </View>
+    );
+  }
+  return <IconoCategoriaVista testID={testID} iconKey={f.varias ? null : f.categoria?.icon_key ?? null} />;
 }
 
 function DetalleVista({ d }: { d: DetalleActividad }) {
@@ -539,7 +546,10 @@ function DetalleVista({ d }: { d: DetalleActividad }) {
   kv.push(['Nota', (d.nota ?? '').trim() || '—']);
   return (
     <View testID="detalle-contenido" style={{ gap: espacio.s }}>
-      <Text testID="detalle-subtitulo" style={[tipo.footnote, { color: c.textSecondary }]}>{`${nombreTipo} · ${diaMesAnioIso(d.fecha_hecho)}`}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: espacio.s }}>
+        <IconoFila f={d} testID="detalle-icono" />
+        <Text testID="detalle-subtitulo" style={[tipo.footnote, { color: c.textSecondary }]}>{`${nombreTipo} · ${diaMesAnioIso(d.fecha_hecho)}`}</Text>
+      </View>
       {kv.map(([k, v]) => (
         <View key={k} testID={`kv-${k}`} style={s.kv}>
           <Text style={[tipo.subheadline, { color: c.textSecondary }]}>{k}</Text>

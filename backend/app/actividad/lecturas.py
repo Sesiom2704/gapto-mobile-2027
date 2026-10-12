@@ -36,6 +36,8 @@
 #   detalle(hecho_id): los mismos campos + presupuestable + magnitudes.
 #   El titulo lo calcula el cliente (`tituloRegistro`, una sola implementacion).
 # Version: 0.1.0 (F05-05 K2 §1.5)
+# Version: 0.2.0 (F05-06 K-7, F05 §51.8): la categoria de la fila (y del
+#   detalle) lleva `icon_key` del catalogo ya leido; sin consultas nuevas.
 # ============================================================
 
 from __future__ import annotations
@@ -282,7 +284,8 @@ def _componer(sesion: SesionMotor, ids: list[uuid.UUID]) -> dict[uuid.UUID, dict
         categoria = None
         if len(categorias) == 1:
             n = nodos[categorias[0]]
-            categoria = {"id": n["id"], "nombre": n["nombre"], "ruta": ruta_texto(n), "enabled": bool(n["enabled"])}
+            categoria = {"id": n["id"], "nombre": n["nombre"], "ruta": ruta_texto(n), "enabled": bool(n["enabled"]),
+                         "icon_key": n["icon_key"]}
         estado, tu_parte, pendiente = None, None, None
         if efs:
             estado = max((e[4] for e in efs), key=lambda s: _PEOR[s])
