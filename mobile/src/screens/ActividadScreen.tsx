@@ -499,7 +499,7 @@ function FilaVista(p: { f: FilaActividad; conFecha: boolean; ultima: boolean; on
       onPress={p.onPress}
       style={({ pressed }) => [s.fila, { borderBottomColor: c.separator, borderBottomWidth: p.ultima ? 0 : StyleSheet.hairlineWidth, opacity: pressed ? 0.7 : 1 }]}
     >
-      <IconoFila f={f} testID={`fila-icono-${f.id}`} />
+      <IconoFila f={f} testID={`actividad-icono-${f.id}`} />
       <View style={{ flex: 1, gap: 2 }}>
         <Text style={[tipo.body, { color: c.textPrimary }]} numberOfLines={1}>{titulo}</Text>
         {secundaria ? <Text style={[tipo.caption, { color: c.textSecondary }]} numberOfLines={1}>{secundaria}</Text> : null}

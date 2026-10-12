@@ -433,11 +433,11 @@ test('K-7: la fila y el detalle muestran el icono de su categoría; transferenci
   await pulsar('tab-DIA');
   await waitFor(() => expect(screen.getByTestId('fila-k1')).toBeTruthy());
   expect(glifoDe('compras.carrito')).toBe('cart-outline');
-  expect(glifo('fila-icono-k1')).toBe('cart-outline');
-  expect(glifo('fila-icono-k2')).toBe(categoriaIconoFallback);
-  expect(glifo('fila-icono-k3')).toBe('swap-horizontal');
-  expect(glifo('fila-icono-k4')).toBe(categoriaIconoFallback);
-  expect(glifo('fila-icono-k5')).toBe(categoriaIconoFallback);
+  expect(glifo('actividad-icono-k1')).toBe('cart-outline');
+  expect(glifo('actividad-icono-k2')).toBe(categoriaIconoFallback);
+  expect(glifo('actividad-icono-k3')).toBe('swap-horizontal');
+  expect(glifo('actividad-icono-k4')).toBe(categoriaIconoFallback);
+  expect(glifo('actividad-icono-k5')).toBe(categoriaIconoFallback);
   await pulsar('fila-k1');
   await waitFor(() => expect(screen.getByTestId('detalle-contenido')).toBeTruthy());
   expect(glifo('detalle-icono')).toBe('cart-outline');
