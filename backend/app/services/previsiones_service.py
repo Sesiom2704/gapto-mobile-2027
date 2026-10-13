@@ -31,6 +31,28 @@
 #   sigue siendo ABIERTA: no hay estado PARCIAL persistido. Y el primer hecho
 #   ACTIVO congela la expectativa poniendo `recalculo_automatico=false`, de
 #   modo que una version posterior de la regla ya no reescribe ese importe.
+# Version: 0.5.0
+#   0.5.0 (F04-R1 G-R1-D; F04-D058, AJ-F04R1-V11-01/02/04): ORDEN GLOBAL DE
+#   ADQUISICION, separado del de procesamiento: advisory INVERSIONES -> hechos
+#   (NKU, UUID) -> posiciones (NKU, id) -> reglas (FU, UUID; TODAS las
+#   implicadas) -> previsiones (FU, UUID). Primero se adquiere todo y despues
+#   se procesa en el orden semantico.
+#     - OP-17: hecho -> regla -> previsión; relee la previsión y el estado del
+#       hecho tras el lock.
+#     - corregir_vinculo: vinculo sin lock -> hechos viejo y nuevo -> reglas
+#       de origen y destino -> previsiones de origen y destino -> RELEE el
+#       vinculo y las reglas. Si cambio el hecho, la previsión o el conjunto de
+#       reglas: `ConjuntoCambiado` (reintento COMPLETO de la transaccion).
+#     - retirar_vinculo: vinculo -> regla -> previsión -> relee el vinculo.
+#     - impacto_correccion_ancla (OP-02/OP-03): conjunto de sucesores y
+#       reglas SIN lock -> reglas -> previsiones por UUID -> relee el conjunto
+#       (si cambio: `ConjuntoCambiado`) -> procesa en el orden CRONOLOGICO de
+#       siempre. `tocar_prevision` en conflicto ya no se ignora (conflicto,
+#       nunca exito) y `actualizar_prevision` solo sigue a un tocar correcto.
+#   `ConjuntoCambiado` lleva sqlstate 40001: la UnidadDeTrabajo reintenta la
+#   transaccion completa y, agotados los intentos, responde
+#   CONFLICTO_CONCURRENCIA («nada se ha persistido»). Nunca se continua con una
+#   proteccion incompleta. Resultados financieros identicos (oraculos F1).
 # Version: 0.4.0
 #   0.4.0 (F04-R1 G-R1-C; F04-D058): porcion acumulada de un hecho entre
 #   previsiones en OP-17 (y por tanto OP-22) y en corregir_vinculo
@@ -101,8 +123,29 @@ from app.repositories import auditoria_repository as auditoria
 from app.repositories import hechos_repository as repo_hechos
 from app.repositories import previsiones_repository as repo_prev
 from app.repositories import reglas_repository as repo_reglas
+from app.repositories import relaciones_repository as repo_rel
 
 _MONEDA_VALIDA = re.compile(r"^[A-Z]{3}$")
+
+
+class ConjuntoCambiado(Exception):
+    """F04-R1 G-R1-D: el conjunto de filas protegido cambio entre su lectura
+    y su adquisicion (vinculo movido de hecho o de previsión, reglas o
+    sucesores distintos). No se sigue con una proteccion incompleta: el
+    sqlstate 40001 hace que la UnidadDeTrabajo reintente la transaccion
+    COMPLETA, que vuelve a leer el conjunto y a adquirirlo en el orden global."""
+
+    sqlstate = "40001"
+
+
+def _bloquear_reglas(sesion: SesionMotor, reglas: Sequence[uuid.UUID]) -> None:
+    for regla_id in sorted(set(reglas), key=str):
+        repo_reglas.bloquear_regla(sesion, regla_id)
+
+
+def _regla_de(sesion: SesionMotor, prevision_id: uuid.UUID) -> uuid.UUID | None:
+    prevision = repo_prev.leer_prevision(sesion, prevision_id)
+    return None if prevision is None else prevision["regla_id"]
 
 
 class PrevisionesService:
@@ -747,10 +790,17 @@ class PrevisionesService:
 
         def operacion(sesion: SesionMotor) -> ResultadoPrevision:
             repo_hechos.exigir_contexto(sesion)
-            prevision = self._exigir_prevision(sesion, prevision_id)
-            regla_id = prevision["regla_id"]
+            # F04-R1 G-R1-D: conjunto sin lock -> hecho -> regla -> previsión.
+            regla_id = self._exigir_prevision(sesion, prevision_id)["regla_id"]
+            # Un hecho no visible no se bloquea; lo rechaza la validacion de abajo.
+            repo_rel.bloquear_hechos(sesion, [datos.hecho_id])
             if regla_id is not None:
                 repo_reglas.bloquear_regla(sesion, regla_id)
+            repo_prev.bloquear_prevision(sesion, prevision_id)
+            # Relectura de la previsión tras el lock (estado y recalculo).
+            prevision = self._exigir_prevision(sesion, prevision_id)
+            if prevision["regla_id"] != regla_id:  # pragma: no cover - la version es inmutable
+                raise ConjuntoCambiado()
 
             # Reintento exacto antes de la guarda de version, igual que en
             # F04-04: si el COMMIT confirmo y el cliente perdio la respuesta,
@@ -914,8 +964,16 @@ class PrevisionesService:
 
             origen_id = vinculo["prevision_id"]
             destino_id = nueva_prevision_id or origen_id
-            # Orden UUID para no introducir un ciclo de espera nuevo.
+            # F04-R1 G-R1-D: hechos (viejo y nuevo) -> reglas de origen y
+            # destino -> previsiones de origen y destino, cada nivel por UUID.
             afectadas = sorted({origen_id, destino_id}, key=str)
+            hechos = {vinculo["hecho_id"], nuevo_hecho_id or vinculo["hecho_id"]}
+            repo_rel.bloquear_hechos(sesion, sorted(hechos, key=str))
+            reglas = sorted(
+                {r for r in (_regla_de(sesion, p) for p in afectadas) if r is not None},
+                key=str,
+            )
+            _bloquear_reglas(sesion, reglas)
             for identificador in afectadas:
                 if repo_prev.bloquear_prevision(sesion, identificador) is None:
                     raise ErrorMotor(
@@ -923,6 +981,20 @@ class PrevisionesService:
                         "Alguna previsión implicada no existe o no es "
                         "accesible.",
                     )
+            # Relectura: si el vinculo cambio de hecho o de previsión, o cambio
+            # el conjunto de reglas, la proteccion adquirida no es la necesaria.
+            releido = repo_prev.leer_vinculo(sesion, vinculo_id)
+            if (
+                releido is None
+                or releido["hecho_id"] != vinculo["hecho_id"]
+                or releido["prevision_id"] != vinculo["prevision_id"]
+                or sorted(
+                    {r for r in (_regla_de(sesion, p) for p in afectadas) if r is not None},
+                    key=str,
+                ) != reglas
+            ):
+                raise ConjuntoCambiado()
+            vinculo = releido
 
             if nueva_prevision_id is not None:
                 destino = self._exigir_prevision(sesion, destino_id)
@@ -1026,7 +1098,14 @@ class PrevisionesService:
                     "El vinculo indicado no existe o no es accesible.",
                 )
             prevision_id = vinculo["prevision_id"]
-            self._exigir_prevision(sesion, prevision_id)
+            # F04-R1 G-R1-D: vinculo -> regla -> previsión -> relee el vinculo.
+            regla_id = self._exigir_prevision(sesion, prevision_id)["regla_id"]
+            if regla_id is not None:
+                repo_reglas.bloquear_regla(sesion, regla_id)
+            repo_prev.bloquear_prevision(sesion, prevision_id)
+            releido = repo_prev.leer_vinculo(sesion, vinculo_id)
+            if releido is None or releido["prevision_id"] != prevision_id:
+                raise ConjuntoCambiado()
             nueva_version = self._tocar(
                 sesion, prevision_id, prevision_row_version_esperada
             )
@@ -1863,6 +1942,21 @@ def exigir_porcion(
 # F04-D022 — impacto de una correccion de realidad sobre la cadena
 # ==================================================================
 
+def _conjunto_de_impacto(
+    sesion: SesionMotor, hecho_id: uuid.UUID
+) -> tuple[list[dict[str, Any]], list[uuid.UUID], list[uuid.UUID]]:
+    """(REALIZADAS en orden cronologico, reglas por UUID, sucesores por UUID)
+    que la propagacion de `hecho_id` puede tocar. Lectura sin lock."""
+    filas = repo_prev.rodantes_realizadas_de_hecho(sesion, hecho_id)
+    reglas = sorted({f["regla_id"] for f in filas}, key=str)
+    sucesores = set()
+    for fila in filas:
+        sucesor = repo_prev.sucesor_inmediato(sesion, fila["regla_id"], fila["fecha_objetivo"])
+        if sucesor is not None:
+            sucesores.add(sucesor["id"])
+    return filas, reglas, sorted(sucesores, key=str)
+
+
 def impacto_correccion_ancla(
     sesion: SesionMotor, hecho_id: uuid.UUID
 ) -> dict[str, Any]:
@@ -1890,7 +1984,22 @@ def impacto_correccion_ancla(
     propagadas: list[uuid.UUID] = []
     afectadas: list[uuid.UUID] = []
 
-    for fila in repo_prev.rodantes_realizadas_de_hecho(sesion, hecho_id):
+    # F04-R1 G-R1-D: adquisicion (reglas -> previsiones, por UUID) separada del
+    # procesamiento (orden cronologico de siempre). El conjunto se determina sin
+    # lock, se adquiere y se relee; si cambio, reintento completo.
+    filas, reglas, sucesores = _conjunto_de_impacto(sesion, hecho_id)
+    _bloquear_reglas(sesion, reglas)
+    for sucesor_id in sucesores:
+        repo_prev.bloquear_prevision(sesion, sucesor_id)
+    releido = _conjunto_de_impacto(sesion, hecho_id)
+    if (
+        [f["prevision_id"] for f in releido[0]] != [f["prevision_id"] for f in filas]
+        or releido[1:] != (reglas, sucesores)
+    ):
+        raise ConjuntoCambiado()
+    filas = releido[0]
+
+    for fila in filas:
         prevision_id = fila["prevision_id"]
         regla_id = fila["regla_id"]
         objetivo = fila["fecha_objetivo"]
@@ -1929,7 +2038,9 @@ def impacto_correccion_ancla(
         ):
             continue
 
-        repo_prev.tocar_prevision(sesion, sucesor["id"], detalle["row_version"])
+        # Un conflicto de version nunca es una actualizacion satisfactoria.
+        if repo_prev.tocar_prevision(sesion, sucesor["id"], detalle["row_version"]) is None:
+            raise ConjuntoCambiado()
         actualizada = repo_prev.actualizar_prevision(
             sesion,
             sucesor["id"],
