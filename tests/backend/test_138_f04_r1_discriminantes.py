@@ -26,6 +26,12 @@
 #   miembro del catalogo aun no existe y el test debe fallar por la
 #   conducta, no por un AttributeError.
 # Version: 0.1.0 (F04-R1 IMPL F1)
+# Version: 0.2.0 (F04-R1 IMPL F2, G-R1-A/B): OP-03 con dependencia y row_version
+#   desfasada (gana la dependencia); el detalle solo lista dependientes del
+#   mismo owner (una relacion de origen ajeno, solo posible con superusuario,
+#   ni se lista ni bloquea: la RLS de hecho_relaciones la oculta). Las filas de
+#   tipos reservados que crean los fixtures se BORRAN al terminar cada test:
+#   test_123 (N12) exige que la suite no deje ninguna.
 # ============================================================
 
 from __future__ import annotations
@@ -122,10 +128,25 @@ def vinculos_de(admin, owner, hecho_id) -> list[tuple]:
         return cur.fetchall()
 
 
+_RESERVADAS: list[uuid.UUID] = []
+
+
+@pytest.fixture(autouse=True)
+def _limpiar_reservadas(admin):
+    """N12 (test_123): ninguna fila de tipo reservado sobrevive al test que la creo."""
+    yield
+    if _RESERVADAS:
+        with admin.cursor() as cur:
+            cur.execute("RESET ROLE")
+            cur.execute("DELETE FROM gapto.hecho_relaciones WHERE id = ANY(%s)", (list(_RESERVADAS),))
+        _RESERVADAS.clear()
+
+
 def relacion_reservada(admin: psycopg.Connection, owner: uuid.UUID, origen: uuid.UUID, destino: uuid.UUID,
                        tipo: str = "REPERCUSION_DE") -> uuid.UUID:
     """Relacion de un tipo SIN escritor (REPERCUSION_DE, REVERSA_A, PARTE_DE): fixture gapto_owner."""
     relacion_id = uuid.uuid4()
+    _RESERVADAS.append(relacion_id)
     with admin.cursor() as cur:
         cur.execute("RESET ROLE")
         cur.execute("SET ROLE gapto_owner")
@@ -295,3 +316,37 @@ def test_l_multidivisa_y_segundo_vinculo(servicio, servicio_previsiones, context
         vincular(servicio_previsiones, contexto, p2, hecho, "10.0000", equivalencia=True)
     _rechazo_porcion(excinfo, "NO_DETERMINABLE")
     assert len(vinculos_de(admin, contexto.owner_user_id, hecho)) == 1
+
+
+# ==================================================================
+# F2 · orden de validacion y owner del detalle
+# ==================================================================
+def test_op03_dependencia_gana_a_la_version_desfasada(servicio, servicio_efectos, servicio_devoluciones,
+                                                     contexto, admin):
+    original = crear_origen(servicio, servicio_efectos, contexto)
+    devolucion = datos_devolucion(original)
+    servicio_devoluciones.devolver(contexto, devolucion)
+    with pytest.raises(ErrorMotor) as excinfo:
+        servicio.anular_hecho(contexto, hecho_id=original,
+                              row_version_esperada=version_hecho(admin, contexto.owner_user_id, original) + 7,
+                              motivo_anulacion="version vieja")
+    _rechazo_dependencias(excinfo)
+    assert excinfo.value.contexto_extra["dependientes"] == [
+        {"hecho_id": str(devolucion.hecho_id), "tipo_relacion": "DEVOLUCION_DE"}]
+
+
+def test_op03_detalle_solo_lista_dependientes_del_mismo_owner(servicio, contexto, admin, otro_owner):
+    destino = hecho_simple(servicio, contexto)
+    propio = hecho_simple(servicio, contexto)
+    relacion_reservada(admin, contexto.owner_user_id, propio, destino, "PARTE_DE")
+    ajeno = hecho_simple(servicio, ContextoOperacion.de_usuario(otro_owner))
+    with admin.cursor() as cur:  # solo posible con superusuario: el WITH CHECK exige el mismo owner
+        cur.execute("RESET ROLE")
+        ajena = uuid.uuid4()
+        _RESERVADAS.append(ajena)
+        cur.execute("INSERT INTO gapto.hecho_relaciones (id, hecho_origen_id, hecho_destino_id, tipo_relacion) "
+                    "VALUES (%s, %s, %s, 'REPERCUSION_DE')", (ajena, ajeno, destino))
+    with pytest.raises(ErrorMotor) as excinfo:
+        anular(servicio, contexto, admin, destino)
+    _rechazo_dependencias(excinfo)
+    assert excinfo.value.contexto_extra["dependientes"] == [{"hecho_id": str(propio), "tipo_relacion": "PARTE_DE"}]

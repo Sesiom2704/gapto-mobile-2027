@@ -20,6 +20,14 @@
 #       asi que se falla cerrado en vez de recalcular nada;
 #     - OP-03, ante realidad ya vinculada: entonces el hecho ocurrio y lo que
 #       corresponde es devolucion o reversion, que pertenecen a F04-06.
+# Version: 0.9.0
+#   0.9.0 (F04-R1 G-R1-A; F04-D058): OP-03 rechaza anular el hecho X si existe
+#   una relacion de hecho_relaciones con destino X, de CUALQUIER tipo, cuyo
+#   origen esta ACTIVO (dependencias activas). Orden de validacion con X ya
+#   bloqueado: estado (idempotencia) -> realidad asociada -> dependencias
+#   activas -> row_version. Codigo HECHO_CON_REALIDAD_ASOCIADA con
+#   contexto_extra {motivo: DEPENDENCIAS_ACTIVAS, dependientes: [{hecho_id,
+#   tipo_relacion}]}, solo del mismo owner. Ser origen nunca bloquea.
 # Version: 0.8.0
 #   0.8.0 (F04-D053 B1 · B8): OP-02 y OP-03 adquieren la raiz de bloqueo de
 #   la posicion (hecho FOR NO KEY UPDATE -> posiciones que alimenta) antes
@@ -401,6 +409,24 @@ class HechosService:
                     CodigoError.HECHO_CON_REALIDAD_ASOCIADA,
                     "El hecho tiene realidad vinculada: no es un hecho que "
                     "nunca debio existir.",
+                )
+
+            # F04-R1 G-R1-A: un hecho del que dependen relaciones activas no se
+            # anula (la devolucion, el reembolso o la correccion seguirian
+            # contando sobre un original inexistente).
+            dependientes = repo.dependencias_activas(sesion, hecho_id)
+            if dependientes:
+                raise ErrorMotor(
+                    CodigoError.HECHO_CON_REALIDAD_ASOCIADA,
+                    "Otros hechos activos dependen de este hecho: no se puede "
+                    "anular mientras sigan activos.",
+                    contexto_extra={
+                        "motivo": "DEPENDENCIAS_ACTIVAS",
+                        "dependientes": [
+                            {"hecho_id": str(origen), "tipo_relacion": tipo}
+                            for origen, tipo in dependientes
+                        ],
+                    },
                 )
 
             if row_version_actual != row_version_esperada:

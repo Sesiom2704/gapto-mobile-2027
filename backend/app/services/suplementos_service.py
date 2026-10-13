@@ -31,6 +31,10 @@
 #   INV-08 · UN HECHO POR PERIODO. Un efecto no tiene fecha propia: la toma de
 #   su hecho. Una realidad que abarca varios periodos economicos exige un hecho
 #   por periodo, y este servicio crea exactamente uno.
+# Version: 0.5.0
+#   0.5.0 (F04-R1 G-R1-B; F04-D058): OP-18 con relacion relee el estado del
+#   hecho ajustado tras su lock y exige ACTIVO ->
+#   OPERACION_NO_PERMITIDA_EN_ESTADO, antes de escribir nada.
 # Version: 0.4.0
 #   0.4.0 (mandato F04 R1+R2 v0.3 §9): sin cambio de codigo propio; hereda de
 #   `resolver_decision_historica` el rechazo de `NO_APLICA` con GASTO/INGRESO.
@@ -110,6 +114,15 @@ class SuplementosService:
                     raise ErrorMotor(
                         CodigoError.AGREGADO_NO_ENCONTRADO,
                         "El hecho ajustado no existe o no es accesible.",
+                    )
+                # F04-R1 G-R1-B: relectura tras el lock; un hecho ANULADO no
+                # puede recibir una relacion CORRIGE_A activa.
+                ajustado = repo_hechos.leer_estado(sesion, datos.hecho_ajustado_id)
+                if ajustado is None or ajustado[1] != "ACTIVO":
+                    raise ErrorMotor(
+                        CodigoError.OPERACION_NO_PERMITIDA_EN_ESTADO,
+                        "El hecho ajustado esta anulado: no puede corregirse "
+                        "con un suplemento.",
                     )
 
             tipo_hecho_id = repo_hechos.resolver_tipo_hecho(

@@ -65,6 +65,12 @@
 #   Reapertura auditable (B1): `reabrir_posicion` es la unica transicion
 #   CERRADA -> ACTIVA; todo cierre se audita CERRAR y toda reapertura
 #   REABRIR, ambos bajo la raiz B8 (invariante de alternancia de R-Q2).
+# Version: 0.8.0
+#   0.8.0 (F04-R1 G-R1-B; F04-D058): OP-14 con hecho causal incluye ese hecho
+#   en la raiz (`adquirir_raiz(hechos=[causal], posiciones=[...],
+#   advisory=True)`: advisory -> hechos -> posiciones), lo relee tras el lock
+#   y exige ACTIVO -> OPERACION_NO_PERMITIDA_EN_ESTADO. Ninguna relacion activa
+#   apunta a un hecho ANULADO.
 # Version: 0.7.0
 #   0.7.0 (F04-D055 B1 · Parte B): `reabrir_posicion` (B1, B4/R-Q2) y
 #   `_cerrar` audita CERRAR en lugar de ACTUALIZAR (B2).
@@ -842,8 +848,11 @@ class PosicionesService:
             owner = repo_hechos.exigir_contexto(sesion)
             # F04-D053 B8: advisory (escribe hecho_entidades, D-080/D-158) ->
             # raiz de la posicion, ANTES de leer el saldo y antes del movimiento.
+            # F04-R1 G-R1-B: el hecho causal de OP-14 entra en la raiz (orden
+            # advisory -> hechos -> posiciones) y se relee tras el lock.
+            hechos_raiz = [relacion[0]] if relacion[0] is not None else []
             integridad_posicion.adquirir_raiz(
-                sesion, owner, posiciones=[entidad_id], advisory=True
+                sesion, owner, hechos=hechos_raiz, posiciones=[entidad_id], advisory=True
             )
 
             artefactos = self._artefactos_delta(
@@ -1105,10 +1114,18 @@ class PosicionesService:
         hecho_causal: uuid.UUID,
         importe: decimal.Decimal,
     ) -> None:
-        if repo_hechos.leer_estado(sesion, hecho_causal) is None:
+        estado_causal = repo_hechos.leer_estado(sesion, hecho_causal)
+        if estado_causal is None:
             raise ErrorMotor(
                 CodigoError.AGREGADO_NO_ENCONTRADO,
                 "El hecho causal indicado no existe o no es accesible.",
+            )
+        # F04-R1 G-R1-B: el causal ya esta bloqueado en la raiz; un hecho
+        # ANULADO no puede recibir una relacion activa.
+        if estado_causal[1] != "ACTIVO":
+            raise ErrorMotor(
+                CodigoError.OPERACION_NO_PERMITIDA_EN_ESTADO,
+                "El hecho causal esta anulado: no puede recibir un reembolso.",
             )
         snapshot = repo_pos.insertar_relacion_si_no_existe(
             sesion,

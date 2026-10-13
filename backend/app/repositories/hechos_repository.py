@@ -24,6 +24,11 @@
 #   4) El snapshot EXCLUYE created_at, updated_at y row_version: son volatiles
 #      y romperian la comparabilidad entre el snapshot solicitado y el
 #      auditado. Exclusion deliberada.
+# Version: 0.3.0
+#   0.3.0 (F04-R1 G-R1-A; F04-D058): `dependencias_activas`, relaciones de
+#   CUALQUIER tipo cuyo destino es el hecho y cuyo origen esta ACTIVO. Bajo
+#   RLS solo son visibles las de origen del owner (policy tenant_isolation de
+#   hecho_relaciones), asi que la lista nunca expone hechos de otro owner.
 # Version: 0.2.0
 #   0.2.0 (F04-02): se anade `tocar_raiz`, que incrementa UNA vez la version de
 #   la raiz del agregado con la guarda en SQL. Lo usan OP-04 y OP-05, cuyas
@@ -382,6 +387,31 @@ def tiene_realidad_asociada(sesion: SesionMotor, hecho_id: uuid.UUID) -> bool:
         (hecho_id, hecho_id),
     )
     return bool(fila and fila[0])
+
+
+def dependencias_activas(sesion: SesionMotor, hecho_id: uuid.UUID) -> list[tuple[uuid.UUID, str]]:
+    """F04-R1 G-R1-A: (hecho_origen_id, tipo_relacion) de las relaciones con
+    destino `hecho_id`, de CUALQUIER tipo, cuyo origen esta ACTIVO.
+
+    Una relacion solo es inactiva si su origen esta ANULADO; ningun otro
+    motivo la desactiva, tampoco su tipo. Ser origen nunca cuenta. El filtro de
+    owner es explicito ademas de la RLS: el detalle solo lista dependientes
+    del mismo owner.
+    """
+    with sesion.conexion.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT r.hecho_origen_id, r.tipo_relacion
+              FROM gapto.hecho_relaciones r
+              JOIN gapto.hechos_financieros o ON o.id = r.hecho_origen_id
+             WHERE r.hecho_destino_id = %s::uuid
+               AND o.estado = 'ACTIVO'
+               AND o.owner_user_id = current_setting('gapto.owner_user_id')::uuid
+             ORDER BY r.hecho_origen_id, r.tipo_relacion
+            """,
+            (hecho_id,),
+        )
+        return [(f[0], f[1]) for f in cursor.fetchall()]
 
 
 def correccion_ya_aplicada(
