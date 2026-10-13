@@ -34,6 +34,11 @@
 #   cerrar_posicion; relectura con el conjunto cambiado (el vinculo cambia de
 #   previsión o de hecho entre la lectura y la adquisicion: 40001 y reintento
 #   completo, nunca exito con una proteccion incompleta).
+# Version: 0.3.0 (F04-R1 CORR paso 2; STOP_F04-R1_F6): par OP-22 con
+#   marcar_realizada=True frente a OP-17 sobre la MISMA previsión y version, con
+#   el ganador forzado por barrera en los dos ordenes. Oraculo IL4: el perdedor
+#   recibe VERSION_DESFASADA (nunca ESTADO_PREVISION_INCOMPATIBLE), un unico
+#   vinculo, nada del perdedor persiste y, si pierde OP-22, ni rastro de su hecho.
 # Version: 0.2.0 (F04-R1 IMPL F5: pares seriales, posiciones y relectura)
 # Version: 0.1.0 (F04-R1 IMPL F1)
 # ============================================================
@@ -397,6 +402,45 @@ def esc_op17_op22(s):
                                                    marcar_realizada=False)))}, None)
 
 
+def esc_op22_realizada_op17(s):
+    """IL4 forzado: OP-22 deja la previsión REALIZADA si gana; OP-17 suelto con la misma version."""
+    pm = prevision_manual(s.prev, s.ctx)
+    suelto = hecho_simple(s.hec, s.ctx)
+    v = _version_prev(s, pm)
+    datos = hecho_op22(total="76.1000")
+    vinculo_op17, vinculo_op22 = uuid.uuid4(), uuid.uuid4()
+
+    def op17():
+        return s.prev.vincular_realidad(
+            s.ctx, prevision_id=pm, row_version_esperada=v,
+            datos=DatosVinculo(vinculo_id=vinculo_op17, hecho_id=suelto, importe_asignado=D("76.1000"),
+                               marcar_realizada=False))
+
+    def comprobar(traza):
+        with s.admin.cursor() as cur:
+            cur.execute("RESET ROLE")
+            cur.execute("SELECT id FROM gapto.prevision_hechos WHERE prevision_id = %s", (pm,))
+            vinculos = [f[0] for f in cur.fetchall()]
+            cur.execute("SELECT count(*) FROM gapto.hechos_financieros WHERE id = %s", (datos.hecho_id,))
+            hechos_op22 = cur.fetchone()[0]
+            cur.execute("SELECT estado FROM gapto.previsiones WHERE id = %s", (pm,))
+            estado = cur.fetchone()[0]
+        traza.update({"vinculos": len(vinculos), "hecho_op22": hechos_op22, "estado_prevision": estado})
+        assert len(vinculos) == 1, traza
+        if traza["OP-22"] == OK:
+            assert vinculos == [vinculo_op22] and hechos_op22 == 1 and estado == "REALIZADA", traza
+        else:
+            assert vinculos == [vinculo_op17] and hechos_op22 == 0 and estado == "ABIERTA", traza
+
+    return ([("previsiones", pm)],
+            {"OP-17": op17,
+             "OP-22": lambda: s.op22.registrar_hecho_compuesto(s.ctx, DatosHechoCompuesto(
+                 hecho=datos, efectos=[efecto("GASTO", D("76.1000"))],
+                 prevision=DatosPrevisionCompuesta(prevision_id=pm, prevision_row_version_esperada=v,
+                                                   vinculo_id=vinculo_op22, importe_asignado=D("76.1000"),
+                                                   marcar_realizada=True)))}, comprobar)
+
+
 def _sin_exceso(s, hecho_id, tope="76.1000"):
     def comprobar(traza):
         total = sum((fila[1] for fila in vinculos_de(s.admin, s.owner, hecho_id)), D("0"))
@@ -547,6 +591,9 @@ ESPERADO = {
     "op17_op14": (esc_op17_op14, {"OP-17": {"OP-17": OK, "OP-14": OK}, "OP-14": {"OP-14": OK, "OP-17": OK}}),
     "op17_op22": (esc_op17_op22, {"OP-17": {"OP-17": OK, "OP-22": DESFASADA},
                                   "OP-22": {"OP-22": OK, "OP-17": DESFASADA}}),
+    # IL4 forzado (CORR): el perdedor SIEMPRE VERSION_DESFASADA, tambien cuando OP-22 deja la previsión REALIZADA.
+    "op22r_op17": (esc_op22_realizada_op17, {"OP-17": {"OP-17": OK, "OP-22": DESFASADA},
+                                             "OP-22": {"OP-22": OK, "OP-17": DESFASADA}}),
     "dos_op17": (esc_dos_op17, {"OP-17a": {"OP-17a": OK, "OP-17b": PORCION},
                                 "OP-17b": {"OP-17b": OK, "OP-17a": PORCION}}),
     "cv_cruzados": (esc_cv_cruzados, {"cv1": {"cv1": OK, "cv2": DESFASADA}, "cv2": {"cv2": OK, "cv1": DESFASADA}}),

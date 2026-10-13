@@ -22,11 +22,13 @@
 #   compensado, R12 sin rama NO_DETERMINABLE, R13 NULL como 0), G-R1-D (R14
 #   OP-17 sin lock del hecho, R15 corregir_vinculo sin relectura, R16
 #   adquisicion de la propagacion en el orden de procesamiento, R17 retorno de
-#   tocar_prevision ignorado).
+#   tocar_prevision ignorado; R18 OP-17 con el estado releido antes que la
+#   version, la causa del KO IL4 de F6).
 #   Uso: GAPTO_TEST_DATABASE_URL=<base desechable> GAPTO_F04R1_CONCURRENCIA=1
 #        python scripts/dev/mutantes_f04_r1.py [--solo ID,ID]
 #   Sin GAPTO_F04R1_CONCURRENCIA=1 los discriminantes de test_139 se omiten.
 #   No ejecutar en paralelo con otro arnes ni con la suite sobre el mismo arbol.
+# Version: 0.2.0 (F04-R1 CORR paso 1.3): mutante R18.
 # Version: 0.1.0 (F04-R1 IMPL F5)
 # ============================================================
 
@@ -122,6 +124,12 @@ MUTANTES = [
      [f"{T139}test_c1_corregir_vinculo_frente_a_propagacion_de_op02", par("op17_op02", "OP-17")],
      "con G-R1-D el sucesor ya esta bajo FU y su row_version se lee despues del lock y de la relectura del "
      "conjunto: tocar_prevision no puede fallar. Es defensa en profundidad; no hay entrelazado que lo alcance"),
+    ("R18", "OP-17 con el estado releido antes que la version (KO IL4 de F6)",
+     [(PREV, "            if prevision[\"row_version\"] != row_version_esperada:\n",
+       "            if prevision[\"estado\"] != ABIERTA:\n"
+       "                raise ErrorMotor(CodigoError.ESTADO_PREVISION_INCOMPATIBLE, \"mutante R18\")\n"
+       "            if prevision[\"row_version\"] != row_version_esperada:\n")],
+     [par("op22r_op17", "OP-22")], None),
 ]
 
 

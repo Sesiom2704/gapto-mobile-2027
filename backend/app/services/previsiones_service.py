@@ -31,6 +31,16 @@
 #   sigue siendo ABIERTA: no hay estado PARCIAL persistido. Y el primer hecho
 #   ACTIVO congela la expectativa poniendo `recalculo_automatico=false`, de
 #   modo que una version posterior de la regla ya no reescribe ese importe.
+# Version: 0.5.1
+#   0.5.1 (F04-R1 CORR; STOP_F04-R1_F6, IL4): OP-17 recupera la precedencia de
+#   errores de la base (5536bb3) sin perder la relectura de G-R1-D. El estado
+#   que decide ESTADO_PREVISION_INCOMPATIBLE es el de la lectura PREVIA (como en
+#   la base); la version se compara con la previsión RELEIDA tras el lock y en
+#   el mismo punto de la cadena de guardas que en la base (justo antes de
+#   tocar); el estado releido solo se comprueba DESPUES de la version, como
+#   defensa. Un perdedor concurrente (IL4) vuelve a recibir VERSION_DESFASADA y
+#   el caso secuencial (version obsoleta sobre una REALIZADA) sigue en
+#   ESTADO_PREVISION_INCOMPATIBLE. Sin cambios en el orden de adquisicion.
 # Version: 0.5.0
 #   0.5.0 (F04-R1 G-R1-D; F04-D058, AJ-F04R1-V11-01/02/04): ORDEN GLOBAL DE
 #   ADQUISICION, separado del de procesamiento: advisory INVERSIONES -> hechos
@@ -791,13 +801,15 @@ class PrevisionesService:
         def operacion(sesion: SesionMotor) -> ResultadoPrevision:
             repo_hechos.exigir_contexto(sesion)
             # F04-R1 G-R1-D: conjunto sin lock -> hecho -> regla -> previsión.
-            regla_id = self._exigir_prevision(sesion, prevision_id)["regla_id"]
+            # La lectura PREVIA decide la guarda de estado (precedencia de la base).
+            previa = self._exigir_prevision(sesion, prevision_id)
+            regla_id = previa["regla_id"]
             # Un hecho no visible no se bloquea; lo rechaza la validacion de abajo.
             repo_rel.bloquear_hechos(sesion, [datos.hecho_id])
             if regla_id is not None:
                 repo_reglas.bloquear_regla(sesion, regla_id)
             repo_prev.bloquear_prevision(sesion, prevision_id)
-            # Relectura de la previsión tras el lock (estado y recalculo).
+            # Relectura de la previsión tras el lock (version, estado y recalculo).
             prevision = self._exigir_prevision(sesion, prevision_id)
             if prevision["regla_id"] != regla_id:  # pragma: no cover - la version es inmutable
                 raise ConjuntoCambiado()
@@ -816,7 +828,7 @@ class PrevisionesService:
                     return self._resultado_actual(sesion, prevision_id, idempotente=True)
                 raise self._conflicto_identidad()
 
-            if prevision["estado"] != ABIERTA:
+            if previa["estado"] != ABIERTA:
                 raise ErrorMotor(
                     CodigoError.ESTADO_PREVISION_INCOMPATIBLE,
                     "Solo una previsión ABIERTA admite vincular realidad.",
@@ -861,6 +873,21 @@ class PrevisionesService:
                 solicitado=(datos.importe_asignado, prevision["moneda"]),
             )
 
+            # Guarda de version sobre la previsión RELEIDA, en el punto de la base
+            # (justo antes de tocar). Toda transicion de estado incrementa
+            # row_version (corr\estado_row_version.md): con la version igual, el
+            # estado releido es el previo; la guarda de abajo es solo defensa.
+            if prevision["row_version"] != row_version_esperada:
+                raise ErrorMotor(
+                    CodigoError.VERSION_DESFASADA,
+                    "La previsión ha cambiado desde la version que conoce el "
+                    "llamante.",
+                )
+            if prevision["estado"] != ABIERTA:
+                raise ErrorMotor(
+                    CodigoError.ESTADO_PREVISION_INCOMPATIBLE,
+                    "Solo una previsión ABIERTA admite vincular realidad.",
+                )
             nueva_version = self._tocar(sesion, prevision_id, row_version_esperada)
 
             snapshot = repo_prev.insertar_vinculo(

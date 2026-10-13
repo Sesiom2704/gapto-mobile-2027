@@ -42,6 +42,9 @@
 # Version: 0.4.0 (F04-R1 IMPL F5, impacto en F05-06 M5): OP-22 con una
 #   asignacion mayor que el total se rechaza y no deja nada (ni el hecho); «Ya
 #   lo registre» (OP-17) sobre un hecho que OP-22 ya asigno entero se rechaza.
+# Version: 0.5.0 (F04-R1 CORR paso 2, caso secuencial de 1.1): OP-17 con una
+#   version obsoleta sobre una previsión ya REALIZADA -> ESTADO_PREVISION_INCOMPATIBLE
+#   (precedencia de la base: el estado de la lectura previa gana a la version).
 # ============================================================
 
 from __future__ import annotations
@@ -507,3 +510,24 @@ def test_m5_ya_lo_registre_sobre_un_hecho_ya_asignado_entero(op22, servicio_prev
         vincular(servicio_previsiones, contexto, p2, hecho, "0.0001")
     _rechazo_porcion(excinfo, "EXCEDE")
     assert vinculos_de(admin, contexto.owner_user_id, hecho) == [(p1, D("100.0000"))]
+
+
+# ==================================================================
+# F04-R1 CORR · precedencia de OP-17 (caso secuencial de 1.1)
+# ==================================================================
+def test_corr_version_obsoleta_sobre_prevision_realizada(servicio, servicio_previsiones, contexto, admin):
+    """Secuencial, igual que en 5536bb3: el estado (lectura previa) gana a la version obsoleta."""
+    prevision = prevision_manual(servicio_previsiones, contexto)
+    obsoleta = servicio_previsiones.estado_de(contexto, prevision).row_version
+    primero, segundo = hecho_simple(servicio, contexto), hecho_simple(servicio, contexto)
+    servicio_previsiones.vincular_realidad(
+        contexto, prevision_id=prevision, row_version_esperada=obsoleta,
+        datos=DatosVinculo(vinculo_id=uuid.uuid4(), hecho_id=primero, importe_asignado=D("76.1000"),
+                           marcar_realizada=True))
+    with pytest.raises(ErrorMotor) as excinfo:
+        servicio_previsiones.vincular_realidad(
+            contexto, prevision_id=prevision, row_version_esperada=obsoleta,
+            datos=DatosVinculo(vinculo_id=uuid.uuid4(), hecho_id=segundo, importe_asignado=D("10.0000"),
+                               marcar_realizada=False))
+    assert excinfo.value.codigo is CodigoError.ESTADO_PREVISION_INCOMPATIBLE
+    assert vinculos_de(admin, contexto.owner_user_id, segundo) == []
