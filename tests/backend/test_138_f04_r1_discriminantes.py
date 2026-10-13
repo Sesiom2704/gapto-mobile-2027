@@ -39,6 +39,9 @@
 #   NO_DETERMINABLE sin fabricar capacidad; vinculo en la moneda del hecho
 #   seguido de otro en una moneda distinta. El exceso previo se crea por la via
 #   real que lo permite (OP-02 rebaja importe_total; R1-OBS-01).
+# Version: 0.4.0 (F04-R1 IMPL F5, impacto en F05-06 M5): OP-22 con una
+#   asignacion mayor que el total se rechaza y no deja nada (ni el hecho); «Ya
+#   lo registre» (OP-17) sobre un hecho que OP-22 ya asigno entero se rechaza.
 # ============================================================
 
 from __future__ import annotations
@@ -460,3 +463,47 @@ def test_vinculo_en_la_moneda_del_hecho_y_otro_en_moneda_distinta(servicio, serv
         vincular(servicio_previsiones, contexto, p_eur, hecho, "10.0000", equivalencia=True)
     _rechazo_porcion(excinfo, "NO_DETERMINABLE")
     assert excinfo.value.contexto_extra["tope"] == {"importe": "100.0000", "moneda": "USD"}
+
+
+# ==================================================================
+# Impacto en F05-06 M5 (confirmacion de previsiones: OP-22 + OP-17)
+# ==================================================================
+from app.core.modelos_compuesto import DatosHechoCompuesto, DatosPrevisionCompuesta  # noqa: E402
+from f08_motor import efecto  # noqa: E402
+from test_140_f04_r3_op22 import hecho as hecho_op22, op22  # noqa: E402,F401
+
+
+def _op22_con_prevision(op22, servicio_previsiones, contexto, prevision_id, asignado: str):
+    datos = hecho_op22()
+    op22.registrar_hecho_compuesto(contexto, DatosHechoCompuesto(
+        hecho=datos, efectos=[efecto("GASTO", D("100.0000"))],
+        prevision=DatosPrevisionCompuesta(
+            prevision_id=prevision_id,
+            prevision_row_version_esperada=servicio_previsiones.estado_de(contexto, prevision_id).row_version,
+            vinculo_id=uuid.uuid4(), importe_asignado=D(asignado), marcar_realizada=False)))
+    return datos.hecho_id
+
+
+def test_m5_op22_con_asignacion_mayor_que_el_total_no_deja_nada(op22, servicio_previsiones, contexto, admin):
+    prevision = prevision_manual(servicio_previsiones, contexto)
+    datos = hecho_op22()
+    with pytest.raises(ErrorMotor) as excinfo:
+        op22.registrar_hecho_compuesto(contexto, DatosHechoCompuesto(
+            hecho=datos, efectos=[efecto("GASTO", D("100.0000"))],
+            prevision=DatosPrevisionCompuesta(
+                prevision_id=prevision,
+                prevision_row_version_esperada=servicio_previsiones.estado_de(contexto, prevision).row_version,
+                vinculo_id=uuid.uuid4(), importe_asignado=D("100.0001"), marcar_realizada=True)))
+    _rechazo_porcion(excinfo, "EXCEDE")
+    assert leer_fila(admin, contexto.owner_user_id, "SELECT count(*) FROM gapto.hechos_financieros WHERE id = %s",
+                     (datos.hecho_id,)) == (0,)
+    assert servicio_previsiones.estado_de(contexto, prevision).estado == "ABIERTA"
+
+
+def test_m5_ya_lo_registre_sobre_un_hecho_ya_asignado_entero(op22, servicio_previsiones, contexto, admin):
+    p1, p2 = prevision_manual(servicio_previsiones, contexto), prevision_manual(servicio_previsiones, contexto)
+    hecho = _op22_con_prevision(op22, servicio_previsiones, contexto, p1, "100.0000")
+    with pytest.raises(ErrorMotor) as excinfo:
+        vincular(servicio_previsiones, contexto, p2, hecho, "0.0001")
+    _rechazo_porcion(excinfo, "EXCEDE")
+    assert vinculos_de(admin, contexto.owner_user_id, hecho) == [(p1, D("100.0000"))]

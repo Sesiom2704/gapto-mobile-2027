@@ -23,6 +23,18 @@
 #   (reglas y previsiones por UUID) debe serializar sin 40P01.
 #   C2 (dos reglas frente a recalcular_futuras/corregir_estado_terminal):
 #   NO_REPRODUCIBLE sobre la base (ver HANDOFF_F04-R1_F1.md).
+#
+#   F5 · pares SERIALES en los dos ordenes (`serie`): una barrera retiene el
+#   primer recurso comun; el primer paso queda esperando, despues el segundo, y
+#   se libera. El resultado de cada orden es fijo (ESPERADO) y en ninguno hay
+#   40P01 ni deadlocks. Pares: OP-17 frente a OP-02/03/13/14/22; dos OP-17 sobre
+#   el mismo hecho; corregir_vinculo cruzados, frente a retirar_vinculo y frente
+#   a OP-17; OP-03 frente a OP-13/14/18; ruta con posiciones H->E->R->P (OP-02
+#   de un hecho de posicion que realiza una RODANTE) frente a OP-09, OP-14 y
+#   cerrar_posicion; relectura con el conjunto cambiado (el vinculo cambia de
+#   previsión o de hecho entre la lectura y la adquisicion: 40001 y reintento
+#   completo, nunca exito con una proteccion incompleta).
+# Version: 0.2.0 (F04-R1 IMPL F5: pares seriales, posiciones y relectura)
 # Version: 0.1.0 (F04-R1 IMPL F1)
 # ============================================================
 
@@ -201,3 +213,385 @@ def test_c1_corregir_vinculo_frente_a_propagacion_de_op02(v_en, dsn, servicio, s
     assert op02.error is None, traza
     assert cv.error in (None, "VERSION_DESFASADA"), traza
     assert not traza["reintentos_40P01"] and traza["deadlocks_delta"] == 0, traza
+
+
+
+# ------------------------------------------------------------------ F5 · pares seriales
+from types import SimpleNamespace  # noqa: E402
+
+from app.core.modelos_compuesto import DatosHechoCompuesto, DatosPrevisionCompuesta  # noqa: E402
+from app.core.modelos_posicion import (  # noqa: E402
+    TIPO_OBLIGACION, DatosCierre, DatosCondonacionObligacion, DatosReembolso)
+from app.core.modelos_prevision import DatosVinculo  # noqa: E402
+from app.core.modelos_tesoreria import DatosConciliacion, DatosMovimiento  # noqa: E402
+from app.services.compuesto_service import HechosCompuestosService  # noqa: E402
+from app.services.previsiones_service import impacto_correccion_ancla  # noqa: E402
+from conftest import leer_fila  # noqa: E402
+from f08_motor import efecto  # noqa: E402
+from test_109_op12_posiciones import CONDONACION, COBRO, PAGO, alta, delta, tesoreria_nueva  # noqa: E402
+from test_117_op13_devolucion import crear_origen, datos_devolucion  # noqa: E402
+from test_118_op18_suplemento import datos_suplemento  # noqa: E402
+from test_138_f04_r1_discriminantes import hecho_simple, vinculos_de  # noqa: E402
+from test_140_f04_r3_op22 import hecho as hecho_op22  # noqa: E402
+
+OK = "OK"
+PORCION = "PORCION_DE_REALIDAD_EXCEDIDA"
+DESFASADA = "VERSION_DESFASADA"
+DEPENDENCIAS = "HECHO_CON_REALIDAD_ASOCIADA"
+ESTADO = "OPERACION_NO_PERMITIDA_EN_ESTADO"
+
+
+def reintentos(caplog, sqlstate: str) -> int:
+    return sum(1 for r in caplog.records if r.name == LOGGER and getattr(r, "sqlstate", None) == sqlstate)
+
+
+def serie(dsn, caplog, barreras, primero, segundo) -> dict:
+    """Ejecuta dos pasos en serie determinista detras de las barreras. Devuelve la traza."""
+    caplog.clear()
+    antes = deadlocks(dsn)
+    retenidas = [Barrera(dsn, tabla, ident) for tabla, ident in barreras]
+    pasos = [Paso(nombre, fn) for nombre, fn in (primero, segundo)]
+    traza: dict = {"orden": [primero[0], segundo[0]]}
+    try:
+        pasos[0].start()
+        traza["primero_espera"] = esperar(lambda: len(bloqueados(dsn)) >= 1)
+        pasos[1].start()
+        traza["segundo_espera"] = esperar(lambda: len(bloqueados(dsn)) >= 2)
+        for b in retenidas:
+            b.liberar()
+        for p in pasos:
+            p.join(60)
+    finally:
+        for b in retenidas:
+            b.liberar()
+    time.sleep(1.1)  # las estadisticas acumuladas se publican con retardo
+    for p in pasos:
+        traza[p.name] = p.error or OK
+    traza.update({"vivos": [p.name for p in pasos if p.is_alive()],
+                  "reintentos_40P01": reintentos(caplog, "40P01"),
+                  "reintentos_40001": reintentos(caplog, "40001"),
+                  "deadlocks_delta": deadlocks(dsn) - antes})
+    traza["resultados"] = {p.name: p.resultado for p in pasos}
+    return traza
+
+
+@pytest.fixture()
+def s(dsn, unidad, servicio, servicio_reglas, servicio_previsiones, servicio_efectos, servicio_devoluciones,
+      servicio_posiciones, servicio_suplementos, servicio_tesoreria, contexto, admin, contraparte, cuenta):
+    return SimpleNamespace(
+        dsn=dsn, hec=servicio, reg=servicio_reglas, prev=servicio_previsiones, efe=servicio_efectos,
+        dev=servicio_devoluciones, pos=servicio_posiciones, sup=servicio_suplementos, tes=servicio_tesoreria,
+        op22=HechosCompuestosService(unidad, impacto_ancla=impacto_correccion_ancla),
+        ctx=contexto, admin=admin, owner=contexto.owner_user_id, contraparte=contraparte, cuenta=cuenta)
+
+
+def _version_prev(s, p) -> int:
+    return s.prev.estado_de(s.ctx, p).row_version
+
+
+def _version_entidad(s, entidad_id) -> int:
+    return leer_fila(s.admin, s.owner, "SELECT row_version FROM gapto.entidades WHERE id = %s", (entidad_id,))[0]
+
+
+def _op02(s, hecho_id, campos):
+    v = version_hecho(s.admin, s.owner, hecho_id)
+    return lambda: s.hec.corregir_hecho(s.ctx, hecho_id=hecho_id, row_version_esperada=v, campos=campos,
+                                        motivo="F04-R1 F5")
+
+
+def _op03(s, hecho_id):
+    v = version_hecho(s.admin, s.owner, hecho_id)
+    return lambda: s.hec.anular_hecho(s.ctx, hecho_id=hecho_id, row_version_esperada=v,
+                                      motivo_anulacion="F04-R1 F5")
+
+
+def _op17(s, prevision_id, hecho_id, importe, *, sucesor=None):
+    v = _version_prev(s, prevision_id)
+    return lambda: s.prev.vincular_realidad(
+        s.ctx, prevision_id=prevision_id, row_version_esperada=v,
+        datos=DatosVinculo(vinculo_id=uuid.uuid4(), hecho_id=hecho_id, importe_asignado=D(importe),
+                           marcar_realizada=sucesor is not None), uuid_sucesor=sucesor)
+
+
+def _cv(s, vinculo_id, previsiones, **cambios):
+    versiones = {p: _version_prev(s, p) for p in previsiones}
+    return lambda: s.prev.corregir_vinculo(s.ctx, vinculo_id=vinculo_id, versiones_esperadas=versiones,
+                                           motivo="F04-R1 F5", **cambios)
+
+
+def _retirar(s, vinculo_id, prevision_id):
+    v = _version_prev(s, prevision_id)
+    return lambda: s.prev.retirar_vinculo(s.ctx, vinculo_id=vinculo_id, prevision_row_version_esperada=v,
+                                          motivo="F04-R1 F5")
+
+
+def _op14_reembolso(s, causal):
+    datos_alta = alta(s.contraparte)
+    creada = s.pos.crear_posicion(s.ctx, datos_alta)
+    return lambda: s.pos.reembolsar(
+        s.ctx, entidad_id=datos_alta.entidad_id, entidad_row_version_esperada=creada.entidad_row_version,
+        datos=DatosReembolso(delta=delta("40.0000", causa=COBRO), tesoreria=tesoreria_nueva(s.cuenta),
+                             hecho_causal_id=causal, relacion_id=uuid.uuid4()))
+
+
+def _rodante(s, vigente: str = "2027-01-10") -> tuple[uuid.UUID, uuid.UUID]:
+    regla, cabeza = uuid.uuid4(), uuid.uuid4()
+    s.reg.crear_regla(s.ctx, DatosRegla(regla_id=regla, nombre=f"F5 {vigente}"),
+                      version_rodante(vigente_desde=F(vigente)))
+    s.prev.generar_rodante(s.ctx, regla_id=regla, uuid_nuevo=cabeza)
+    return regla, cabeza
+
+
+def _vinculo(s, prevision_id, hecho_id, importe) -> uuid.UUID:
+    vinculo_id = uuid.uuid4()
+    vincular(s.prev, s.ctx, prevision_id, hecho_id, importe, vinculo_id=vinculo_id)
+    return vinculo_id
+
+
+# Cada escenario devuelve (barreras, {nombre: fn}, comprobacion_final | None).
+def esc_op17_op02(s):
+    _, ca = _rodante(s, "2027-01-10")
+    _, cb = _rodante(s, "2027-01-17")
+    h1 = crear_hecho(s.hec, s.ctx, F("2027-02-02"), importe=D("100.0000"))
+    _vincular(s.prev, s.ctx, ca, h1, sucesor=uuid.uuid4())
+    return ([("hechos_financieros", h1)],
+            {"OP-17": _op17(s, cb, h1, "45.0000", sucesor=uuid.uuid4()),
+             "OP-02": _op02(s, h1, CamposCorreccion(fecha_hecho=F("2027-02-09")))}, None)
+
+
+def esc_op17_op03(s):
+    _, ca = _rodante(s, "2027-01-10")
+    _, cb = _rodante(s, "2027-01-17")
+    h1 = crear_hecho(s.hec, s.ctx, F("2027-02-02"), importe=D("100.0000"))
+    _vincular(s.prev, s.ctx, ca, h1, sucesor=uuid.uuid4())
+    return ([("hechos_financieros", h1)],
+            {"OP-17": _op17(s, cb, h1, "45.0000", sucesor=uuid.uuid4()), "OP-03": _op03(s, h1)}, None)
+
+
+def esc_op17_op13(s):
+    original = crear_origen(s.hec, s.efe, s.ctx)
+    pm = prevision_manual(s.prev, s.ctx)
+    return ([("hechos_financieros", original)],
+            {"OP-17": _op17(s, pm, original, "10.0000"),
+             "OP-13": lambda: s.dev.devolver(s.ctx, datos_devolucion(original))}, None)
+
+
+def esc_op17_op14(s):
+    causal = hecho_simple(s.hec, s.ctx)
+    pm = prevision_manual(s.prev, s.ctx)
+    return ([("hechos_financieros", causal)],
+            {"OP-17": _op17(s, pm, causal, "10.0000"), "OP-14": _op14_reembolso(s, causal)}, None)
+
+
+def esc_op17_op22(s):
+    pm = prevision_manual(s.prev, s.ctx)
+    h = hecho_simple(s.hec, s.ctx)
+    v = _version_prev(s, pm)
+    datos = hecho_op22()
+    return ([("previsiones", pm)],
+            {"OP-17": _op17(s, pm, h, "10.0000"),
+             "OP-22": lambda: s.op22.registrar_hecho_compuesto(s.ctx, DatosHechoCompuesto(
+                 hecho=datos, efectos=[efecto("GASTO", D("100.0000"))],
+                 prevision=DatosPrevisionCompuesta(prevision_id=pm, prevision_row_version_esperada=v,
+                                                   vinculo_id=uuid.uuid4(), importe_asignado=D("100.0000"),
+                                                   marcar_realizada=False)))}, None)
+
+
+def _sin_exceso(s, hecho_id, tope="76.1000"):
+    def comprobar(traza):
+        total = sum((fila[1] for fila in vinculos_de(s.admin, s.owner, hecho_id)), D("0"))
+        traza["asignado_final"] = str(total)
+        assert total <= D(tope), traza
+    return comprobar
+
+
+def esc_dos_op17(s):
+    h = hecho_simple(s.hec, s.ctx)
+    p1, p2 = prevision_manual(s.prev, s.ctx), prevision_manual(s.prev, s.ctx)
+    return ([("hechos_financieros", h)],
+            {"OP-17a": _op17(s, p1, h, "50.0000"), "OP-17b": _op17(s, p2, h, "50.0000")}, _sin_exceso(s, h))
+
+
+def esc_cv_cruzados(s):
+    h1, h2 = hecho_simple(s.hec, s.ctx), hecho_simple(s.hec, s.ctx)
+    p1, p2 = prevision_manual(s.prev, s.ctx), prevision_manual(s.prev, s.ctx)
+    v1, v2 = _vinculo(s, p1, h1, "30.0000"), _vinculo(s, p2, h2, "30.0000")
+    return ([("previsiones", p1), ("previsiones", p2)],
+            {"cv1": _cv(s, v1, (p1, p2), nueva_prevision_id=p2),
+             "cv2": _cv(s, v2, (p1, p2), nueva_prevision_id=p1)}, None)
+
+
+def esc_cv_retirar(s):
+    h = hecho_simple(s.hec, s.ctx)
+    p1, p2 = prevision_manual(s.prev, s.ctx), prevision_manual(s.prev, s.ctx)
+    v = _vinculo(s, p1, h, "30.0000")
+    # Versiones de p1 y p2 distintas a proposito (retirar_vinculo solo recibe la version, no la previsión).
+    _vinculo(s, p2, hecho_simple(s.hec, s.ctx), "1.0000")
+    _vinculo(s, p2, hecho_simple(s.hec, s.ctx), "1.0000")
+    # Barrera solo en p1, el unico recurso que piden los dos: la cola sigue el orden de arranque.
+    return ([("previsiones", p1)],
+            {"cv": _cv(s, v, (p1, p2), nueva_prevision_id=p2), "retirar": _retirar(s, v, p1)}, None)
+
+
+def esc_cv_op17(s):
+    h = hecho_simple(s.hec, s.ctx)
+    p1, p2 = prevision_manual(s.prev, s.ctx), prevision_manual(s.prev, s.ctx)
+    v = _vinculo(s, p1, h, "30.0000")
+    return ([("hechos_financieros", h)],
+            {"cv": _cv(s, v, (p1,), nuevo_importe=D("60.0000")), "OP-17": _op17(s, p2, h, "40.0000")},
+            _sin_exceso(s, h))
+
+
+def esc_op03_op13(s):
+    original = crear_origen(s.hec, s.efe, s.ctx)
+    return ([("hechos_financieros", original)],
+            {"OP-03": _op03(s, original), "OP-13": lambda: s.dev.devolver(s.ctx, datos_devolucion(original))}, None)
+
+
+def esc_op03_op14(s):
+    causal = hecho_simple(s.hec, s.ctx)
+    return ([("hechos_financieros", causal)], {"OP-03": _op03(s, causal), "OP-14": _op14_reembolso(s, causal)}, None)
+
+
+def esc_op03_op18(s):
+    ajustado = hecho_simple(s.hec, s.ctx)
+    return ([("hechos_financieros", ajustado)],
+            {"OP-03": _op03(s, ajustado),
+             "OP-18": lambda: s.sup.registrar(s.ctx, datos_suplemento(relacion_id=uuid.uuid4(),
+                                                                      hecho_ajustado_id=ajustado))}, None)
+
+
+def _posicion_con_rodante(s) -> dict:
+    """Obligacion con pago y condonacion; el hecho de la condonacion realiza una RODANTE
+    (ruta H -> E -> R -> P en OP-02)."""
+    a = alta(s.contraparte, tipo=TIPO_OBLIGACION, nombre="F04-R1 F5")
+    r = s.pos.crear_posicion(s.ctx, a)
+    pago = delta("30.0000", causa=PAGO)
+    r = s.pos.reducir_obligacion(s.ctx, entidad_id=a.entidad_id, entidad_row_version_esperada=r.entidad_row_version,
+                                 delta=pago, movimiento=tesoreria_nueva(s.cuenta))
+    cond = delta("10.0000", causa=CONDONACION)
+    s.pos.condonar_obligacion(s.ctx, entidad_id=a.entidad_id, entidad_row_version_esperada=r.entidad_row_version,
+                              datos=DatosCondonacionObligacion(delta=cond))
+    regla, cabeza = _rodante(s)
+    sucesor = uuid.uuid4()
+    _vincular(s.prev, s.ctx, cabeza, cond.hecho_id, "5.0000", sucesor=sucesor)
+    return {"entidad": a.entidad_id, "alta": a, "cond": cond, "regla": regla, "sucesor": sucesor}
+
+
+def _op02_posicion(s, p):
+    return _op02(s, p["cond"].hecho_id, CamposCorreccion(concepto="F04-R1 F5 posicion"))
+
+
+def esc_pos_op09(s):
+    p = _posicion_con_rodante(s)
+    mov = s.tes.registrar_movimiento(s.ctx, DatosMovimiento(
+        movimiento_id=uuid.uuid4(), cuenta_id=s.cuenta, fecha_movimiento=dt.date(2026, 6, 2),
+        importe=D("-7.0000"), clase_movimiento="OPERACION"))
+    hecho_alta = p["alta"].hecho_id
+    v = version_hecho(s.admin, s.owner, hecho_alta)
+    return ([("entidades", p["entidad"])],
+            {"OP-02": _op02_posicion(s, p),
+             "OP-09": lambda: s.tes.conciliar(s.ctx, DatosConciliacion(uuid.uuid4(), hecho_alta, mov.movimiento_id,
+                                                                     D("-7.0000")),
+                                              hecho_row_version_esperada=v,
+                                              movimiento_row_version_esperada=mov.row_version)}, None)
+
+
+def esc_pos_op14(s):
+    p = _posicion_con_rodante(s)
+    v = _version_entidad(s, p["entidad"])
+    return ([("entidades", p["entidad"])],
+            {"OP-02": _op02_posicion(s, p),
+             "OP-14": lambda: s.pos.reducir_obligacion(s.ctx, entidad_id=p["entidad"], entidad_row_version_esperada=v,
+                                                       delta=delta("5.0000", causa=PAGO),
+                                                       movimiento=tesoreria_nueva(s.cuenta))}, None)
+
+
+def esc_pos_cerrar(s):
+    p = _posicion_con_rodante(s)
+    saldo = s.pos.saldo(s.ctx, p["entidad"]).saldo.importe
+    s.pos.condonar_obligacion(s.ctx, entidad_id=p["entidad"],
+                              entidad_row_version_esperada=_version_entidad(s, p["entidad"]),
+                              datos=DatosCondonacionObligacion(delta=delta(str(saldo), causa=CONDONACION)))
+    v = _version_entidad(s, p["entidad"])
+    return ([("entidades", p["entidad"])],
+            {"OP-02": _op02_posicion(s, p),
+             "cerrar": lambda: s.pos.cerrar_posicion(s.ctx, entidad_id=p["entidad"], entidad_row_version_esperada=v,
+                                                     cierre=DatosCierre(motivo_cierre="CONDONADA",
+                                                                        fecha_cierre=dt.date(2026, 7, 1)))}, None)
+
+
+def esc_relectura_prevision(s):
+    h = hecho_simple(s.hec, s.ctx)
+    p1, p2, p3 = (prevision_manual(s.prev, s.ctx) for _ in range(3))
+    v = _vinculo(s, p1, h, "30.0000")
+    return ([("hechos_financieros", h)],
+            {"cv_a_p2": _cv(s, v, (p1, p2), nueva_prevision_id=p2),
+             "cv_a_p3": _cv(s, v, (p1, p3), nueva_prevision_id=p3)}, None)
+
+
+def esc_relectura_hecho(s):
+    h, h2 = hecho_simple(s.hec, s.ctx), hecho_simple(s.hec, s.ctx)
+    p1 = prevision_manual(s.prev, s.ctx)
+    v = _vinculo(s, p1, h, "30.0000")
+    return ([("hechos_financieros", h)],
+            {"cv_hecho": _cv(s, v, (p1,), nuevo_hecho_id=h2),
+             "cv_importe": _cv(s, v, (p1,), nuevo_importe=D("20.0000"))}, None)
+
+
+# ESPERADO[escenario] = (preparacion, {primero: {paso: resultado}}). Cada orden tiene UN resultado.
+ESPERADO = {
+    "op17_op02": (esc_op17_op02, {"OP-17": {"OP-17": OK, "OP-02": OK}, "OP-02": {"OP-02": OK, "OP-17": OK}}),
+    "op17_op03": (esc_op17_op03, {"OP-17": {"OP-17": OK, "OP-03": OK}, "OP-03": {"OP-03": OK, "OP-17": ESTADO}}),
+    "op17_op13": (esc_op17_op13, {"OP-17": {"OP-17": OK, "OP-13": OK}, "OP-13": {"OP-13": OK, "OP-17": OK}}),
+    "op17_op14": (esc_op17_op14, {"OP-17": {"OP-17": OK, "OP-14": OK}, "OP-14": {"OP-14": OK, "OP-17": OK}}),
+    "op17_op22": (esc_op17_op22, {"OP-17": {"OP-17": OK, "OP-22": DESFASADA},
+                                  "OP-22": {"OP-22": OK, "OP-17": DESFASADA}}),
+    "dos_op17": (esc_dos_op17, {"OP-17a": {"OP-17a": OK, "OP-17b": PORCION},
+                                "OP-17b": {"OP-17b": OK, "OP-17a": PORCION}}),
+    "cv_cruzados": (esc_cv_cruzados, {"cv1": {"cv1": OK, "cv2": DESFASADA}, "cv2": {"cv2": OK, "cv1": DESFASADA}}),
+    "cv_retirar": (esc_cv_retirar, {"cv": {"cv": OK, "retirar": DESFASADA},
+                                    "retirar": {"retirar": OK, "cv": "AGREGADO_NO_ENCONTRADO"}}),
+    "cv_op17": (esc_cv_op17, {"cv": {"cv": OK, "OP-17": PORCION}, "OP-17": {"OP-17": OK, "cv": PORCION}}),
+    "op03_op13": (esc_op03_op13, {"OP-03": {"OP-03": OK, "OP-13": ESTADO},
+                                  "OP-13": {"OP-13": OK, "OP-03": DEPENDENCIAS}}),
+    "op03_op14": (esc_op03_op14, {"OP-03": {"OP-03": OK, "OP-14": ESTADO},
+                                  "OP-14": {"OP-14": OK, "OP-03": DEPENDENCIAS}}),
+    "op03_op18": (esc_op03_op18, {"OP-03": {"OP-03": OK, "OP-18": ESTADO},
+                                  "OP-18": {"OP-18": OK, "OP-03": DEPENDENCIAS}}),
+    "pos_op09": (esc_pos_op09, {"OP-02": {"OP-02": OK, "OP-09": OK}, "OP-09": {"OP-09": OK, "OP-02": OK}}),
+    "pos_op14": (esc_pos_op14, {"OP-02": {"OP-02": OK, "OP-14": OK}, "OP-14": {"OP-14": OK, "OP-02": OK}}),
+    "pos_cerrar": (esc_pos_cerrar, {"OP-02": {"OP-02": OK, "cerrar": OK}, "cerrar": {"cerrar": OK, "OP-02": OK}}),
+    # Tras el reintento el vinculo esta en una previsión cuya version no aporto el llamante: rechazo, nada persiste.
+    "relectura_prevision": (esc_relectura_prevision, {"cv_a_p2": {"cv_a_p2": OK, "cv_a_p3": "ENTRADA_INVALIDA"},
+                                                      "cv_a_p3": {"cv_a_p3": OK, "cv_a_p2": "ENTRADA_INVALIDA"}}),
+    "relectura_hecho": (esc_relectura_hecho, {"cv_hecho": {"cv_hecho": OK, "cv_importe": DESFASADA},
+                                              "cv_importe": {"cv_importe": OK, "cv_hecho": DESFASADA}}),
+}
+# (escenario, primero) en los que el SEGUNDO ve el conjunto cambiado y reintenta (40001) antes de su resultado.
+REINTENTO_40001 = {("relectura_prevision", "cv_a_p2"), ("relectura_prevision", "cv_a_p3"),
+                   ("relectura_hecho", "cv_hecho"), ("cv_retirar", "cv"), ("cv_retirar", "retirar")}
+
+CASOS = [(nombre, primero) for nombre, (_, ordenes) in ESPERADO.items() for primero in ordenes]
+
+
+@pytest.mark.parametrize("escenario, primero", CASOS, ids=[f"{n}-{p}-primero" for n, p in CASOS])
+def test_f5_par_serial(escenario, primero, s, caplog):
+    caplog.set_level(logging.WARNING, logger=LOGGER)
+    preparar, ordenes = ESPERADO[escenario]
+    barreras, pasos, comprobar = preparar(s)
+    segundo = next(n for n in pasos if n != primero)
+    traza = serie(s.dsn, caplog, barreras, (primero, pasos[primero]), (segundo, pasos[segundo]))
+    traza["escenario"] = escenario
+    if comprobar:
+        comprobar(traza)
+    resultados = traza.pop("resultados")
+    evidencia(f"F5_{escenario}_{primero}_primero", traza)
+    assert traza["primero_espera"] and traza["segundo_espera"], traza
+    assert not traza["vivos"], traza
+    assert traza["reintentos_40P01"] == 0 and traza["deadlocks_delta"] == 0, traza
+    assert {primero: traza[primero], segundo: traza[segundo]} == ordenes[primero], traza
+    if (escenario, primero) in REINTENTO_40001:
+        assert traza["reintentos_40001"] >= 1, traza
+    if escenario == "op17_op02":  # OP-02 propaga tambien el sucesor que OP-17 haya creado antes
+        assert len(resultados["OP-02"].previsiones_propagadas) == (2 if primero == "OP-17" else 1), traza
