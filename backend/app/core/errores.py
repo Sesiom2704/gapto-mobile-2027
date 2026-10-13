@@ -15,6 +15,14 @@
 #   operacion y reintentar no la hara posible". Fusionarlos haria que la UX
 #   reintentase indefinidamente algo imposible, o que abandonase algo que solo
 #   necesitaba otro intento.
+# Version: 0.21.0
+#   0.21.0 (F04-R1 G-R1-C; F04-D058): `PORCION_DE_REALIDAD_EXCEDIDA`. OP-17 y
+#   corregir_vinculo rechazan dejar la porcion acumulada de un hecho entre
+#   previsiones por encima de su importe_total (crear o agravar exceso) o, en
+#   la rama NO_DETERMINABLE, aumentar sus vinculos por encima de uno.
+#   contexto_extra: motivo EXCEDE | NO_DETERMINABLE, tope {importe, moneda} o
+#   null (nunca 0), asignado_previo y solicitado. SUMA_EXCEDE_PORCION sigue
+#   siendo exclusivo de OP-07. Ningun codigo existente cambia.
 # Version: 0.20.0
 #   0.20.0 (F04-D055 B1 · A1): `CIERRE_CON_SALDO_NO_NULO`. Con saldo
 #   determinado, un cierre solo es valido si el saldo canonico resultante es
@@ -338,6 +346,10 @@ class CodigoError(str, enum.Enum):
     PREVISION_YA_MATERIALIZADA_POR_ESTA_REALIDAD = (
         "PREVISION_YA_MATERIALIZADA_POR_ESTA_REALIDAD"
     )
+    # F04-R1 G-R1-C. La porcion acumulada de un hecho entre previsiones no
+    # supera su importe_total; con importe o monedas no comparables, un unico
+    # vinculo por hecho (restriccion funcional provisional, F04-D058).
+    PORCION_DE_REALIDAD_EXCEDIDA = "PORCION_DE_REALIDAD_EXCEDIDA"
     REALIZACION_SIN_HECHO_ACTIVO = "REALIZACION_SIN_HECHO_ACTIVO"
     ESTADO_PREVISION_INCOMPATIBLE = "ESTADO_PREVISION_INCOMPATIBLE"
 

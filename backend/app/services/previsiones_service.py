@@ -31,6 +31,18 @@
 #   sigue siendo ABIERTA: no hay estado PARCIAL persistido. Y el primer hecho
 #   ACTIVO congela la expectativa poniendo `recalculo_automatico=false`, de
 #   modo que una version posterior de la regla ya no reescribe ese importe.
+# Version: 0.4.0
+#   0.4.0 (F04-R1 G-R1-C; F04-D058): porcion acumulada de un hecho entre
+#   previsiones en OP-17 (y por tanto OP-22) y en corregir_vinculo
+#   (`exigir_porcion`). Tope = importe_total bruto; Σ = todos los vinculos del
+#   hecho, sea cual sea el estado de su previsión. Clasificacion sobre el
+#   estado POSTERIOR completo: se rechaza crear o agravar exceso; mantener,
+#   reducir y la igualdad se admiten. En un traslado, origen y destino se
+#   evaluan por separado, sin compensacion. Rama NO_DETERMINABLE (importe NULL
+#   o vinculo en otra moneda en el estado posterior): sin comparacion
+#   numerica; a lo sumo un vinculo por hecho; con mas de uno preexistente,
+#   nada que aumente su numero o un importe; retirar siempre. Codigo
+#   PORCION_DE_REALIDAD_EXCEDIDA. retirar_vinculo solo reduce: no se evalua.
 # Version: 0.3.0
 #   0.3.0 (F04-05, remediacion): OP-17 rechaza la pareja repetida con su codigo
 #   canonico PREVISION_YA_MATERIALIZADA_POR_ESTA_REALIDAD en vez de uno
@@ -791,6 +803,14 @@ class PrevisionesService:
                     "vincularlo de nuevo contaria dos veces la misma realidad.",
                 )
 
+            # F04-R1 G-R1-C: la misma porcion no se materializa dos veces.
+            exigir_porcion(
+                sesion,
+                datos.hecho_id,
+                {datos.vinculo_id: (datos.importe_asignado, prevision["moneda"])},
+                solicitado=(datos.importe_asignado, prevision["moneda"]),
+            )
+
             nueva_version = self._tocar(sesion, prevision_id, row_version_esperada)
 
             snapshot = repo_prev.insertar_vinculo(
@@ -925,6 +945,21 @@ class PrevisionesService:
                         CodigoError.OPERACION_NO_PERMITIDA_EN_ESTADO,
                         "Un hecho anulado no es realidad.",
                     )
+
+            # F04-R1 G-R1-C: estado posterior de cada hecho afectado; en un
+            # traslado, origen y destino por separado y sin compensacion.
+            hecho_viejo = vinculo["hecho_id"]
+            hecho_nuevo = nuevo_hecho_id or hecho_viejo
+            importe_nuevo = (
+                nuevo_importe if nuevo_importe is not None else vinculo["importe_asignado"]
+            )
+            moneda_nueva = repo_prev.leer_prevision(sesion, destino_id)["moneda"]
+            solicitado = (importe_nuevo, moneda_nueva)
+            if hecho_nuevo == hecho_viejo:
+                exigir_porcion(sesion, hecho_viejo, {vinculo_id: solicitado}, solicitado=solicitado)
+            else:
+                exigir_porcion(sesion, hecho_viejo, {vinculo_id: None}, solicitado=solicitado)
+                exigir_porcion(sesion, hecho_nuevo, {vinculo_id: solicitado}, solicitado=solicitado)
 
             for identificador in afectadas:
                 esperada = versiones_esperadas.get(identificador)
@@ -1736,6 +1771,92 @@ class PrevisionesService:
         resultado = self._unidad.ejecutar_con_traza(contexto, operacion, nombre=nombre)
         self.ultima_traza = resultado.traza
         return resultado.valor
+
+
+# ==================================================================
+# F04-R1 G-R1-C — porcion acumulada de un hecho entre previsiones
+# ==================================================================
+
+def exigir_porcion(
+    sesion: SesionMotor,
+    hecho_id: uuid.UUID,
+    cambios: dict[uuid.UUID, tuple[Any, str] | None],
+    *,
+    solicitado: tuple[Any, str],
+) -> None:
+    """Evalua el estado POSTERIOR completo de los vinculos de `hecho_id`.
+
+    `cambios`: vinculo_id -> (importe, moneda de su previsión) en el estado
+    posterior, o None si el vinculo deja el hecho. Levanta
+    PORCION_DE_REALIDAD_EXCEDIDA si la operacion crea o agrava un exceso, o si
+    en la rama NO_DETERMINABLE aumenta los vinculos por encima de uno (o, con
+    mas de uno preexistente, aumenta su numero o algun importe). El importe
+    desconocido nunca cuenta como 0 y la equivalencia declarada no es una
+    conversion: en esa rama no hay comparacion numerica.
+    """
+    porcion = repo_prev.porcion_de_hecho(sesion, hecho_id)
+    if porcion is None:  # existencia y visibilidad las deciden las validaciones previas
+        return
+    tope, moneda_hecho = porcion
+    previo = {
+        v["id"]: (decimal.Decimal(v["importe"]), v["moneda"])
+        for v in repo_prev.vinculos_de_hecho(sesion, hecho_id)
+    }
+    posterior = dict(previo)
+    for vinculo_id, valor in cambios.items():
+        if valor is None:
+            posterior.pop(vinculo_id, None)
+        else:
+            posterior[vinculo_id] = (decimal.Decimal(valor[0]), valor[1])
+
+    def comparable(estado: dict) -> bool:
+        return tope is not None and all(m == moneda_hecho for _, m in estado.values())
+
+    sigma_previa = (
+        sum((i for i, _ in previo.values()), CERO) if comparable(previo) else None
+    )
+
+    def rechazo(motivo: str) -> ErrorMotor:
+        return ErrorMotor(
+            CodigoError.PORCION_DE_REALIDAD_EXCEDIDA,
+            "La porcion de realidad del hecho ya esta asignada a otras "
+            "previsiones."
+            if motivo == "EXCEDE"
+            else "El importe del hecho no es comparable con sus vinculos: "
+            "solo admite un vinculo.",
+            contexto_extra={
+                "motivo": motivo,
+                "tope": None
+                if tope is None
+                else {"importe": str(tope), "moneda": moneda_hecho},
+                "asignado_previo": {
+                    "importe": None if sigma_previa is None else str(sigma_previa),
+                    "moneda": moneda_hecho,
+                    "vinculos": len(previo),
+                },
+                "solicitado": {
+                    "importe": str(decimal.Decimal(solicitado[0])),
+                    "moneda": solicitado[1],
+                },
+            },
+        )
+
+    if not comparable(posterior):
+        # Rama NO_DETERMINABLE (restriccion funcional provisional, F04-D058).
+        aumenta = len(posterior) > len(previo) and len(posterior) > 1
+        sube = len(previo) > 1 and (
+            len(posterior) > len(previo)
+            or any(posterior[v][0] > previo[v][0] for v in posterior if v in previo)
+        )
+        if aumenta or sube:
+            raise rechazo("NO_DETERMINABLE")
+        return
+
+    sigma_posterior = sum((i for i, _ in posterior.values()), CERO)
+    if sigma_posterior > tope and (
+        sigma_previa is None or sigma_previa <= tope or sigma_posterior > sigma_previa
+    ):
+        raise rechazo("EXCEDE")
 
 
 # ==================================================================

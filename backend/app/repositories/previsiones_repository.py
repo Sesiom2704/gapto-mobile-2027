@@ -24,6 +24,10 @@
 #   `id` y el `created_at` original, y admite cambiar importe, hecho o
 #   previsión. `borrar_vinculo` devuelve el snapshot completo antes de
 #   eliminar, y se reserva al vinculo que nunca debio existir sin sustituto.
+# Version: 0.2.0
+#   0.2.0 (F04-R1 G-R1-C; F04-D058): `porcion_de_hecho` (importe_total y moneda
+#   del hecho) y `vinculos_de_hecho` (TODOS los vinculos del hecho con la
+#   moneda de su previsión, sea cual sea su estado), para la porcion acumulada.
 # Version: 0.1.0
 # ============================================================
 
@@ -485,6 +489,39 @@ def leer_vinculo(sesion: SesionMotor, vinculo_id: uuid.UUID) -> dict[str, Any] |
         "created_at": fila[3],
         "snapshot": fila[4],
     }
+
+
+def porcion_de_hecho(
+    sesion: SesionMotor, hecho_id: uuid.UUID
+) -> tuple[decimal.Decimal | None, str] | None:
+    """(importe_total, moneda) del hecho; None si no es visible."""
+    fila = sesion.uno(
+        "SELECT importe_total, moneda FROM gapto.hechos_financieros WHERE id = %s::uuid",
+        (hecho_id,),
+    )
+    return None if fila is None else (fila[0], fila[1])
+
+
+def vinculos_de_hecho(
+    sesion: SesionMotor, hecho_id: uuid.UUID
+) -> list[dict[str, Any]]:
+    """Todos los vinculos del hecho (cualquier estado de la previsión), con la
+    moneda de su previsión. Orden estable por id."""
+    with sesion.conexion.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT pv.id, pv.prevision_id, pv.importe_asignado, p.moneda
+              FROM gapto.prevision_hechos pv
+              JOIN gapto.previsiones p ON p.id = pv.prevision_id
+             WHERE pv.hecho_id = %s::uuid
+             ORDER BY pv.id
+            """,
+            (hecho_id,),
+        )
+        return [
+            {"id": f[0], "prevision_id": f[1], "importe": f[2], "moneda": f[3]}
+            for f in cursor.fetchall()
+        ]
 
 
 def vinculo_de_pareja(

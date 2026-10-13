@@ -96,6 +96,9 @@
 #   detalle, IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION) y de las lecturas de
 #   F05-05 (TERCERO_NO_ENCONTRADO 404, FECHA_FUTURA 422; sin «no se ha
 #   guardado nada», porque son lecturas).
+#   v0.18.0 (F04-R1 G-R1-C; F04-D058): PORCION_DE_REALIDAD_EXCEDIDA -> 409,
+#   mensaje fijo; el detalle de contexto_extra no se serializa (como el resto
+#   del catalogo F04).
 #   v0.17.0 (F05-06 M4 §2.3/§2.4; D-CAP-08; PD-2/PD-3): rechazo de
 #   integracion CUENTA_SIN_CAPACIDAD (409, sin escritura) con el texto de B3,
 #   compuesto con el detalle (nombre de la cuenta propia y operacion), que se
@@ -103,7 +106,7 @@
 #   capacidades: CUENTA_NO_ENCONTRADA (404), CAPACIDAD_NO_EDITABLE,
 #   OPERACION_NO_PERMITIDA_EN_ESTADO y VERSION_DESFASADA (409),
 #   ENTRADA_INVALIDA (422).
-# Version: 0.17.0
+# Version: 0.18.0
 # ============================================================
 
 from __future__ import annotations
@@ -123,6 +126,11 @@ _MAPA: dict[CodigoError, tuple[int, str, bool]] = {
         True,
     ),
     CodigoError.CUENTA_DESCONOCIDA: (422, "La cuenta seleccionada no está disponible.", False),
+    CodigoError.PORCION_DE_REALIDAD_EXCEDIDA: (
+        409,
+        "Esa realidad ya está asignada a otras previsiones por su importe completo. No se ha guardado nada.",
+        False,
+    ),
     CodigoError.MISMA_CUENTA: (422, "Elige dos cuentas distintas: origen y destino no pueden coincidir.", False),
     CodigoError.MONEDA_INVALIDA: (
         422,

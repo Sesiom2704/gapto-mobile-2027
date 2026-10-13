@@ -32,6 +32,13 @@
 #   ni se lista ni bloquea: la RLS de hecho_relaciones la oculta). Las filas de
 #   tipos reservados que crean los fixtures se BORRAN al terminar cada test:
 #   test_123 (N12) exige que la suite no deje ninguna.
+# Version: 0.3.0 (F04-R1 IMPL F3, G-R1-C): (j2) correccion a la baja con exceso
+#   previo; exceso que se mantiene, que disminuye y que se agrava; OP-17 sobre
+#   un exceso previo; traslado con el destino en exceso y el origen que mejora
+#   (rechazo, sin compensar); corregir y retirar el unico vinculo
+#   NO_DETERMINABLE sin fabricar capacidad; vinculo en la moneda del hecho
+#   seguido de otro en una moneda distinta. El exceso previo se crea por la via
+#   real que lo permite (OP-02 rebaja importe_total; R1-OBS-01).
 # ============================================================
 
 from __future__ import annotations
@@ -350,3 +357,106 @@ def test_op03_detalle_solo_lista_dependientes_del_mismo_owner(servicio, contexto
         anular(servicio, contexto, admin, destino)
     _rechazo_dependencias(excinfo)
     assert excinfo.value.contexto_extra["dependientes"] == [{"hecho_id": str(propio), "tipo_relacion": "PARTE_DE"}]
+
+
+# ==================================================================
+# F3 · G-R1-C: estado posterior, exceso previo, traslado y NO_DETERMINABLE
+# ==================================================================
+def _rebajar_importe(servicio, contexto, admin, hecho_id, importe: str) -> None:
+    """R1-OBS-01: OP-02 no se bloquea por los vinculos y puede dejar exceso."""
+    from app.core.modelos import CamposCorreccion
+    servicio.corregir_hecho(contexto, hecho_id=hecho_id,
+                            row_version_esperada=version_hecho(admin, contexto.owner_user_id, hecho_id),
+                            campos=CamposCorreccion(importe_total=D(importe)), motivo="importe corregido")
+
+
+def _corregir(servicio_previsiones, contexto, vinculo_id, previsiones, **cambios):
+    versiones = {p: servicio_previsiones.estado_de(contexto, p).row_version for p in previsiones}
+    return servicio_previsiones.corregir_vinculo(contexto, vinculo_id=vinculo_id, versiones_esperadas=versiones,
+                                                 motivo="F04-R1 F3", **cambios)
+
+
+@pytest.fixture()
+def exceso_previo(servicio, servicio_previsiones, contexto, admin):
+    """Hecho 76,10 con un vinculo de 70 en p1; OP-02 lo rebaja a 50: exceso previo 70 > 50."""
+    hecho = hecho_simple(servicio, contexto, importe=D("76.1000"))
+    p1, p2 = prevision_manual(servicio_previsiones, contexto), prevision_manual(servicio_previsiones, contexto)
+    v1 = uuid.uuid4()
+    vincular(servicio_previsiones, contexto, p1, hecho, "70.0000", vinculo_id=v1)
+    _rebajar_importe(servicio, contexto, admin, hecho, "50.0000")
+    return {"hecho": hecho, "p1": p1, "p2": p2, "v1": v1}
+
+
+def test_j2_correccion_a_la_baja_con_exceso_previo(servicio_previsiones, contexto, admin, exceso_previo):
+    e = exceso_previo
+    _corregir(servicio_previsiones, contexto, e["v1"], [e["p1"]], nuevo_importe=D("60.0000"))
+    assert vinculos_de(admin, contexto.owner_user_id, e["hecho"]) == [(e["p1"], D("60.0000"))]
+
+
+def test_exceso_que_se_mantiene_al_mover_de_prevision(servicio_previsiones, contexto, admin, exceso_previo):
+    e = exceso_previo
+    _corregir(servicio_previsiones, contexto, e["v1"], [e["p1"], e["p2"]], nueva_prevision_id=e["p2"])
+    assert vinculos_de(admin, contexto.owner_user_id, e["hecho"]) == [(e["p2"], D("70.0000"))]
+
+
+def test_exceso_que_se_agrava(servicio_previsiones, contexto, admin, exceso_previo):
+    e = exceso_previo
+    with pytest.raises(ErrorMotor) as excinfo:
+        _corregir(servicio_previsiones, contexto, e["v1"], [e["p1"]], nuevo_importe=D("75.0000"))
+    _rechazo_porcion(excinfo, "EXCEDE")
+    extra = excinfo.value.contexto_extra
+    assert extra["tope"] == {"importe": "50.0000", "moneda": "EUR"}
+    assert extra["asignado_previo"]["importe"] == "70.0000" and extra["solicitado"]["importe"] == "75.0000"
+    assert vinculos_de(admin, contexto.owner_user_id, e["hecho"]) == [(e["p1"], D("70.0000"))]
+
+
+def test_op17_sobre_un_exceso_previo(servicio_previsiones, contexto, admin, exceso_previo):
+    e = exceso_previo
+    with pytest.raises(ErrorMotor) as excinfo:
+        vincular(servicio_previsiones, contexto, e["p2"], e["hecho"], "0.0100")
+    _rechazo_porcion(excinfo, "EXCEDE")
+
+
+def test_traslado_destino_en_exceso_y_origen_que_mejora(servicio, servicio_previsiones, contexto, admin):
+    """El origen mejora (110 > 100 pasa a 90) pero el destino crearia exceso (40 -> 60 > 50): rechazo."""
+    a = hecho_simple(servicio, contexto, importe=D("50.0000"))
+    b = hecho_simple(servicio, contexto, importe=D("120.0000"))
+    p1, p2, p3 = (prevision_manual(servicio_previsiones, contexto) for _ in range(3))
+    vincular(servicio_previsiones, contexto, p1, a, "40.0000")
+    vincular(servicio_previsiones, contexto, p2, b, "90.0000")
+    vx = uuid.uuid4()
+    vincular(servicio_previsiones, contexto, p3, b, "20.0000", vinculo_id=vx)
+    _rebajar_importe(servicio, contexto, admin, b, "100.0000")  # b: 110 > 100
+    with pytest.raises(ErrorMotor) as excinfo:
+        _corregir(servicio_previsiones, contexto, vx, [p3], nuevo_hecho_id=a)
+    _rechazo_porcion(excinfo, "EXCEDE")
+    assert len(vinculos_de(admin, contexto.owner_user_id, b)) == 2
+    assert len(vinculos_de(admin, contexto.owner_user_id, a)) == 1
+
+
+def test_corregir_y_retirar_el_unico_vinculo_no_determinable(servicio, servicio_previsiones, contexto, admin):
+    hecho = hecho_simple(servicio, contexto, importe=None)
+    p1, p2 = prevision_manual(servicio_previsiones, contexto), prevision_manual(servicio_previsiones, contexto)
+    v1 = uuid.uuid4()
+    vincular(servicio_previsiones, contexto, p1, hecho, "10.0000", vinculo_id=v1)
+    _corregir(servicio_previsiones, contexto, v1, [p1], nuevo_importe=D("999.0000"))  # corregir el unico: admitido
+    _corregir(servicio_previsiones, contexto, v1, [p1, p2], nueva_prevision_id=p2)   # moverlo: admitido
+    with pytest.raises(ErrorMotor) as excinfo:  # no se ha fabricado capacidad: un segundo vinculo sigue vetado
+        vincular(servicio_previsiones, contexto, p1, hecho, "1.0000")
+    _rechazo_porcion(excinfo, "NO_DETERMINABLE")
+    servicio_previsiones.retirar_vinculo(contexto, vinculo_id=v1,
+                                         prevision_row_version_esperada=servicio_previsiones.estado_de(contexto, p2).row_version)
+    assert vinculos_de(admin, contexto.owner_user_id, hecho) == []
+    vincular(servicio_previsiones, contexto, p1, hecho, "1.0000")  # vuelve a haber sitio para UN vinculo
+    assert len(vinculos_de(admin, contexto.owner_user_id, hecho)) == 1
+
+
+def test_vinculo_en_la_moneda_del_hecho_y_otro_en_moneda_distinta(servicio, servicio_previsiones, contexto, admin):
+    hecho = hecho_simple(servicio, contexto, importe=D("100.0000"), moneda="USD")
+    p_usd = prevision_manual(servicio_previsiones, contexto, moneda="USD")
+    p_eur = prevision_manual(servicio_previsiones, contexto, moneda="EUR")
+    vincular(servicio_previsiones, contexto, p_usd, hecho, "50.0000")
+    with pytest.raises(ErrorMotor) as excinfo:
+        vincular(servicio_previsiones, contexto, p_eur, hecho, "10.0000", equivalencia=True)
+    _rechazo_porcion(excinfo, "NO_DETERMINABLE")
+    assert excinfo.value.contexto_extra["tope"] == {"importe": "100.0000", "moneda": "USD"}
