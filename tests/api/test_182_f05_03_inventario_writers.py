@@ -29,6 +29,17 @@
 #   afinidades sube row_version por `incrementar_version`. Los comandos alta/baja de
 #   afinidades/servicio.py toman el advisory primero; afinidades/ y senales/ entran en la
 #   capa F05 (sin roles privilegiados).
+# Version: 0.5.0 (F05-06 M4; F05-D037, F05 §51.2; adenda LANZAMIENTO_M4_CORR-F4-ENVDEV
+#   §1.3/§1.4, aprobada por Moises el 2026-10-13): la garantia «cuenta_capacidades ->
+#   CERO writers runtime» era la foto del inventario de J2, cuando la escritura de
+#   capacidades era deuda (DEU-F05-CAPACIDADES-UI) asignada a F05-06. F05-D037 aprueba
+#   «writer de cuenta_capacidades ... un unico servicio»: la garantia pasa a ser «el
+#   UNICO writer runtime de cuenta_capacidades es backend/app/capacidades/servicio.py»
+#   (INSERT y DELETE; nunca UPDATE). Falla si cualquier otro fichero de backend/ escribe
+#   en la tabla. Registro: alta del servicio y del fixture E2E e2e_f05_06_m4.py (DELETE
+#   de las capacidades sinteticas de sus cuentas, base LOCAL desechable); capacidades/
+#   entra en la capa F05 (sin roles privilegiados). EXCLUIDOS incluye el arnes
+#   mutantes_f05_06_m4.py (los mutantes son texto).
 # ============================================================
 
 from __future__ import annotations
@@ -40,7 +51,7 @@ import re
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
 EXCLUIDOS = {"scripts/dev/mutantes_f05_01.py", "scripts/dev/mutantes_f05_02.py", "scripts/dev/mutantes_f05_j2j3.py",
              "scripts/dev/mutantes_vs01.py", "scripts/dev/mutantes_cierre_f05_02.py",
-             "scripts/dev/mutantes_f05_05.py"}
+             "scripts/dev/mutantes_f05_05.py", "scripts/dev/mutantes_f05_06_m4.py"}
 CAPA_F05 = ("backend/app/api/", "backend/app/comun/", "backend/app/terceros/", "backend/app/contextos/",
             "backend/app/plantillas/", "backend/app/preferencias/", "backend/app/categorias/",
             "backend/app/magnitudes/")
@@ -80,11 +91,16 @@ REGISTRO = {
     "terceros": {"backend/app/terceros/repositorio.py": {"INSERT", "UPDATE"}},
     "cuenta_capacidades": {"scripts/dev/bootstrap_dev_db.py": {"INSERT"}, "scripts/dev/e2e_preferencias.py": {"INSERT"},
                            "scripts/dev/e2e_j2j3.py": {"INSERT"},
-                           "scripts/envdev/envdev_capacidades_cuenta.py": {"INSERT"}},
+                           "scripts/envdev/envdev_capacidades_cuenta.py": {"INSERT"},
+                           # F05-06 M4 (F05-D037): writer unico runtime y fixture del E2E.
+                           "backend/app/capacidades/servicio.py": {"INSERT", "DELETE"},
+                           "scripts/dev/e2e_f05_06_m4.py": {"DELETE"}},
 }
+WRITER_UNICO_CAPACIDADES = "backend/app/capacidades/servicio.py"
 #: F05-05 K2 §1.3 (alta aditiva).
 REGISTRO["tercero_afinidades"] = {"backend/app/afinidades/repositorio.py": {"INSERT", "DELETE"}}
 CAPA_F05 = CAPA_F05 + ("backend/app/afinidades/", "backend/app/senales/")
+CAPA_F05 = CAPA_F05 + ("backend/app/capacidades/",)  # F05-06 M4
 REGISTRO_F05 = {
     "entidades": {"backend/app/contextos/repositorio.py": {"INSERT", "UPDATE"}},
     "contextos": {"backend/app/contextos/repositorio.py": {"INSERT", "UPDATE"}},
@@ -103,8 +119,11 @@ def test_escritores_en_la_capa_f05_registro_cerrado():
         assert _escritores(tabla, solo_f05=True) == esperado, tabla
 
 
-def test_cuenta_capacidades_sin_writer_runtime():
-    assert not [r for r in _escritores("cuenta_capacidades") if r.startswith("backend/")]
+def test_cuenta_capacidades_unico_writer_runtime():
+    """F05-D037: el UNICO writer runtime de cuenta_capacidades es el servicio de
+    capacidades. Cualquier otro fichero de backend/ que escriba en la tabla falla."""
+    runtime = {r: ops for r, ops in _escritores("cuenta_capacidades").items() if r.startswith("backend/")}
+    assert runtime == {WRITER_UNICO_CAPACIDADES: {"INSERT", "DELETE"}}, runtime
 
 
 def test_comandos_toman_su_advisory_primero():

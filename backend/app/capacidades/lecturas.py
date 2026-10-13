@@ -30,6 +30,10 @@
 #   - `sin_configurar`: numero de cuentas habilitadas y sin cerrar que no
 #     tienen ninguna capacidad del registro (aviso B2, D-CAP-06).
 # Version: 0.1.0 (F05-06 M4 F1)
+# Version: 0.2.0 (F05-06 M4, adenda LANZAMIENTO_M4_CORR-F4-ENVDEV §1.1; KO de F4,
+#   test_154 I6): los nombres de categoria y de tercero del impacto se leen con
+#   dos consultas FIJAS (sin nombre de tabla dinamico), con el mismo filtro de
+#   owner.
 # ============================================================
 
 from __future__ import annotations
@@ -126,8 +130,8 @@ def impacto(sesion: SesionMotor, cuenta_id: uuid.UUID, capacidad: str,
     ]
     preferencias = [
         {"preferencia_id": p["id"], "enabled": p["enabled"], "categoria_id": p["categoria_id"],
-         "categoria_nombre": _nombre(sesion, "categorias_financieras", p["categoria_id"]),
-         "tercero_id": p["tercero_id"], "tercero_nombre": _nombre(sesion, "terceros", p["tercero_id"])}
+         "categoria_nombre": _nombre(sesion, _NOMBRE_CATEGORIA, p["categoria_id"]),
+         "tercero_id": p["tercero_id"], "tercero_nombre": _nombre(sesion, _NOMBRE_TERCERO, p["tercero_id"])}
         for p in lect_pref.listar(sesion, reloj)
         if p["cuenta_default_id"] == cuenta_id and p["cuenta_disponible_hoy"]
         and operacion_de_tipo(sesion, p["tipo_hecho_id"]) == operacion
@@ -135,11 +139,16 @@ def impacto(sesion: SesionMotor, cuenta_id: uuid.UUID, capacidad: str,
     return {"plantillas": plantillas, "preferencias": preferencias}
 
 
-def _nombre(sesion: SesionMotor, tabla: str, ident) -> str | None:
+_NOMBRE_CATEGORIA = ("SELECT nombre FROM gapto.categorias_financieras WHERE id = %s "
+                     "AND owner_user_id = current_setting('gapto.owner_user_id')::uuid")
+_NOMBRE_TERCERO = ("SELECT nombre FROM gapto.terceros WHERE id = %s "
+                   "AND owner_user_id = current_setting('gapto.owner_user_id')::uuid")
+
+
+def _nombre(sesion: SesionMotor, sql: str, ident) -> str | None:
     if ident is None:
         return None
-    fila = sesion.uno(f"SELECT nombre FROM gapto.{tabla} WHERE id = %s "
-                      "AND owner_user_id = current_setting('gapto.owner_user_id')::uuid", (ident,))
+    fila = sesion.uno(sql, (ident,))
     return None if fila is None else fila[0]
 
 

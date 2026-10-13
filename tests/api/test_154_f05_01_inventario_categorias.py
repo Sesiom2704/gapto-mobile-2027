@@ -278,7 +278,14 @@
 # Version 0.22.0 (F05-05 K4-E, hueco A1·ruta de la matriz A/R): la unica ruta HTTP
 #     con «sugeridas» es la del onboarding (/v1/categorias/sugeridas); las senales
 #     viven en /v1/senales/* (F05 §49.4 A1).
-# Version: 0.22.0
+# Version 0.23.0 (F05-06 M4, adenda LANZAMIENTO_M4_CORR-F4-ENVDEV §1.2; KO de F4): altas
+#     aditivas. I1: el impacto de desactivar una capacidad (capacidades/lecturas.impacto)
+#     y su DTO (PreferenciaAfectada) copian categoria_id de las preferencias afectadas
+#     (R, solo lectura); el E2E scripts/dev/e2e_f05_06_m4.py crea su preferencia por el
+#     writer publico (R). I13 a: RegistroGastoScreen importa el aviso B2 / panel de
+#     Cuentas (FaltaCuenta) y el texto de B3 (domain/capacidades): no tocan el camino
+#     categorial. I6 sin cambios: el SQL dinamico de capacidades/lecturas se retiro.
+# Version: 0.23.0
 # ============================================================
 
 from __future__ import annotations
@@ -490,6 +497,15 @@ REGISTRO.update({
     ("backend/app/api/app.py", "create_app.alta_afinidad"): ("R", "POST /v1/afinidades", "pasa categoria_id al writer de afinidades"),
     **{("backend/app/api/dto_f05_05.py", n): ("R", "DTO F05-05", "declaracion de campo")
        for n in ("CandidataCategoria", "AltaAfinidad", "AfinidadNodo", "AfinidadGuardada", "CategoriaHistorial")},
+})
+# F05-06 M4 (alta aditiva, adenda LANZAMIENTO_M4_CORR-F4-ENVDEV §1.2): impacto de desactivar una
+# capacidad (A4), solo lectura; nunca escribe ni revalida la categoria.
+REGISTRO.update({
+    ("backend/app/capacidades/lecturas.py", "impacto"): (
+        "R", "GET /v1/cuentas/{id}/capacidades/{capacidad}/impacto", "copia categoria_id de las preferencias afectadas"),
+    ("backend/app/api/dto_capacidades.py", "PreferenciaAfectada"): ("R", "DTO F05-06 M4", "declaracion de campo"),
+    ("scripts/dev/e2e_f05_06_m4.py", "main"): (
+        "R", "E2E F05-06 M4 preparacion", "crea la preferencia de Hogar por /v1/preferencias (writer publico)"),
 })
 # F05-05 K2 §1.5 (alta aditiva): Actividad v0, solo lectura (R11); la categoria de la fila sale de los
 # efectos GASTO/INGRESO y nunca se persiste nada.
@@ -1465,6 +1481,12 @@ IMPORTS_CAMINO[SEL] = IMPORTS_CAMINO[SEL] | {
 }
 IMPORTS_CAMINO[CLI] = IMPORTS_CAMINO[CLI] | {
     ("../domain/senales", "type SenalesCategorias"), ("../domain/senales", "type SenalesTerceros"),
+}
+
+# F05-06 M4 (alta aditiva, adenda LANZAMIENTO_M4_CORR-F4-ENVDEV §1.2): aviso B2 y texto de B3.
+IMPORTS_CAMINO[REG] = IMPORTS_CAMINO[REG] | {
+    ("../components/FaltaCuenta", "AvisoFaltaCuenta"), ("../components/FaltaCuenta", "PanelCuentas"),
+    ("../components/FaltaCuenta", "useSinConfigurar"), ("../domain/capacidades", "TEXTO_FORMULARIO_SE_CONSERVA"),
 }
 
 MENCIONES_CLIENTE.update({
