@@ -23,12 +23,14 @@
 #   OP-17 sin lock del hecho, R15 corregir_vinculo sin relectura, R16
 #   adquisicion de la propagacion en el orden de procesamiento, R17 retorno de
 #   tocar_prevision ignorado; R18 OP-17 con el estado releido antes que la
-#   version, la causa del KO IL4 de F6).
+#   version, la causa del KO IL4 de F6; R19/R20 corregir_vinculo/retirar_vinculo
+#   sin la guarda de version previa a la relectura). R15 pasa a EQUIVALENTE con
+#   el patron CORR (ver su justificacion).
 #   Uso: GAPTO_TEST_DATABASE_URL=<base desechable> GAPTO_F04R1_CONCURRENCIA=1
 #        python scripts/dev/mutantes_f04_r1.py [--solo ID,ID]
 #   Sin GAPTO_F04R1_CONCURRENCIA=1 los discriminantes de test_139 se omiten.
 #   No ejecutar en paralelo con otro arnes ni con la suite sobre el mismo arbol.
-# Version: 0.2.0 (F04-R1 CORR paso 1.3): mutante R18.
+# Version: 0.2.0 (F04-R1 CORR pasos 1.3 y 3.1): mutantes R18, R19 y R20; R15 equivalente.
 # Version: 0.1.0 (F04-R1 IMPL F5)
 # ============================================================
 
@@ -113,7 +115,11 @@ MUTANTES = [
      [par("dos_op17", "OP-17a"), par("dos_op17", "OP-17b"), par("cv_op17", "cv"), par("cv_op17", "OP-17")], None),
     ("R15", "corregir_vinculo sin relectura del vinculo",
      [(PREV, "            if (\n                releido is None\n", "            if False and (\n                releido is None\n")],
-     [par("relectura_hecho", "cv_hecho"), par("relectura_prevision", "cv_a_p2")], None),
+     [par("relectura_hecho", "cv_hecho"), par("relectura_prevision", "cv_a_p2")],
+     "CORR: la guarda de version de las previsiones bloqueadas precede a la relectura, y todo writer de "
+     "prevision_hechos (insertar en OP-17, actualizar en corregir_vinculo, borrar en retirar_vinculo) toca "
+     "antes, en la misma transaccion, la previsión de origen del vinculo (corr/precedencias.md): un vinculo "
+     "movido o retirado siempre deja una version distinta y la relectura no es alcanzable. Defensa en profundidad"),
     ("R16", "propagacion: adquisicion en el orden de procesamiento (por fecha, sin reglas)",
      [(PREV, "    _bloquear_reglas(sesion, reglas)\n    for sucesor_id in sucesores:\n"
              "        repo_prev.bloquear_prevision(sesion, sucesor_id)\n", "")],
@@ -130,6 +136,14 @@ MUTANTES = [
        "                raise ErrorMotor(CodigoError.ESTADO_PREVISION_INCOMPATIBLE, \"mutante R18\")\n"
        "            if prevision[\"row_version\"] != row_version_esperada:\n")],
      [par("op22r_op17", "OP-22")], None),
+    ("R19", "corregir_vinculo sin la guarda de version previa a la relectura",
+     [(PREV, "                if bloqueadas[identificador] != esperada:\n",
+       "                if False and bloqueadas[identificador] != esperada:\n")],
+     [par("relectura_prevision", "cv_a_p2"), par("cv_retirar", "retirar")], None),
+    ("R20", "retirar_vinculo sin la guarda de version previa a la relectura",
+     [(PREV, "            if version_bloqueada != prevision_row_version_esperada:\n",
+       "            if False and version_bloqueada != prevision_row_version_esperada:\n")],
+     [par("dos_retirar", "retirar_a"), par("cv_retirar", "cv")], None),
 ]
 
 

@@ -39,6 +39,10 @@
 #   el ganador forzado por barrera en los dos ordenes. Oraculo IL4: el perdedor
 #   recibe VERSION_DESFASADA (nunca ESTADO_PREVISION_INCOMPATIBLE), un unico
 #   vinculo, nada del perdedor persiste y, si pierde OP-22, ni rastro de su hecho.
+#   Mismo patron en corregir_vinculo/retirar_vinculo (auditoria 3.1): el
+#   perdedor cuyo vinculo otro writer movio o retiro recibe VERSION_DESFASADA
+#   SIN reintento (la guarda de version precede a la relectura), como en la
+#   base; nuevo par dos_retirar.
 # Version: 0.2.0 (F04-R1 IMPL F5: pares seriales, posiciones y relectura)
 # Version: 0.1.0 (F04-R1 IMPL F1)
 # ============================================================
@@ -477,6 +481,13 @@ def esc_cv_retirar(s):
             {"cv": _cv(s, v, (p1, p2), nueva_prevision_id=p2), "retirar": _retirar(s, v, p1)}, None)
 
 
+def esc_dos_retirar(s):
+    h = hecho_simple(s.hec, s.ctx)
+    p1 = prevision_manual(s.prev, s.ctx)
+    v = _vinculo(s, p1, h, "30.0000")
+    return ([("previsiones", p1)], {"retirar_a": _retirar(s, v, p1), "retirar_b": _retirar(s, v, p1)}, None)
+
+
 def esc_cv_op17(s):
     h = hecho_simple(s.hec, s.ctx)
     p1, p2 = prevision_manual(s.prev, s.ctx), prevision_manual(s.prev, s.ctx)
@@ -598,7 +609,9 @@ ESPERADO = {
                                 "OP-17b": {"OP-17b": OK, "OP-17a": PORCION}}),
     "cv_cruzados": (esc_cv_cruzados, {"cv1": {"cv1": OK, "cv2": DESFASADA}, "cv2": {"cv2": OK, "cv1": DESFASADA}}),
     "cv_retirar": (esc_cv_retirar, {"cv": {"cv": OK, "retirar": DESFASADA},
-                                    "retirar": {"retirar": OK, "cv": "AGREGADO_NO_ENCONTRADO"}}),
+                                    "retirar": {"retirar": OK, "cv": DESFASADA}}),
+    "dos_retirar": (esc_dos_retirar, {"retirar_a": {"retirar_a": OK, "retirar_b": DESFASADA},
+                                      "retirar_b": {"retirar_b": OK, "retirar_a": DESFASADA}}),
     "cv_op17": (esc_cv_op17, {"cv": {"cv": OK, "OP-17": PORCION}, "OP-17": {"OP-17": OK, "cv": PORCION}}),
     "op03_op13": (esc_op03_op13, {"OP-03": {"OP-03": OK, "OP-13": ESTADO},
                                   "OP-13": {"OP-13": OK, "OP-03": DEPENDENCIAS}}),
@@ -609,15 +622,18 @@ ESPERADO = {
     "pos_op09": (esc_pos_op09, {"OP-02": {"OP-02": OK, "OP-09": OK}, "OP-09": {"OP-09": OK, "OP-02": OK}}),
     "pos_op14": (esc_pos_op14, {"OP-02": {"OP-02": OK, "OP-14": OK}, "OP-14": {"OP-14": OK, "OP-02": OK}}),
     "pos_cerrar": (esc_pos_cerrar, {"OP-02": {"OP-02": OK, "cerrar": OK}, "cerrar": {"cerrar": OK, "OP-02": OK}}),
-    # Tras el reintento el vinculo esta en una previsión cuya version no aporto el llamante: rechazo, nada persiste.
-    "relectura_prevision": (esc_relectura_prevision, {"cv_a_p2": {"cv_a_p2": OK, "cv_a_p3": "ENTRADA_INVALIDA"},
-                                                      "cv_a_p3": {"cv_a_p3": OK, "cv_a_p2": "ENTRADA_INVALIDA"}}),
+    # El vinculo cambio de previsión: la version de su origen avanzo y la guarda de version gana (como en la base).
+    "relectura_prevision": (esc_relectura_prevision, {"cv_a_p2": {"cv_a_p2": OK, "cv_a_p3": DESFASADA},
+                                                      "cv_a_p3": {"cv_a_p3": OK, "cv_a_p2": DESFASADA}}),
     "relectura_hecho": (esc_relectura_hecho, {"cv_hecho": {"cv_hecho": OK, "cv_importe": DESFASADA},
                                               "cv_importe": {"cv_importe": OK, "cv_hecho": DESFASADA}}),
 }
-# (escenario, primero) en los que el SEGUNDO ve el conjunto cambiado y reintenta (40001) antes de su resultado.
-REINTENTO_40001 = {("relectura_prevision", "cv_a_p2"), ("relectura_prevision", "cv_a_p3"),
-                   ("relectura_hecho", "cv_hecho"), ("cv_retirar", "cv"), ("cv_retirar", "retirar")}
+# CORR: el vinculo movido o retirado por el primero NO provoca reintento en el segundo: la guarda de version
+# (precedencia de la base) decide antes de la relectura. ConjuntoCambiado queda como defensa.
+SIN_REINTENTO_40001 = {("relectura_prevision", "cv_a_p2"), ("relectura_prevision", "cv_a_p3"),
+                       ("relectura_hecho", "cv_hecho"), ("cv_retirar", "cv"), ("cv_retirar", "retirar"),
+                       ("dos_retirar", "retirar_a"), ("dos_retirar", "retirar_b"),
+                       ("op22r_op17", "OP-22"), ("op22r_op17", "OP-17")}
 
 CASOS = [(nombre, primero) for nombre, (_, ordenes) in ESPERADO.items() for primero in ordenes]
 
@@ -638,7 +654,7 @@ def test_f5_par_serial(escenario, primero, s, caplog):
     assert not traza["vivos"], traza
     assert traza["reintentos_40P01"] == 0 and traza["deadlocks_delta"] == 0, traza
     assert {primero: traza[primero], segundo: traza[segundo]} == ordenes[primero], traza
-    if (escenario, primero) in REINTENTO_40001:
-        assert traza["reintentos_40001"] >= 1, traza
+    if (escenario, primero) in SIN_REINTENTO_40001:
+        assert traza["reintentos_40001"] == 0, traza
     if escenario == "op17_op02":  # OP-02 propaga tambien el sucesor que OP-17 haya creado antes
         assert len(resultados["OP-02"].previsiones_propagadas) == (2 if primero == "OP-17" else 1), traza

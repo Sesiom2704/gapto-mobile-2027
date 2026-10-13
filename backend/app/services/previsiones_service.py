@@ -41,6 +41,13 @@
 #   defensa. Un perdedor concurrente (IL4) vuelve a recibir VERSION_DESFASADA y
 #   el caso secuencial (version obsoleta sobre una REALIZADA) sigue en
 #   ESTADO_PREVISION_INCOMPATIBLE. Sin cambios en el orden de adquisicion.
+#   Mismo patron (auditoria 3.1, misma causa) en corregir_vinculo y
+#   retirar_vinculo: la guarda de version (sobre las previsiones bloqueadas, en
+#   el punto de la base) va ANTES de la relectura del vinculo. Un perdedor cuyo
+#   vinculo otro writer movio o retiro vuelve a recibir VERSION_DESFASADA (como
+#   en la base) en lugar de ENTRADA_INVALIDA/AGREGADO_NO_ENCONTRADO tras un
+#   reintento; ConjuntoCambiado queda solo para un cambio que no movio ninguna
+#   version (defensa).
 # Version: 0.5.0
 #   0.5.0 (F04-R1 G-R1-D; F04-D058, AJ-F04R1-V11-01/02/04): ORDEN GLOBAL DE
 #   ADQUISICION, separado del de procesamiento: advisory INVERSIONES -> hechos
@@ -1001,27 +1008,16 @@ class PrevisionesService:
                 key=str,
             )
             _bloquear_reglas(sesion, reglas)
+            bloqueadas: dict[uuid.UUID, int] = {}
             for identificador in afectadas:
-                if repo_prev.bloquear_prevision(sesion, identificador) is None:
+                version_bloqueada = repo_prev.bloquear_prevision(sesion, identificador)
+                if version_bloqueada is None:
                     raise ErrorMotor(
                         CodigoError.AGREGADO_NO_ENCONTRADO,
                         "Alguna previsión implicada no existe o no es "
                         "accesible.",
                     )
-            # Relectura: si el vinculo cambio de hecho o de previsión, o cambio
-            # el conjunto de reglas, la proteccion adquirida no es la necesaria.
-            releido = repo_prev.leer_vinculo(sesion, vinculo_id)
-            if (
-                releido is None
-                or releido["hecho_id"] != vinculo["hecho_id"]
-                or releido["prevision_id"] != vinculo["prevision_id"]
-                or sorted(
-                    {r for r in (_regla_de(sesion, p) for p in afectadas) if r is not None},
-                    key=str,
-                ) != reglas
-            ):
-                raise ConjuntoCambiado()
-            vinculo = releido
+                bloqueadas[identificador] = version_bloqueada
 
             if nueva_prevision_id is not None:
                 destino = self._exigir_prevision(sesion, destino_id)
@@ -1044,6 +1040,36 @@ class PrevisionesService:
                         CodigoError.OPERACION_NO_PERMITIDA_EN_ESTADO,
                         "Un hecho anulado no es realidad.",
                     )
+
+            # Guarda de version en el punto y el orden de la base (antes del
+            # tocar), sobre las previsiones ya bloqueadas: precede a la relectura.
+            for identificador in afectadas:
+                esperada = versiones_esperadas.get(identificador)
+                if esperada is None:
+                    raise ErrorMotor(
+                        CodigoError.ENTRADA_INVALIDA,
+                        "Cada previsión afectada exige su version esperada.",
+                    )
+                if bloqueadas[identificador] != esperada:
+                    raise ErrorMotor(
+                        CodigoError.VERSION_DESFASADA,
+                        "La previsión ha cambiado desde la version que conoce el "
+                        "llamante.",
+                    )
+            # Relectura: si el vinculo cambio de hecho o de previsión, o cambio
+            # el conjunto de reglas, la proteccion adquirida no es la necesaria.
+            releido = repo_prev.leer_vinculo(sesion, vinculo_id)
+            if (
+                releido is None
+                or releido["hecho_id"] != vinculo["hecho_id"]
+                or releido["prevision_id"] != vinculo["prevision_id"]
+                or sorted(
+                    {r for r in (_regla_de(sesion, p) for p in afectadas) if r is not None},
+                    key=str,
+                ) != reglas
+            ):
+                raise ConjuntoCambiado()
+            vinculo = releido
 
             # F04-R1 G-R1-C: estado posterior de cada hecho afectado; en un
             # traslado, origen y destino por separado y sin compensacion.
@@ -1129,7 +1155,14 @@ class PrevisionesService:
             regla_id = self._exigir_prevision(sesion, prevision_id)["regla_id"]
             if regla_id is not None:
                 repo_reglas.bloquear_regla(sesion, regla_id)
-            repo_prev.bloquear_prevision(sesion, prevision_id)
+            version_bloqueada = repo_prev.bloquear_prevision(sesion, prevision_id)
+            # Guarda de version (punto de la base) antes de la relectura del vinculo.
+            if version_bloqueada != prevision_row_version_esperada:
+                raise ErrorMotor(
+                    CodigoError.VERSION_DESFASADA,
+                    "La previsión ha cambiado desde la version que conoce el "
+                    "llamante.",
+                )
             releido = repo_prev.leer_vinculo(sesion, vinculo_id)
             if releido is None or releido["prevision_id"] != prevision_id:
                 raise ConjuntoCambiado()
