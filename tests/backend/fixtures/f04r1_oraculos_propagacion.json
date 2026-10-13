@@ -1,0 +1,261 @@
+{
+ "anulacion": {
+  "previsiones": [
+   {
+    "desde": "2027-01-10",
+    "estado": "REALIZADA",
+    "hasta": "2027-01-10",
+    "importe": "45.0000",
+    "objetivo": "2027-01-10",
+    "prevision": "cabeza_a",
+    "recalculo": false,
+    "row_version": 2,
+    "vinculos": 1
+   },
+   {
+    "desde": "2027-01-17",
+    "estado": "REALIZADA",
+    "hasta": "2027-01-17",
+    "importe": "45.0000",
+    "objetivo": "2027-01-17",
+    "prevision": "cabeza_b",
+    "recalculo": false,
+    "row_version": 2,
+    "vinculos": 1
+   },
+   {
+    "desde": "2027-03-09",
+    "estado": "ABIERTA",
+    "hasta": "2027-03-09",
+    "importe": "45.0000",
+    "objetivo": "2027-03-09",
+    "prevision": "s_a",
+    "recalculo": true,
+    "row_version": 1,
+    "vinculos": 0
+   },
+   {
+    "desde": "2027-03-09",
+    "estado": "ABIERTA",
+    "hasta": "2027-03-09",
+    "importe": "45.0000",
+    "objetivo": "2027-03-09",
+    "prevision": "s_b",
+    "recalculo": true,
+    "row_version": 1,
+    "vinculos": 0
+   }
+  ],
+  "resultado": {
+   "afectadas": [
+    "cabeza_a",
+    "cabeza_b"
+   ],
+   "motivo": "REVISION_DERIVADA_REQUERIDA",
+   "propagadas": [],
+   "requiere_revision": true
+  }
+ },
+ "rodante_una_realizada": {
+  "previsiones": [
+   {
+    "desde": "2027-01-10",
+    "estado": "REALIZADA",
+    "hasta": "2027-01-10",
+    "importe": "45.0000",
+    "objetivo": "2027-01-10",
+    "prevision": "cabeza",
+    "recalculo": false,
+    "row_version": 2,
+    "vinculos": 1
+   },
+   {
+    "desde": "2027-03-16",
+    "estado": "ABIERTA",
+    "hasta": "2027-03-16",
+    "importe": "45.0000",
+    "objetivo": "2027-03-09",
+    "prevision": "s1",
+    "recalculo": true,
+    "row_version": 2,
+    "vinculos": 0
+   }
+  ],
+  "resultado": {
+   "afectadas": [],
+   "motivo": null,
+   "propagadas": [
+    "s1"
+   ],
+   "requiere_revision": false
+  }
+ },
+ "rodante_varias_realizadas_mismo_ancla": {
+  "previsiones": [
+   {
+    "desde": "2027-01-10",
+    "estado": "REALIZADA",
+    "hasta": "2027-01-10",
+    "importe": "45.0000",
+    "objetivo": "2027-01-10",
+    "prevision": "cabeza",
+    "recalculo": false,
+    "row_version": 2,
+    "vinculos": 1
+   },
+   {
+    "desde": "2027-03-09",
+    "estado": "REALIZADA",
+    "hasta": "2027-03-09",
+    "importe": "45.0000",
+    "objetivo": "2027-03-09",
+    "prevision": "s1",
+    "recalculo": false,
+    "row_version": 3,
+    "vinculos": 2
+   },
+   {
+    "desde": "2027-04-14",
+    "estado": "ABIERTA",
+    "hasta": "2027-04-14",
+    "importe": "45.0000",
+    "objetivo": "2027-04-14",
+    "prevision": "s2",
+    "recalculo": true,
+    "row_version": 1,
+    "vinculos": 0
+   }
+  ],
+  "resultado": {
+   "afectadas": [
+    "s1"
+   ],
+   "motivo": "REVISION_DERIVADA_REQUERIDA",
+   "propagadas": [],
+   "requiere_revision": true
+  }
+ },
+ "sin_cambio_de_ventana": {
+  "previsiones": [
+   {
+    "desde": "2027-01-10",
+    "estado": "REALIZADA",
+    "hasta": "2027-01-10",
+    "importe": "45.0000",
+    "objetivo": "2027-01-10",
+    "prevision": "cabeza",
+    "recalculo": false,
+    "row_version": 2,
+    "vinculos": 1
+   },
+   {
+    "desde": "2027-03-09",
+    "estado": "ABIERTA",
+    "hasta": "2027-03-09",
+    "importe": "45.0000",
+    "objetivo": "2027-03-09",
+    "prevision": "s1",
+    "recalculo": true,
+    "row_version": 1,
+    "vinculos": 0
+   }
+  ],
+  "resultado": {
+   "afectadas": [],
+   "motivo": null,
+   "propagadas": [],
+   "requiere_revision": false
+  }
+ },
+ "sucesor_con_realidad": {
+  "previsiones": [
+   {
+    "desde": "2027-01-10",
+    "estado": "REALIZADA",
+    "hasta": "2027-01-10",
+    "importe": "45.0000",
+    "objetivo": "2027-01-10",
+    "prevision": "cabeza",
+    "recalculo": false,
+    "row_version": 2,
+    "vinculos": 1
+   },
+   {
+    "desde": "2027-03-09",
+    "estado": "ABIERTA",
+    "hasta": "2027-03-09",
+    "importe": "45.0000",
+    "objetivo": "2027-03-09",
+    "prevision": "s1",
+    "recalculo": false,
+    "row_version": 2,
+    "vinculos": 1
+   }
+  ],
+  "resultado": {
+   "afectadas": [
+    "s1"
+   ],
+   "motivo": "REVISION_DERIVADA_REQUERIDA",
+   "propagadas": [],
+   "requiere_revision": true
+  }
+ },
+ "sucesores_de_reglas_distintas": {
+  "previsiones": [
+   {
+    "desde": "2027-01-10",
+    "estado": "REALIZADA",
+    "hasta": "2027-01-10",
+    "importe": "45.0000",
+    "objetivo": "2027-01-10",
+    "prevision": "cabeza_a",
+    "recalculo": false,
+    "row_version": 2,
+    "vinculos": 1
+   },
+   {
+    "desde": "2027-01-17",
+    "estado": "REALIZADA",
+    "hasta": "2027-01-17",
+    "importe": "45.0000",
+    "objetivo": "2027-01-17",
+    "prevision": "cabeza_b",
+    "recalculo": false,
+    "row_version": 2,
+    "vinculos": 1
+   },
+   {
+    "desde": "2027-03-16",
+    "estado": "ABIERTA",
+    "hasta": "2027-03-16",
+    "importe": "45.0000",
+    "objetivo": "2027-03-09",
+    "prevision": "s_a",
+    "recalculo": true,
+    "row_version": 2,
+    "vinculos": 0
+   },
+   {
+    "desde": "2027-03-16",
+    "estado": "ABIERTA",
+    "hasta": "2027-03-16",
+    "importe": "45.0000",
+    "objetivo": "2027-03-09",
+    "prevision": "s_b",
+    "recalculo": true,
+    "row_version": 2,
+    "vinculos": 0
+   }
+  ],
+  "resultado": {
+   "afectadas": [],
+   "motivo": null,
+   "propagadas": [
+    "s_a",
+    "s_b"
+   ],
+   "requiere_revision": false
+  }
+ }
+}
