@@ -8,7 +8,8 @@
 // v0.4.0 (F05-03/F05-04 J2 §2.5): Ajustes › Terceros, Contextos y Plantillas en la pila de Más, como Preferencias; sus formularios y selectores son tareas inmersivas.
 // v0.5.0 (F05-03/F05-04 J2+J3 §2.1–§2.4): «Registrar» de Inicio abre la hoja de tipos (sin preselección); Gasto e Ingreso abren el registro con ese tipo, «Entre cuentas» la pantalla de transferencia. Un acceso de Inicio abre el registro del tipo de su plantilla con la plantilla aplicada. El cambio de tipo antes del primer envío que cruza a/desde «Entre cuentas» cambia de pantalla conservando importe y fecha (y su aviso T02). «Editar» / «Añadir acceso» llevan a Ajustes › Plantillas.
 // v0.6.0 (F05-05 K3 §2.5/§2.6; F05 §49.4 A7/A8, D-SRCH-06/12): «Día a día» deja de ser territorio pendiente: monta la Actividad v0 (ActividadScreen) de forma PERSISTENTE, como Más (conserva periodo, filtros y scroll al cambiar de pestaña); sus hojas son inmersivas (el velo cubre la barra inferior). Tras un registro confirmado la Actividad vuelve a leer. Ajustes › Terceros › «Ver sus registros» abre en la pila de Más la Actividad filtrada por el tercero con todo el historial («‹ <tercero>» vuelve a la ficha). Mes y Patrimonio siguen pendientes.
-// Versión: 0.6.0
+// v0.7.0 (F05-06 M4 §3; F09 §12.105 CAP): Ajustes › «Cuentas» (capacidades de cuenta, entrada provisional junto a Preferencias financieras) en la pila de Más; su hoja de confirmación es inmersiva (oculta la barra inferior).
+// Versión: 0.7.0
 // ============================================================
 
 import * as Crypto from 'expo-crypto';
@@ -24,6 +25,7 @@ import { HojaTipos } from './src/components/HojaTipos';
 import type { TipoRegistro } from './src/domain/registro';
 import { CategoriasAjustesScreen } from './src/screens/CategoriasAjustesScreen';
 import { ContextosAjustesScreen } from './src/screens/ContextosAjustesScreen';
+import { CuentasCapacidadesScreen } from './src/screens/CuentasCapacidadesScreen';
 import { PlantillasAjustesScreen } from './src/screens/PlantillasAjustesScreen';
 import { TercerosAjustesScreen } from './src/screens/TercerosAjustesScreen';
 import { PreferenciasAjustesScreen } from './src/screens/PreferenciasAjustesScreen';
@@ -37,7 +39,7 @@ import { ProveedorTema, useTema } from './src/theme/tema';
 
 const TITULOS: Record<Exclude<Destino, 'INICIO' | 'MAS' | 'DIA'>, string> = { MES: 'Mes', PATRIMONIO: 'Patrimonio' };
 
-type PantallaMas = 'MAS' | 'AJUSTES' | 'CATEGORIAS' | 'PREFERENCIAS' | 'TERCEROS' | 'CONTEXTOS' | 'PLANTILLAS' | 'REGISTROS_TERCERO';
+type PantallaMas = 'MAS' | 'AJUSTES' | 'CATEGORIAS' | 'PREFERENCIAS' | 'TERCEROS' | 'CONTEXTOS' | 'PLANTILLAS' | 'CUENTAS' | 'REGISTROS_TERCERO';
 
 /** Tarea inmersiva de registro (F05-04): tipo, plantilla del acceso y lo conservado de otro tipo. */
 type TareaRegistro = {
@@ -100,6 +102,7 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
               onTerceros={() => setPantallaMas('TERCEROS')}
               onContextos={() => setPantallaMas('CONTEXTOS')}
               onPlantillas={() => setPantallaMas('PLANTILLAS')}
+              onCuentas={() => setPantallaMas('CUENTAS')}
             />
           ) : null}
           {pantallaMas === 'CATEGORIAS' ? (
@@ -151,6 +154,9 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
               onAtras={() => setPantallaMas('AJUSTES')}
               onInmersiva={setInmersivaMas}
             />
+          ) : null}
+          {pantallaMas === 'CUENTAS' ? (
+            <CuentasCapacidadesScreen cliente={p.cliente} etiquetaAtras="Ajustes" onAtras={() => setPantallaMas('AJUSTES')} onInmersiva={setInmersivaMas} />
           ) : null}
           {pantallaMas === 'PREFERENCIAS' ? (
             <PreferenciasAjustesScreen

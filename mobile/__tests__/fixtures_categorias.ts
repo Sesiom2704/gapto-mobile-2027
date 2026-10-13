@@ -9,6 +9,7 @@
 // Versión: 0.4.0 (F05-02 B3): el stub incluye desactivar y reactivar preferencia (no esperados por defecto).
 // Versión: 0.5.0 (F05-03/F05-04 J2 §1.5; F05 §46.5 E3): la lista de preferencias del stub informa `tipos` (ids de GASTO e INGRESO).
 // Versión: 0.6.0 (F05-03/F05-04 J2 §2): el stub incluye los métodos nuevos del cliente: lecturas vacías por defecto (terceros, contextos, plantillas, cuentas elegibles, propuesta del registro sin valores) y escrituras no esperadas (lanzan).
+// Versión: 0.8.0 (F05-06 M4 F2): el stub incluye las capacidades de cuenta: lista vacía y 0 sin configurar por defecto (el aviso B2 no aparece); detalle, historial, impacto y cambio no esperados (lanzan).
 // Versión: 0.7.0 (F05-05 K3): el stub incluye los métodos de F05-05: señales, búsqueda de terceros, afinidades del tercero, Actividad (página vacía) e Inicio (nombre null y Resultado a cero) por defecto; alta y retirada de afinidad y detalle de la Actividad no esperados (lanzan).
 // ============================================================
 
@@ -108,6 +109,12 @@ export function clienteCategoriasStub(
     detalleActividad: noEsperado('detalleActividad'),
     yo: jest.fn(async () => ({ tipo: 'OK', datos: { nombre: null } }) as any),
     resultadoMes: jest.fn(async () => ({ tipo: 'OK', datos: { mes: '2026-10', moneda: 'EUR', ingresos_propios: '0.00', gastos_propios: '0.00', resultado: '0.00', sin_indicar: { gastos: { n: 0, importe: '0.00' }, ingresos: { n: 0, importe: '0.00' } } } }) as any),
+    listarCapacidades: jest.fn(async () => ({ tipo: 'OK', datos: { cuentas: [], sin_configurar: 0 } }) as any),
+    cuentasSinConfigurar: jest.fn(async () => ({ tipo: 'OK', datos: { sin_configurar: 0 } }) as any),
+    detalleCapacidades: noEsperado('detalleCapacidades'),
+    historialCapacidades: noEsperado('historialCapacidades'),
+    impactoCapacidad: noEsperado('impactoCapacidad'),
+    cambiarCapacidad: noEsperado('cambiarCapacidad'),
   };
 }
 

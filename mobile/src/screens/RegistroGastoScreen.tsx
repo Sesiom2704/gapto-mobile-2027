@@ -10,7 +10,8 @@
 // v0.6.0 (F05-03/F05-04 J2 §2.2–§2.4; F05 §46.3 A1–A9, §45.3; láminas REG-DYN G01–G03/I01/T02/N01 y REG-PLT R01–R06): el formulario sirve a Gasto e Ingreso cobrado (`tipo`). Cabecera «Cancelar · Nuevo gasto | Nuevo ingreso · Tipo»: el cambio de tipo solo antes del primer envío, conserva importe y fecha y quita con aviso lo que no encaja (T02); «Entre cuentas» lo resuelve la raíz. Tercero opcional («Tercero» / «De») con alta mínima y duplicados; «Más detalles» con contexto (alta «Crear y usar») y, en ingresos, nota. Selector de categorías por tipo (A12). «No lo sé» en magnitudes obligatorias (A9). Plantilla: chip «Plantilla: <nombre> ×» con «Quitar», origen por campo («De tu plantilla …»), campos tocados nunca se pisan y avisos de lo que no aplica. Ingresos: cuentas elegibles para cobrar («Cobrado en»), sin financiación. Con tercero, plantilla o en ingresos la propuesta es la del registro por tipo (GET /v1/registro/propuesta); el gasto sin ellos conserva la de F05-02. FECHA_FUTURA con su mensaje. Éxito: «Guardar como preferencia» para el tercero O la categoría y «Guardar como plantilla…».
 // v0.7.0 (F05-03/F05-04 J3 §2.7; F05 §46.3 A8; CORTE DE CONCEPTO, atómico con el servidor): desaparece el campo obligatorio «Concepto»; la «Nota (opcional)» va en «Más detalles» (contexto, nota) en gasto e ingreso. Vacía o solo espacios no viaja; nunca bloquea ni figura en «faltan». La pantalla de éxito muestra el título CALCULADO (nota > «Tercero · Categoría» > categoría > tercero > «Gasto · importe»), nunca persistido ni vacío.
 // v0.8.0 (F05-05 K3 §2.1/§2.2/§2.4; F05 §49.4 A1/A2/A2 bis/A5, §49.5 R1/R2; D-SRCH-01/05/11; lámina SRCH-ACT-AFI A1, A5, A7): las sugerencias de categoría (GET /v1/senales/categorias por tipo, fecha del formulario y tercero) se muestran en la sección «Sugeridas» del selector (que ahora tiene búsqueda) y como hasta 3 chips de ACCIÓN bajo «Categoría» mientras está pendiente. El selector se construye una vez y los chips invocan su MISMO callback de selección (`props.onElegir`): elegir un chip, una sugerida o el nodo en el árbol produce la misma intención (R1); sin tocar, el estado sigue PENDIENTE y nada habilita «Registrar» (C01). Con categoría elegida por el usuario, «Elegida por ti.». Éxito: tarjeta «¿Recordar <categoría> para <tercero>?» (escritura independiente; un fallo no afecta al hecho).
-// Versión: 0.8.0
+// v0.9.0 (F05-06 M4 §3; lámina CAP B2/B3; D-CAP-06/08): al final de «Pagado con» / «Cobrado en», «¿Falta una cuenta? N sin configurar ›» (solo si N > 0) abre la lista de Cuentas encima del formulario, que conserva lo escrito; al volver se recargan las cuentas y el número. CUENTA_SIN_CAPACIDAD al guardar: se muestra el mensaje del servidor y «El resto del formulario se conserva.»; se recargan las cuentas (la que perdió la capacidad ya no sale) y la cuenta queda sin elegir y pendiente de decisión del usuario: ninguna propuesta la vuelve a rellenar.
+// Versión: 0.9.0
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -21,6 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ClienteApi, CuentaPago } from '../api/cliente';
 import { BotonPrimario, BotonTexto, Chip, ChipAccion, EstadoDato, Segmentado, Velo } from '../components/Basicos';
 import { FormularioContexto, SelectorContexto } from '../components/Contextos';
+import { AvisoFaltaCuenta, PanelCuentas, useSinConfigurar } from '../components/FaltaCuenta';
 import { GuardarPlantilla } from '../components/GuardarPlantilla';
 import { GuardarPreferencia } from '../components/GuardarPreferencia';
 import { HojaTipos } from '../components/HojaTipos';
@@ -71,6 +73,7 @@ import {
   tituloRegistro,
   TITULO_TAREA,
 } from '../domain/registro';
+import { TEXTO_FORMULARIO_SE_CONSERVA } from '../domain/capacidades';
 import type { SugeridaCategoria } from '../domain/senales';
 import { textoChips, vistaSugeridas } from '../domain/senales';
 import { useEnvioGasto } from '../state/useEnvioGasto';
@@ -124,6 +127,9 @@ export function RegistroGastoScreen(p: {
   const [hojaTipos, setHojaTipos] = useState(false);
   const [avisos, setAvisos] = useState<string[]>(p.inicial?.aviso ? [p.inicial.aviso] : []);
   const [selectorTercero, setSelectorTercero] = useState(false);
+  /** B2: lista de Cuentas abierta encima del formulario. */
+  const [panelCuentas, setPanelCuentas] = useState(false);
+  const sinConfigurar = useSinConfigurar(p.cliente);
   const [selectorContexto, setSelectorContexto] = useState<'LISTA' | 'NUEVO' | null>(null);
   const [masDetalles, setMasDetalles] = useState(false);
   const [guardarPlantilla, setGuardarPlantilla] = useState(false);
@@ -256,7 +262,7 @@ export function RegistroGastoScreen(p: {
 
   // Cuentas y propuesta de financiación SIEMPRE para la fecha elegida (§16.4):
   // la propuesta se evalúa en la fecha del pago.
-  const cargarCuentas = async (fecha: string) => {
+  const cargarCuentas = async (fecha: string, trasSinCapacidad = false) => {
     const n = ++peticion.current;
     ++peticionPropuesta.current; // una propuesta en vuelo de otra fecha ya no se aplica
     setCuentas({ fase: 'CARGANDO' });
@@ -270,6 +276,8 @@ export function RegistroGastoScreen(p: {
     const lista = r.datos.cuentas;
     setCuentas({ fase: 'OK', lista });
     setB((x) => {
+      // B3 (D-CAP-08): la cuenta perdió la capacidad; el usuario elige otra (ninguna propuesta la rellena).
+      if (trasSinCapacidad) return { ...x, cuentaId: null, cuentaOrigen: 'USUARIO', cuentaPropuesta: null, propuesta: null, propuestaRechazada: false };
       const sel = lista.find((c2) => c2.cuenta_id === x.cuentaId);
       // La cuenta elegida por el usuario se conserva si sigue en la lista (lo explícito gana).
       if (sel && x.cuentaOrigen === 'USUARIO') return { ...x, propuesta: sel.propuesta_financiacion };
@@ -322,6 +330,10 @@ export function RegistroGastoScreen(p: {
   // Propuesta obsoleta: la cuenta cambió; se recarga para mostrar la realidad actual.
   useEffect(() => {
     if (estado.fase === 'RECHAZADO' && estado.codigo === 'PROPUESTA_FINANCIACION_OBSOLETA') void cargarCuentas(b.fechaHecho);
+    if (estado.fase === 'RECHAZADO' && estado.codigo === 'CUENTA_SIN_CAPACIDAD') {
+      void cargarCuentas(b.fechaHecho, true);
+      sinConfigurar.recargar();
+    }
     // Categoría o magnitudes rechazadas tras confirmar: la intención sellada ya se liberó
     // (useEnvioGasto); se conservan las demás decisiones, se recarga el árbol y se pide otra.
     if (estado.fase === 'RECHAZADO' && RECHAZOS_CATEGORIA.has(estado.codigo) && b.categoria.estado === 'CATEGORIA') {
@@ -847,6 +859,7 @@ export function RegistroGastoScreen(p: {
               ))}
             </View>
           ) : null}
+          {!bloqueado ? <AvisoFaltaCuenta testID="falta-cuenta" n={sinConfigurar.n} onPress={() => setPanelCuentas(true)} /> : null}
           {cuentaSel && (b.cuentaOrigen === 'USUARIO' || (b.cuentaOrigen === 'INFERIDO' && b.cuentaPropuesta)) ? (
             <Text testID="origen-cuenta" style={[tipo.footnote, { color: c.textSecondary }]}>
               {b.cuentaOrigen === 'USUARIO' ? TEXTO_ELEGIDA : origen(b.cuentaPropuesta!)}
@@ -948,7 +961,9 @@ export function RegistroGastoScreen(p: {
                 ? `No se ha registrado: «${categoriaInvalida.nombre}» ya no se puede usar así. Elige otra categoría; el resto de datos se conserva.`
                 : estado.codigo === 'FECHA_FUTURA'
                   ? `No se ha registrado. ${TEXTO_FECHA_FUTURA}`
-                  : `No se ha registrado. ${estado.mensaje}`}
+                  : estado.codigo === 'CUENTA_SIN_CAPACIDAD'
+                    ? `${estado.mensaje} ${TEXTO_FORMULARIO_SE_CONSERVA}`
+                    : `No se ha registrado. ${estado.mensaje}`}
             </Text>
           </View>
         ) : null}
@@ -1039,6 +1054,17 @@ export function RegistroGastoScreen(p: {
         />
       ) : null}
       {hojaTipos ? <HojaTipos actual={tipoReg} onElegir={cambiarTipo} onCancelar={() => setHojaTipos(false)} /> : null}
+      {panelCuentas ? (
+        <PanelCuentas
+          cliente={p.cliente}
+          etiquetaAtras={esIngreso ? 'Nuevo ingreso' : 'Nuevo gasto'}
+          onCerrar={() => {
+            setPanelCuentas(false);
+            sinConfigurar.recargar();
+            void cargarCuentas(bRef.current.fechaHecho);
+          }}
+        />
+      ) : null}
     </KeyboardAvoidingView>
   );
 }

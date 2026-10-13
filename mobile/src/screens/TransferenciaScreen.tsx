@@ -4,6 +4,7 @@
 // Ruta: mobile/src/screens/TransferenciaScreen.tsx
 // Descripción: «Entre cuentas» (F05-04 J2 §2.3; D-DYN-09; lámina REG-DYN X01). Tarea inmersiva «Cancelar · Entre cuentas · Tipo»: «Desde» y «A» (cuentas elegibles que da el servidor para salida y entrada en la fecha), importe, fecha (Hoy · Ayer · Otra, nunca futura), «+ Añadir nota» y la nota fija de la lámina. Misma cuenta en «Desde» y «A»: aviso en el campo y no se puede registrar. Mismo ciclo de envío que el registro: UUID y payload sellados antes de enviar; doble toque ignorado; INDETERMINADO reintenta con la MISMA identidad; rechazo definitivo libera la edición (FECHA_FUTURA con su mensaje). El tipo solo se puede cambiar antes del primer envío. Sin categoría, tercero, presupuesto ni atribución: no es gasto ni ingreso.
 // Versión: 0.1.0 (F05-03/F05-04 J2 §2.3)
+// Versión: 0.2.0 (F05-06 M4 §3; lámina CAP B2/B3; D-CAP-06/08): al final de «Desde» y de «A», «¿Falta una cuenta? N sin configurar ›» (solo si N > 0) abre la lista de Cuentas encima del formulario, que conserva lo escrito; al volver se recargan ambas listas y el número. CUENTA_SIN_CAPACIDAD al guardar: mensaje del servidor y «El resto del formulario se conserva.»; se recargan las listas y la cuenta que perdió la capacidad deja de estar elegida (sin preselección).
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -12,7 +13,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ClienteApi, CuentaElegible, PayloadTransferencia, ResultadoRegistroTipo } from '../api/cliente';
 import { BotonPrimario, BotonTexto, Chip, EstadoDato } from '../components/Basicos';
+import { AvisoFaltaCuenta, PanelCuentas, useSinConfigurar } from '../components/FaltaCuenta';
 import { HojaTipos } from '../components/HojaTipos';
+import { TEXTO_FORMULARIO_SE_CONSERVA } from '../domain/capacidades';
 import { ayer, ddmmaaaaAIso, fechaCortaIso, isoADdmmaaaa, isoLocal } from '../domain/fechas';
 import { formatearEur, parsearImporte } from '../domain/importe';
 import { esFechaIso } from '../domain/intencion';
@@ -70,6 +73,9 @@ export function TransferenciaScreen(p: {
   const enVuelo = useRef(false);
   const sellada = useRef<PayloadTransferencia | null>(null);
   const [enviado, setEnviado] = useState(false);
+  /** B2: lista de Cuentas abierta encima del formulario. */
+  const [panelCuentas, setPanelCuentas] = useState(false);
+  const sinConfigurar = useSinConfigurar(p.cliente);
 
   const cargar = async (f: string) => {
     setOrigen({ fase: 'CARGANDO' });
@@ -106,6 +112,11 @@ export function TransferenciaScreen(p: {
       else if (r.tipo === 'RECHAZADO') {
         sellada.current = null; // definitivo: el siguiente envío lleva identidad nueva
         setEstado({ fase: 'RECHAZADO', codigo: r.codigo, mensaje: r.mensaje });
+        // B3: la cuenta perdió la capacidad; al recargar deja de estar elegida (sin preselección).
+        if (r.codigo === 'CUENTA_SIN_CAPACIDAD') {
+          void cargar(payload.fecha_hecho);
+          sinConfigurar.recargar();
+        }
       } else setEstado({ fase: 'INDETERMINADO', payload, mensaje: r.mensaje });
     } finally {
       enVuelo.current = false;
@@ -180,6 +191,7 @@ export function TransferenciaScreen(p: {
       {sel && otra && sel === otra ? (
         <Text testID={`${prefijo}-misma`} accessibilityRole="alert" style={[tipo.footnote, { color: c.critical }]}>{TEXTO_MISMA_CUENTA}</Text>
       ) : null}
+      {!bloqueado ? <AvisoFaltaCuenta testID={`${prefijo}-falta-cuenta`} n={sinConfigurar.n} onPress={() => setPanelCuentas(true)} /> : null}
     </>
   );
 
@@ -261,7 +273,9 @@ export function TransferenciaScreen(p: {
         {estado.fase === 'RECHAZADO' ? (
           <View testID="error-dominio" accessibilityLiveRegion="assertive" style={[s.aviso, { backgroundColor: c.surfacePrimary, borderColor: c.critical, borderWidth: 1 }]}>
             <Text style={[tipo.subheadline, { color: c.textPrimary }]}>
-              {`No se ha registrado. ${estado.codigo === 'FECHA_FUTURA' ? TEXTO_FECHA_FUTURA : estado.mensaje}`}
+              {estado.codigo === 'CUENTA_SIN_CAPACIDAD'
+                ? `${estado.mensaje} ${TEXTO_FORMULARIO_SE_CONSERVA}`
+                : `No se ha registrado. ${estado.codigo === 'FECHA_FUTURA' ? TEXTO_FECHA_FUTURA : estado.mensaje}`}
             </Text>
           </View>
         ) : null}
@@ -288,6 +302,17 @@ export function TransferenciaScreen(p: {
         )}
       </ScrollView>
       {hojaTipos ? <HojaTipos actual="TRANSFERENCIA" onElegir={cambiarTipo} onCancelar={() => setHojaTipos(false)} /> : null}
+      {panelCuentas ? (
+        <PanelCuentas
+          cliente={p.cliente}
+          etiquetaAtras="Entre cuentas"
+          onCerrar={() => {
+            setPanelCuentas(false);
+            sinConfigurar.recargar();
+            void cargar(fecha);
+          }}
+        />
+      ) : null}
     </KeyboardAvoidingView>
   );
 }

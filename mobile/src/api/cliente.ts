@@ -13,7 +13,8 @@
 // v0.9.0 (F05-03/F05-04 J2 §1.9/§2): cuentas elegibles por operación, terceros, contextos, plantillas y acciones rápidas, propuesta del registro con la capa plantilla, registro de ingreso cobrado y entre cuentas, y onboarding de categorías. Escrituras de maestros con clasificación 'CAMBIO'; registros con la de escritura (indeterminado = reintentar el MISMO UUID).
 // v0.10.0 (F05-05 K3 §2.1–§2.7; F05 §49.4 A1–A9): lecturas de señales (GET /v1/senales/categorias y /v1/senales/terceros; tipos en domain/senales, único import nuevo), búsqueda de terceros en servidor (GET /v1/terceros?q=&incluir_inactivos=), afinidades (lectura del detalle, alta con UUID del cliente y retirada, clasificación 'CAMBIO'), Actividad v0 (página keyset y detalle) y read models de Inicio (yo, Resultado del mes). Las lecturas nuevas llaman `nota` al dato (M5-08); el wire de escritura del gasto no cambia.
 // v0.11.0 (F05-06 K-7; F05 §51.8): la categoría de la fila y del detalle de la Actividad trae `icon_key` (tipo aditivo, opcional). Sin rutas nuevas.
-// Versión: 0.10.0
+// v0.12.0 (F05-06 M4 §2.4/§3; F09 §12.105 CAP): capacidades de cuenta. Lecturas GET /v1/cuentas/capacidades (lista A1), /v1/cuentas/sin-configurar (aviso B2), /v1/cuentas/{id}/capacidades (A2/B1), …/historial (B4) y …/{capacidad}/impacto (A4); comando POST …/{capacidad}/activar | desactivar con `row_version` de la cuenta (clasificación 'CAMBIO'). Tipos sin tipo de cuenta ni defaults (D-CAP-04).
+// Versión: 0.12.0
 // ============================================================
 
 import type { Ambito, CategoriaNodo } from '../domain/categoria';
@@ -453,6 +454,42 @@ export interface ResultadoMes {
   sin_indicar: { gastos: { n: number; importe: string }; ingresos: { n: number; importe: string } };
 }
 
+// ------------------------------------------------------------------ F05-06 M4 capacidades de cuenta
+export type CodigoCapacidad = 'PAGAR_GASTO' | 'RECIBIR_INGRESO' | 'TRANSFERIR_SALIDA' | 'TRANSFERIR_ENTRADA' | 'COMPRA_TARJETA' | 'DOMICILIAR';
+
+export interface CapacidadNodo {
+  codigo: CodigoCapacidad;
+  etiqueta: string;
+  efecto: string;
+  permitida: boolean;
+  editable: boolean;
+}
+
+export interface CuentaCapacidades {
+  cuenta_id: string;
+  nombre: string;
+  estado: 'ACTIVA' | 'DESHABILITADA' | 'CERRADA';
+  row_version: number;
+  origen_v3: boolean;
+  sin_configurar: boolean;
+  capacidades: CapacidadNodo[];
+  otras: CapacidadNodo[];
+}
+
+export interface ImpactoCapacidad {
+  plantillas: { plantilla_id: string; nombre: string; enabled: boolean }[];
+  preferencias: { preferencia_id: string; enabled: boolean; categoria_id: string | null; categoria_nombre: string | null; tercero_id: string | null; tercero_nombre: string | null }[];
+}
+
+export interface EntradaHistorialCapacidad {
+  cuando: string;
+  accion: 'ACTIVAR' | 'DESACTIVAR';
+  capacidad: CodigoCapacidad;
+  etiqueta: string;
+  actor_tipo: 'USUARIO' | 'SISTEMA';
+  actor_es_owner: boolean;
+}
+
 export type Respuesta<T> =
   | { tipo: 'OK'; datos: T }
   | { tipo: 'RECHAZADO'; codigo: string; mensaje: string; detalle?: Record<string, unknown> }
@@ -551,6 +588,12 @@ export interface ClienteApi {
   detalleActividad(id: string): Promise<Respuesta<DetalleActividad>>;
   yo(): Promise<Respuesta<{ nombre: string | null }>>;
   resultadoMes(fecha: string): Promise<Respuesta<ResultadoMes>>;
+  listarCapacidades(): Promise<Respuesta<{ cuentas: CuentaCapacidades[]; sin_configurar: number }>>;
+  cuentasSinConfigurar(): Promise<Respuesta<{ sin_configurar: number }>>;
+  detalleCapacidades(cuentaId: string): Promise<Respuesta<CuentaCapacidades>>;
+  historialCapacidades(cuentaId: string): Promise<Respuesta<{ entradas: EntradaHistorialCapacidad[] }>>;
+  impactoCapacidad(cuentaId: string, capacidad: CodigoCapacidad): Promise<Respuesta<ImpactoCapacidad>>;
+  cambiarCapacidad(cuentaId: string, capacidad: CodigoCapacidad, permitir: boolean, row_version: number): Promise<Respuesta<{ cuenta: CuentaCapacidades; idempotente: boolean }>>;
 }
 
 const CAT = '/v1/categorias';
@@ -560,6 +603,7 @@ const TER = '/v1/terceros';
 const CTX = '/v1/contextos';
 const PLT = '/v1/plantillas';
 const ACC = '/v1/acciones-rapidas';
+const CAP = (id: string) => `/v1/cuentas/${encodeURIComponent(id)}/capacidades`;
 const asoc = (cat: string, a?: string) => `${CAT}/${encodeURIComponent(cat)}/magnitudes${a ? `/${encodeURIComponent(a)}` : ''}`;
 const post = (cuerpo: unknown): RequestInit => ({ method: 'POST', body: JSON.stringify(cuerpo) });
 
@@ -696,5 +740,12 @@ export function crearCliente(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): C
     detalleActividad: (id) => llamar(`/v1/actividad/${encodeURIComponent(id)}`, { method: 'GET' }, false),
     yo: () => llamar('/v1/yo', { method: 'GET' }, false),
     resultadoMes: (fecha) => llamar(`/v1/inicio/resultado-mes?fecha=${encodeURIComponent(fecha)}`, { method: 'GET' }, false),
+    listarCapacidades: () => llamar('/v1/cuentas/capacidades', { method: 'GET' }, false),
+    cuentasSinConfigurar: () => llamar('/v1/cuentas/sin-configurar', { method: 'GET' }, false),
+    detalleCapacidades: (id) => llamar(CAP(id), { method: 'GET' }, false),
+    historialCapacidades: (id) => llamar(`${CAP(id)}/historial`, { method: 'GET' }, false),
+    impactoCapacidad: (id, cap) => llamar(`${CAP(id)}/${encodeURIComponent(cap)}/impacto`, { method: 'GET' }, false),
+    cambiarCapacidad: (id, cap, permitir, row_version) =>
+      llamar(`${CAP(id)}/${encodeURIComponent(cap)}/${permitir ? 'activar' : 'desactivar'}`, post({ row_version }), 'CAMBIO'),
   };
 }

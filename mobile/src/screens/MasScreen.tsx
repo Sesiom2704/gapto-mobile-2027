@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-01 S6-WIRE+UI (este mandato))
 // Versión: 0.2.0 (F05-02 B3, A1; D-B3-01 ratificada por Moisés): «Preferencias financieras» pasa de «No disponible» a navegable y abre Ajustes › Preferencias. La fila conserva la etiqueta del árbol F09 §12.91.1; el título de la pantalla es «Preferencias» (lámina SET-PREF). Las otras ocho secciones siguen «No disponible».
 // Versión: 0.3.0 (F05-03/F05-04 J2 §2.5; láminas REG-DYN / SET-TH / SET-CTX v0.1 S01/S03 y SET-PLT v0.2 S01): «Terceros» y «Contextos» pasan a navegables; «Plantillas» se añade JUNTO a «Preferencias financieras» (mandato §2.5) como fila propia, sin alterar el árbol cerrado de diez secciones. Las otras seis siguen «No disponible».
+// Versión: 0.4.0 (F05-06 M4 §3; F09 §12.105 CAP, P-CAP-01): «Cuentas» se añade JUNTO a «Preferencias financieras», tras «Plantillas», como entrada provisional de las capacidades de cuenta (destino final PAT-07-D › Más, §12.72; divergencia provisional de navegación registrada en F09). El árbol cerrado de diez secciones no cambia.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -49,6 +50,7 @@ export function AjustesScreen(p: {
   onTerceros?: () => void;
   onContextos?: () => void;
   onPlantillas?: () => void;
+  onCuentas?: () => void;
 }) {
   const { c } = useTema();
   return (
@@ -62,6 +64,7 @@ export function AjustesScreen(p: {
             <React.Fragment key={sec}>
               <FilaNavegable testID="ajustes-preferencias" titulo={sec} onPress={p.onPreferencias} />
               {p.onPlantillas ? <FilaNavegable testID="ajustes-plantillas" titulo="Plantillas" onPress={p.onPlantillas} /> : null}
+              {p.onCuentas ? <FilaNavegable testID="ajustes-cuentas" titulo="Cuentas" onPress={p.onCuentas} /> : null}
             </React.Fragment>
           ) : sec === 'Terceros' && p.onTerceros ? (
             <FilaNavegable key={sec} testID="ajustes-terceros" titulo={sec} onPress={p.onTerceros} />
