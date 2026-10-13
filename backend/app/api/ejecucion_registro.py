@@ -38,6 +38,17 @@
 # Version: 0.1.0 (F05-03/F05-04 J2 §1.7)
 # Version: 0.2.0 (F05-03/F05-04 J2 §3, L5): la regla R1 bajo el lock toma
 #   tambien FOR SHARE de la fila de capacidad (cuenta -> capacidad).
+# Version: 0.3.0 (F05-06 M4 §2.3; D-CAP-08; PD-3): bajo el lock, el motivo
+#   SIN_CAPACIDAD deja de responder CUENTA_DESCONOCIDA y pasa a ser el
+#   rechazo de capa F05 CUENTA_SIN_CAPACIDAD (409, sin escritura previa), con
+#   detalle (cuenta_id, cuenta, operacion, capacidad) para el texto de B3.
+#   Viaja como excepcion `CuentaSinCapacidad` desde `rechazo_cuenta` (antes de
+#   cualquier escritura) y `con_rechazo_capacidad` la convierte en valor
+#   dentro de la misma transaccion (COMMIT vacio, como los demas rechazos de
+#   capa F05). Alcance: ingreso, transferencia (origen y destino) y, desde
+#   ejecucion_gasto_pagado.py, el gasto VS-01. Los demas motivos
+#   (DESHABILITADA, CERRADA, LEDGER_POSTERIOR, NO_ENCONTRADA) siguen en
+#   CUENTA_DESCONOCIDA y MONEDA en MONEDA_INVALIDA.
 # ============================================================
 
 from __future__ import annotations
@@ -52,7 +63,7 @@ from app.api.dto_registro import IntencionIngresoCobrado, IntencionTransferencia
 from app.api.elegibilidad_categoria import validar_seleccion_categoria
 from app.api.traductor_registro import componer_ingreso, componer_transferencia
 from app.api.traductor_gasto_pagado import leer_actor_self
-from app.comun.elegibilidad_cuentas import MONEDA, motivo_cuenta
+from app.comun.elegibilidad_cuentas import CAPACIDAD_POR_OPERACION, MONEDA, SIN_CAPACIDAD, motivo_cuenta
 from app.comun.fecha_funcional import CODIGO_FECHA_FUTURA, Reloj, es_futura, reloj_sistema
 from app.core.contexto import ContextoOperacion
 from app.core.errores import CodigoError, ErrorMotor
@@ -65,11 +76,39 @@ from app.services.transferencias_service import TransferenciasService
 
 CODIGO_TERCERO_NO_DISPONIBLE = "TERCERO_NO_DISPONIBLE"
 CODIGO_CONTEXTO_NO_DISPONIBLE = "CONTEXTO_NO_DISPONIBLE"
+CODIGO_CUENTA_SIN_CAPACIDAD = "CUENTA_SIN_CAPACIDAD"
 
 
 @dataclass(frozen=True, slots=True)
 class RechazoRegistro:
     codigo: str
+    detalle: dict[str, Any] | None = None
+
+
+class CuentaSinCapacidad(Exception):
+    """Motivo SIN_CAPACIDAD bajo el lock (D-CAP-08). Se lanza ANTES de
+    cualquier escritura y `con_rechazo_capacidad` la devuelve como valor."""
+
+    def __init__(self, detalle: dict[str, Any]) -> None:
+        super().__init__(CODIGO_CUENTA_SIN_CAPACIDAD)
+        self.detalle = detalle
+
+
+def con_rechazo_capacidad(operacion, rechazo):
+    """Envuelve la operacion transaccional: CuentaSinCapacidad -> rechazo(codigo, detalle)."""
+    def envuelta(sesion: SesionMotor):
+        try:
+            return operacion(sesion)
+        except CuentaSinCapacidad as exc:
+            return rechazo(CODIGO_CUENTA_SIN_CAPACIDAD, exc.detalle)
+    return envuelta
+
+
+def detalle_sin_capacidad(sesion: SesionMotor, cuenta_id: uuid.UUID, operacion: str) -> dict[str, Any]:
+    """Datos del texto de B3: la cuenta es visible (el motivo no es NO_ENCONTRADA)."""
+    fila = sesion.uno("SELECT nombre FROM gapto.cuentas WHERE id = %s", (cuenta_id,))
+    return {"cuenta_id": str(cuenta_id), "cuenta": fila[0], "operacion": operacion,
+            "capacidad": CAPACIDAD_POR_OPERACION[operacion]}
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,11 +136,14 @@ def bloquear_cuentas(sesion: SesionMotor, *cuentas: uuid.UUID) -> None:
 
 
 def rechazo_cuenta(sesion: SesionMotor, cuenta_id: uuid.UUID, operacion: str, fecha) -> None:
-    """Regla unica R1 bajo el lock: MONEDA -> MONEDA_INVALIDA; otro motivo ->
+    """Regla unica R1 bajo el lock: MONEDA -> MONEDA_INVALIDA; SIN_CAPACIDAD ->
+    CuentaSinCapacidad (CUENTA_SIN_CAPACIDAD, capa F05); otro motivo ->
     CUENTA_DESCONOCIDA (codigos F04 ya traducidos por la API)."""
     motivo = motivo_cuenta(sesion, cuenta_id, operacion, fecha, bloquear=True)
     if motivo == MONEDA:
         raise ErrorMotor(CodigoError.MONEDA_INVALIDA, "Solo se admite una cuenta en EUR.")
+    if motivo == SIN_CAPACIDAD:
+        raise CuentaSinCapacidad(detalle_sin_capacidad(sesion, cuenta_id, operacion))
     if motivo is not None:
         raise ErrorMotor(CodigoError.CUENTA_DESCONOCIDA, "La cuenta no existe o no esta disponible.")
 
@@ -167,7 +209,8 @@ def registrar_ingreso_cobrado(unidad: UnidadDeTrabajo, contexto: ContextoOperaci
         return Registrado(hecho_id=r.hecho_id, idempotente=r.idempotente,
                           estado_atribucion=datos.efectos[0].estado_atribucion)
 
-    return unidad.ejecutar(contexto, operacion, nombre="F05-04 ingreso_cobrado (locks + OP-22)")
+    return unidad.ejecutar(contexto, con_rechazo_capacidad(operacion, RechazoRegistro),
+                           nombre="F05-04 ingreso_cobrado (locks + OP-22)")
 
 
 # ------------------------------------------------------------------ entre cuentas (OP-10)
@@ -216,4 +259,5 @@ def registrar_transferencia(unidad: UnidadDeTrabajo, contexto: ContextoOperacion
             contexto, componer_transferencia(intencion))
         return Registrado(hecho_id=r.hecho_id, idempotente=r.idempotente, estado_atribucion=None)
 
-    return unidad.ejecutar(contexto, operacion, nombre="F05-04 transferencia (locks + OP-10)")
+    return unidad.ejecutar(contexto, con_rechazo_capacidad(operacion, RechazoRegistro),
+                           nombre="F05-04 transferencia (locks + OP-10)")

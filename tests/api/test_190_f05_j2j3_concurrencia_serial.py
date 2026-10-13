@@ -36,6 +36,9 @@
 #   son las mismas. Cada JSON de evidencia anota la espera aplicada y la
 #   duracion de cada paso.
 # Version: 0.2.0 (MANT-190-L8, AJ-J4-01)
+# Version: 0.3.0 (F05-06 M4 §2.3, D-CAP-08): en L5, la transferencia que llega
+#   despues de la retirada de la capacidad responde CUENTA_SIN_CAPACIDAD; tras
+#   deshabilitar la cuenta sigue en CUENTA_DESCONOCIDA.
 # Historial:
 #   0.1.0 F05-03/F05-04 J2 §3: bateria inicial.
 #   0.2.0 MANT-190-L8 (AJ-J4-01): espera configurable en _serie
@@ -347,7 +350,8 @@ def test_l5_transferencia_frente_a_cambio_de_cuenta(t, cambio, primero):
     if primero == "transferencia":
         assert salida["transferencia"].status_code == 200
     else:
-        assert _cod(salida["transferencia"]) == "CUENTA_DESCONOCIDA"
+        assert _cod(salida["transferencia"]) == ("CUENTA_SIN_CAPACIDAD" if cambio == "capacidad"
+                                                 else "CUENTA_DESCONOCIDA")
 
 
 # ------------------------------------------------------------------ L6 terceros homonimos

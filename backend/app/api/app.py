@@ -153,7 +153,20 @@
 #   v0.21.0 (F05-05 K2 §1.6; F05 §49.4 A9, D13): read models de Inicio:
 #     GET  /v1/yo                         nombre del owner (identidad de desarrollo)
 #     GET  /v1/inicio/resultado-mes?fecha= Resultado del mes (contrato de A9)
-# Version: 0.21.0
+#   v0.22.0 (F05-06 M4 §2.2-§2.4; F09 §12.105 CAP): capacidades de cuenta
+#   (Ajustes › Preferencias financieras › Cuentas, entrada provisional):
+#     GET  /v1/cuentas/capacidades                 lista (A1) + numero sin configurar
+#     GET  /v1/cuentas/sin-configurar              numero sin configurar (aviso B2)
+#     GET  /v1/cuentas/{id}/capacidades            detalle (A2/B1)
+#     GET  /v1/cuentas/{id}/capacidades/historial  historial de auditoria (B4)
+#     GET  /v1/cuentas/{id}/capacidades/{capacidad}/impacto  plantillas y
+#          preferencias que pasarian a «No disponible» (A4)
+#     POST /v1/cuentas/{id}/capacidades/{capacidad}/activar | desactivar
+#          {row_version} (writer unico, capacidades/servicio.py)
+#   El registro responde CUENTA_SIN_CAPACIDAD (409, con detalle) cuando la
+#   cuenta perdio la capacidad (D-CAP-08); los rechazos de capa F05 llevan
+#   su detalle si lo tienen.
+# Version: 0.22.0
 # ============================================================
 
 from __future__ import annotations
@@ -179,6 +192,15 @@ from app.api.configuracion import (
     ConfiguracionApi,
     cargar_desde_entorno,
     verificar_base_permitida,
+)
+from app.api.dto_capacidades import (
+    CambioCapacidad,
+    CuentaCapacidades,
+    HistorialCapacidades,
+    ImpactoDesactivar,
+    ListaCuentasCapacidades,
+    ResultadoComandoCapacidad,
+    SinConfigurar,
 )
 from app.api.dto_categorias import (
     AltaCategoria,
@@ -272,6 +294,8 @@ from app.api.ejecucion_registro import RechazoRegistro, registrar_ingreso_cobrad
 from app.actividad import lecturas as lect_act
 from app.afinidades import lecturas as lect_afi
 from app.afinidades import servicio as serv_afi
+from app.capacidades import lecturas as lect_cap
+from app.capacidades import servicio as serv_cap
 from app.categorias import lecturas as lect_cat
 from app.categorias import onboarding as onb
 from app.inicio import lecturas as lect_ini
@@ -657,6 +681,71 @@ def create_app(
         return _comando_preferencia("reactivar", lambda s: serv_pref.reactivar(
             s, preferencia_id=preferencia_id, row_version=c.row_version))
 
+    # ------------------------------------------------------------ F05-06 M4 capacidades de cuenta
+    def _rechazo_capacidad(salida) -> JSONResponse:
+        status, cuerpo = eh.rechazo_capacidad(salida.codigo, salida.detalle)
+        return JSONResponse(cuerpo, status_code=status)
+
+    @app.get("/v1/cuentas/capacidades", response_model=ListaCuentasCapacidades, dependencies=[Depends(autorizar)])
+    def capacidades_lista() -> dict:
+        def _op(s):
+            cuentas = lect_cap.lista(s)
+            return {"cuentas": cuentas, "sin_configurar": lect_cap.contar_sin_configurar(cuentas)}
+        return unidad.ejecutar(contexto(), _op, nombre="F05-06 capacidades lista")
+
+    @app.get("/v1/cuentas/sin-configurar", response_model=SinConfigurar, dependencies=[Depends(autorizar)])
+    def capacidades_sin_configurar() -> dict:
+        return {"sin_configurar": unidad.ejecutar(contexto(), lect_cap.sin_configurar,
+                                                  nombre="F05-06 capacidades sin configurar")}
+
+    @app.get("/v1/cuentas/{cuenta_id}/capacidades", response_model=CuentaCapacidades,
+             dependencies=[Depends(autorizar)])
+    def capacidades_detalle(cuenta_id: uuid.UUID):
+        salida = unidad.ejecutar(contexto(), lambda s: lect_cap.detalle(s, cuenta_id),
+                                 nombre="F05-06 capacidades detalle")
+        return _rechazo_capacidad(serv_cap.Rechazo(serv_cap.CUENTA_NO_ENCONTRADA)) if salida is None else salida
+
+    @app.get("/v1/cuentas/{cuenta_id}/capacidades/historial", response_model=HistorialCapacidades,
+             dependencies=[Depends(autorizar)])
+    def capacidades_historial(cuenta_id: uuid.UUID):
+        def _op(s):
+            if lect_cap.detalle(s, cuenta_id) is None:
+                return serv_cap.Rechazo(serv_cap.CUENTA_NO_ENCONTRADA)
+            return {"entradas": lect_cap.historial(s, cuenta_id)}
+        salida = unidad.ejecutar(contexto(), _op, nombre="F05-06 capacidades historial")
+        return _rechazo_capacidad(salida) if isinstance(salida, serv_cap.Rechazo) else salida
+
+    @app.get("/v1/cuentas/{cuenta_id}/capacidades/{capacidad}/impacto", response_model=ImpactoDesactivar,
+             dependencies=[Depends(autorizar)])
+    def capacidades_impacto(cuenta_id: uuid.UUID, capacidad: str):
+        def _op(s):
+            rechazo = serv_cap.validar_capacidad(capacidad)
+            if rechazo is not None:
+                return rechazo
+            if lect_cap.detalle(s, cuenta_id) is None:
+                return serv_cap.Rechazo(serv_cap.CUENTA_NO_ENCONTRADA)
+            return lect_cap.impacto(s, cuenta_id, capacidad, reloj)
+        salida = unidad.ejecutar(contexto(), _op, nombre="F05-06 capacidades impacto")
+        return _rechazo_capacidad(salida) if isinstance(salida, serv_cap.Rechazo) else salida
+
+    def _comando_capacidad(nombre_op: str, operacion) -> dict | JSONResponse:
+        salida = unidad.ejecutar(contexto(), operacion, nombre=f"F05-06 capacidad {nombre_op}")
+        if isinstance(salida, serv_cap.Rechazo):
+            return _rechazo_capacidad(salida)
+        return {"cuenta": salida.cuenta, "idempotente": salida.idempotente}
+
+    _RCAP = {"response_model": ResultadoComandoCapacidad, "dependencies": [Depends(autorizar)]}
+
+    @app.post("/v1/cuentas/{cuenta_id}/capacidades/{capacidad}/activar", **_RCAP)
+    def activar_capacidad(cuenta_id: uuid.UUID, capacidad: str, c: CambioCapacidad):
+        return _comando_capacidad("activar", lambda s: serv_cap.activar(
+            s, cuenta_id=cuenta_id, capacidad=capacidad, row_version=c.row_version))
+
+    @app.post("/v1/cuentas/{cuenta_id}/capacidades/{capacidad}/desactivar", **_RCAP)
+    def desactivar_capacidad(cuenta_id: uuid.UUID, capacidad: str, c: CambioCapacidad):
+        return _comando_capacidad("desactivar", lambda s: serv_cap.desactivar(
+            s, cuenta_id=cuenta_id, capacidad=capacidad, row_version=c.row_version))
+
     # ------------------------------------------------------------ F05-04 J2 §1.3/§1.4 maestros
     def _comando_maestro(nombre_op: str, operacion, modulo, traducir, clave: str) -> dict | JSONResponse:
         salida = unidad.ejecutar(contexto(), operacion, nombre=f"F05-04 {nombre_op}")
@@ -818,7 +907,7 @@ def create_app(
     def gasto_pagado(intencion: IntencionGastoPagado) -> dict:
         salida = registrar_gasto_pagado(unidad, contexto(), intencion, reloj)
         if isinstance(salida, RechazoIntegracion):
-            status, cuerpo = eh.rechazo_integracion(salida.codigo)
+            status, cuerpo = eh.rechazo_integracion(salida.codigo, salida.detalle)
             return JSONResponse(cuerpo, status_code=status)
         r, datos = salida.resultado, salida.datos
         return {
@@ -836,7 +925,7 @@ def create_app(
 
     def _respuesta_registro(salida, intencion, tipo: str, estado_categorial) -> dict | JSONResponse:
         if isinstance(salida, RechazoRegistro):
-            status, cuerpo = eh.rechazo_integracion(salida.codigo)
+            status, cuerpo = eh.rechazo_integracion(salida.codigo, salida.detalle)
             return JSONResponse(cuerpo, status_code=status)
         return {
             "intencion_id": intencion.intencion_id, "hecho_id": salida.hecho_id, "idempotente": salida.idempotente,

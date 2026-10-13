@@ -24,6 +24,10 @@
 # Version: 0.1.0 (F05-03/F05-04 J2 §1.7)
 # Version: 0.2.0 (F05-03/F05-04 J3 §3; AJ-F0504-09 caso 21): sin multicategoria (lista,
 #   campo `categorias` o categoria_id multiple -> 422 en gasto e ingreso, sin efectos).
+# Version: 0.3.0 (F05-06 M4 §2.3, D-CAP-08): una cuenta sin la capacidad de la
+#   operacion (ingreso, origen o destino de OP-10, gasto con la capacidad retirada)
+#   responde CUENTA_SIN_CAPACIDAD (409); la cuenta de otro owner sigue en
+#   CUENTA_DESCONOCIDA (422).
 # ============================================================
 
 from __future__ import annotations
@@ -236,7 +240,7 @@ def test_ingreso_exige_recibir_ingreso_y_categoria_de_ingreso(t):
     for cuenta in (ahorro, credito):
         cuerpo = ingreso(cuenta)
         r = cli.post(INGRESO, json=cuerpo, headers=h.AUTH)
-        assert r.status_code == 422 and r.json()["codigo"] == "CUENTA_DESCONOCIDA" and _nada(owner, cuerpo["intencion_id"])
+        assert r.status_code == 409 and r.json()["codigo"] == "CUENTA_SIN_CAPACIDAD" and _nada(owner, cuerpo["intencion_id"])
     gasto = _cat(owner, "Supermercado")
     r = cli.post(INGRESO, json=ingreso(corriente, categoria={"estado": "CATEGORIA", "categoria_id": str(gasto)}),
                  headers=h.AUTH)
@@ -271,11 +275,11 @@ def test_caso8_liquidacion_de_la_tarjeta_y_capacidades(t):
     assert r.status_code == 200, r.text
     cuerpo = transf(credito, corriente)  # CREDITO no tiene TRANSFERIR_SALIDA
     r = cli.post(TRANSF, json=cuerpo, headers=h.AUTH)
-    assert r.status_code == 422 and r.json()["codigo"] == "CUENTA_DESCONOCIDA" and _nada(owner, cuerpo["intencion_id"])
+    assert r.status_code == 409 and r.json()["codigo"] == "CUENTA_SIN_CAPACIDAD" and _nada(owner, cuerpo["intencion_id"])
     sin = h.crear_cuenta(owner, [(t[1], 100)], capacidades=("TRANSFERIR_SALIDA",))
     cuerpo = transf(corriente, sin)  # destino sin TRANSFERIR_ENTRADA
     r = cli.post(TRANSF, json=cuerpo, headers=h.AUTH)
-    assert r.status_code == 422 and _nada(owner, cuerpo["intencion_id"])
+    assert r.status_code == 409 and r.json()["codigo"] == "CUENTA_SIN_CAPACIDAD" and _nada(owner, cuerpo["intencion_id"])
 
 
 @pytest.mark.parametrize("cambio", [{"importe": "501.00"}, {"nota": "otra"}, {"fecha_hecho": "2026-09-23"},
@@ -342,7 +346,7 @@ def test_caso17_desactivado_entre_carga_y_confirmacion(t, que):
     else:
         h.como_owner(owner, "DELETE FROM gapto.cuenta_capacidades WHERE cuenta_id=%s AND capacidad_codigo='PAGAR_GASTO'",
                      (corriente,))
-        codigo = "CUENTA_DESCONOCIDA"
+        codigo = "CUENTA_SIN_CAPACIDAD"
     r = cli.post(GASTO, json=cuerpo, headers=h.AUTH)
     assert r.json()["codigo"] == codigo and _nada(owner, cuerpo["intencion_id"])
 

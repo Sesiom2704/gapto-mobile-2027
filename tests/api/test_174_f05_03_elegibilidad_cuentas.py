@@ -17,6 +17,10 @@
 #     efectos de deuda, R2); sin capacidad o con ledger posterior ->
 #     CUENTA_DESCONOCIDA; USD -> MONEDA_INVALIDA (test_150 sin cambios).
 # Version: 0.1.0 (F05-03/F05-04 J2 §1.1)
+# Version: 0.2.0 (F05-06 M4 §2.3, D-CAP-08): la confirmacion VS-01 sin la
+#   capacidad (sin filas o AHORRO sin PAGAR_GASTO) responde
+#   CUENTA_SIN_CAPACIDAD (409); el ledger posterior sigue en
+#   CUENTA_DESCONOCIDA (422).
 # ============================================================
 
 from __future__ import annotations
@@ -167,6 +171,7 @@ def test_gasto_pagado_con_cuenta_no_elegible(t, caso):
                      (dt.date(2026, 9, 25), cid))
     cuerpo = h.intencion(cid)
     r = cli.post(URL, json=cuerpo, headers=h.AUTH)
-    assert r.status_code == 422 and r.json()["codigo"] == "CUENTA_DESCONOCIDA", r.text
+    esperado = (422, "CUENTA_DESCONOCIDA") if caso == "ledger_posterior" else (409, "CUENTA_SIN_CAPACIDAD")
+    assert (r.status_code, r.json()["codigo"]) == esperado, r.text
     assert h.leer(owner, "SELECT count(*) FROM gapto.hechos_financieros WHERE id=%s",
                   (uuid.UUID(cuerpo["intencion_id"]),))[0][0] == 0

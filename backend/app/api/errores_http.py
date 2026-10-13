@@ -96,7 +96,14 @@
 #   detalle, IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION) y de las lecturas de
 #   F05-05 (TERCERO_NO_ENCONTRADO 404, FECHA_FUTURA 422; sin «no se ha
 #   guardado nada», porque son lecturas).
-# Version: 0.16.0
+#   v0.17.0 (F05-06 M4 §2.3/§2.4; D-CAP-08; PD-2/PD-3): rechazo de
+#   integracion CUENTA_SIN_CAPACIDAD (409, sin escritura) con el texto de B3,
+#   compuesto con el detalle (nombre de la cuenta propia y operacion), que se
+#   devuelve tambien en `detalle`. `rechazo_capacidad` traduce el writer de
+#   capacidades: CUENTA_NO_ENCONTRADA (404), CAPACIDAD_NO_EDITABLE,
+#   OPERACION_NO_PERMITIDA_EN_ESTADO y VERSION_DESFASADA (409),
+#   ENTRADA_INVALIDA (422).
+# Version: 0.17.0
 # ============================================================
 
 from __future__ import annotations
@@ -207,10 +214,43 @@ _RECHAZOS_INTEGRACION: dict[str, tuple[int, str]] = {
 }
 
 
-def rechazo_integracion(codigo: str) -> tuple[int, dict]:
+#: CUENTA_SIN_CAPACIDAD (B3): operacion -> (lo que la cuenta ya no puede hacer, lo que no se ha guardado).
+_SIN_CAPACIDAD: dict[str, tuple[str, str]] = {
+    "GASTO": ("pagar gastos", "El gasto"),
+    "INGRESO": ("recibir ingresos", "El ingreso"),
+    "TRANSFERENCIA_ORIGEN": ("enviar a otras cuentas tuyas", "La transferencia"),
+    "TRANSFERENCIA_DESTINO": ("recibir de otras cuentas tuyas", "La transferencia"),
+}
+
+
+def _mensaje_sin_capacidad(detalle: dict) -> str:
+    verbo, sujeto = _SIN_CAPACIDAD[detalle["operacion"]]
+    return (f"{detalle['cuenta']} ya no puede {verbo}. Se cambió mientras registrabas. "
+            f"{sujeto} no se ha guardado: elige otra cuenta.")
+
+
+def rechazo_integracion(codigo: str, detalle: dict | None = None) -> tuple[int, dict]:
     """Rechazo DEFINITIVO de la capa F05: repetir la misma intencion no puede
     tener exito; el cliente libera la edicion y usara identidad nueva."""
+    if codigo == "CUENTA_SIN_CAPACIDAD":
+        return 409, {"codigo": codigo, "mensaje": _mensaje_sin_capacidad(detalle), "reintentable": False,
+                     "detalle": dict(detalle)}
     status, mensaje = _RECHAZOS_INTEGRACION[codigo]
+    return status, {"codigo": codigo, "mensaje": mensaje, "reintentable": False}
+
+
+_RECHAZOS_CAPACIDAD: dict[str, tuple[int, str]] = {
+    "CUENTA_NO_ENCONTRADA": (404, "No encontrado."),
+    "CAPACIDAD_NO_EDITABLE": (409, "Esta capacidad aún no se usa en el registro y no se puede cambiar."),
+    "OPERACION_NO_PERMITIDA_EN_ESTADO": (
+        409, "Esta cuenta está cerrada o desactivada: no se puede cambiar lo que puede hacer."),
+    "VERSION_DESFASADA": (409, "La cuenta ha cambiado desde que la abriste. Vuelve a cargarla."),
+    "ENTRADA_INVALIDA": (422, "Revisa los datos."),
+}
+
+
+def rechazo_capacidad(codigo: str, detalle: dict | None = None) -> tuple[int, dict]:
+    status, mensaje = _RECHAZOS_CAPACIDAD[codigo]
     return status, {"codigo": codigo, "mensaje": mensaje, "reintentable": False}
 
 

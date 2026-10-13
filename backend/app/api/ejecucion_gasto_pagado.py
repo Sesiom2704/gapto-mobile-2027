@@ -97,7 +97,13 @@
 #     -> C07 FOR SHARE -> tercero / contexto FOR SHARE (paso 3d) -> OP-22.
 #   Tercero o contexto ajeno, inexistente o desactivado ->
 #   TERCERO_NO_DISPONIBLE / CONTEXTO_NO_DISPONIBLE (capa F05, sin escritura).
-# Version: 0.8.0
+#
+#   v0.9.0 (F05-06 M4 §2.3; D-CAP-08; PD-3): el motivo SIN_CAPACIDAD bajo el
+#   lock pasa de CUENTA_DESCONOCIDA al rechazo de capa F05
+#   CUENTA_SIN_CAPACIDAD (409, sin escritura), con el mismo mecanismo que
+#   ejecucion_registro.py (CuentaSinCapacidad + con_rechazo_capacidad).
+#   MONEDA y los demas motivos no cambian.
+# Version: 0.9.0
 # ============================================================
 
 from __future__ import annotations
@@ -108,8 +114,15 @@ from app.api.captura_magnitudes import validar_magnitudes
 from app.api.dto_vs01 import IntencionGastoPagado
 from app.api.elegibilidad_categoria import validar_seleccion_categoria
 from app.api.traductor_gasto_pagado import componer, leer_actor_self, participacion_self_100
-from app.api.ejecucion_registro import tomar_inversiones, validar_contexto, validar_tercero
-from app.comun.elegibilidad_cuentas import MONEDA, motivo_cuenta
+from app.api.ejecucion_registro import (
+    CuentaSinCapacidad,
+    con_rechazo_capacidad,
+    detalle_sin_capacidad,
+    tomar_inversiones,
+    validar_contexto,
+    validar_tercero,
+)
+from app.comun.elegibilidad_cuentas import MONEDA, SIN_CAPACIDAD, motivo_cuenta
 from app.comun.fecha_funcional import CODIGO_FECHA_FUTURA, Reloj, es_futura, reloj_sistema
 from app.core.contexto import ContextoOperacion
 from app.core.errores import CodigoError, ErrorMotor
@@ -132,6 +145,7 @@ class Registrado:
 @dataclass(frozen=True, slots=True)
 class RechazoIntegracion:
     codigo: str
+    detalle: dict | None = None
 
 
 def bloquear_cuenta(sesion: SesionMotor, cuenta_id) -> None:
@@ -154,6 +168,8 @@ def _validar_cuenta_nueva(sesion: SesionMotor, intencion: IntencionGastoPagado) 
             CodigoError.MONEDA_INVALIDA,
             "VS-01 solo admite pagar desde una cuenta en la misma moneda del gasto.",
         )
+    if motivo == SIN_CAPACIDAD:
+        raise CuentaSinCapacidad(detalle_sin_capacidad(sesion, intencion.cuenta_id, "GASTO"))
     if motivo is not None:
         raise ErrorMotor(CodigoError.CUENTA_DESCONOCIDA, "La cuenta no existe o no esta disponible.")
 
@@ -208,4 +224,5 @@ def registrar_gasto_pagado(
         )
         return Registrado(resultado=op22.registrar_hecho_compuesto(contexto, datos), datos=datos)
 
-    return unidad.ejecutar(contexto, operacion, nombre="VS01 gasto_pagado (lock cuenta + OP-22)")
+    return unidad.ejecutar(contexto, con_rechazo_capacidad(operacion, RechazoIntegracion),
+                           nombre="VS01 gasto_pagado (lock cuenta + OP-22)")
