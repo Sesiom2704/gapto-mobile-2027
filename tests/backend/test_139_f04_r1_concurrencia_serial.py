@@ -20,7 +20,15 @@
 #   Los UUID de los sucesores (los da el llamante) fijan UUID(s_b) < UUID(s_a)
 #   mientras la propagacion procesa s_a antes que s_b. Sobre la base el ciclo
 #   P_s_a <-> P_s_b produce 40P01 (rojo: evidencia_f04r1\f1\); con G-R1-D
-#   (reglas y previsiones por UUID) debe serializar sin 40P01.
+#   (reglas y previsiones por UUID) debe serializar sin 40P01. Orden REAL
+#   observado con G-R1-D (local y Neon, evidencia_f04r1\f7b\): OP-02 toma las
+#   reglas y pide s_b ANTES que s_a (orden por UUID), asi que la barrera de s_b
+#   lo retiene desde el principio y corregir_vinculo espera a OP-02 en la regla;
+#   liberar s_a no lo desbloquea. La tercera espera acredita que OP-02 sigue
+#   pidiendo s_b (barrera o cola) tras liberar s_a; el oraculo no cambia.
+#   Las barreras guardan el pid REAL del servidor (pg_backend_pid()): tras el
+#   proxy de Neon, info.backend_pid es la clave de cancelacion del proxy y no
+#   coincide con pg_stat_activity/pg_blocking_pids (F7b, sonda_backend_pid).
 #   C2 (dos reglas frente a recalcular_futuras/corregir_estado_terminal):
 #   NO_REPRODUCIBLE sobre la base (ver HANDOFF_F04-R1_F1.md).
 #
@@ -34,6 +42,10 @@
 #   cerrar_posicion; relectura con el conjunto cambiado (el vinculo cambia de
 #   previsión o de hecho entre la lectura y la adquisicion: 40001 y reintento
 #   completo, nunca exito con una proteccion incompleta).
+# Version: 0.4.0 (F04-R1 F7c; HANDOFF_F04-R1_F7B): Barrera.pid = pg_backend_pid()
+#   (pid real; tras el proxy de Neon info.backend_pid no coincide con
+#   pg_blocking_pids y C1 no podia cumplir su tercera espera). Comentarios de C1
+#   con el orden real (OP-02 pide s_b antes que s_a). Aserciones sin cambios.
 # Version: 0.3.0 (F04-R1 CORR paso 2; STOP_F04-R1_F6): par OP-22 con
 #   marcar_realizada=True frente a OP-17 sobre la MISMA previsión y version, con
 #   el ganador forzado por barrera en los dos ordenes. Oraculo IL4: el perdedor
@@ -84,7 +96,9 @@ class Barrera:
     def __init__(self, dsn: str, tabla: str, ident: uuid.UUID) -> None:
         self.conexion = psycopg.connect(dsn)
         self.conexion.execute(f"SELECT id FROM gapto.{tabla} WHERE id = %s FOR UPDATE", (ident,))
-        self.pid = self.conexion.info.backend_pid
+        # pid REAL del backend (el que ven pg_stat_activity y pg_blocking_pids); info.backend_pid no vale tras el
+        # proxy de Neon (F04-R1 F7c).
+        self.pid = self.conexion.execute("SELECT pg_backend_pid()").fetchone()[0]
 
     def liberar(self) -> None:
         if not self.conexion.closed:
