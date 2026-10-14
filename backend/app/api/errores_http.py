@@ -106,7 +106,19 @@
 #   capacidades: CUENTA_NO_ENCONTRADA (404), CAPACIDAD_NO_EDITABLE,
 #   OPERACION_NO_PERMITIDA_EN_ESTADO y VERSION_DESFASADA (409),
 #   ENTRADA_INVALIDA (422).
-# Version: 0.18.0
+#   v0.19.0 (F05-06 M2 §A2-§A3; nota de impacto de F04-R1 F5): devolucion
+#   contextual. _MAPA: HECHO_CON_REALIDAD_ASOCIADA (409; G-R1-A, un origen con
+#   devolucion activa no se anula), YA_CONCILIADO (409; no hay abono doble) y
+#   EXCEDE_CAPACIDAD_REVERSIBLE (409; limite acumulado de OP-13). Ninguna ruta
+#   previa los alcanzaba (caian en el 422 por defecto). Rechazos de
+#   integracion F05 nuevos (409, sin escritura): DEVOLUCION_ORIGEN_NO_ACTIVO,
+#   DEVOLUCION_ORIGEN_NO_GASTO, DEVOLUCION_ORIGEN_V3_VARIOS_EFECTOS,
+#   DEVOLUCION_ORIGEN_MULTICATEGORIA, DEVOLUCION_ATRIBUCION_NO_DEMOSTRABLE,
+#   HECHO_NO_ES_DEVOLUCION y DEVOLUCION_NO_ACTIVA; EXCEDE_CAPACIDAD_REVERSIBLE
+#   como rechazo con detalle {queda} (texto de B3 con «lo que queda»);
+#   CUENTA_SIN_CAPACIDAD con la operacion ABONO_DEVOLUCION (capacidad
+#   PAGAR_GASTO: «recibir devoluciones de gastos», nunca «ingreso», D-DEV-04).
+# Version: 0.19.0
 # ============================================================
 
 from __future__ import annotations
@@ -129,6 +141,18 @@ _MAPA: dict[CodigoError, tuple[int, str, bool]] = {
     CodigoError.PORCION_DE_REALIDAD_EXCEDIDA: (
         409,
         "Esa realidad ya está asignada a otras previsiones por su importe completo. No se ha guardado nada.",
+        False,
+    ),
+    # F05-06 M2 (devolucion contextual).
+    CodigoError.HECHO_CON_REALIDAD_ASOCIADA: (
+        409,
+        "No se puede anular: tiene una devolución u otra operación registrada. No se ha cambiado nada.",
+        False,
+    ),
+    CodigoError.YA_CONCILIADO: (409, "Esta devolución ya tiene su abono registrado. No se ha guardado nada.", False),
+    CodigoError.EXCEDE_CAPACIDAD_REVERSIBLE: (
+        409,
+        "Supera lo que queda por devolver de esta compra. No se ha guardado nada.",
         False,
     ),
     CodigoError.MISMA_CUENTA: (422, "Elige dos cuentas distintas: origen y destino no pueden coincidir.", False),
@@ -219,6 +243,21 @@ _RECHAZOS_INTEGRACION: dict[str, tuple[int, str]] = {
         "Un dato adicional tiene más decimales o es mayor de lo permitido. "
         "Revísalo: no se ha guardado nada.",
     ),
+    # F05-06 M2: devolucion contextual (D-DEV, P-DEV).
+    "DEVOLUCION_ORIGEN_NO_ACTIVO": (
+        409, "Esta compra ya no está activa: no se puede registrar una devolución. No se ha guardado nada."),
+    "DEVOLUCION_ORIGEN_NO_GASTO": (
+        409, "Solo se pueden registrar devoluciones de gastos. No se ha guardado nada."),
+    "DEVOLUCION_ORIGEN_V3_VARIOS_EFECTOS": (
+        409, "Esta compra viene de la versión anterior con varias partes: no se puede saber qué se devuelve. "
+             "No se ha guardado nada."),
+    "DEVOLUCION_ORIGEN_MULTICATEGORIA": (
+        409, "Esta compra tiene varias categorías: aún no se puede registrar su devolución. No se ha guardado nada."),
+    "DEVOLUCION_ATRIBUCION_NO_DEMOSTRABLE": (
+        409, "La compra no era 100 % tuya: la devolución no puede quedar como tuya. Déjala «Sin indicar». "
+             "No se ha guardado nada."),
+    "HECHO_NO_ES_DEVOLUCION": (409, "Solo se registra un abono sobre una devolución. No se ha guardado nada."),
+    "DEVOLUCION_NO_ACTIVA": (409, "Esta devolución ya no está activa. No se ha guardado nada."),
 }
 
 
@@ -228,6 +267,7 @@ _SIN_CAPACIDAD: dict[str, tuple[str, str]] = {
     "INGRESO": ("recibir ingresos", "El ingreso"),
     "TRANSFERENCIA_ORIGEN": ("enviar a otras cuentas tuyas", "La transferencia"),
     "TRANSFERENCIA_DESTINO": ("recibir de otras cuentas tuyas", "La transferencia"),
+    "ABONO_DEVOLUCION": ("pagar gastos ni recibir sus devoluciones", "El abono"),
 }
 
 
@@ -243,6 +283,12 @@ def rechazo_integracion(codigo: str, detalle: dict | None = None) -> tuple[int, 
     if codigo == "CUENTA_SIN_CAPACIDAD":
         return 409, {"codigo": codigo, "mensaje": _mensaje_sin_capacidad(detalle), "reintentable": False,
                      "detalle": dict(detalle)}
+    if codigo == "EXCEDE_CAPACIDAD_REVERSIBLE":
+        queda = detalle["queda"].replace(".", ",")
+        return 409, {"codigo": codigo,
+                     "mensaje": (f"Supera lo que queda por devolver de esta compra ({queda} €). Si te han abonado "
+                                 "más, la diferencia no es una devolución. No se ha guardado nada."),
+                     "reintentable": False, "detalle": dict(detalle)}
     status, mensaje = _RECHAZOS_INTEGRACION[codigo]
     return status, {"codigo": codigo, "mensaje": mensaje, "reintentable": False}
 

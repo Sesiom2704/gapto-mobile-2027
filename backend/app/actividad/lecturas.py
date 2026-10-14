@@ -38,6 +38,16 @@
 # Version: 0.1.0 (F05-05 K2 §1.5)
 # Version: 0.2.0 (F05-06 K-7, F05 §51.8): la categoria de la fila (y del
 #   detalle) lleva `icon_key` del catalogo ya leido; sin consultas nuevas.
+# Version: 0.3.0 (F05-06 M2 §A4; D-DEV-06/07, P-DEV-03): campos ADITIVOS de
+#   la devolucion contextual, sin cambiar el universo, el orden ni ningun
+#   campo existente. Fila y detalle: `devolucion_de` (el origen de una
+#   devolucion: id, nota, fecha, tercero; relacion DEVOLUCION_DE con origen =
+#   este hecho) y `abono` (PENDIENTE si la devolucion no tiene ningun
+#   movimiento conciliado, COBRADO si lo tiene; null si no es devolucion).
+#   Solo el detalle: `devoluciones` del origen (las ACTIVAS, con su abono),
+#   `devuelto`, `queda` y `neto` (derivados con las lecturas de OP-13; no se
+#   guardan) cuando el hecho tiene alguna devolucion activa. Una consulta por
+#   pagina (relaciones de los ids), sin joins que multipliquen filas.
 # ============================================================
 
 from __future__ import annotations
@@ -225,7 +235,34 @@ def detalle(sesion: SesionMotor, hecho_id: uuid.UUID) -> dict[str, Any] | None:
         item["magnitudes"] = [{"magnitud_id": r[0], "nombre": r[1], "valor": str(r[2]), "unidad": r[3]}
                               for r in cur.fetchall()]
     item["presupuestable"] = existe[0]
+    item["devoluciones"] = devoluciones_de_origen(sesion, hecho_id)
     return item
+
+
+def devoluciones_de_origen(sesion: SesionMotor, origen_id: uuid.UUID) -> dict[str, Any] | None:
+    """D-DEV-06: devoluciones ACTIVAS del origen, lo devuelto, lo que queda y el
+    neto derivado (no se guarda). None si no tiene ninguna."""
+    with sesion.conexion.cursor() as cur:
+        cur.execute(
+            "SELECT d.id, d.fecha_hecho, r.importe_relacionado, "
+            "EXISTS (SELECT 1 FROM gapto.hecho_movimientos_tesoreria hm WHERE hm.hecho_id = d.id) "
+            "FROM gapto.hecho_relaciones r JOIN gapto.hechos_financieros d ON d.id = r.hecho_origen_id "
+            "WHERE r.hecho_destino_id = %s AND r.tipo_relacion = 'DEVOLUCION_DE' AND d.estado = 'ACTIVO' "
+            "ORDER BY d.fecha_hecho, d.id", (origen_id,))
+        filas = cur.fetchall()
+    if not filas:
+        return None
+    total = sesion.uno("SELECT importe_total FROM gapto.hechos_financieros WHERE id = %s", (origen_id,))[0]
+    devuelto = sum((decimal.Decimal(f[2]) for f in filas), decimal.Decimal(0))
+    capacidad = sesion.uno(
+        "SELECT abs(COALESCE(sum(importe_delta), 0)) FROM gapto.hecho_efectos WHERE hecho_id = %s "
+        "AND tipo_efecto = 'GASTO'", (origen_id,))[0]
+    return {
+        "items": [{"hecho_id": f[0], "fecha_hecho": f[1], "importe": _dinero(f[2]),
+                   "abono": "COBRADO" if f[3] else "PENDIENTE"} for f in filas],
+        "devuelto": _dinero(devuelto), "queda": _dinero(decimal.Decimal(capacidad) - devuelto),
+        "neto": _dinero(decimal.Decimal(total or 0) - devuelto),
+    }
 
 
 def _dinero(valor) -> str | None:
@@ -276,6 +313,17 @@ def _componer(sesion: SesionMotor, ids: list[uuid.UUID]) -> dict[uuid.UUID, dict
         for r in cur.fetchall():
             cuentas.setdefault(r[0], []).append({"cuenta_id": r[1], "nombre": r[2], "enabled": r[3],
                                                  "importe": decimal.Decimal(r[4])})
+        # F05-06 M2: origen de cada devolucion de la pagina (a lo sumo una
+        # relacion DEVOLUCION_DE por hecho de devolucion, OP-13) y su tercero
+        # principal, para el titulo «Devolución · <origen>» (D-DEV-06).
+        cur.execute(
+            "SELECT r.hecho_origen_id, o.id, o.concepto, o.fecha_hecho, "
+            "(SELECT t.nombre FROM gapto.hecho_terceros ht JOIN gapto.terceros t ON t.id = ht.tercero_id "
+            " WHERE ht.hecho_id = o.id ORDER BY ht.principal DESC, t.id LIMIT 1) "
+            "FROM gapto.hecho_relaciones r JOIN gapto.hechos_financieros o ON o.id = r.hecho_destino_id "
+            "WHERE r.hecho_origen_id = ANY(%s) AND r.tipo_relacion = 'DEVOLUCION_DE'", (ids,))
+        origenes = {r[0]: {"hecho_id": r[1], "nota": r[2], "fecha_hecho": r[3], "tercero": r[4]}
+                    for r in cur.fetchall()}
     salida = {}
     for hid in ids:
         _, fecha, tipo, concepto, importe_total, moneda = base[hid]
@@ -310,5 +358,7 @@ def _componer(sesion: SesionMotor, ids: list[uuid.UUID]) -> dict[uuid.UUID, dict
             "importe_total": _dinero(importe_total), "tercero": ter, "categoria": categoria,
             "varias": len(categorias) > 1, "contexto": ctx, "cuentas": roles, "estado_reparto": estado,
             "tu_parte": _dinero(tu_parte), "pendiente": _dinero(pendiente), "maestros_desactivados": desactivados,
+            "devolucion_de": origenes.get(hid),
+            "abono": None if hid not in origenes else ("COBRADO" if cuentas.get(hid) else "PENDIENTE"),
         }
     return salida

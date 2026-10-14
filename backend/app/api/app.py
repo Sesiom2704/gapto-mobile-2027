@@ -166,7 +166,17 @@
 #   El registro responde CUENTA_SIN_CAPACIDAD (409, con detalle) cuando la
 #   cuenta perdio la capacidad (D-CAP-08); los rechazos de capa F05 llevan
 #   su detalle si lo tienen.
-# Version: 0.22.0
+#   v0.23.0 (F05-06 M2 §A2-§A4; F05 §14, §51.2; lamina DEV v0.1):
+#   devolucion contextual D-194 (ejecucion_devolucion.py):
+#     GET  /v1/hechos/{origen_id}/devoluciones   contexto del formulario
+#          (origen, lo devuelto, lo que queda, propuestas P-DEV-01/02)
+#     POST /v1/hechos/{origen_id}/devoluciones   OP-13 + OP-05 [+ OP-08 +
+#          OP-09 con «Ya cobrado»] en una transaccion
+#     POST /v1/hechos/{devolucion_id}/abono      «Registrar abono»: OP-08 +
+#          OP-09 sobre una devolucion pendiente
+#   La Actividad y su detalle ganan campos aditivos (devolucion_de, abono,
+#   devoluciones).
+# Version: 0.23.0
 # ============================================================
 
 from __future__ import annotations
@@ -291,6 +301,14 @@ from app.api.dto_vs01 import (
 from app.api.dto_registro import IntencionIngresoCobrado, IntencionTransferencia, ResultadoRegistro
 from app.api.ejecucion_gasto_pagado import RechazoIntegracion, registrar_gasto_pagado
 from app.api.ejecucion_registro import RechazoRegistro, registrar_ingreso_cobrado, registrar_transferencia
+from app.api.dto_devolucion import (
+    ContextoDevolucion,
+    IntencionAbono,
+    IntencionDevolucion,
+    ResultadoAbonoHttp,
+    ResultadoDevolucionHttp,
+)
+from app.api.ejecucion_devolucion import contexto_devolucion, registrar_abono, registrar_devolucion
 from app.actividad import lecturas as lect_act
 from app.afinidades import lecturas as lect_afi
 from app.afinidades import servicio as serv_afi
@@ -943,6 +961,47 @@ def create_app(
     def transferencia(intencion: IntencionTransferencia):
         salida = registrar_transferencia(unidad, contexto(), intencion, reloj)
         return _respuesta_registro(salida, intencion, "TRANSFERENCIA", None)
+
+    # ------------------------------------------------------------ F05-06 M2 devolucion contextual
+    _AVISO_F05 = "API de integracion F05, pendiente de consolidacion F10"
+
+    @app.get("/v1/hechos/{origen_id}/devoluciones", response_model=ContextoDevolucion,
+             dependencies=[Depends(autorizar)])
+    def contexto_de_devolucion(origen_id: uuid.UUID):
+        salida = unidad.ejecutar(contexto(), lambda s: contexto_devolucion(s, origen_id),
+                                 nombre="F05-06 M2 contexto_devolucion")
+        if salida is None:
+            status, cuerpo = eh.rechazo_lectura("HECHO_NO_ENCONTRADO")
+            return JSONResponse(cuerpo, status_code=status)
+        return salida
+
+    @app.post("/v1/hechos/{origen_id}/devoluciones", response_model=ResultadoDevolucionHttp,
+              dependencies=[Depends(autorizar)])
+    def devolucion(origen_id: uuid.UUID, intencion: IntencionDevolucion):
+        salida = registrar_devolucion(unidad, contexto(), origen_id, intencion, reloj)
+        if isinstance(salida, RechazoRegistro):
+            status, cuerpo = eh.rechazo_integracion(salida.codigo, salida.detalle)
+            return JSONResponse(cuerpo, status_code=status)
+        return {
+            "intencion_id": intencion.intencion_id, "hecho_id": salida.hecho_id, "origen_id": origen_id,
+            "idempotente": salida.idempotente, "importe": str(intencion.importe.quantize(_CENT)),
+            "moneda": intencion.moneda, "estado_atribucion": salida.estado_atribucion, "abono": salida.abono,
+            "devuelto": str(salida.devuelto.quantize(_CENT)), "queda": str(salida.queda.quantize(_CENT)),
+            "aviso": _AVISO_F05,
+        }
+
+    @app.post("/v1/hechos/{devolucion_id}/abono", response_model=ResultadoAbonoHttp,
+              dependencies=[Depends(autorizar)])
+    def abono(devolucion_id: uuid.UUID, intencion: IntencionAbono):
+        salida = registrar_abono(unidad, contexto(), devolucion_id, intencion, reloj)
+        if isinstance(salida, RechazoRegistro):
+            status, cuerpo = eh.rechazo_integracion(salida.codigo, salida.detalle)
+            return JSONResponse(cuerpo, status_code=status)
+        return {
+            "intencion_id": intencion.intencion_id, "hecho_id": salida.hecho_id,
+            "movimiento_id": salida.movimiento_id, "idempotente": salida.idempotente,
+            "importe": str(salida.importe.quantize(_CENT)), "abono": "COBRADO", "aviso": _AVISO_F05,
+        }
 
     # ------------------------------------------------------------ F05-05 K2 §1.2-§1.4
     def _lectura_con_fecha(nombre_op: str, fecha: dt.date, operacion) -> dict | JSONResponse:

@@ -13,6 +13,8 @@
 # Version: 0.2.0 (F05-05 K2 §1.5): Actividad v0 (fila, detalle, pagina keyset).
 # Version: 0.3.0 (F05-05 K2 §1.6): read models de Inicio (yo, Resultado del mes).
 # Version: 0.4.0 (F05-06 K-7, F05 §51.8): `CategoriaFila.icon_key` (aditivo).
+# Version: 0.5.0 (F05-06 M2 §A4): campos aditivos de la devolucion contextual:
+#   `devolucion_de` y `abono` en la fila; `devoluciones` en el detalle.
 # ============================================================
 
 from __future__ import annotations
@@ -124,6 +126,13 @@ class CuentaFila(_Estricto):
     enabled: bool
 
 
+class OrigenDevolucion(_Estricto):
+    hecho_id: uuid.UUID
+    nota: str | None
+    fecha_hecho: dt.date
+    tercero: str | None
+
+
 class FilaActividad(_Estricto):
     id: uuid.UUID
     fecha_hecho: dt.date
@@ -141,6 +150,8 @@ class FilaActividad(_Estricto):
     pendiente: str | None
     maestros_desactivados: list[Literal["CATEGORIA", "TERCERO", "CONTEXTO"]]
     coincide_en: list[Literal["TERCERO", "CATEGORIA", "CONTEXTO", "NOTA", "IMPORTE"]] | None = None
+    devolucion_de: OrigenDevolucion | None = None
+    abono: Literal["PENDIENTE", "COBRADO"] | None = None
 
 
 class PaginaActividad(_Estricto):
@@ -156,9 +167,24 @@ class MagnitudHecho(_Estricto):
     unidad: str | None
 
 
+class DevolucionDelOrigen(_Estricto):
+    hecho_id: uuid.UUID
+    fecha_hecho: dt.date
+    importe: str
+    abono: Literal["PENDIENTE", "COBRADO"]
+
+
+class DevolucionesOrigen(_Estricto):
+    items: list[DevolucionDelOrigen]
+    devuelto: str
+    queda: str
+    neto: str  # derivado, no se guarda (D-DEV-05)
+
+
 class DetalleActividad(FilaActividad):
     presupuestable: bool
     magnitudes: list[MagnitudHecho]
+    devoluciones: DevolucionesOrigen | None = None
 
 
 # ------------------------------------------------------------------ Inicio (§1.6)

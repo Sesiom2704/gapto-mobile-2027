@@ -285,7 +285,16 @@
 #     writer publico (R). I13 a: RegistroGastoScreen importa el aviso B2 / panel de
 #     Cuentas (FaltaCuenta) y el texto de B3 (domain/capacidades): no tocan el camino
 #     categorial. I6 sin cambios: el SQL dinamico de capacidades/lecturas se retiro.
-# Version: 0.23.0
+# Version 0.24.0 (F05-06 M2-A §A2/§A5; MANDATO_F05-06_M2 v1.0): altas aditivas por la
+#     devolucion contextual D-194. I1: ejecucion_devolucion lee categoria_id del efecto
+#     GASTO del origen y la pasa a OP-13, que la HEREDA (D-194, «De la compra»): no hay
+#     seleccion nueva (R); su lectura de contexto y el DTO la copian (R). I3: excepcion
+#     ACOTADA y nominal: solo backend/app/api/ejecucion_devolucion.py puede referenciar
+#     DevolucionesService (OP-13) y EfectosService (OP-05, solo atribucion), porque el
+#     mandato §A2 exige componer OP-13 + OP-05 en una transaccion del adaptador; la
+#     categoria nunca la elige el adaptador. El resto de la frontera sigue con OP-22
+#     como unica puerta.
+# Version: 0.24.0
 # ============================================================
 
 from __future__ import annotations
@@ -516,12 +525,29 @@ REGISTRO.update({
     ("backend/app/api/app.py", "create_app.actividad"): ("R", "GET /v1/actividad", "parametro de filtro de una lectura"),
 })
 
+# F05-06 M2-A (alta aditiva, v0.24.0): devolucion contextual D-194. La categoria del efecto
+# origen se lee y se pasa a OP-13, que la hereda (B en el motor); el adaptador no la elige.
+REGISTRO.update({
+    ("backend/app/api/ejecucion_devolucion.py", "<modulo>"): (
+        "R", "SQL de efectos del origen (M2)", "lee categoria_id de los efectos GASTO del origen"),
+    ("backend/app/api/ejecucion_devolucion.py", "registrar_devolucion.operacion"): (
+        "R", "M2 -> OP-13", "pasa a OP-13 la categoria del efecto origen, que la hereda (D-194); sin seleccion nueva"),
+    ("backend/app/api/ejecucion_devolucion.py", "contexto_devolucion"): (
+        "R", "GET contexto de devolucion (M2)", "copia la categoria del origen para «De la compra»"),
+    ("backend/app/api/dto_devolucion.py", "ContextoDevolucion"): ("R", "DTO F05-06 M2", "declaracion de campo"),
+})
+
 #: Servicios del motor que la frontera NO puede referenciar (I3): tienen
 #: caminos A_MOTOR, B o P con categoria. OP-22 es la unica puerta.
 SERVICIOS_VEDADOS_EN_FRONTERA = (
     "EfectosService", "SuplementosService", "DevolucionesService", "CorreccionesService",
     "ReglasService", "PrevisionesService", "insertar_efecto_si_no_existe", "actualizar_efecto",
 )
+#: Excepcion I3 ACOTADA (v0.24.0, F05-06 M2-A §A2): fichero -> servicios autorizados. La devolucion
+#: compone OP-13 + OP-05 en una transaccion del adaptador por mandato; la categoria la hereda OP-13.
+EXCEPCIONES_I3: dict[str, frozenset[str]] = {
+    "backend/app/api/ejecucion_devolucion.py": frozenset({"DevolucionesService", "EfectosService"}),
+}
 
 #: Construcciones con nombre de tabla dinamico (I6): (ruta, funcion) ->
 #: (modulo, atributo del conjunto cerrado, justificacion).
@@ -657,7 +683,7 @@ def test_i3_frontera_no_referencia_servicios_con_caminos_a_b_o_p():
         nombres |= {n.attr for n in ast.walk(arbol) if isinstance(n, ast.Attribute)}
         for imp in (n for n in ast.walk(arbol) if isinstance(n, ast.ImportFrom)):
             nombres |= {a.name for a in imp.names}
-        vedados = sorted(nombres & set(SERVICIOS_VEDADOS_EN_FRONTERA))
+        vedados = sorted((nombres & set(SERVICIOS_VEDADOS_EN_FRONTERA)) - EXCEPCIONES_I3.get(ruta, frozenset()))
         assert not vedados, f"{ruta} alcanza el motor sin pasar por OP-22: {vedados}"
 
 
