@@ -17,10 +17,19 @@
 #         va primero OP-03, la devolucion recibe DEVOLUCION_ORIGEN_NO_ACTIVO;
 #     (c) abono doble sobre la misma devolucion pendiente (dos cuentas
 #         distintas, para que solo se encuentren en el hecho): uno pasa, el
-#         otro recibe YA_CONCILIADO; una sola conciliacion.
+#         otro recibe YA_CONCILIADO; una sola conciliacion;
+#     (d) abono en OTRA cuenta (con RECIBIR_INGRESO) frente a retirar esa
+#         capacidad (writer de M4): si va primero el abono, pasa y la retirada
+#         despues; si va primero la retirada, CUENTA_SIN_CAPACIDAD (capacidad
+#         RECIBIR_INGRESO) sin escritura;
+#     (e) abono en la cuenta ORIGINAL (sin capacidad exigida) frente a
+#         deshabilitarla: si va primero el abono, pasa; si va primero la
+#         deshabilitacion, CUENTA_DESCONOCIDA sin escritura.
 #   En todos: ningun 40P01 (ni reintento de la UnidadDeTrabajo ni aumento de
 #   pg_stat_database.deadlocks) y nada parcial.
 # Version: 0.1.0 (F05-06 M2-A §A5)
+# Version: 0.2.0 (F05-06 M2-D §3): escenarios (d) y (e) de la capacidad de la
+#   cuenta del abono; barrera FOR UPDATE de la cuenta (como test_194).
 # ============================================================
 
 from __future__ import annotations
@@ -42,6 +51,7 @@ from test_190_f05_j2j3_concurrencia_serial import _barrera_fila, _cod, _serie
 pytestmark = pytest.mark.skipif(os.getenv("GAPTO_M2_CONCURRENCIA") != "1",
                                 reason="bateria serial fuera de la suite general (GAPTO_M2_CONCURRENCIA=1)")
 HECHO_FOR_UPDATE = "SELECT id FROM gapto.hechos_financieros WHERE id=%s FOR UPDATE"
+CUENTA_FOR_UPDATE = "SELECT id FROM gapto.cuentas WHERE id=%s FOR UPDATE"
 
 
 @pytest.fixture()
@@ -138,3 +148,67 @@ def test_c_abono_doble(t, primero):
                          "JOIN gapto.movimientos_tesoreria m ON m.id = hm.movimiento_tesoreria_id WHERE hm.hecho_id=%s",
                   (dev,))
     assert conc == [(cta if primero == "cuenta1" else otra,)]
+
+
+def _abonos(owner, dev) -> list:
+    return h.leer(owner, "SELECT m.cuenta_id FROM gapto.hecho_movimientos_tesoreria hm "
+                         "JOIN gapto.movimientos_tesoreria m ON m.id = hm.movimiento_tesoreria_id WHERE hm.hecho_id=%s",
+                  (dev,))
+
+
+def _pendiente(cli, origen) -> uuid.UUID:
+    c, r = m.devolver(cli, origen)
+    assert r.status_code == 200, r.text
+    return uuid.UUID(c["intencion_id"])
+
+
+@pytest.mark.parametrize("primero", ["abono", "capacidad"])
+def test_d_abono_frente_a_retirar_recibir_ingreso(t, primero):
+    owner, actor, cli, _, _, ropa = t
+    tarjeta = h.crear_cuenta(owner, [(actor, 100)], tipo="CREDITO", naturaleza="PASIVO")
+    otra = h.crear_cuenta(owner, [(actor, 100)], capacidades=("RECIBIR_INGRESO",))
+    origen = m.compra(cli, tarjeta, categoria_id=ropa)
+    dev = _pendiente(cli, origen)
+    version = h.leer(owner, "SELECT row_version FROM gapto.cuentas WHERE id=%s", (otra,))[0][0]
+    barrera = _barrera_fila(owner, CUENTA_FOR_UPDATE, (otra,))
+    pasos = {"abono": lambda: m.abonar(cli, dev, otra)[1],
+             "capacidad": lambda: cli.post(f"/v1/cuentas/{otra}/capacidades/RECIBIR_INGRESO/desactivar",
+                                           json={"row_version": version}, headers=h.AUTH)}
+    salida = _serie(barrera, _en_orden(primero, pasos), f"M2D_d_{primero}")
+    assert salida["capacidad"].status_code == 200, salida["capacidad"].text
+    if primero == "abono":
+        assert salida["abono"].status_code == 200, salida["abono"].text
+        assert _abonos(owner, dev) == [(otra,)]
+    else:
+        r = salida["abono"]
+        assert (r.status_code, _cod(r)) == (409, "CUENTA_SIN_CAPACIDAD"), r.text
+        assert r.json()["detalle"]["capacidad"] == "RECIBIR_INGRESO"
+        assert _abonos(owner, dev) == []
+
+
+def _deshabilitar(owner, cuenta):
+    """Writer de la cuenta (no hay ruta HTTP): UPDATE enabled = false en su propia transaccion."""
+    try:
+        h.como_owner(owner, "UPDATE gapto.cuentas SET enabled = false WHERE id=%s", (cuenta,))
+        return "OK"
+    except Exception as exc:  # noqa: BLE001 - se clasifica en el oraculo
+        return exc
+
+
+@pytest.mark.parametrize("primero", ["abono", "deshabilitar"])
+def test_e_abono_en_la_original_frente_a_deshabilitarla(t, primero):
+    owner, actor, cli, _, _, ropa = t
+    tarjeta = h.crear_cuenta(owner, [(actor, 100)], tipo="CREDITO", naturaleza="PASIVO")
+    origen = m.compra(cli, tarjeta, categoria_id=ropa)
+    dev = _pendiente(cli, origen)
+    barrera = _barrera_fila(owner, CUENTA_FOR_UPDATE, (tarjeta,))
+    pasos = {"abono": lambda: m.abonar(cli, dev, tarjeta)[1], "deshabilitar": lambda: _deshabilitar(owner, tarjeta)}
+    salida = _serie(barrera, _en_orden(primero, pasos), f"M2D_e_{primero}")
+    assert salida["deshabilitar"] == "OK", salida["deshabilitar"]
+    if primero == "abono":
+        assert salida["abono"].status_code == 200, salida["abono"].text
+        assert _abonos(owner, dev) == [(tarjeta,)]
+    else:
+        r = salida["abono"]
+        assert (r.status_code, _cod(r)) == (422, "CUENTA_DESCONOCIDA"), r.text
+        assert _abonos(owner, dev) == []

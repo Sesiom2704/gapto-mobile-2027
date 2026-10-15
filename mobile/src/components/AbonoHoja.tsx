@@ -2,8 +2,9 @@
 // GAPTO MOBILE 2027
 // Fichero: AbonoHoja.tsx
 // Ruta: mobile/src/components/AbonoHoja.tsx
-// Descripción: «Registrar abono» de una devolución pendiente (F05-06 M2-B §B1; lámina DEV B2, D-DEV-07, P-DEV-04; DAY-RULE-03). Hoja «¿Llegó el abono?» con la devolución y su importe, la cuenta (propuesta la de la compra si sigue pudiendo pagar gastos, P-DEV-02; «Otra cuenta» con las que pueden pagar gastos, PAGAR_GASTO) y la fecha (Hoy · Ayer · Otra fecha, nunca futura): siempre con confirmación consciente de cuenta y fecha, también desde el swipe «Cobrado». El importe es el de la devolución: «¿Llegó otro importe o en varias veces? Abrir el formulario completo» explica que eso no es este abono (no se cambia la devolución aquí). Mismo ciclo de envío que el registro (UUID sellado, doble toque ignorado, INDETERMINADO reintenta la MISMA identidad; YA_CONCILIADO y CUENTA_SIN_CAPACIDAD con el mensaje del servidor).
+// Descripción: «Registrar abono» de una devolución pendiente (F05-06 M2-B §B1; lámina DEV B2, D-DEV-07, P-DEV-04; DAY-RULE-03). Hoja «¿Llegó el abono?» con la devolución y su importe, la cuenta (propuesta la cuenta original demostrable de la compra, P-DEV-02 con M2-D; «Otra cuenta» con las que pueden recibir dinero, RECIBIR_INGRESO) y la fecha (Hoy · Ayer · Otra fecha, nunca futura): siempre con confirmación consciente de cuenta y fecha, también desde el swipe «Cobrado». El importe es el de la devolución: «¿Llegó otro importe o en varias veces? Abrir el formulario completo» explica que eso no es este abono (no se cambia la devolución aquí). Mismo ciclo de envío que el registro (UUID sellado, doble toque ignorado, INDETERMINADO reintenta la MISMA identidad; YA_CONCILIADO y CUENTA_SIN_CAPACIDAD con el mensaje del servidor).
 // Versión: 0.1.0 (F05-06 M2-B §B1)
+// Versión: 0.2.0 (F05-06 M2-D §2; decisión R-M2A-02 opción b): la propuesta es la cuenta ORIGINAL demostrable de la compra solo cuando `cuenta_compra` no es null (el servidor la admite sin capacidad); «Otra cuenta» lista las que pueden recibir dinero (operación INGRESO = RECIBIR_INGRESO, nunca «ingreso» en el texto) y una recarga de la lista no quita la original. CUENTA_SIN_CAPACIDAD sigue mostrando el mensaje del servidor, que nombra la capacidad del detalle.
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -58,17 +59,19 @@ export function AbonoHoja(p: {
   }, [p.devolucion.origenId]);
   const cargarCuentas = async (f: string) => {
     setCuentas({ fase: 'CARGANDO' });
-    const r = await p.cliente.cuentasElegibles('GASTO', f); // PAGAR_GASTO: el medio con que se pagan gastos
+    // M2-D: otra cuenta que no es la original exige recibir dinero (RECIBIR_INGRESO); no se crea ningún ingreso.
+    const r = await p.cliente.cuentasElegibles('INGRESO', f);
     const l: Lista = r.tipo === 'OK' ? { fase: 'OK', lista: r.datos.cuentas } : { fase: 'ERROR' };
     setCuentas(l);
-    if (l.fase === 'OK') setCuenta((x) => (x && l.lista.some((y) => y.cuenta_id === x) ? x : null));
+    if (l.fase === 'OK') setCuenta((x) => (x && (x === propuesta?.cuenta_id || l.lista.some((y) => y.cuenta_id === x)) ? x : null));
   };
   useEffect(() => {
     if (esFechaIso(fecha) && fecha <= hoyIso) void cargarCuentas(fecha);
   }, [fecha]);
 
-  const propuestaElegible = !!propuesta && cuentas.fase === 'OK' && cuentas.lista.some((x) => x.cuenta_id === propuesta.cuenta_id);
-  // P-DEV-02: la cuenta de la compra viene propuesta, visible y cambiable.
+  // P-DEV-02 con M2-D: solo la cuenta ORIGINAL demostrable (cuenta_compra no null) viene propuesta, visible y
+  // cambiable; el servidor no le exige capacidad. Sin original no hay propuesta por defecto.
+  const propuestaElegible = !!propuesta;
   useEffect(() => {
     if (propuestaElegible && cuenta === null && !otra) setCuenta(propuesta!.cuenta_id);
   }, [propuestaElegible]);

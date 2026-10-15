@@ -118,7 +118,10 @@
 #   como rechazo con detalle {queda} (texto de B3 con «lo que queda»);
 #   CUENTA_SIN_CAPACIDAD con la operacion ABONO_DEVOLUCION (capacidad
 #   PAGAR_GASTO: «recibir devoluciones de gastos», nunca «ingreso», D-DEV-04).
-# Version: 0.19.0
+#   v0.20.0 (F05-06 M2-D §1-§2): CUENTA_SIN_CAPACIDAD de ABONO_DEVOLUCION
+#   nombra la capacidad que llega en el detalle (RECIBIR_INGRESO: «recibir
+#   dinero», nunca «ingreso», D-DEV-04); el resto de operaciones no cambia.
+# Version: 0.20.0
 # ============================================================
 
 from __future__ import annotations
@@ -267,12 +270,16 @@ _SIN_CAPACIDAD: dict[str, tuple[str, str]] = {
     "INGRESO": ("recibir ingresos", "El ingreso"),
     "TRANSFERENCIA_ORIGEN": ("enviar a otras cuentas tuyas", "La transferencia"),
     "TRANSFERENCIA_DESTINO": ("recibir de otras cuentas tuyas", "La transferencia"),
-    "ABONO_DEVOLUCION": ("pagar gastos ni recibir sus devoluciones", "El abono"),
+    "ABONO_DEVOLUCION": ("recibir dinero", "El abono"),
 }
+#: ABONO_DEVOLUCION: lo que la cuenta ya no puede hacer, segun la capacidad del detalle (M2-D; nunca «ingreso»).
+_SIN_CAPACIDAD_ABONO: dict[str, str] = {"RECIBIR_INGRESO": "recibir dinero"}
 
 
 def _mensaje_sin_capacidad(detalle: dict) -> str:
     verbo, sujeto = _SIN_CAPACIDAD[detalle["operacion"]]
+    if detalle["operacion"] == "ABONO_DEVOLUCION":
+        verbo = _SIN_CAPACIDAD_ABONO[detalle["capacidad"]]
     return (f"{detalle['cuenta']} ya no puede {verbo}. Se cambió mientras registrabas. "
             f"{sujeto} no se ha guardado: elige otra cuenta.")
 

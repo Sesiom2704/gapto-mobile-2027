@@ -5,6 +5,7 @@
 // Descripción: Devolución contextual (F05-06 M2-B §B2; lámina DEV v0.1). Dominio puro (límite, neto derivado, propuesta P-DEV-01, títulos y etiquetas de la Actividad), formulario A1 (origen fijo con lo devuelto y lo que queda, «De la compra», «Tuya» solo demostrable y «Todo mío» atenuado en B4, abono sin respuesta por defecto, «Todavía no» sin liquidez, límite B3, compra no disponible), revisión A2 (relación, abono real o pendiente, lo que no cambia, neto), envío (UUID sellado, doble toque, INDETERMINADO con la MISMA identidad, rechazo EXCEDE con el mensaje del servidor), confirmación con ida y vuelta; hoja de abono B2 (cuenta de la compra propuesta, confirmación, YA_CONCILIADO); Actividad (fila sin «+» ni «−» con «Devolución» / «Abono pendiente», «Registrar devolución» solo en gastos que no son devoluciones, «Registrar abono» solo con el abono pendiente, swipe «Cobrado» por la acción de accesibilidad, ida y vuelta compra ↔ devolución). Nunca «Ingreso».
 // Versión: 0.1.0 (F05-06 M2-B §B2)
 // Versión: 0.2.0 (F05-06 M2-C; acta M2 iPhone O-1): pista visual del swipe «Cobrado» (la fila se desplaza con tope, franja «Confirmar abono» tenue y de acento pasado el umbral, vuelta al soltar; sin franja ni desplazamiento en una compra).
+// Versión: 0.3.0 (F05-06 M2-D §2-§3): cuenta del abono (opción b): «Sí, en <original>» y la propuesta de B2 aunque la original no esté en la lista de RECIBIR_INGRESO; sin cuenta original no hay propuesta; las listas piden la operación INGRESO; CUENTA_SIN_CAPACIDAD con el mensaje del servidor (capacidad del detalle) y sin «ingreso».
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
@@ -300,6 +301,71 @@ describe('B2 registrar abono', () => {
     await act(async () => fireEvent.press(screen.getByTestId('abono-confirmar')));
     expect(await screen.findByTestId('abono-error')).toHaveTextContent(/ya tiene su abono/);
     expect(onCerrar).not.toHaveBeenCalled();
+  });
+});
+
+// ------------------------------------------------------------------ M2-D cuenta del abono (opción b)
+// La cuenta ORIGINAL (bbva) ya no está en la lista de RECIBIR_INGRESO: solo la nómina puede recibir dinero.
+const SOLO_RECIBIR = [{ cuenta_id: 'nomina', nombre: 'Cuenta nómina', moneda: 'EUR', elegible: true, motivo: null }];
+function clienteM2D(cuentaCompra: ContextoDevolucion['cuenta_compra'], o: Partial<ClienteApi> = {}) {
+  return cliente({
+    contextoDevolucion: jest.fn(async () => ({ tipo: 'OK', datos: { ...CTX, cuenta_compra: cuentaCompra } }) as any),
+    cuentasElegibles: jest.fn(async (op: string) => ({ tipo: 'OK', datos: { operacion: op, cuentas: op === 'INGRESO' ? SOLO_RECIBIR : CUENTAS } }) as any),
+    ...o,
+  });
+}
+
+describe('M2-D cuenta del abono', () => {
+  test('formulario: «Sí, en <original>» aunque la original no pueda recibir dinero; «Otra cuenta» con RECIBIR_INGRESO', async () => {
+    const c = clienteM2D(CTX.cuenta_compra);
+    envolver(<DevolucionScreen cliente={c} nuevoId={nuevoId} ahora={AHORA} origenId="compra" onCerrar={jest.fn()} />);
+    await waitFor(() => expect(screen.getByTestId('abono-compra')).toBeTruthy());
+    expect(within(screen.getByTestId('abono-compra')).getByText('Sí, en Tarjeta BBVA')).toBeTruthy();
+    expect((c.cuentasElegibles as jest.Mock).mock.calls.every(([op]) => op === 'INGRESO')).toBe(true);
+    fireEvent.press(screen.getByTestId('abono-otra'));
+    expect(await screen.findByTestId('abono-cuenta-nomina')).toBeTruthy();
+    expect(screen.queryByTestId('abono-cuenta-bbva')).toBeNull();
+  });
+
+  test('formulario: sin cuenta original (cuenta_compra null) no hay propuesta ni «Sí, en <cuenta>»', async () => {
+    const c = clienteM2D(null);
+    envolver(<DevolucionScreen cliente={c} nuevoId={nuevoId} ahora={AHORA} origenId="compra" onCerrar={jest.fn()} />);
+    await waitFor(() => expect(screen.getByTestId('abono-otra')).toBeTruthy());
+    expect(screen.queryByTestId('abono-compra')).toBeNull();
+    expect(within(screen.getByTestId('abono-otra')).getByText('Sí, en una cuenta')).toBeTruthy();
+  });
+
+  test('hoja B2: propone la original aunque no esté en la lista de RECIBIR_INGRESO y la envía', async () => {
+    const registrarAbono = jest.fn(async () => ({ tipo: 'OK', datos: { hecho_id: 'd', movimiento_id: 'm', idempotente: false, importe: '40.00', abono: 'COBRADO' } }) as any);
+    const c = clienteM2D(CTX.cuenta_compra, { registrarAbono });
+    envolver(<AbonoHoja cliente={c} nuevoId={nuevoId} ahora={AHORA} devolucion={{ id: 'd', titulo: 'Abrigo · 20 ago', importe: '40.00', origenId: 'compra' }} onCerrar={jest.fn()} />);
+    await waitFor(() => expect(screen.getByTestId('abono-cuenta-compra').props.accessibilityState).toMatchObject({ checked: true }));
+    expect((c.cuentasElegibles as jest.Mock).mock.calls.every(([op]) => op === 'INGRESO')).toBe(true);
+    await act(async () => fireEvent.press(screen.getByTestId('abono-confirmar')));
+    expect(registrarAbono).toHaveBeenCalledWith('d', expect.objectContaining({ cuenta_id: 'bbva' }));
+  });
+
+  test('hoja B2: sin cuenta original no hay propuesta; «Otra cuenta» ofrece solo las que reciben dinero', async () => {
+    const c = clienteM2D(null);
+    envolver(<AbonoHoja cliente={c} nuevoId={nuevoId} ahora={AHORA} devolucion={{ id: 'd', titulo: 'Abrigo · 20 ago', importe: '40.00', origenId: 'compra' }} onCerrar={jest.fn()} />);
+    await waitFor(() => expect(c.contextoDevolucion).toHaveBeenCalled());
+    await waitFor(() => expect(c.cuentasElegibles).toHaveBeenCalled());
+    expect(screen.queryByTestId('abono-cuenta-compra')).toBeNull();
+    fireEvent.press(screen.getByTestId('abono-otra-cuenta'));
+    expect(await screen.findByTestId('abono-cuenta-nomina')).toBeTruthy();
+    expect(screen.queryByTestId('abono-cuenta-bbva')).toBeNull();
+  });
+
+  test('CUENTA_SIN_CAPACIDAD del abono: se muestra el mensaje del servidor, que nombra la capacidad del detalle', async () => {
+    const mensaje = 'Cuenta nómina ya no puede recibir dinero. Se cambió mientras registrabas. El abono no se ha guardado: elige otra cuenta.';
+    const c = clienteM2D(CTX.cuenta_compra, { registrarAbono: jest.fn(async () => ({ tipo: 'RECHAZADO', codigo: 'CUENTA_SIN_CAPACIDAD', mensaje,
+      detalle: { operacion: 'ABONO_DEVOLUCION', capacidad: 'RECIBIR_INGRESO', cuenta_id: 'nomina', cuenta: 'Cuenta nómina' } }) as any) });
+    envolver(<AbonoHoja cliente={c} nuevoId={nuevoId} ahora={AHORA} devolucion={{ id: 'd', titulo: 'Abrigo · 20 ago', importe: '40.00', origenId: 'compra' }} onCerrar={jest.fn()} />);
+    fireEvent.press(await screen.findByTestId('abono-otra-cuenta'));
+    fireEvent.press(await screen.findByTestId('abono-cuenta-nomina'));
+    await act(async () => fireEvent.press(screen.getByTestId('abono-confirmar')));
+    expect(await screen.findByTestId('abono-error')).toHaveTextContent(/recibir dinero/);
+    expect(textoPlano().toLowerCase()).not.toMatch(/ingreso/);
   });
 });
 

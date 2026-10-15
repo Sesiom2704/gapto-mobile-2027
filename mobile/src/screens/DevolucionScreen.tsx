@@ -2,8 +2,9 @@
 // GAPTO MOBILE 2027
 // Fichero: DevolucionScreen.tsx
 // Ruta: mobile/src/screens/DevolucionScreen.tsx
-// Descripción: «Registrar devolución» desde una compra (F05-06 M2-B §B1; F05 §14, §51.2; lámina DEV v0.1 A1, A2, B3, B4, C1, C2). Tarea inmersiva «Cancelar · Registrar devolución». A1: compra origen fija arriba con lo ya devuelto y lo que queda (D-DEV-02); importe, fecha (Hoy · Ayer · Otra, nunca futura), categoría de la compra marcada «De la compra» (no editable), «¿De quién es lo devuelto?» (P-DEV-01: «Tuya» propuesta solo si el servidor la demuestra; si no, «Sin indicar» por defecto y «Todo mío» atenuado con su motivo, B4), «¿Ya te han abonado el dinero?» (D-DEV-03: «Sí, en <cuenta de la compra>» si sigue pudiendo pagar gastos, «En otra cuenta» con las cuentas que pueden pagar gastos (PAGAR_GASTO), «Todavía no»; sin respuesta por defecto) y nota opcional. Límite visible (B3, D-DEV-08): un importe mayor que lo que queda se explica y no deja revisar. A2: revisión con la relación visible, lo que se registra, el abono (real o pendiente: sin liquidez, C2) y lo que no cambia, y el neto derivado (D-DEV-05). Confirmación con ida y vuelta (D-DEV-06): «Ver la devolución» y «Ver la compra». Mismo ciclo de envío que el registro: UUID y payload sellados antes de enviar; doble toque ignorado; INDETERMINADO reintenta con la MISMA identidad; rechazo definitivo libera la edición. Nunca se ofrece «Ingreso» (D-DEV-04).
+// Descripción: «Registrar devolución» desde una compra (F05-06 M2-B §B1; F05 §14, §51.2; lámina DEV v0.1 A1, A2, B3, B4, C1, C2). Tarea inmersiva «Cancelar · Registrar devolución». A1: compra origen fija arriba con lo ya devuelto y lo que queda (D-DEV-02); importe, fecha (Hoy · Ayer · Otra, nunca futura), categoría de la compra marcada «De la compra» (no editable), «¿De quién es lo devuelto?» (P-DEV-01: «Tuya» propuesta solo si el servidor la demuestra; si no, «Sin indicar» por defecto y «Todo mío» atenuado con su motivo, B4), «¿Ya te han abonado el dinero?» (D-DEV-03: «Sí, en <cuenta original>» solo si la compra tiene cuenta original demostrable, «En otra cuenta» con las cuentas que pueden recibir dinero (RECIBIR_INGRESO), «Todavía no»; sin respuesta por defecto) y nota opcional. Límite visible (B3, D-DEV-08): un importe mayor que lo que queda se explica y no deja revisar. A2: revisión con la relación visible, lo que se registra, el abono (real o pendiente: sin liquidez, C2) y lo que no cambia, y el neto derivado (D-DEV-05). Confirmación con ida y vuelta (D-DEV-06): «Ver la devolución» y «Ver la compra». Mismo ciclo de envío que el registro: UUID y payload sellados antes de enviar; doble toque ignorado; INDETERMINADO reintenta con la MISMA identidad; rechazo definitivo libera la edición. Nunca se ofrece «Ingreso» (D-DEV-04).
 // Versión: 0.1.0 (F05-06 M2-B §B1)
+// Versión: 0.2.0 (F05-06 M2-D §2; decisión R-M2A-02 opción b): «Sí, en <cuenta>» solo cuando `cuenta_compra` (cuenta ORIGINAL demostrable) no es null, sin exigir que esté en la lista (el servidor no le exige capacidad); «En otra cuenta» con las de RECIBIR_INGRESO (operación INGRESO). CUENTA_SIN_CAPACIDAD sigue con el mensaje del servidor, que nombra la capacidad del detalle.
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -89,8 +90,8 @@ export function DevolucionScreen(p: {
   };
   const cargarCuentas = async (f: string) => {
     setCuentas({ fase: 'CARGANDO' });
-    // El abono vuelve al medio con que se pagan gastos (PAGAR_GASTO, como la cuenta de la compra); nunca es un «ingreso».
-    const r = await p.cliente.cuentasElegibles('GASTO', f);
+    // M2-D: otra cuenta que no es la original exige recibir dinero (RECIBIR_INGRESO); el abono nunca es un «ingreso».
+    const r = await p.cliente.cuentasElegibles('INGRESO', f);
     const l: Lista = r.tipo === 'OK' ? { fase: 'OK', lista: r.datos.cuentas } : { fase: 'ERROR' };
     setCuentas(l);
     if (l.fase === 'OK') setCuentaOtra((x) => (x && l.lista.some((y) => y.cuenta_id === x) ? x : null));
@@ -103,7 +104,8 @@ export function DevolucionScreen(p: {
   }, [fecha]);
 
   const ctx = carga.fase === 'OK' ? carga.ctx : null;
-  const compraElegible = !!ctx?.cuenta_compra && cuentas.fase === 'OK' && cuentas.lista.some((x) => x.cuenta_id === ctx.cuenta_compra!.cuenta_id);
+  // M2-D: la cuenta original demostrable se ofrece siempre que exista; no tiene que estar en la lista de RECIBIR_INGRESO.
+  const compraElegible = !!ctx?.cuenta_compra;
   const cuentaAbono = abono === 'COMPRA' && compraElegible ? ctx!.cuenta_compra!.cuenta_id : abono === 'OTRA' ? cuentaOtra : null;
   const nombreCuenta = (id: string | null) =>
     id === null ? null : ctx?.cuenta_compra?.cuenta_id === id ? ctx.cuenta_compra.nombre : cuentas.fase === 'OK' ? cuentas.lista.find((x) => x.cuenta_id === id)?.nombre ?? null : null;

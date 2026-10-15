@@ -22,6 +22,10 @@
 #     - cuenta sin capacidad, fecha futura e IDs de otro owner sin efectos.
 #   Reloj fijo 2026-10-10 (Madrid).
 # Version: 0.1.0 (F05-06 M2-A §A5)
+# Version: 0.2.0 (F05-06 M2-D §1): `test_cuenta_sin_capacidad_sin_escritura`
+#   con el contrato de M2-D: la cuenta NO original exige RECIBIR_INGRESO (una
+#   con solo PAGAR_GASTO se rechaza; la de solo RECIBIR_INGRESO, que M2-A
+#   rechazaba, se admite). Matriz completa en test_198.
 # ============================================================
 
 from __future__ import annotations
@@ -371,12 +375,13 @@ def test_varias_categorias_fuera(t):
 # ------------------------------------------------------------------ cuenta, fecha y owner
 def test_cuenta_sin_capacidad_sin_escritura(t):
     owner, actor, cli, cta, _, ropa = t
-    sin = h.crear_cuenta(owner, [(actor, 100)], capacidades=("RECIBIR_INGRESO",))
+    sin = h.crear_cuenta(owner, [(actor, 100)], capacidades=("PAGAR_GASTO",))
     origen = m.compra(cli, cta, categoria_id=ropa)
     antes = m.huella(owner)
     _, r = m.devolver(cli, origen, abono=m.cobrado(sin))
     assert (r.status_code, _cod(r)) == (409, "CUENTA_SIN_CAPACIDAD")
-    assert r.json()["detalle"]["operacion"] == "ABONO_DEVOLUCION" and "ingreso" not in r.json()["mensaje"].lower()
+    assert (r.json()["detalle"]["operacion"], r.json()["detalle"]["capacidad"]) == ("ABONO_DEVOLUCION", "RECIBIR_INGRESO")
+    assert "ingreso" not in r.json()["mensaje"].lower()
     assert m.huella(owner) == antes
     c, _ = m.devolver(cli, origen)
     antes = m.huella(owner)

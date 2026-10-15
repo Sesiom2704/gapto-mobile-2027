@@ -41,6 +41,13 @@
 #   y, a la inversa, el registro que llega despues ya no la encuentra
 #   (SIN_CAPACIDAD). Sin ciclo: borrar la capacidad no bloquea la cuenta. Las
 #   lecturas siguen sin locks.
+# Version: 0.3.0 (F05-06 M2-D; decision R-M2A-02 = opcion (b) endurecida,
+#   AJ-M2C-01..04): via ADITIVA y NOMINAL `motivo_cuenta_original_abono`, solo
+#   para el abono de una devolucion en la cuenta ORIGINAL demostrable de la
+#   compra: mismas reglas de cuenta (owner, habilitada, cierre, ledger, EUR)
+#   SIN exigir capacidad (recibir la devolucion no es pagar). No cambia
+#   ninguna operacion existente: CAPACIDAD_POR_OPERACION, OPERACIONES,
+#   `elegibilidad_cuentas`, `cuentas_elegibles` y `motivo_cuenta` quedan igual.
 # ============================================================
 
 from __future__ import annotations
@@ -131,6 +138,27 @@ def motivo_cuenta(sesion: SesionMotor, cuenta_id: uuid.UUID, operacion: str, fec
         sesion.uno("SELECT id FROM gapto.cuenta_capacidades WHERE cuenta_id = %s AND capacidad_codigo = %s FOR SHARE",
                    (cuenta_id, capacidad))
     fila = sesion.uno(_SELECT + " AND c.id = %s", (capacidad, cuenta_id))
+    if fila is None:
+        return NO_ENCONTRADA
+    return _motivo(fila, fecha)
+
+
+#: Misma fila que `_SELECT`, con la capacidad marcada como no exigida (TRUE).
+_SELECT_SIN_CAPACIDAD = (
+    "SELECT c.id, c.nombre, c.moneda, c.enabled, c.fecha_cierre, c.fecha_inicio_ledger, TRUE AS capacidad "
+    "FROM gapto.cuentas c WHERE c.owner_user_id = current_setting('gapto.owner_user_id')::uuid AND c.id = %s"
+)
+
+
+def motivo_cuenta_original_abono(sesion: SesionMotor, cuenta_id: uuid.UUID, fecha: dt.date) -> str | None:
+    """Motivo de no elegibilidad de la cuenta ORIGINAL demostrable de una
+    compra para recibir el abono de su devolucion (F05-06 M2-D §1.2): todas las
+    reglas de cuenta de `_motivo` (DESHABILITADA, CERRADA, LEDGER_POSTERIOR,
+    MONEDA) y NINGUNA capacidad. Solo la usa el adaptador de la devolucion, y
+    solo cuando la cuenta pedida ES la original; cualquier otra cuenta pasa por
+    `motivo_cuenta` con su capacidad. Sin locks: el llamante ya tiene la cuenta
+    FOR NO KEY UPDATE (que serializa frente a deshabilitarla o cerrarla)."""
+    fila = sesion.uno(_SELECT_SIN_CAPACIDAD, (cuenta_id,))
     if fila is None:
         return NO_ENCONTRADA
     return _motivo(fila, fecha)

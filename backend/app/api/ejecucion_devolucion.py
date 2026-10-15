@@ -34,14 +34,29 @@
 #     efectos GASTO (R15 multicategoria fuera, DEVOLUCION_ORIGEN_MULTICATEGORIA)
 #     -> atribucion SOLO_MIO solo si cada efecto GASTO del origen es COMPLETA
 #     con una unica fila, del actor propio (P-DEV-01;
-#     DEVOLUCION_ATRIBUCION_NO_DEMOSTRABLE) -> cuenta del abono (capacidad
-#     PAGAR_GASTO: el abono de una devolucion vuelve al medio con que se paga
-#     el gasto; P-DEV-02 propone la cuenta de la compra, que la tenia.
-#     CUENTA_SIN_CAPACIDAD con operacion ABONO_DEVOLUCION).
-#     Decision de adaptador anotada para la revisora: RECIBIR_INGRESO dejaria
-#     fuera la tarjeta de credito (CREDITO no recibe ingresos), justo la
-#     cuenta propuesta en la lamina A1, y llamaria «ingreso» a lo que no lo
-#     es (D-DEV-04).
+#     DEVOLUCION_ATRIBUCION_NO_DEMOSTRABLE) -> cuenta del abono (contrato de
+#     M2-D, CUENTA DEL ABONO, abajo).
+#   CUENTA DEL ABONO (F05-06 M2-D §1; decision de Moises R-M2A-02 = opcion (b)
+#   endurecida; manda sobre la nota de M2-A, que exigia PAGAR_GASTO):
+#     Cuenta ORIGINAL demostrable del origen = la cuenta del UNICO movimiento
+#     de salida ACTIVO conciliado con el origen, SOLO si el origen tiene
+#     EXACTAMENTE una conciliacion y es contra un movimiento de salida
+#     (importe < 0) ACTIVO. Se lee de tesoreria bajo el lock del origen; nunca
+#     de preferencias, plantillas, tipo de cuenta ni «la primera de la lista».
+#     Sin cuenta original unica (ninguna, varias conciliaciones, movimiento de
+#     entrada o anulado): no hay original; `contexto_devolucion` devuelve
+#     cuenta_compra = null y cualquier cuenta exige RECIBIR_INGRESO.
+#     Elegibilidad (devolucion «Ya cobrado» y abono posterior, misma regla):
+#       - siempre: owner, habilitada, sin cierre anterior o igual a la fecha,
+#         ledger respetado, EUR (como hoy), locks y orden actuales;
+#       - la cuenta ES la original -> SIN capacidad exigida
+#         (`motivo_cuenta_original_abono`): recibir la devolucion no es pagar;
+#       - cualquier otra -> RECIBIR_INGRESO vigente (`motivo_cuenta` con la
+#         operacion INGRESO, FOR SHARE de la capacidad). Sin ella:
+#         CUENTA_SIN_CAPACIDAD con operacion ABONO_DEVOLUCION y capacidad
+#         RECIBIR_INGRESO.
+#     RECIBIR_INGRESO es aqui capacidad de RECIBIR FONDOS: no se crea ningun
+#     efecto INGRESO ni cambia la naturaleza del abono (D-DEV-04).
 #   Composicion:
 #     OP-13: hecho GASTO de signo contrario + relacion DEVOLUCION_DE, con la
 #       categoria del efecto del origen («De la compra», conservada aunque hoy
@@ -58,8 +73,13 @@
 #   Identidades: hecho = intencion_id; el resto uuid5(intencion_id,
 #   «gapto.f05.devolucion.<rol>»).
 #
-#   ABONO (POST /v1/hechos/{devolucion_id}/abono): cuenta -> capacidad ->
-#   hecho de la devolucion FOR NO KEY UPDATE. Replay: el movimiento de la
+#   ABONO (POST /v1/hechos/{devolucion_id}/abono): cuenta -> hecho ORIGEN
+#   (por DEVOLUCION_DE, relacion inmutable leida sin lock) FOR NO KEY UPDATE
+#   -> hecho de la devolucion FOR NO KEY UPDATE -> capacidad (si la cuenta no
+#   es la original). Origen antes que la devolucion, como OP-13 (que bloquea
+#   el origen y crea la devolucion); OP-03 sobre el origen solo LEE sus
+#   dependientes y OP-03 sobre la devolucion no toma el origen: sin ciclo.
+#   Replay: el movimiento de la
 #   intencion ya existe -> se compara (cuenta, fecha, importe, conciliado con
 #   esta devolucion). Nueva: FECHA_FUTURA -> es devolucion
 #   (HECHO_NO_ES_DEVOLUCION) -> ACTIVA (DEVOLUCION_NO_ACTIVA) -> sin abono
@@ -67,6 +87,13 @@
 #   no hay abono doble) -> cuenta -> OP-08 + OP-09 por el importe de la
 #   devolucion. La devolucion no cambia.
 # Version: 0.1.0 (F05-06 M2-A §A2-§A3)
+# Version: 0.2.0 (F05-06 M2-D §1-§2; AJ-M2C-01..04): capacidad de la cuenta
+#   del abono = opcion (b) endurecida (CUENTA DEL ABONO): cuenta original
+#   demostrable sin capacidad, cualquier otra con RECIBIR_INGRESO;
+#   `cuenta_original` (exactamente una conciliacion contra un movimiento de
+#   salida ACTIVO) alimenta tambien cuenta_compra del contexto (antes: el
+#   primer movimiento de salida, LIMIT 1); el abono posterior bloquea el
+#   origen antes que la devolucion.
 # ============================================================
 
 from __future__ import annotations
@@ -80,7 +107,7 @@ from typing import Any
 from app.api.dto_devolucion import AbonoCobrado, IntencionAbono, IntencionDevolucion
 from app.api.ejecucion_registro import RechazoRegistro, bloquear_cuentas
 from app.api.traductor_gasto_pagado import leer_actor_self
-from app.comun.elegibilidad_cuentas import MONEDA, SIN_CAPACIDAD, motivo_cuenta
+from app.comun.elegibilidad_cuentas import MONEDA, SIN_CAPACIDAD, motivo_cuenta, motivo_cuenta_original_abono
 from app.comun.fecha_funcional import CODIGO_FECHA_FUTURA, Reloj, es_futura, reloj_sistema
 from app.core.contexto import ContextoOperacion
 from app.core.errores import CodigoError, ErrorMotor
@@ -107,11 +134,12 @@ EXCEDE = "EXCEDE_CAPACIDAD_REVERSIBLE"
 NO_ES_DEVOLUCION = "HECHO_NO_ES_DEVOLUCION"
 DEVOLUCION_NO_ACTIVA = "DEVOLUCION_NO_ACTIVA"
 CUENTA_SIN_CAPACIDAD = "CUENTA_SIN_CAPACIDAD"
-#: Operacion del abono para el texto de CUENTA_SIN_CAPACIDAD. Exige la
-#: capacidad del medio de pago del gasto (PAGAR_GASTO; ver cabecera).
+#: Operacion del abono para el texto de CUENTA_SIN_CAPACIDAD. Una cuenta que
+#: NO es la original exige recibir fondos: la operacion de elegibilidad
+#: INGRESO (RECIBIR_INGRESO), sin crear ningun efecto INGRESO (M2-D §1.3-§1.4).
 OPERACION_ABONO = "ABONO_DEVOLUCION"
-OPERACION_CUENTA_ABONO = "GASTO"
-CAPACIDAD_ABONO = "PAGAR_GASTO"
+OPERACION_CUENTA_ABONO = "INGRESO"
+CAPACIDAD_ABONO = "RECIBIR_INGRESO"
 
 
 def _id(intencion: uuid.UUID, rol: str) -> uuid.UUID:
@@ -205,8 +233,35 @@ def devuelto_y_queda(sesion: SesionMotor, origen_id: uuid.UUID) -> tuple[decimal
     return devuelto, capacidad - devuelto
 
 
-def _rechazo_cuenta_abono(sesion: SesionMotor, cuenta_id: uuid.UUID, fecha: dt.date) -> None:
-    motivo = motivo_cuenta(sesion, cuenta_id, OPERACION_CUENTA_ABONO, fecha, bloquear=True)
+_CONCILIACIONES_ORIGEN = (
+    "SELECT m.cuenta_id, m.importe < 0 AND m.estado = 'ACTIVO' FROM gapto.hecho_movimientos_tesoreria hm "
+    "JOIN gapto.movimientos_tesoreria m ON m.id = hm.movimiento_tesoreria_id WHERE hm.hecho_id = %s"
+)
+
+
+def cuenta_original(sesion: SesionMotor, origen_id: uuid.UUID) -> uuid.UUID | None:
+    """M2-D §1: cuenta ORIGINAL demostrable del origen, o None. Solo si el
+    origen tiene EXACTAMENTE una conciliacion y es contra un movimiento de
+    salida ACTIVO; con varias (aunque una sea de salida), ninguna, o contra un
+    movimiento de entrada o anulado, no hay original. Las escrituras la leen
+    con el origen ya bloqueado (las conciliaciones del origen se escriben bajo
+    su raiz); `contexto_devolucion`, sin lock."""
+    with sesion.conexion.cursor() as cur:
+        cur.execute(_CONCILIACIONES_ORIGEN, (origen_id,))
+        filas = cur.fetchall()
+    if len(filas) != 1 or not filas[0][1]:
+        return None
+    return filas[0][0]
+
+
+def _rechazo_cuenta_abono(sesion: SesionMotor, cuenta_id: uuid.UUID, fecha: dt.date,
+                          original: uuid.UUID | None) -> None:
+    """M2-D §1: la cuenta original, sin capacidad; cualquier otra, RECIBIR_INGRESO.
+    Las reglas de cuenta (owner, habilitada, cierre, ledger, EUR) siempre."""
+    if original is not None and cuenta_id == original:
+        motivo = motivo_cuenta_original_abono(sesion, cuenta_id, fecha)
+    else:
+        motivo = motivo_cuenta(sesion, cuenta_id, OPERACION_CUENTA_ABONO, fecha, bloquear=True)
     if motivo == MONEDA:
         raise ErrorMotor(CodigoError.MONEDA_INVALIDA, "Solo se admite una cuenta en EUR.")
     if motivo == SIN_CAPACIDAD:
@@ -294,7 +349,7 @@ def registrar_devolucion(unidad: UnidadDeTrabajo, contexto: ContextoOperacion, o
         if i.atribucion == "SOLO_MIO" and not tuya_demostrable(gastos):
             raise _Rechazo(ATRIBUCION_NO_DEMOSTRABLE)
         if cobrado:
-            _rechazo_cuenta_abono(sesion, i.abono.cuenta_id, i.abono.fecha)
+            _rechazo_cuenta_abono(sesion, i.abono.cuenta_id, i.abono.fecha, cuenta_original(sesion, origen_id))
         x = i.importe.quantize(ESCALA)
         datos = DatosDevolucion(
             hecho_id=i.intencion_id, efecto_id=_id(i.intencion_id, "efecto"),
@@ -332,12 +387,15 @@ def registrar_abono(unidad: UnidadDeTrabajo, contexto: ContextoOperacion, devolu
                     i: IntencionAbono, reloj: Reloj = reloj_sistema) -> Abonada | RechazoRegistro:
     def operacion(sesion: SesionMotor) -> Abonada | RechazoRegistro:
         bloquear_cuentas(sesion, i.cuenta_id)
+        # M2-D §1.5: el origen por DEVOLUCION_DE (relacion inmutable, sin lock) y bajo lock ANTES que la devolucion.
+        relacion = sesion.uno("SELECT importe_relacionado, hecho_destino_id FROM gapto.hecho_relaciones "
+                              "WHERE hecho_origen_id = %s AND tipo_relacion = 'DEVOLUCION_DE'", (devolucion_id,))
+        if relacion is not None:
+            sesion.uno("SELECT id FROM gapto.hechos_financieros WHERE id = %s FOR NO KEY UPDATE", (relacion[1],))
         hecho = sesion.uno("SELECT estado FROM gapto.hechos_financieros WHERE id = %s FOR NO KEY UPDATE",
                            (devolucion_id,))
         if hecho is None:
             raise ErrorMotor(CodigoError.AGREGADO_NO_ENCONTRADO, "La devolucion no existe o no es accesible.")
-        relacion = sesion.uno("SELECT importe_relacionado FROM gapto.hecho_relaciones "
-                              "WHERE hecho_origen_id = %s AND tipo_relacion = 'DEVOLUCION_DE'", (devolucion_id,))
         movimiento_id = _id(i.intencion_id, "movimiento")
         if sesion.uno("SELECT 1 FROM gapto.movimientos_tesoreria WHERE id = %s", (movimiento_id,)) is not None:
             mov = _movimiento_de(sesion, movimiento_id, devolucion_id)
@@ -356,7 +414,7 @@ def registrar_abono(unidad: UnidadDeTrabajo, contexto: ContextoOperacion, devolu
         if sesion.uno("SELECT 1 FROM gapto.hecho_movimientos_tesoreria WHERE hecho_id = %s LIMIT 1",
                       (devolucion_id,)) is not None:
             raise ErrorMotor(CodigoError.YA_CONCILIADO, "La devolucion ya tiene su abono registrado.")
-        _rechazo_cuenta_abono(sesion, i.cuenta_id, i.fecha)
+        _rechazo_cuenta_abono(sesion, i.cuenta_id, i.fecha, cuenta_original(sesion, relacion[1]))
         importe = decimal.Decimal(relacion[0])
         concepto = sesion.uno("SELECT concepto FROM gapto.hechos_financieros WHERE id = %s", (devolucion_id,))[0]
         _abonar(sesion, contexto, devolucion_id, i.intencion_id, i.cuenta_id, i.fecha, importe, concepto)
@@ -397,13 +455,10 @@ def contexto_devolucion(sesion: SesionMotor, origen_id: uuid.UUID) -> dict[str, 
             "ORDER BY d.fecha_hecho, d.id", (origen_id,))
         devoluciones = [{"hecho_id": d[0], "fecha_hecho": d[1], "importe": _texto(d[2]),
                          "abono": "COBRADO" if d[3] else "PENDIENTE"} for d in cur.fetchall()]
-        # P-DEV-02: la cuenta con la que se pago la compra (movimiento de salida).
-        cur.execute(
-            "SELECT c.id, c.nombre FROM gapto.hecho_movimientos_tesoreria hm "
-            "JOIN gapto.movimientos_tesoreria m ON m.id = hm.movimiento_tesoreria_id "
-            "JOIN gapto.cuentas c ON c.id = m.cuenta_id WHERE hm.hecho_id = %s AND m.importe < 0 "
-            "ORDER BY m.fecha_movimiento, m.id LIMIT 1", (origen_id,))
-        compra = cur.fetchone()
+    # P-DEV-02 con M2-D §1: solo la cuenta ORIGINAL demostrable; sin ella, ninguna propuesta (null).
+    original = cuenta_original(sesion, origen_id)
+    compra = None if original is None else sesion.uno("SELECT id, nombre FROM gapto.cuentas WHERE id = %s",
+                                                      (original,))
     tuya = motivo is None and tuya_demostrable(gastos)
     if motivo is None and queda <= CERO:
         motivo = EXCEDE

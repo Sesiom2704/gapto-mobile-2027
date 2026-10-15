@@ -20,9 +20,15 @@
 #   Uso: GAPTO_TEST_DATABASE_URL=<base desechable> GAPTO_M2_CONCURRENCIA=1
 #        python scripts/dev/mutantes_f05_06_m2.py [--solo ID,ID]
 #   No ejecutar en paralelo con otro arnes ni con la suite sobre el mismo arbol.
+# Version: 0.1.0 (F05-06 M2-A §A5)
 # Version: 0.2.0 (F05-06 M2-B §B2): MU04, captura del gesto «Cobrado» en el
 #   contenedor de la fila (autocorreccion del swipe en M2-B).
-# Version: 0.1.0 (F05-06 M2-A §A5)
+# Version: 0.3.0 (F05-06 M2-D §3): un mutante por guarda de la cuenta del abono
+#   (opcion b): MD01 sin excepcion de cuenta original, MD02 excepcion para
+#   cualquier cuenta, MD03 RECIBIR_INGRESO -> PAGAR_GASTO, MD04 cuenta original
+#   con varias conciliaciones (la primera, como un LIMIT 1), MD05 excepcion que
+#   omite habilitada/cierre/owner/moneda; cliente MU05/MU06 propuesta de la
+#   original solo si esta en la lista (comportamiento de M2-B).
 # ============================================================
 
 from __future__ import annotations
@@ -43,6 +49,10 @@ T196 = "tests/api/test_196_f05_06_m2_devolucion.py"
 T197 = "tests/api/test_197_f05_06_m2_concurrencia_serial.py"
 M_DOM = "mobile/src/domain/devolucion.ts"
 M_ACT = "mobile/src/screens/ActividadScreen.tsx"
+ELEG = "backend/app/comun/elegibilidad_cuentas.py"
+T198 = "tests/api/test_198_f05_06_m2d_cuenta_abono.py"
+M_DEV = "mobile/src/screens/DevolucionScreen.tsx"
+M_HOJA = "mobile/src/components/AbonoHoja.tsx"
 J_DEV = "mobile/__tests__/devolucion.test.tsx"
 
 #: (id, descripcion, [(fichero, texto, sustituto)], discriminantes, equivalencia o None)
@@ -108,6 +118,31 @@ MUTANTES = [
      [J_DEV], None),
     ("MU04", "cliente: swipe «Cobrado» sin capturar el movimiento (el Pressable se lo queda) (P-DEV-04)",
      [(M_ACT, "      onMoveShouldSetPanResponderCapture: (_, g) => horizontal(g),", "      onMoveShouldSetPanResponderCapture: () => false,")],
+     [J_DEV], None),
+    ("MD01", "abono: sin excepcion de la cuenta original (toda cuenta exige RECIBIR_INGRESO)",
+     [(EJEC, "    if original is not None and cuenta_id == original:", "    if False:")],
+     [f"{T198}::test_1_cuenta_original_tarjeta_sin_recibir_ingreso", f"{T198}::test_2_cuenta_original_sin_pagar_gasto"],
+     None),
+    ("MD02", "abono: excepcion de capacidad ampliada a cualquier cuenta",
+     [(EJEC, "    if original is not None and cuenta_id == original:", "    if True:")],
+     [f"{T198}::test_4_otra_cuenta_sin_recibir_ingreso", f"{T198}::test_6_origen_con_dos_conciliaciones"], None),
+    ("MD03", "abono: la otra cuenta exige PAGAR_GASTO en lugar de RECIBIR_INGRESO",
+     [(EJEC, 'OPERACION_CUENTA_ABONO = "INGRESO"', 'OPERACION_CUENTA_ABONO = "GASTO"')],
+     [f"{T198}::test_3_otra_cuenta_con_recibir_ingreso", f"{T198}::test_4_otra_cuenta_sin_recibir_ingreso"], None),
+    ("MD04", "abono: cuenta original elegida con varias conciliaciones (la primera, LIMIT 1)",
+     [(EJEC, "    if len(filas) != 1 or not filas[0][1]:", "    if not filas or not filas[0][1]:")],
+     [f"{T198}::test_6_origen_con_dos_conciliaciones"], None),
+    ("MD05", "abono: la excepcion de la original omite habilitada, cierre, owner y moneda",
+     [(ELEG, "    fila = sesion.uno(_SELECT_SIN_CAPACIDAD, (cuenta_id,))", "    return None")],
+     [f"{T198}::test_5_cuenta_original_cerrada_o_deshabilitada", f"{T198}::test_5_cuenta_original_de_otra_moneda_no_se_exime"],
+     None),
+    ("MU05", "cliente: «Sí, en <original>» solo si la original esta en la lista de RECIBIR_INGRESO",
+     [(M_DEV, "  const compraElegible = !!ctx?.cuenta_compra;",
+       "  const compraElegible = !!ctx?.cuenta_compra && cuentas.fase === 'OK' && cuentas.lista.some((x) => x.cuenta_id === ctx.cuenta_compra!.cuenta_id);")],
+     [J_DEV], None),
+    ("MU06", "cliente: la hoja B2 propone la original solo si esta en la lista de RECIBIR_INGRESO",
+     [(M_HOJA, "  const propuestaElegible = !!propuesta;",
+       "  const propuestaElegible = !!propuesta && cuentas.fase === 'OK' && cuentas.lista.some((x) => x.cuenta_id === propuesta.cuenta_id);")],
      [J_DEV], None),
 ]
 
