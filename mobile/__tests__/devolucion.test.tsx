@@ -4,10 +4,12 @@
 // Ruta: mobile/__tests__/devolucion.test.tsx
 // Descripción: Devolución contextual (F05-06 M2-B §B2; lámina DEV v0.1). Dominio puro (límite, neto derivado, propuesta P-DEV-01, títulos y etiquetas de la Actividad), formulario A1 (origen fijo con lo devuelto y lo que queda, «De la compra», «Tuya» solo demostrable y «Todo mío» atenuado en B4, abono sin respuesta por defecto, «Todavía no» sin liquidez, límite B3, compra no disponible), revisión A2 (relación, abono real o pendiente, lo que no cambia, neto), envío (UUID sellado, doble toque, INDETERMINADO con la MISMA identidad, rechazo EXCEDE con el mensaje del servidor), confirmación con ida y vuelta; hoja de abono B2 (cuenta de la compra propuesta, confirmación, YA_CONCILIADO); Actividad (fila sin «+» ni «−» con «Devolución» / «Abono pendiente», «Registrar devolución» solo en gastos que no son devoluciones, «Registrar abono» solo con el abono pendiente, swipe «Cobrado» por la acción de accesibilidad, ida y vuelta compra ↔ devolución). Nunca «Ingreso».
 // Versión: 0.1.0 (F05-06 M2-B §B2)
+// Versión: 0.2.0 (F05-06 M2-C; acta M2 iPhone O-1): pista visual del swipe «Cobrado» (la fila se desplaza con tope, franja «Confirmar abono» tenue y de acento pasado el umbral, vuelta al soltar; sin franja ni desplazamiento en una compra).
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import type { ClienteApi, ContextoDevolucion, DetalleActividad, FilaActividad } from '../src/api/cliente';
@@ -22,7 +24,7 @@ import {
   superaLoQueQueda,
   textoDevolucionDe,
 } from '../src/domain/devolucion';
-import { ActividadScreen } from '../src/screens/ActividadScreen';
+import { ActividadScreen, TEXTO_FRANJA_COBRADO, TOPE_SWIPE } from '../src/screens/ActividadScreen';
 import { DevolucionScreen } from '../src/screens/DevolucionScreen';
 import { TEXTO_FORMULARIO_SE_CONSERVA } from '../src/domain/capacidades';
 import { ProveedorTema } from '../src/theme/tema';
@@ -395,6 +397,58 @@ describe('Actividad', () => {
     expect(screen.queryByTestId('hoja-abono')).toBeNull();
     await act(async () => { expect(gesto(-100, 0)).toBe(true); });
     expect(await screen.findByTestId('hoja-abono')).toBeTruthy();
+    expect(c.registrarAbono).not.toHaveBeenCalled();
+  });
+
+  test('O-1: al arrastrar, la fila se desplaza y deja ver «Confirmar abono»; se intensifica pasado el umbral y vuelve al soltar', async () => {
+    const c = clienteActividad({ registrarAbono: jest.fn() as any });
+    envolver(<ActividadScreen cliente={c} ahora={AHORA} nuevoId={nuevoId} onRegistrarDevolucion={jest.fn()} />);
+    await screen.findByTestId('fila-dev');
+    const z = screen.getByTestId('fila-swipe-dev');
+    let reloj = 0;
+    const evento = (dx: number) => {
+      const ts = (reloj += 10);
+      const toque = { touchActive: true, startPageX: 300, startPageY: 20, startTimeStamp: 0,
+        currentPageX: 300 + dx, currentPageY: 20, currentTimeStamp: ts, previousPageX: 300, previousPageY: 20, previousTimeStamp: ts - 5 };
+      return { nativeEvent: { changedTouches: [], touches: [], pageX: 300 + dx, pageY: 20, timestamp: ts },
+        touchHistory: { numberActiveTouches: 1, indexOfSingleActiveTouch: 0, mostRecentTimeStamp: ts, touchBank: [toque] } };
+    };
+    const x = () => StyleSheet.flatten(screen.getByTestId('fila-desplazable-dev').props.style).transform[0].translateX;
+    const OCULTOS = { includeHiddenElements: true }; // la franja es decorativa: oculta a VoiceOver (S1 no cambia)
+    const franja = () => screen.getByTestId('franja-cobrado-dev', OCULTOS);
+    const fondoFranja = () => StyleSheet.flatten(franja().props.style).backgroundColor;
+    expect(screen.queryByTestId('franja-cobrado-dev', OCULTOS)).toBeNull(); // en reposo no hay franja
+    expect(screen.queryByTestId('franja-cobrado-compra', OCULTOS)).toBeNull();
+    expect(screen.queryByTestId('fila-desplazable-compra')).toBeNull(); // una compra no se desplaza
+
+    // Por debajo del umbral: franja tenue y fila desplazada; al soltar vuelve y no abre la hoja.
+    await act(async () => {
+      expect(z.props.onMoveShouldSetResponderCapture(evento(-20))).toBe(true);
+      z.props.onResponderGrant(evento(-20));
+      z.props.onResponderMove(evento(-50));
+    });
+    expect(within(franja()).getByText(TEXTO_FRANJA_COBRADO, OCULTOS)).toBeTruthy();
+    expect(screen.queryByTestId('franja-cobrado-dev')).toBeNull(); // no la ve la accesibilidad
+    expect(fondoFranja()).toBe(colores.light.accentSurface);
+    expect(x()).toBe(-50);
+    await act(async () => { z.props.onResponderRelease(evento(-50)); });
+    expect(screen.queryByTestId('franja-cobrado-dev', OCULTOS)).toBeNull();
+    await waitFor(() => expect(x()).toBe(0));
+    expect(screen.queryByTestId('hoja-abono')).toBeNull();
+
+    // Pasado el umbral: franja de acento y desplazamiento con tope; al soltar abre la hoja y la fila vuelve.
+    await act(async () => {
+      expect(z.props.onMoveShouldSetResponderCapture(evento(-30))).toBe(true);
+      z.props.onResponderGrant(evento(-30));
+      z.props.onResponderMove(evento(-400));
+    });
+    expect(fondoFranja()).toBe(colores.light.accent);
+    expect(x()).toBe(-TOPE_SWIPE);
+    expect(screen.queryByTestId('hoja-abono')).toBeNull(); // arrastrar no abre nada: solo al soltar
+    await act(async () => { z.props.onResponderRelease(evento(-400)); });
+    expect(await screen.findByTestId('hoja-abono')).toBeTruthy();
+    expect(screen.queryByTestId('franja-cobrado-dev', OCULTOS)).toBeNull();
+    await waitFor(() => expect(x()).toBe(0));
     expect(c.registrarAbono).not.toHaveBeenCalled();
   });
 });

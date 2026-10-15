@@ -7,11 +7,12 @@
 // Versión: 0.2.0 (F05-05 K4-C; acta K4-A2 P12, deuda K-1, CC-05-8 / DAY-Q08): «Cancelar» restaura el desplazamiento cuando la lista posterior a la cancelación ya está cargada (`onContentSizeChange` con la ref `restaurarY`), en lugar de un `setTimeout` que actuaba sobre el esqueleto y se recortaba a 0. Un solo intento; la carga, los filtros y el contrato no cambian.
 // Versión: 0.3.0 (F05-06 K-7; F05 §51.8, F09 §12.104 B1/B4): la fila y la cabecera del detalle muestran el icono de la categoría (`categoria.icon_key`); transferencia con el icono de intercambio; «Varias» y sin categoría, icono de reserva. Fondo neutro (tinte C3b pendiente). Nada más cambia.
 // Versión: 0.4.0 (F05-06 M2-B §B1; lámina DEV A3, A4, B1, B2; D-DEV-01, 06, 07; P-DEV-03, 04): devolución contextual. El detalle de un gasto que no es devolución ofrece «Registrar devolución» (abre la tarea de devolución, `onRegistrarDevolucion`); el de una compra con devoluciones las lista (tocar abre la devolución) con lo devuelto y el neto derivado; el de una devolución muestra «Devolución de: <compra> ›» (vuelve a la compra), el abono (recibido en <cuenta> o pendiente) y, si está pendiente, «Registrar abono» (hoja B2). La fila de una devolución con el abono pendiente admite el swipe «Cobrado» (en un contenedor que captura el movimiento horizontal, para que el Pressable de la fila no se quede el gesto) y la acción de accesibilidad «Cobrado»; los dos abren la misma hoja con confirmación de cuenta y fecha. `abrir` abre el detalle de un hecho desde fuera (ida y vuelta tras registrar). Tras un abono se recargan la lista y el detalle.
+// Versión: 0.5.0 (F05-06 M2-C; acta M2 iPhone O-1; P-DEV-04): pista visual del swipe «Cobrado». Al arrastrar a la izquierda la fila sigue al dedo (con tope `TOPE_SWIPE`) y deja ver detrás la franja «Confirmar abono»; al superar `UMBRAL_SWIPE` la franja pasa al color de acento. Al soltar, la fila vuelve con animación; por encima del umbral se abre la misma hoja de siempre. La franja es decorativa (oculta a VoiceOver); el toque, el scroll vertical, la acción accesible «Cobrado» y las demás filas no cambian.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { PanResponder, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Animated, PanResponder, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ClienteApi, DetalleActividad, FilaActividad, TipoActividad } from '../api/cliente';
@@ -523,6 +524,12 @@ export function ActividadScreen(p: {
 
 /** Distancia horizontal (px) a la izquierda que dispara el swipe «Cobrado» (P-DEV-04). */
 export const UMBRAL_SWIPE = 72;
+/** Desplazamiento máximo (px) de la fila durante el swipe «Cobrado» (O-1): deja ver la franja entera sin vaciar la fila. */
+export const TOPE_SWIPE = 160;
+/** Texto de la franja que aparece detrás de la fila al deslizar (O-1, patrón iOS). */
+export const TEXTO_FRANJA_COBRADO = 'Confirmar abono';
+
+type FaseSwipe = 'reposo' | 'arrastrando' | 'superado';
 
 function FilaVista(p: { f: FilaActividad; conFecha: boolean; ultima: boolean; onPress: () => void; onCobrado?: () => void }) {
   const { c } = useTema();
@@ -532,20 +539,35 @@ function FilaVista(p: { f: FilaActividad; conFecha: boolean; ultima: boolean; on
   const marca = marcaReparto(f);
   const onCobrado = useRef(p.onCobrado);
   onCobrado.current = p.onCobrado;
+  // O-1: la fila sigue al dedo (solo a la izquierda, con tope) y deja ver detrás la franja «Confirmar abono», que se
+  // intensifica al superar el umbral. Al soltar la fila vuelve a su sitio con animación.
+  const desplazamiento = useRef(new Animated.Value(0)).current;
+  const [fase, setFase] = useState<FaseSwipe>('reposo');
   // Swipe «Cobrado» (DAY-RULE-03): solo en una devolución con el abono pendiente; abre la confirmación, nunca registra solo.
   // Va en un contenedor que CAPTURA el movimiento horizontal: el Pressable de la fila es responder desde el toque y sus
   // manejadores pisarían los del gesto (en web y en nativo); al capturar, el Pressable se cancela y no hay toque.
   const gesto = useMemo(() => {
     const horizontal = (g: { dx: number; dy: number }) => !!onCobrado.current && Math.abs(g.dx) > 12 && Math.abs(g.dx) > Math.abs(g.dy);
+    const volver = () => {
+      setFase('reposo');
+      Animated.timing(desplazamiento, { toValue: 0, duration: 180, useNativeDriver: false }).start(); // el arrastre ya va por JS (setValue)
+    };
     return PanResponder.create({
       onMoveShouldSetPanResponder: (_, g) => horizontal(g),
       onMoveShouldSetPanResponderCapture: (_, g) => horizontal(g),
       onPanResponderTerminationRequest: () => false,
+      onPanResponderGrant: () => setFase('arrastrando'),
+      onPanResponderMove: (_, g) => {
+        desplazamiento.setValue(Math.max(-TOPE_SWIPE, Math.min(0, g.dx)));
+        setFase(g.dx <= -UMBRAL_SWIPE ? 'superado' : 'arrastrando');
+      },
       onPanResponderRelease: (_, g) => {
+        volver();
         if (onCobrado.current && g.dx <= -UMBRAL_SWIPE) onCobrado.current();
       },
+      onPanResponderTerminate: volver,
     });
-  }, []);
+  }, [desplazamiento]);
   const fila = (
     <Pressable
       testID={`fila-${f.id}`}
@@ -570,7 +592,23 @@ function FilaVista(p: { f: FilaActividad; conFecha: boolean; ultima: boolean; on
       </View>
     </Pressable>
   );
-  return p.onCobrado ? <View testID={`fila-swipe-${f.id}`} {...gesto.panHandlers}>{fila}</View> : fila;
+  if (!p.onCobrado) return fila;
+  const superado = fase === 'superado';
+  return (
+    <View testID={`fila-swipe-${f.id}`} style={s.swipe} {...gesto.panHandlers}>
+      {fase !== 'reposo' ? (
+        // Decorativa: la acción accesible sigue siendo «Cobrado» en la fila (S1); VoiceOver no ve la franja.
+        <View testID={`franja-cobrado-${f.id}`} accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+          style={[s.franja, { backgroundColor: superado ? c.accent : c.accentSurface }]}>
+          <Ionicons name="checkmark" size={18} color={superado ? c.onAccent : c.accent} />
+          <Text style={[tipo.body, { color: superado ? c.onAccent : c.accent, fontWeight: '600' }]}>{TEXTO_FRANJA_COBRADO}</Text>
+        </View>
+      ) : null}
+      <Animated.View testID={`fila-desplazable-${f.id}`} style={{ backgroundColor: c.surfacePrimary, transform: [{ translateX: desplazamiento }] }}>
+        {fila}
+      </Animated.View>
+    </View>
+  );
 }
 
 function IconoFila({ f, testID }: { f: FilaActividad; testID: string }) {
@@ -712,6 +750,8 @@ const s = StyleSheet.create({
   tarjetaError: { borderRadius: radio.m, padding: espacio.l, gap: espacio.s },
   vacio: { alignItems: 'center', gap: espacio.s, paddingVertical: espacio.xxl },
   tarjeta: { borderRadius: radio.m, overflow: 'hidden' },
+  swipe: { overflow: 'hidden' },
+  franja: { ...StyleSheet.absoluteFill, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: espacio.s, paddingHorizontal: espacio.m },
   fila: { flexDirection: 'row', alignItems: 'center', gap: espacio.m, paddingHorizontal: espacio.m, paddingVertical: espacio.s, minHeight: TACTIL_MIN + 12 },
   icono: { width: 32, height: 32, borderRadius: radio.s, alignItems: 'center', justifyContent: 'center' },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: espacio.s },
