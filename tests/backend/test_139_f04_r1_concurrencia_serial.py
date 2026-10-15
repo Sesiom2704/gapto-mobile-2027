@@ -42,6 +42,9 @@
 #   cerrar_posicion; relectura con el conjunto cambiado (el vinculo cambia de
 #   previsión o de hecho entre la lectura y la adquisicion: 40001 y reintento
 #   completo, nunca exito con una proteccion incompleta).
+# Version: 0.4.1 (F04-R1 MANT-RV3): comentario en linea de la tercera espera
+#   de C1 con el orden real (OP-02 pide s_b antes que s_a). Sin cambios de
+#   codigo ni de aserciones.
 # Version: 0.4.0 (F04-R1 F7c; HANDOFF_F04-R1_F7B): Barrera.pid = pg_backend_pid()
 #   (pid real; tras el proxy de Neon info.backend_pid no coincide con
 #   pg_blocking_pids y C1 no podia cumplir su tercera espera). Comentarios de C1
@@ -208,8 +211,8 @@ def test_c1_corregir_vinculo_frente_a_propagacion_de_op02(v_en, dsn, servicio, s
         pid_cv = next(p for p in bloqueados(dsn) if p != pid_op02)
         traza["cv_espera_a"] = "barrera_s_b" if y.pid in bloqueados(dsn).get(pid_cv, []) else "otro"
         x.liberar()
-        # Con corregir_vinculo ya en cola sobre s_b, OP-02 espera al primero de la cola (lock de tupla), no a la
-        # barrera: cualquiera de los dos acredita que OP-02 tiene s_a y pide s_b.
+        # Orden real con G-R1-D: OP-02 pide s_b ANTES que s_a, asi que liberar s_a no lo desbloquea. Sigue pidiendo
+        # s_b y espera a la barrera de s_b o al primero de la cola (lock de tupla): cualquiera de los dos lo acredita.
         assert esperar(lambda: bool({y.pid, pid_cv} & set(bloqueados(dsn).get(pid_op02, [])))),             "OP-02 no llego a esperar s_b"
         traza["op02_tras_liberar_s_a"] = "espera s_b (barrera o cola de corregir_vinculo)"
         y.liberar()

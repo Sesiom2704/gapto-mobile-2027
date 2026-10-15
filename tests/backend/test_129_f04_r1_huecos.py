@@ -8,7 +8,7 @@
 #   por una ruta ejecutable del motor (`backend/app`): pasa mientras el hueco
 #   exista y FALLA el dia que se cierre, para que el cambio se haga a la vista
 #   (y se retire o invierta este test). No es la conducta deseada: cada hueco
-#   esta escalado en `C:\DEV\gapto-canal\handoffs\ESCALADO_F04-R1_<hueco>.md`.
+#   esta escalado en el canal de handoffs (ESCALADO_F04-R1_<hueco>.md).
 #   R1 no los corrige (fuera de alcance; ningun fix aqui).
 #     - OP21-PERTENENCIA: OP-21 sobre el hecho H1 actualiza un efecto, retira
 #       una relacion y retira una conciliacion de OTRO hecho H2 del mismo
@@ -16,6 +16,8 @@
 #     - RVRX-REGLA: crear_version de la regla A cierra una version de la regla
 #       B, y corregir_excepcion de A reescribe una excepcion de B, bajo el lock
 #       de A y sin tocar la version de B.
+# Version: 0.1.1 (F04-R1 MANT-RV3): la ruta absoluta del escalado pasa a una
+#   referencia neutra al canal (test_rv3_000). Sin cambios de codigo.
 # Version: 0.1.0 (F04-R1 IMPL F5)
 # ============================================================
 
