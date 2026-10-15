@@ -4,11 +4,13 @@
 // Ruta: mobile/src/domain/actividad.ts
 // Descripción: Lógica pura de la Actividad v0 de Día a día (F05 §49.4 A7, §49.5 R11/R12; P-ACT-01..03; F09 DAY-Q01..Q05, Q08, Q09; lámina SRCH-ACT-AFI v0.2 B1–B13, C4). Periodo (este mes, mes anterior, otro mes, entre fechas, todo el historial) en mes natural → consulta [desde, hasta); filtros (tipo, categoría con subcategorías, cuenta, tercero, contexto) con su recuento de GRUPOS («Filtros · 2»); búsqueda: si lo escrito es un importe («48,72» o «48.72») se busca el importe exacto, si no, el texto. Fila: título calculado (`tituloRegistro`, una sola implementación) en la línea principal; la secundaria dice lo que el título no dice (tercero, categoría, cuenta, contexto; maestro desactivado marcado); importe con signo y color solo si describen la magnitud (gasto «−», ingreso «+» neutro, transferencia sin signo, DAY-Q04, P-ACT-02); «Total · reparto sin indicar» o «Total · reparto parcial» cuando el importe es el total del hecho y no tu parte (P-ACT-03, R12). Agrupación por día («Hoy · 10 oct 2026», «Ayer · …») en el periodo y por mes en la búsqueda. Sin hora: `fecha_hecho` es una fecha.
 // Versión: 0.1.0 (F05-05 K3 §2.6)
+// Versión: 0.2.0 (F05-06 M2-B §B1; lámina DEV B1, D-DEV-07, P-DEV-03): una devolución se titula «Devolución · <compra>», su línea secundaria dice el tercero de la compra y la categoría, el importe va sin «+» ni «−» y bajo él «Devolución» o «Abono pendiente» (nunca la marca de reparto). Nada más cambia.
 // ============================================================
 
 import type { ConsultaActividad, FilaActividad, TipoActividad } from '../api/cliente';
 import { diaMesAnioIso, limitesMesIso, mesAnioIso, mesDesplazadoIso } from './fechas';
 import { formatearEur, parsearImporte } from './importe';
+import { esDevolucion, etiquetaDevolucion, importeDevolucion, tituloDevolucion } from './devolucion';
 import { tituloRegistro } from './registro';
 
 export type Periodo =
@@ -120,6 +122,8 @@ export function consulta(p: Periodo, f: Filtros, hoyIso: string, busqueda: strin
 
 /** Título calculado de la fila (P-ACT-01). */
 export function tituloFila(r: FilaActividad): string {
+  const devolucion = tituloDevolucion(r);
+  if (devolucion) return devolucion;
   return tituloRegistro({
     tipo: r.tipo,
     importe: r.importe_total ?? '0',
@@ -133,7 +137,10 @@ export function tituloFila(r: FilaActividad): string {
 export function secundariaFila(r: FilaActividad): string {
   const titulo = tituloFila(r);
   const partes: string[] = [];
-  if (r.tipo === 'TRANSFERENCIA') {
+  if (r.devolucion_de) {
+    if (r.devolucion_de.tercero) partes.push(r.devolucion_de.tercero);
+    partes.push(r.categoria?.nombre ?? 'Sin categoría');
+  } else if (r.tipo === 'TRANSFERENCIA') {
     partes.push('Entre cuentas');
   } else {
     const ter = r.tercero?.nombre;
@@ -161,6 +168,7 @@ export function tituloTransferencia(r: FilaActividad): string | null {
 
 /** Importe con signo según el tipo (DAY-Q04, P-ACT-02). */
 export function importeFila(r: FilaActividad): string {
+  if (esDevolucion(r)) return importeDevolucion(r);
   const total = formatearEur(r.importe_total ?? '0');
   if (r.tipo === 'GASTO') return `−${total}`;
   if (r.tipo === 'INGRESO') return `+${total}`;
@@ -169,6 +177,7 @@ export function importeFila(r: FilaActividad): string {
 
 /** Marca bajo el importe cuando es el total del hecho y no tu parte (P-ACT-03, R12). */
 export function marcaReparto(r: FilaActividad): string | null {
+  if (esDevolucion(r)) return etiquetaDevolucion(r);
   if (r.estado_reparto === 'NO_DISPONIBLE') return 'Total · reparto sin indicar';
   if (r.estado_reparto === 'PARCIAL') return 'Total · reparto parcial';
   return null;

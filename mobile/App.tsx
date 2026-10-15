@@ -9,7 +9,8 @@
 // v0.5.0 (F05-03/F05-04 J2+J3 §2.1–§2.4): «Registrar» de Inicio abre la hoja de tipos (sin preselección); Gasto e Ingreso abren el registro con ese tipo, «Entre cuentas» la pantalla de transferencia. Un acceso de Inicio abre el registro del tipo de su plantilla con la plantilla aplicada. El cambio de tipo antes del primer envío que cruza a/desde «Entre cuentas» cambia de pantalla conservando importe y fecha (y su aviso T02). «Editar» / «Añadir acceso» llevan a Ajustes › Plantillas.
 // v0.6.0 (F05-05 K3 §2.5/§2.6; F05 §49.4 A7/A8, D-SRCH-06/12): «Día a día» deja de ser territorio pendiente: monta la Actividad v0 (ActividadScreen) de forma PERSISTENTE, como Más (conserva periodo, filtros y scroll al cambiar de pestaña); sus hojas son inmersivas (el velo cubre la barra inferior). Tras un registro confirmado la Actividad vuelve a leer. Ajustes › Terceros › «Ver sus registros» abre en la pila de Más la Actividad filtrada por el tercero con todo el historial («‹ <tercero>» vuelve a la ficha). Mes y Patrimonio siguen pendientes.
 // v0.7.0 (F05-06 M4 §3; F09 §12.105 CAP): Ajustes › «Cuentas» (capacidades de cuenta, entrada provisional junto a Preferencias financieras) en la pila de Más; su hoja de confirmación es inmersiva (oculta la barra inferior).
-// Versión: 0.7.0
+// v0.8.0 (F05-06 M2-B §B1; lámina DEV, D-DEV-01/06): «Registrar devolución» del detalle de un gasto en la Actividad abre la tarea inmersiva de devolución (DevolucionScreen) sobre la compra; al terminar, Día a día y Inicio vuelven a leer y «Ver la devolución» / «Ver la compra» abren ese detalle en Día a día (ida y vuelta). La Actividad recibe `nuevoId` para «Registrar abono».
+// Versión: 0.8.0
 // ============================================================
 
 import * as Crypto from 'expo-crypto';
@@ -32,6 +33,7 @@ import { PreferenciasAjustesScreen } from './src/screens/PreferenciasAjustesScre
 import { HomeScreen } from './src/screens/HomeScreen';
 import { AjustesScreen, MasScreen } from './src/screens/MasScreen';
 import { ActividadScreen } from './src/screens/ActividadScreen';
+import { DevolucionScreen } from './src/screens/DevolucionScreen';
 import { RegistroGastoScreen } from './src/screens/RegistroGastoScreen';
 import { TerritorioPendiente } from './src/screens/TerritorioPendiente';
 import { TransferenciaScreen } from './src/screens/TransferenciaScreen';
@@ -60,6 +62,10 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
   const [inmersivaDia, setInmersivaDia] = useState(false);
   /** C4: tercero cuyos registros se ven desde Ajustes › Terceros. */
   const [registrosDe, setRegistrosDe] = useState<{ id: string; nombre: string } | null>(null);
+  /** F05-06 M2: tarea de devolución sobre una compra y detalle que abrir en Día a día al volver. */
+  const [devolucionDe, setDevolucionDe] = useState<{ origenId: string; clave: number } | null>(null);
+  const [abrirEnDia, setAbrirEnDia] = useState<{ id: string; clave: number } | null>(null);
+  const registrarDevolucion = useCallback((origenId: string) => setDevolucionDe({ origenId, clave: Date.now() }), []);
 
   const cerrarTarea = useCallback((registrado: boolean) => {
     setTarea(null);
@@ -86,7 +92,8 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
         </View>
         {/* Día a día: Actividad v0 montada de forma persistente (conserva periodo, filtros y scroll). */}
         <View style={[s.raiz, destino !== 'DIA' && s.oculto]}>
-          <ActividadScreen cliente={p.cliente} ahora={p.ahora} refresco={refresco} onRegistrar={() => setHojaTipos(true)} onInmersiva={setInmersivaDia} />
+          <ActividadScreen cliente={p.cliente} ahora={p.ahora} refresco={refresco} onRegistrar={() => setHojaTipos(true)} onInmersiva={setInmersivaDia}
+            onRegistrarDevolucion={registrarDevolucion} nuevoId={p.nuevoId} abrir={abrirEnDia} />
         </View>
         {(Object.keys(TITULOS) as (keyof typeof TITULOS)[]).map((d) =>
           destino === d ? <TerritorioPendiente key={d} titulo={TITULOS[d]} /> : null,
@@ -133,6 +140,8 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
               ahora={p.ahora}
               refresco={refresco}
               onInmersiva={setInmersivaMas}
+              onRegistrarDevolucion={registrarDevolucion}
+              nuevoId={p.nuevoId}
               tercero={{
                 ...registrosDe,
                 onAtras: () => setPantallaMas('TERCEROS'),
@@ -196,6 +205,25 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
             />
           </View>
         ) : null}
+        {devolucionDe ? (
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: c.background }]}>
+            <DevolucionScreen
+              key={devolucionDe.clave}
+              cliente={p.cliente}
+              nuevoId={p.nuevoId}
+              ahora={p.ahora}
+              origenId={devolucionDe.origenId}
+              onCerrar={(registrado, ver) => {
+                setDevolucionDe(null);
+                if (registrado) setRefresco((n) => n + 1);
+                if (ver) {
+                  setDestino('DIA');
+                  setAbrirEnDia({ id: ver, clave: Date.now() });
+                }
+              }}
+            />
+          </View>
+        ) : null}
         {hojaTipos ? (
           <HojaTipos
             onElegir={(t) => {
@@ -206,7 +234,7 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
           />
         ) : null}
       </View>
-      {tarea === null && !hojaTipos && !(destino === 'MAS' && inmersivaMas) && !(destino === 'DIA' && inmersivaDia) ? <BarraInferior actual={destino} onCambiar={setDestino} /> : null}
+      {tarea === null && devolucionDe === null && !hojaTipos && !(destino === 'MAS' && inmersivaMas) && !(destino === 'DIA' && inmersivaDia) ? <BarraInferior actual={destino} onCambiar={setDestino} /> : null}
     </View>
   );
 }

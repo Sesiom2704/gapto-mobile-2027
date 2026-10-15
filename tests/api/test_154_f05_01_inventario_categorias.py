@@ -294,7 +294,10 @@
 #     mandato §A2 exige componer OP-13 + OP-05 en una transaccion del adaptador; la
 #     categoria nunca la elige el adaptador. El resto de la frontera sigue con OP-22
 #     como unica puerta.
-# Version: 0.24.0
+# Version 0.25.0 (F05-06 M2-B §B3; MANDATO_F05-06_M2 v1.0): alta aditiva en I1. El E2E
+#     scripts/dev/e2e_f05_06_m2.py prepara sus compras (`compra`) enviando categoria_id por
+#     /v1/intenciones/gasto-pagado, el writer publico (R, C-a en servidor). Sin cambios en I3.
+# Version: 0.25.0
 # ============================================================
 
 from __future__ import annotations
@@ -515,6 +518,11 @@ REGISTRO.update({
     ("backend/app/api/dto_capacidades.py", "PreferenciaAfectada"): ("R", "DTO F05-06 M4", "declaracion de campo"),
     ("scripts/dev/e2e_f05_06_m4.py", "main"): (
         "R", "E2E F05-06 M4 preparacion", "crea la preferencia de Hogar por /v1/preferencias (writer publico)"),
+})
+# F05-06 M2-B (alta aditiva, v0.25.0): preparacion del E2E de la devolucion contextual.
+REGISTRO.update({
+    ("scripts/dev/e2e_f05_06_m2.py", "compra"): (
+        "R", "E2E F05-06 M2-B preparacion", "envia la categoria de la compra por /v1/intenciones/gasto-pagado (writer publico, C-a en servidor)"),
 })
 # F05-05 K2 §1.5 (alta aditiva): Actividad v0, solo lectura (R11); la categoria de la fila sale de los
 # efectos GASTO/INGRESO y nunca se persiste nada.

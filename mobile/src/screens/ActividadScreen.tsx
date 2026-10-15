@@ -6,14 +6,16 @@
 // Versión: 0.1.0 (F05-05 K3 §2.6)
 // Versión: 0.2.0 (F05-05 K4-C; acta K4-A2 P12, deuda K-1, CC-05-8 / DAY-Q08): «Cancelar» restaura el desplazamiento cuando la lista posterior a la cancelación ya está cargada (`onContentSizeChange` con la ref `restaurarY`), en lugar de un `setTimeout` que actuaba sobre el esqueleto y se recortaba a 0. Un solo intento; la carga, los filtros y el contrato no cambian.
 // Versión: 0.3.0 (F05-06 K-7; F05 §51.8, F09 §12.104 B1/B4): la fila y la cabecera del detalle muestran el icono de la categoría (`categoria.icon_key`); transferencia con el icono de intercambio; «Varias» y sin categoría, icono de reserva. Fondo neutro (tinte C3b pendiente). Nada más cambia.
+// Versión: 0.4.0 (F05-06 M2-B §B1; lámina DEV A3, A4, B1, B2; D-DEV-01, 06, 07; P-DEV-03, 04): devolución contextual. El detalle de un gasto que no es devolución ofrece «Registrar devolución» (abre la tarea de devolución, `onRegistrarDevolucion`); el de una compra con devoluciones las lista (tocar abre la devolución) con lo devuelto y el neto derivado; el de una devolución muestra «Devolución de: <compra> ›» (vuelve a la compra), el abono (recibido en <cuenta> o pendiente) y, si está pendiente, «Registrar abono» (hoja B2). La fila de una devolución con el abono pendiente admite el swipe «Cobrado» (en un contenedor que captura el movimiento horizontal, para que el Pressable de la fila no se quede el gesto) y la acción de accesibilidad «Cobrado»; los dos abren la misma hoja con confirmación de cuenta y fecha. `abrir` abre el detalle de un hecho desde fuera (ida y vuelta tras registrar). Tras un abono se recargan la lista y el detalle.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { PanResponder, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ClienteApi, DetalleActividad, FilaActividad, TipoActividad } from '../api/cliente';
+import { AbonoHoja } from '../components/AbonoHoja';
 import { BotonPrimario, BotonTexto, Chip } from '../components/Basicos';
 import { Hoja } from '../components/HojasCategoria';
 import { BotonSecundario, CargaArbol, IconoCategoriaVista, SelectorCategorias } from '../components/SelectorCategorias';
@@ -38,6 +40,7 @@ import {
   tituloTransferencia,
 } from '../domain/actividad';
 import { construirArbol } from '../domain/categoria';
+import { nombreCorto, ofreceRegistrarAbono, ofreceRegistrarDevolucion, TEXTO_NETO, textoDevolucionDe } from '../domain/devolucion';
 import { ayer, ddmmaaaaAIso, diaMesAnioIso, diaMesIso, isoLocal, mesAnioIso, mesDesplazadoIso } from '../domain/fechas';
 import { formatearEur } from '../domain/importe';
 import { filtrar } from '../domain/maestros';
@@ -53,7 +56,8 @@ type HojaAbierta =
   | { h: 'FILTROS' }
   | { h: 'F_CATEGORIA' }
   | { h: 'F_LISTA'; campo: 'cuenta' | 'tercero' | 'contexto' }
-  | { h: 'DETALLE'; id: string };
+  | { h: 'DETALLE'; id: string }
+  | { h: 'ABONO'; dev: { id: string; titulo: string; importe: string; origenId: string }; volverA: string | null };
 type Opcion = { id: string; nombre: string; detalle?: string };
 
 export const TEXTO_ERROR = 'No se ha podido cargar la actividad';
@@ -71,6 +75,12 @@ export function ActividadScreen(p: {
   onInmersiva?: (x: boolean) => void;
   /** C4: «Registros de <tercero>» (filtrada por el tercero, todo el historial, sin totales). */
   tercero?: { id: string; nombre: string; onAtras: () => void; onLimpiar?: () => void } | null;
+  /** F05-06 M2: «Registrar devolución» desde el detalle de un gasto (tarea inmersiva fuera de la pantalla). */
+  onRegistrarDevolucion?: (origenId: string) => void;
+  /** F05-06 M2: identidad nueva para «Registrar abono». */
+  nuevoId?: () => string;
+  /** F05-06 M2: abre el detalle de un hecho desde fuera (ida y vuelta tras registrar una devolución). */
+  abrir?: { id: string; clave: number } | null;
 }) {
   const { c } = useTema();
   const inset = useSafeAreaInsets();
@@ -215,6 +225,20 @@ export function ActividadScreen(p: {
     const r = await p.cliente.detalleActividad(id);
     setDetalle(r.tipo === 'OK' ? { fase: 'OK', d: r.datos } : { fase: 'ERROR' });
   };
+  useEffect(() => {
+    if (p.abrir) void abrirDetalle(p.abrir.id);
+  }, [p.abrir?.clave]);
+
+  // ---------------------------------------------------------------- abono (D-DEV-07, P-DEV-04)
+  const abrirAbono = (f: FilaActividad, volverA: string | null) => {
+    if (!ofreceRegistrarAbono(f) || !f.devolucion_de) return;
+    setHoja({ h: 'ABONO', volverA, dev: { id: f.id, titulo: textoDevolucionDe(f.devolucion_de), importe: f.importe_total ?? '0', origenId: f.devolucion_de.hecho_id } });
+  };
+  const cerrarAbono = (registrado: boolean, volverA: string | null) => {
+    if (registrado) void cargar();
+    if (volverA) void abrirDetalle(volverA);
+    else setHoja(null);
+  };
 
   const nGrupos = gruposActivos(filtros) - (p.tercero ? 1 : 0);
   const etiquetas = etiquetasFiltros(filtros);
@@ -343,7 +367,8 @@ export function ActividadScreen(p: {
             <Text accessibilityRole="header" style={[tipo.footnote, { color: c.textSecondary, fontWeight: '600' }]}>{g.titulo}</Text>
             <View style={[s.tarjeta, { backgroundColor: c.surfacePrimary }]}>
               {g.filas.map((f, i) => (
-                <FilaVista key={f.id} f={f} conFecha={buscando || !!p.tercero} ultima={i === g.filas.length - 1} onPress={() => void abrirDetalle(f.id)} />
+                <FilaVista key={f.id} f={f} conFecha={buscando || !!p.tercero} ultima={i === g.filas.length - 1} onPress={() => void abrirDetalle(f.id)}
+                  onCobrado={ofreceRegistrarAbono(f) && p.nuevoId ? () => abrirAbono(f, null) : undefined} />
               ))}
             </View>
           </View>
@@ -475,27 +500,61 @@ export function ActividadScreen(p: {
                 <BotonSecundario testID="detalle-reintentar" titulo="Reintentar" onPress={() => void abrirDetalle(hoja.id)} />
               </View>
             ) : null}
-            {detalle.fase === 'OK' ? <DetalleVista d={detalle.d} /> : null}
+            {detalle.fase === 'OK' ? <DetalleVista d={detalle.d} onAbrir={(id) => void abrirDetalle(id)} /> : null}
           </ScrollView>
+          {detalle.fase === 'OK' && ofreceRegistrarDevolucion(detalle.d) && p.onRegistrarDevolucion ? (
+            <BotonSecundario testID="detalle-registrar-devolucion" titulo="Registrar devolución"
+              onPress={() => { const id = detalle.d.id; setHoja(null); p.onRegistrarDevolucion!(id); }} />
+          ) : null}
+          {detalle.fase === 'OK' && ofreceRegistrarAbono(detalle.d) && p.nuevoId ? (
+            <BotonSecundario testID="detalle-registrar-abono" titulo="Registrar abono" onPress={() => abrirAbono(detalle.d, detalle.d.id)} />
+          ) : null}
           <Text style={[tipo.caption, { color: c.textSecondary }]}>{TEXTO_EDICION}</Text>
           <BotonSecundario testID="detalle-cerrar" titulo="Cerrar" onPress={() => setHoja(null)} />
         </Hoja>
+      ) : null}
+
+      {hoja?.h === 'ABONO' && p.nuevoId ? (
+        <AbonoHoja cliente={p.cliente} nuevoId={p.nuevoId} ahora={p.ahora} devolucion={hoja.dev} onCerrar={(r) => cerrarAbono(r, hoja.volverA)} />
       ) : null}
     </View>
   );
 }
 
-function FilaVista(p: { f: FilaActividad; conFecha: boolean; ultima: boolean; onPress: () => void }) {
+/** Distancia horizontal (px) a la izquierda que dispara el swipe «Cobrado» (P-DEV-04). */
+export const UMBRAL_SWIPE = 72;
+
+function FilaVista(p: { f: FilaActividad; conFecha: boolean; ultima: boolean; onPress: () => void; onCobrado?: () => void }) {
   const { c } = useTema();
   const f = p.f;
   const titulo = tituloTransferencia(f) ?? tituloFila(f);
   const secundaria = textoCoincidencia(f) ?? secundariaFila(f);
   const marca = marcaReparto(f);
-  return (
+  const onCobrado = useRef(p.onCobrado);
+  onCobrado.current = p.onCobrado;
+  // Swipe «Cobrado» (DAY-RULE-03): solo en una devolución con el abono pendiente; abre la confirmación, nunca registra solo.
+  // Va en un contenedor que CAPTURA el movimiento horizontal: el Pressable de la fila es responder desde el toque y sus
+  // manejadores pisarían los del gesto (en web y en nativo); al capturar, el Pressable se cancela y no hay toque.
+  const gesto = useMemo(() => {
+    const horizontal = (g: { dx: number; dy: number }) => !!onCobrado.current && Math.abs(g.dx) > 12 && Math.abs(g.dx) > Math.abs(g.dy);
+    return PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) => horizontal(g),
+      onMoveShouldSetPanResponderCapture: (_, g) => horizontal(g),
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderRelease: (_, g) => {
+        if (onCobrado.current && g.dx <= -UMBRAL_SWIPE) onCobrado.current();
+      },
+    });
+  }, []);
+  const fila = (
     <Pressable
       testID={`fila-${f.id}`}
       accessibilityRole="button"
       accessibilityLabel={[titulo, secundaria, importeFila(f), marca].filter(Boolean).join('. ')}
+      accessibilityActions={p.onCobrado ? [{ name: 'cobrado', label: 'Cobrado' }] : undefined}
+      onAccessibilityAction={(e) => {
+        if (e.nativeEvent.actionName === 'cobrado') p.onCobrado?.();
+      }}
       onPress={p.onPress}
       style={({ pressed }) => [s.fila, { borderBottomColor: c.separator, borderBottomWidth: p.ultima ? 0 : StyleSheet.hairlineWidth, opacity: pressed ? 0.7 : 1 }]}
     >
@@ -511,6 +570,7 @@ function FilaVista(p: { f: FilaActividad; conFecha: boolean; ultima: boolean; on
       </View>
     </Pressable>
   );
+  return p.onCobrado ? <View testID={`fila-swipe-${f.id}`} {...gesto.panHandlers}>{fila}</View> : fila;
 }
 
 function IconoFila({ f, testID }: { f: FilaActividad; testID: string }) {
@@ -525,11 +585,18 @@ function IconoFila({ f, testID }: { f: FilaActividad; testID: string }) {
   return <IconoCategoriaVista testID={testID} iconKey={f.varias ? null : f.categoria?.icon_key ?? null} />;
 }
 
-function DetalleVista({ d }: { d: DetalleActividad }) {
+function DetalleVista({ d, onAbrir }: { d: DetalleActividad; onAbrir: (id: string) => void }) {
   const { c } = useTema();
   const kv: [string, string][] = [];
-  const nombreTipo = d.tipo === 'GASTO' ? 'Gasto' : d.tipo === 'INGRESO' ? 'Ingreso' : 'Entre cuentas';
-  if (d.tipo === 'TRANSFERENCIA') {
+  const nombreTipo = d.devolucion_de ? 'Devolución' : d.tipo === 'GASTO' ? 'Gasto' : d.tipo === 'INGRESO' ? 'Ingreso' : 'Entre cuentas';
+  if (d.devolucion_de) {
+    // A4: lo devuelto, el abono, la categoría y tu parte (sin signo: no es un ingreso).
+    kv.push(['Devuelto', formatearEur(d.importe_total ?? '0')]);
+    const cobro = d.cuentas.find((x) => x.rol === 'COBRO');
+    kv.push(['Abono', d.abono === 'COBRADO' ? `Recibido en ${cobro?.nombre ?? 'la cuenta'}` : 'Pendiente']);
+    kv.push(['Categoría', d.categoria ? `${d.categoria.ruta}${d.categoria.enabled ? '' : ' (desactivada)'}` : 'Sin categoría']);
+    kv.push(['Tu parte', d.estado_reparto === 'COMPLETA' && d.tu_parte !== null ? formatearEur(d.tu_parte.replace('-', '')) : 'Sin indicar']);
+  } else if (d.tipo === 'TRANSFERENCIA') {
     kv.push(['Importe', formatearEur(d.importe_total ?? '0')]);
     kv.push(['Desde', d.cuentas.find((x) => x.rol === 'ORIGEN')?.nombre ?? '—']);
     kv.push(['A', d.cuentas.find((x) => x.rol === 'DESTINO')?.nombre ?? '—']);
@@ -544,6 +611,8 @@ function DetalleVista({ d }: { d: DetalleActividad }) {
     kv.push(['Presupuesto', d.presupuestable ? 'Sí' : 'No']);
   }
   kv.push(['Nota', (d.nota ?? '').trim() || '—']);
+  const origen = d.devolucion_de;
+  const devs = d.devoluciones;
   return (
     <View testID="detalle-contenido" style={{ gap: espacio.s }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: espacio.s }}>
@@ -557,6 +626,30 @@ function DetalleVista({ d }: { d: DetalleActividad }) {
         </View>
       ))}
       {d.tipo === 'TRANSFERENCIA' ? <Text style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_ENTRE_CUENTAS_DETALLE}</Text> : null}
+      {origen ? (
+        <Pressable testID="detalle-devolucion-de" accessibilityRole="link" accessibilityLabel={`Devolución de ${textoDevolucionDe(origen)}`}
+          onPress={() => onAbrir(origen.hecho_id)} style={s.kv}>
+          <Text style={[tipo.subheadline, { color: c.textSecondary }]}>Devolución de</Text>
+          <Text style={[tipo.subheadline, { color: c.accent }]}>{`${nombreCorto(origen)} · ${diaMesIso(origen.fecha_hecho)} ›`}</Text>
+        </Pressable>
+      ) : null}
+      {devs ? (
+        <View testID="detalle-devoluciones" style={{ gap: espacio.xs }}>
+          {devs.items.map((x) => (
+            <Pressable key={x.hecho_id} testID={`detalle-devolucion-${x.hecho_id}`} accessibilityRole="link" onPress={() => onAbrir(x.hecho_id)} style={s.kv}>
+              <Text style={[tipo.subheadline, { color: c.textSecondary }]}>Devolución</Text>
+              <Text style={[tipo.subheadline, { color: c.accent }]}>
+                {`${formatearEur(x.importe)} · ${diaMesIso(x.fecha_hecho)}${x.abono === 'PENDIENTE' ? ' · abono pendiente' : ''} ›`}
+              </Text>
+            </Pressable>
+          ))}
+          <View testID="detalle-neto" style={s.kv}>
+            <Text style={[tipo.subheadline, { color: c.textSecondary }]}>Neto tras devoluciones</Text>
+            <Text style={[tipo.subheadline, { color: c.textPrimary, fontWeight: '600' }]}>{formatearEur(devs.neto)}</Text>
+          </View>
+          <Text style={[tipo.caption, { color: c.textSecondary }]}>{`Queda por devolver ${formatearEur(devs.queda)}. El neto ${TEXTO_NETO.toLowerCase()}`}</Text>
+        </View>
+      ) : null}
     </View>
   );
 }

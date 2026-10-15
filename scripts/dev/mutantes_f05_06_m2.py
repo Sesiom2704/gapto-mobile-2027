@@ -15,10 +15,13 @@
 #   M10 sin abono doble, M11 «lo que queda» en EXCEDE, M12 abono solo sobre
 #   devoluciones, M13 abono solo sobre devoluciones ACTIVAS. Cliente: MU01
 #   limite D-DEV-08, MU02 «Tuya» solo demostrada (P-DEV-01), MU03 «Abono
-#   pendiente» en la fila (D-DEV-07).
+#   pendiente» en la fila (D-DEV-07), MU04 el swipe «Cobrado» captura el
+#   movimiento horizontal (P-DEV-04).
 #   Uso: GAPTO_TEST_DATABASE_URL=<base desechable> GAPTO_M2_CONCURRENCIA=1
 #        python scripts/dev/mutantes_f05_06_m2.py [--solo ID,ID]
 #   No ejecutar en paralelo con otro arnes ni con la suite sobre el mismo arbol.
+# Version: 0.2.0 (F05-06 M2-B §B2): MU04, captura del gesto «Cobrado» en el
+#   contenedor de la fila (autocorreccion del swipe en M2-B).
 # Version: 0.1.0 (F05-06 M2-A §A5)
 # ============================================================
 
@@ -39,6 +42,7 @@ EJEC = "backend/app/api/ejecucion_devolucion.py"
 T196 = "tests/api/test_196_f05_06_m2_devolucion.py"
 T197 = "tests/api/test_197_f05_06_m2_concurrencia_serial.py"
 M_DOM = "mobile/src/domain/devolucion.ts"
+M_ACT = "mobile/src/screens/ActividadScreen.tsx"
 J_DEV = "mobile/__tests__/devolucion.test.tsx"
 
 #: (id, descripcion, [(fichero, texto, sustituto)], discriminantes, equivalencia o None)
@@ -101,6 +105,9 @@ MUTANTES = [
     ("MU03", "cliente: «Abono pendiente» perdido en la fila (D-DEV-07)",
      [(M_DOM, "  return f.abono === 'PENDIENTE' ? ETIQUETA_ABONO_PENDIENTE : ETIQUETA_DEVOLUCION;",
        "  return ETIQUETA_DEVOLUCION;")],
+     [J_DEV], None),
+    ("MU04", "cliente: swipe «Cobrado» sin capturar el movimiento (el Pressable se lo queda) (P-DEV-04)",
+     [(M_ACT, "      onMoveShouldSetPanResponderCapture: (_, g) => horizontal(g),", "      onMoveShouldSetPanResponderCapture: () => false,")],
      [J_DEV], None),
 ]
 

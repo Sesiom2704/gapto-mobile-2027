@@ -10,6 +10,7 @@
 // Versión: 0.5.0 (F05-03/F05-04 J2 §1.5; F05 §46.5 E3): la lista de preferencias del stub informa `tipos` (ids de GASTO e INGRESO).
 // Versión: 0.6.0 (F05-03/F05-04 J2 §2): el stub incluye los métodos nuevos del cliente: lecturas vacías por defecto (terceros, contextos, plantillas, cuentas elegibles, propuesta del registro sin valores) y escrituras no esperadas (lanzan).
 // Versión: 0.8.0 (F05-06 M4 F2): el stub incluye las capacidades de cuenta: lista vacía y 0 sin configurar por defecto (el aviso B2 no aparece); detalle, historial, impacto y cambio no esperados (lanzan).
+// Versión: 0.9.0 (F05-06 M2-B): el stub incluye la devolución contextual: contexto, devolución y abono no esperados (lanzan).
 // Versión: 0.7.0 (F05-05 K3): el stub incluye los métodos de F05-05: señales, búsqueda de terceros, afinidades del tercero, Actividad (página vacía) e Inicio (nombre null y Resultado a cero) por defecto; alta y retirada de afinidad y detalle de la Actividad no esperados (lanzan).
 // ============================================================
 
@@ -115,6 +116,9 @@ export function clienteCategoriasStub(
     historialCapacidades: noEsperado('historialCapacidades'),
     impactoCapacidad: noEsperado('impactoCapacidad'),
     cambiarCapacidad: noEsperado('cambiarCapacidad'),
+    contextoDevolucion: noEsperado('contextoDevolucion'),
+    registrarDevolucion: noEsperado('registrarDevolucion'),
+    registrarAbono: noEsperado('registrarAbono'),
   };
 }
 

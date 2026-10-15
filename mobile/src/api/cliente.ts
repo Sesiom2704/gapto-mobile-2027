@@ -14,7 +14,8 @@
 // v0.10.0 (F05-05 K3 §2.1–§2.7; F05 §49.4 A1–A9): lecturas de señales (GET /v1/senales/categorias y /v1/senales/terceros; tipos en domain/senales, único import nuevo), búsqueda de terceros en servidor (GET /v1/terceros?q=&incluir_inactivos=), afinidades (lectura del detalle, alta con UUID del cliente y retirada, clasificación 'CAMBIO'), Actividad v0 (página keyset y detalle) y read models de Inicio (yo, Resultado del mes). Las lecturas nuevas llaman `nota` al dato (M5-08); el wire de escritura del gasto no cambia.
 // v0.11.0 (F05-06 K-7; F05 §51.8): la categoría de la fila y del detalle de la Actividad trae `icon_key` (tipo aditivo, opcional). Sin rutas nuevas.
 // v0.12.0 (F05-06 M4 §2.4/§3; F09 §12.105 CAP): capacidades de cuenta. Lecturas GET /v1/cuentas/capacidades (lista A1), /v1/cuentas/sin-configurar (aviso B2), /v1/cuentas/{id}/capacidades (A2/B1), …/historial (B4) y …/{capacidad}/impacto (A4); comando POST …/{capacidad}/activar | desactivar con `row_version` de la cuenta (clasificación 'CAMBIO'). Tipos sin tipo de cuenta ni defaults (D-CAP-04).
-// Versión: 0.12.0
+// v0.13.0 (F05-06 M2-B §B1; lámina DEV v0.1): devolución contextual. Lectura GET /v1/hechos/{origen}/devoluciones (contexto del formulario), POST /v1/hechos/{origen}/devoluciones (devolución con el abono «Todavía no» o «Ya cobrado») y POST /v1/hechos/{devolución}/abono («Registrar abono»), ambos con la clasificación de escritura (indeterminado = reintentar el MISMO UUID). La fila y el detalle de la Actividad traen `devolucion_de` y `abono`, y el detalle `devoluciones` (tipos aditivos, opcionales).
+// Versión: 0.13.0
 // ============================================================
 
 import type { Ambito, CategoriaNodo } from '../domain/categoria';
@@ -416,6 +417,9 @@ export interface FilaActividad {
   pendiente: string | null;
   maestros_desactivados: ('CATEGORIA' | 'TERCERO' | 'CONTEXTO')[];
   coincide_en?: ('TERCERO' | 'CATEGORIA' | 'CONTEXTO' | 'NOTA' | 'IMPORTE')[] | null;
+  /** F05-06 M2: origen de una devolución (null si no lo es) y estado de su abono. */
+  devolucion_de?: { hecho_id: string; nota: string | null; fecha_hecho: string; tercero: string | null } | null;
+  abono?: 'PENDIENTE' | 'COBRADO' | null;
 }
 
 export interface PaginaActividad {
@@ -427,6 +431,70 @@ export interface PaginaActividad {
 export interface DetalleActividad extends FilaActividad {
   presupuestable: boolean;
   magnitudes: { magnitud_id: string; nombre: string; valor: string; unidad: string | null }[];
+  /** F05-06 M2: devoluciones activas de una compra, lo devuelto, lo que queda y el neto derivado. */
+  devoluciones?: { items: DevolucionDeOrigen[]; devuelto: string; queda: string; neto: string } | null;
+}
+
+// ------------------------------------------------------------------ F05-06 M2 devolución contextual
+export interface DevolucionDeOrigen {
+  hecho_id: string;
+  fecha_hecho: string;
+  importe: string;
+  abono: 'PENDIENTE' | 'COBRADO';
+}
+
+export interface ContextoDevolucion {
+  origen_id: string;
+  fecha_hecho: string;
+  nota: string | null;
+  tercero: string | null;
+  categoria_id: string | null;
+  categoria: string | null;
+  importe_total: string;
+  devuelto: string;
+  queda: string;
+  neto: string;
+  devoluciones: DevolucionDeOrigen[];
+  disponible: boolean;
+  motivo: string | null;
+  atribucion_propuesta: 'SOLO_MIO' | 'SIN_INDICAR';
+  tuya_disponible: boolean;
+  cuenta_compra: { cuenta_id: string; nombre: string } | null;
+}
+
+export interface PayloadDevolucion {
+  intencion_id: string;
+  importe: string;
+  moneda: 'EUR';
+  fecha_hecho: string;
+  atribucion: 'SOLO_MIO' | 'SIN_INDICAR';
+  abono: { estado: 'PENDIENTE' } | { estado: 'COBRADO'; cuenta_id: string; fecha: string };
+  nota?: string;
+}
+
+export interface ResultadoDevolucion {
+  hecho_id: string;
+  origen_id: string;
+  idempotente: boolean;
+  importe: string;
+  estado_atribucion: 'COMPLETA' | 'NO_DISPONIBLE';
+  abono: 'PENDIENTE' | 'COBRADO';
+  devuelto: string;
+  queda: string;
+}
+
+export interface PayloadAbono {
+  intencion_id: string;
+  cuenta_id: string;
+  fecha: string;
+}
+
+export interface ResultadoAbono {
+  hecho_id: string;
+  movimiento_id: string;
+  idempotente: boolean;
+  importe: string;
+  abono: 'COBRADO';
 }
 
 /** Consulta de la Actividad: periodo [desde, hasta) opcional (sin periodo = todo el historial). */
@@ -594,6 +662,9 @@ export interface ClienteApi {
   historialCapacidades(cuentaId: string): Promise<Respuesta<{ entradas: EntradaHistorialCapacidad[] }>>;
   impactoCapacidad(cuentaId: string, capacidad: CodigoCapacidad): Promise<Respuesta<ImpactoCapacidad>>;
   cambiarCapacidad(cuentaId: string, capacidad: CodigoCapacidad, permitir: boolean, row_version: number): Promise<Respuesta<{ cuenta: CuentaCapacidades; idempotente: boolean }>>;
+  contextoDevolucion(origenId: string): Promise<Respuesta<ContextoDevolucion>>;
+  registrarDevolucion(origenId: string, p: PayloadDevolucion): Promise<Respuesta<ResultadoDevolucion>>;
+  registrarAbono(devolucionId: string, p: PayloadAbono): Promise<Respuesta<ResultadoAbono>>;
 }
 
 const CAT = '/v1/categorias';
@@ -604,6 +675,7 @@ const CTX = '/v1/contextos';
 const PLT = '/v1/plantillas';
 const ACC = '/v1/acciones-rapidas';
 const CAP = (id: string) => `/v1/cuentas/${encodeURIComponent(id)}/capacidades`;
+const HECHO = (id: string) => `/v1/hechos/${encodeURIComponent(id)}`;
 const asoc = (cat: string, a?: string) => `${CAT}/${encodeURIComponent(cat)}/magnitudes${a ? `/${encodeURIComponent(a)}` : ''}`;
 const post = (cuerpo: unknown): RequestInit => ({ method: 'POST', body: JSON.stringify(cuerpo) });
 
@@ -747,5 +819,8 @@ export function crearCliente(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): C
     impactoCapacidad: (id, cap) => llamar(`${CAP(id)}/${encodeURIComponent(cap)}/impacto`, { method: 'GET' }, false),
     cambiarCapacidad: (id, cap, permitir, row_version) =>
       llamar(`${CAP(id)}/${encodeURIComponent(cap)}/${permitir ? 'activar' : 'desactivar'}`, post({ row_version }), 'CAMBIO'),
+    contextoDevolucion: (id) => llamar(`${HECHO(id)}/devoluciones`, { method: 'GET' }, false),
+    registrarDevolucion: (id, payload) => llamar(`${HECHO(id)}/devoluciones`, post(payload), true),
+    registrarAbono: (id, payload) => llamar(`${HECHO(id)}/abono`, post(payload), true),
   };
 }
