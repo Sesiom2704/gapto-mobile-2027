@@ -20,6 +20,14 @@
 #   servicio tomase antes sus row locks y el trigger pidiese despues el
 #   advisory, dos correcciones concurrentes podrian invertir el orden. Por eso
 #   se adquiere al principio de la transaccion, antes de cualquier fila.
+# Version: 0.3.0
+#   0.3.0 (F04-D060 · F04-R2 R2-A; contrato F04-R2 v0.6 §7.1-§7.2.1):
+#   PERTENENCIA EN EL PROPIO DELETE/UPDATE. `actualizar_efecto`,
+#   `eliminar_efecto`, `eliminar_conciliacion` y `aportaciones_de_conciliacion`
+#   reciben el hecho raiz y filtran `AND hecho_id = <raiz>`; la relacion solo la
+#   retira su ORIGEN (`AND hecho_origen_id = <raiz>`). Nunca hay una lectura
+#   previa separada que autorice: 0 filas = no es del hecho. `leer_relacion`
+#   relee SIN lock solo para elegir el codigo del rechazo.
 # Version: 0.2.0
 #   0.2.0 (F04-D039): superficie de atribuciones. UPDATE, DELETE y lectura
 #   del estado final de los efectos tocados, para que OP-21 pueda alcanzar
@@ -98,49 +106,84 @@ COLUMNAS_CONCILIACION = {
 }
 
 
-def eliminar_efecto(sesion: SesionMotor, efecto_id: uuid.UUID) -> str | None:
-    """Retira un efecto que nunca debio existir. Devuelve su snapshot."""
+def eliminar_efecto(
+    sesion: SesionMotor, efecto_id: uuid.UUID, hecho_id: uuid.UUID
+) -> str | None:
+    """Retira un efecto DEL HECHO RAIZ que nunca debio existir. Devuelve su
+    snapshot, o None si no es de ese hecho (o no existe o no es visible)."""
     consulta = sql.SQL(
         """
         DELETE FROM gapto.hecho_efectos e
          WHERE e.id = %s::uuid
+           AND e.hecho_id = %s::uuid
         RETURNING ({})::text
         """
     ).format(_snapshot("e", COLUMNAS_EFECTO))
-    fila = sesion.uno(consulta, (efecto_id,))
+    fila = sesion.uno(consulta, (efecto_id, hecho_id))
     return None if fila is None else fila[0]
 
 
-def eliminar_relacion(sesion: SesionMotor, relacion_id: uuid.UUID) -> str | None:
+def eliminar_relacion(
+    sesion: SesionMotor, relacion_id: uuid.UUID, hecho_origen_id: uuid.UUID
+) -> str | None:
+    """F04-R2 §7.2.1: solo el ORIGEN retira su relacion. None si la raiz no
+    es el origen (destino, ajena, inexistente o no visible)."""
     consulta = sql.SQL(
         """
         DELETE FROM gapto.hecho_relaciones r
          WHERE r.id = %s::uuid
+           AND r.hecho_origen_id = %s::uuid
         RETURNING ({})::text
         """
     ).format(_snapshot("r", COLUMNAS_RELACION))
-    fila = sesion.uno(consulta, (relacion_id,))
+    fila = sesion.uno(consulta, (relacion_id, hecho_origen_id))
     return None if fila is None else fila[0]
 
 
+def leer_relacion(
+    sesion: SesionMotor, relacion_id: uuid.UUID
+) -> tuple[Any, ...] | None:
+    """(hecho_origen_id, hecho_destino_id, estado del origen), SIN lock.
+
+    F04-R2 §7.2.1: solo sirve para ELEGIR el codigo del rechazo cuando el
+    DELETE filtrado por origen no borro nada; nunca autoriza una escritura.
+    """
+    return sesion.uno(
+        """
+        SELECT r.hecho_origen_id, r.hecho_destino_id, o.estado
+          FROM gapto.hecho_relaciones r
+          JOIN gapto.hechos_financieros o ON o.id = r.hecho_origen_id
+         WHERE r.id = %s::uuid
+        """,
+        (relacion_id,),
+    )
+
+
 def eliminar_conciliacion(
-    sesion: SesionMotor, conciliacion_id: uuid.UUID
+    sesion: SesionMotor, conciliacion_id: uuid.UUID, hecho_id: uuid.UUID
 ) -> str | None:
+    """Retira una conciliacion DEL HECHO RAIZ. None si no es de ese hecho."""
     consulta = sql.SQL(
         """
         DELETE FROM gapto.hecho_movimientos_tesoreria h
          WHERE h.id = %s::uuid
+           AND h.hecho_id = %s::uuid
         RETURNING ({})::text
         """
     ).format(_snapshot("h", COLUMNAS_CONCILIACION))
-    fila = sesion.uno(consulta, (conciliacion_id,))
+    fila = sesion.uno(consulta, (conciliacion_id, hecho_id))
     return None if fila is None else fila[0]
 
 
 def actualizar_efecto(
-    sesion: SesionMotor, efecto_id: uuid.UUID, cambios: dict[str, Any]
+    sesion: SesionMotor,
+    efecto_id: uuid.UUID,
+    hecho_id: uuid.UUID,
+    cambios: dict[str, Any],
 ) -> tuple[str, str] | None:
     """UPDATE de un dato que nunca fue cierto. Devuelve (antes, despues).
+
+    F04-R2 §7.2: solo un efecto DEL HECHO RAIZ; None si es de otro hecho.
 
     Los campos permitidos se enumeran explicitamente: aceptar cualquier
     columna convertiria la correccion en una via para reescribir la identidad
@@ -170,6 +213,7 @@ def actualizar_efecto(
            SET {}
           FROM antes
          WHERE e.id = %s::uuid
+           AND e.hecho_id = %s::uuid
         RETURNING antes.snapshot, ({})::text
         """
     ).format(
@@ -177,7 +221,9 @@ def actualizar_efecto(
         asignaciones,
         _snapshot("e", COLUMNAS_EFECTO),
     )
-    parametros = [efecto_id] + [cambios[c] for c in columnas] + [efecto_id]
+    parametros = (
+        [efecto_id] + [cambios[c] for c in columnas] + [efecto_id, hecho_id]
+    )
     fila = sesion.uno(consulta, tuple(parametros))
     return None if fila is None else (fila[0], fila[1])
 
@@ -203,17 +249,21 @@ def tipo_de_hecho(sesion: SesionMotor, hecho_id: uuid.UUID) -> str | None:
 
 
 def aportaciones_de_conciliacion(
-    sesion: SesionMotor, conciliacion_id: uuid.UUID
+    sesion: SesionMotor, conciliacion_id: uuid.UUID, hecho_id: uuid.UUID
 ) -> int:
-    """Aportaciones vinculadas a una conciliacion.
+    """Aportaciones vinculadas a una conciliacion DEL HECHO RAIZ.
 
     Retirar la conciliacion antes que sus aportaciones dejaria aportaciones
     apuntando al vacio, de modo que el servicio exige el orden inverso (D-169).
+    F04-R2 §7.2: se cuenta solo si la conciliacion es del hecho raiz; la de
+    otro hecho da 0 y la rechaza el DELETE filtrado, sin revelar que existe.
     """
     fila = sesion.uno(
-        "SELECT count(*) FROM gapto.hecho_aportaciones_pago "
-        "WHERE hecho_movimiento_tesoreria_id = %s::uuid",
-        (conciliacion_id,),
+        "SELECT count(*) FROM gapto.hecho_aportaciones_pago a "
+        "JOIN gapto.hecho_movimientos_tesoreria h "
+        "ON h.id = a.hecho_movimiento_tesoreria_id "
+        "WHERE a.hecho_movimiento_tesoreria_id = %s::uuid AND h.hecho_id = %s::uuid",
+        (conciliacion_id, hecho_id),
     )
     return 0 if fila is None else fila[0]
 

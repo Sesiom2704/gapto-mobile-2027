@@ -42,6 +42,9 @@
 #   cerrar_posicion; relectura con el conjunto cambiado (el vinculo cambia de
 #   previsión o de hecho entre la lectura y la adquisicion: 40001 y reintento
 #   completo, nunca exito con una proteccion incompleta).
+# Version: 0.4.2 (F04-D060 · F04-R2 R2-A, contrato v0.6 §7.4): retirar_vinculo
+#   recibe tambien prevision_id_esperada (la previsión del escenario). Sin
+#   cambios de aserciones ni de escenarios.
 # Version: 0.4.1 (F04-R1 MANT-RV3): comentario en linea de la tercera espera
 #   de C1 con el orden real (OP-02 pide s_b antes que s_a). Sin cambios de
 #   codigo ni de aserciones.
@@ -347,8 +350,8 @@ def _cv(s, vinculo_id, previsiones, **cambios):
 
 def _retirar(s, vinculo_id, prevision_id):
     v = _version_prev(s, prevision_id)
-    return lambda: s.prev.retirar_vinculo(s.ctx, vinculo_id=vinculo_id, prevision_row_version_esperada=v,
-                                          motivo="F04-R1 F5")
+    return lambda: s.prev.retirar_vinculo(s.ctx, vinculo_id=vinculo_id, prevision_id_esperada=prevision_id,
+                                          prevision_row_version_esperada=v, motivo="F04-R1 F5")
 
 
 def _op14_reembolso(s, causal):

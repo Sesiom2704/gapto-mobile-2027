@@ -65,6 +65,15 @@
 #   Reapertura auditable (B1): `reabrir_posicion` es la unica transicion
 #   CERRADA -> ACTIVA; todo cierre se audita CERRAR y toda reapertura
 #   REABRIR, ambos bajo la raiz B8 (invariante de alternancia de R-Q2).
+# Version: 0.9.0
+#   0.9.0 (F04-D060 · F04-R2 R2-A, C3; contrato F04-R2 v0.6 §6.5): OP-12A
+#   enganchado a un hecho existente con importe inicial (escribe el efecto y el
+#   vinculo en `hecho_entidades`, que D-080 valida en el COMMIT tomando el
+#   advisory INVERSIONES) adquiere la raiz en el orden global de F04-D058, la
+#   misma regla que OP-21: `adquirir_raiz(hechos=[causal], advisory=True)`
+#   (advisory -> hecho -> posiciones) ANTES de leer y versionar el hecho.
+#   Antes tomaba el hecho y despues, en el COMMIT, el advisory: ciclo 40P01
+#   con OP-21 `toca_inversion` (R-F04-033). Resultados financieros identicos.
 # Version: 0.8.0
 #   0.8.0 (F04-R1 G-R1-B; F04-D058): OP-14 con hecho causal incluye ese hecho
 #   en la raiz (`adquirir_raiz(hechos=[causal], posiciones=[...],
@@ -207,7 +216,7 @@ class PosicionesService:
         self._validar_alta(datos)
 
         def operacion(sesion: SesionMotor) -> ResultadoPosicion:
-            repo_hechos.exigir_contexto(sesion)
+            owner = repo_hechos.exigir_contexto(sesion)
             self._exigir_contraparte(sesion, datos.contraparte_actor_id)
 
             artefactos = self._artefactos_alta(datos)
@@ -217,7 +226,7 @@ class PosicionesService:
             if replay == "CONFLICTO":
                 raise self._conflicto_identidad()
 
-            hecho_id, hecho_version = self._resolver_hecho_causal(sesion, datos)
+            hecho_id, hecho_version = self._resolver_hecho_causal(sesion, owner, datos)
 
             creada = repo_pos.insertar_entidad_si_no_existe(
                 sesion,
@@ -1533,10 +1542,17 @@ class PosicionesService:
             )
 
     def _resolver_hecho_causal(
-        self, sesion: SesionMotor, datos: DatosAltaPosicion
+        self, sesion: SesionMotor, owner: uuid.UUID, datos: DatosAltaPosicion
     ) -> tuple[uuid.UUID, int | None]:
         """Engancha a un hecho existente o crea el hecho propio de la posicion."""
         if datos.hecho_id is not None and datos.hecho_row_version_esperada is not None:
+            if datos.importe_inicial is not None:
+                # F04-R2 C3 (§6.5): el efecto y el vinculo que escribe el alta
+                # disparan D-080 en el COMMIT. Advisory ANTES del hecho, como
+                # OP-21; asi no hay ciclo hecho -> advisory (40P01).
+                integridad_posicion.adquirir_raiz(
+                    sesion, owner, hechos=[datos.hecho_id], advisory=True
+                )
             estado = repo_hechos.leer_estado(sesion, datos.hecho_id)
             if estado is None:
                 raise ErrorMotor(

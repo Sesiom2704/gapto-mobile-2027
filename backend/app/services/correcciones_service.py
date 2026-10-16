@@ -33,6 +33,20 @@
 #   D-080 · ADVISORY PRIMERO. Si la correccion toca superficies de inversion,
 #   el advisory (INVERSIONES, owner) se toma ANTES de cualquier row lock. Los
 #   locks genericos no lo sustituyen.
+# Version: 0.11.0
+#   0.11.0 (F04-D060 · F04-R2 R2-A; contrato F04-R2 v0.6 §7.1-§7.3, §7.2.1):
+#   PERTENENCIA DE OP-21 COMPLETO. Toda fila hija que OP-21 actualiza o
+#   retira es del hecho raiz, comprobado tras el root lock en el propio
+#   UPDATE/DELETE (`AND hecho_id = <raiz>`), nunca con una lectura previa:
+#   efectos -> AGREGADO_NO_ENCONTRADO; conciliaciones (y su recuento de
+#   aportaciones) -> CONCILIACION_DE_OTRO_HECHO, el mismo codigo exista o no
+#   la fila en otro hecho. AUTORIDAD SOBRE RELACIONES: solo el ORIGEN retira
+#   su relacion (`AND hecho_origen_id = <raiz>`); con 0 filas se relee sin
+#   lock SOLO para elegir el codigo (destino con origen ACTIVO ->
+#   HECHO_CON_REALIDAD_ASOCIADA/DEPENDENCIAS_ACTIVAS; destino con origen
+#   ANULADO -> OPERACION_NO_PERMITIDA_EN_ESTADO/RELACION_ENTRANTE; resto ->
+#   AGREGADO_NO_ENCONTRADO) y la relectura nunca habilita otra escritura
+#   (R-F04R2-V06-05). OP-21 no tiene via que retire aportaciones.
 # Version: 0.10.0
 #   0.10.0 (F04-D053 B1 · B8): raiz de bloqueo en orden global: advisory
 #   D-080 (tambien si cambia importe_delta o tipo_efecto, D-158) -> hecho
@@ -669,12 +683,15 @@ class CorreccionesService:
     ) -> int:
         total = 0
         for efecto_id, cambios in datos.efectos_a_actualizar.items():
-            resultado = repo_corr.actualizar_efecto(sesion, efecto_id, cambios)
+            # F04-R2 §7.2: la pertenencia va en el propio UPDATE.
+            resultado = repo_corr.actualizar_efecto(
+                sesion, efecto_id, datos.hecho_id, cambios
+            )
             if resultado is None:
                 raise ErrorMotor(
                     CodigoError.AGREGADO_NO_ENCONTRADO,
-                    "Alguno de los efectos a corregir no existe o no es "
-                    "accesible.",
+                    "Alguno de los efectos a corregir no pertenece a este "
+                    "hecho o no es accesible.",
                 )
             # F04-D052 E1 (I2, I6): la mutacion se juzga sobre antes/despues.
             exigir_mutacion_e1(
@@ -697,12 +714,12 @@ class CorreccionesService:
     def _eliminar_efectos(self, sesion: SesionMotor, datos: DatosCorreccion) -> int:
         total = 0
         for efecto_id in datos.efectos_a_eliminar:
-            snapshot = repo_corr.eliminar_efecto(sesion, efecto_id)
+            snapshot = repo_corr.eliminar_efecto(sesion, efecto_id, datos.hecho_id)
             if snapshot is None:
                 raise ErrorMotor(
                     CodigoError.AGREGADO_NO_ENCONTRADO,
-                    "Alguno de los efectos a retirar no existe o no es "
-                    "accesible.",
+                    "Alguno de los efectos a retirar no pertenece a este "
+                    "hecho o no es accesible.",
                 )
             # El snapshot es la UNICA prueba que queda de esa fila.
             auditoria.registrar(
@@ -721,13 +738,15 @@ class CorreccionesService:
     ) -> int:
         total = 0
         for relacion_id in datos.relaciones_a_eliminar:
-            snapshot = repo_corr.eliminar_relacion(sesion, relacion_id)
+            # F04-R2 §7.2.1: solo el ORIGEN retira su relacion, en el propio
+            # DELETE y bajo el root lock del origen. Retirar desde el origen
+            # solo REDUCE lo que el destino tiene comprometido, por eso no se
+            # bloquea el destino (hipotesis demostrada en R2-A, C-REL-01/02).
+            snapshot = repo_corr.eliminar_relacion(
+                sesion, relacion_id, datos.hecho_id
+            )
             if snapshot is None:
-                raise ErrorMotor(
-                    CodigoError.AGREGADO_NO_ENCONTRADO,
-                    "Alguna de las relaciones a retirar no existe o no es "
-                    "accesible.",
-                )
+                raise self._rechazo_relacion(sesion, relacion_id, datos.hecho_id)
             auditoria.registrar(
                 sesion,
                 tabla=repo_corr.TABLA_RELACIONES,
@@ -739,23 +758,60 @@ class CorreccionesService:
             total += 1
         return total
 
+    @staticmethod
+    def _rechazo_relacion(
+        sesion: SesionMotor, relacion_id: uuid.UUID, raiz: uuid.UUID
+    ) -> ErrorMotor:
+        """F04-R2 §7.2.1. Elige el codigo tras un DELETE de 0 filas.
+
+        Relee SIN lock y solo devuelve el error: nunca autoriza ni repite una
+        escritura (R-F04R2-V06-05). Una raiz ajena y una relacion inexistente
+        o invisible dan el mismo codigo, sin revelar si existe.
+        """
+        fila = repo_corr.leer_relacion(sesion, relacion_id)
+        if fila is not None and fila[1] == raiz:
+            if fila[2] == "ACTIVO":
+                return ErrorMotor(
+                    CodigoError.HECHO_CON_REALIDAD_ASOCIADA,
+                    "Esa relacion es de un hecho activo que depende de este: "
+                    "se corrige desde su origen o anulando el origen.",
+                    contexto_extra={"motivo": "DEPENDENCIAS_ACTIVAS"},
+                )
+            return ErrorMotor(
+                CodigoError.OPERACION_NO_PERMITIDA_EN_ESTADO,
+                "Esa relacion entrante es de un hecho anulado: ya no cuenta "
+                "y se conserva como historia.",
+                contexto_extra={"motivo": "RELACION_ENTRANTE"},
+            )
+        return ErrorMotor(
+            CodigoError.AGREGADO_NO_ENCONTRADO,
+            "Alguna de las relaciones a retirar no pertenece a este hecho o "
+            "no es accesible.",
+        )
+
     def _eliminar_conciliaciones(
         self, sesion: SesionMotor, datos: DatosCorreccion
     ) -> int:
         total = 0
         for conciliacion_id in datos.conciliaciones_a_eliminar:
-            if repo_corr.aportaciones_de_conciliacion(sesion, conciliacion_id):
+            if repo_corr.aportaciones_de_conciliacion(
+                sesion, conciliacion_id, datos.hecho_id
+            ):
                 raise ErrorMotor(
                     CodigoError.OPERACION_NO_PERMITIDA_EN_ESTADO,
                     "Esa conciliacion tiene aportaciones vinculadas: retirarla "
                     "antes dejaria las aportaciones apuntando al vacio.",
                 )
-            snapshot = repo_corr.eliminar_conciliacion(sesion, conciliacion_id)
+            # F04-R2 §7.2: la pertenencia va en el propio DELETE. Mismo codigo
+            # si la fila es de otro hecho o no existe: no se revela cual.
+            snapshot = repo_corr.eliminar_conciliacion(
+                sesion, conciliacion_id, datos.hecho_id
+            )
             if snapshot is None:
                 raise ErrorMotor(
-                    CodigoError.AGREGADO_NO_ENCONTRADO,
-                    "Alguna de las conciliaciones a retirar no existe o no es "
-                    "accesible.",
+                    CodigoError.CONCILIACION_DE_OTRO_HECHO,
+                    "Alguna de las conciliaciones a retirar no pertenece a "
+                    "este hecho o no es accesible.",
                 )
             auditoria.registrar(
                 sesion,

@@ -31,6 +31,17 @@
 #   sigue siendo ABIERTA: no hay estado PARCIAL persistido. Y el primer hecho
 #   ACTIVO congela la expectativa poniendo `recalculo_automatico=false`, de
 #   modo que una version posterior de la regla ya no reescribe ese importe.
+# Version: 0.6.0
+#   0.6.0 (F04-D060 · F04-R2 R2-A; contrato F04-R2 v0.6 §7.4): IDENTIDAD EN
+#   retirar_vinculo. El llamante pasa tambien `prevision_id_esperada`: la
+#   `row_version` es de la previsión y una coincidencia de versiones entre
+#   previsiones distintas no acredita que sea la que el llamante queria (ni
+#   tras un reintento por ConjuntoCambiado). Tras los locks (regla ->
+#   previsión, G-R1-D) y DESPUES de la guarda de version (precedencia IL4 de
+#   F04-R1), el vinculo RELEIDO debe tener `prevision_id` =
+#   `prevision_id_esperada` y el `hecho_id` leido antes de los locks; si no ->
+#   VERSION_DESFASADA sin escribir. Owner: RLS y `exigir_contexto`. Sin
+#   cambios en el orden de adquisicion ni en la auditoria.
 # Version: 0.5.1
 #   0.5.1 (F04-R1 CORR; STOP_F04-R1_F6, IL4): OP-17 recupera la precedencia de
 #   errores de la base (5536bb3) sin perder la relectura de G-R1-D. El estado
@@ -1132,6 +1143,7 @@ class PrevisionesService:
         contexto: ContextoOperacion,
         *,
         vinculo_id: uuid.UUID,
+        prevision_id_esperada: uuid.UUID,
         prevision_row_version_esperada: int,
         motivo: str | None = None,
     ) -> ResultadoPrevision:
@@ -1140,6 +1152,10 @@ class PrevisionesService:
         Es la unica via con DELETE, y queda auditada con el snapshot completo
         eliminado. Nunca se anula un hecho verdadero para corregir una
         asociacion falsa.
+
+        F04-R2 §7.4: `prevision_row_version_esperada` es la version de
+        `prevision_id_esperada`, la previsión a la que el llamante cree que
+        pertenece el vinculo; no basta con que coincida la version.
         """
 
         def operacion(sesion: SesionMotor) -> ResultadoPrevision:
@@ -1151,6 +1167,7 @@ class PrevisionesService:
                     "El vinculo indicado no existe o no es accesible.",
                 )
             prevision_id = vinculo["prevision_id"]
+            hecho_leido = vinculo["hecho_id"]
             # F04-R1 G-R1-D: vinculo -> regla -> previsión -> relee el vinculo.
             regla_id = self._exigir_prevision(sesion, prevision_id)["regla_id"]
             if regla_id is not None:
@@ -1166,6 +1183,16 @@ class PrevisionesService:
             releido = repo_prev.leer_vinculo(sesion, vinculo_id)
             if releido is None or releido["prevision_id"] != prevision_id:
                 raise ConjuntoCambiado()
+            # F04-R2 §7.4: identidad sobre el vinculo RELEIDO bajo los locks.
+            if (
+                releido["prevision_id"] != prevision_id_esperada
+                or releido["hecho_id"] != hecho_leido
+            ):
+                raise ErrorMotor(
+                    CodigoError.VERSION_DESFASADA,
+                    "El vinculo no pertenece a la previsión que conoce el "
+                    "llamante.",
+                )
             nueva_version = self._tocar(
                 sesion, prevision_id, prevision_row_version_esperada
             )

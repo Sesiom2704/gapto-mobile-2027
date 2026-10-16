@@ -15,12 +15,24 @@
 #   R-F04-033: OP-12 enganchado a un hecho existente frente a OP-21 con
 #   `toca_inversion` puede producir 40P01; el retry de transaccion completa
 #   debe recuperarlo sin perdida semantica ni livelock.
+# Version: 0.2.0 (F04-D060 · F04-R2 R2-A, C3; contrato v0.6 §6.5; mandato
+#   F04-R2A §2 D-A4): IL5 deja de aceptar el 40P01 y EXIGE su ausencia. OP-12A
+#   enganchado toma el advisory antes del hecho (orden global de F04-D058), asi
+#   que el par serializa. Se ejecuta en serie y determinista en los dos ordenes
+#   con el arnes de test_139 (el primero espera tras la barrera del hecho y el
+#   segundo tras el primero antes de liberar): gana el primero y el otro recibe
+#   VERSION_DESFASADA. Con OP-12A primero el oraculo es el del mandato (gana P,
+#   Q desfasada, posicion creada, importe_delta 10). Sin 40P01 en el log de
+#   reintento ni deadlocks en pg_stat_database. Se anade OP-12A frente a OP-21
+#   sin `toca_inversion` ni importe (OP-21 sin advisory). La contraprueba
+#   (advisory despues del hecho) reproduce el 40P01 con OP-12A primero.
 # Version: 0.1.0
 # ============================================================
 from __future__ import annotations
 
 import dataclasses
 import decimal
+import logging
 import threading
 import time
 import uuid
@@ -230,15 +242,20 @@ def test_il4_op22_contra_op17_misma_prevision(
     assert cuenta_filas(admin, owner, "hechos_financieros", "id", h.hecho_id) == (1 if "r" in res[0] else 0)
 
 
-@pytest.mark.parametrize("vuelta", range(REPETICIONES))
+IL5_CASOS = [(variante, primero) for variante in ("toca_inversion", "sin_advisory") for primero in ("OP-12A", "OP-21")]
+
+
+@pytest.mark.parametrize("variante, primero", IL5_CASOS, ids=[f"{v}-{p}-primero" for v, p in IL5_CASOS])
 def test_il5_r_f04_033_op12_enganchado_contra_op21_toca_inversion(
-    dsn, servicio_posiciones, servicio, servicio_efectos, servicio_correcciones, contexto, admin, contraparte, vuelta
+    dsn, servicio_posiciones, servicio, servicio_efectos, servicio_correcciones, contexto, admin, contraparte,
+    variante, primero, caplog
 ) -> None:
-    """IL5 / R-F04-033. OP-12 enganchado al hecho H (root lock y advisory en
-    COMMIT) frente a OP-21 toca_inversion sobre H (advisory y root lock). La
-    topologia heredada puede dar 40P01: el retry de transaccion completa lo
-    absorbe. Oraculo: nadie colgado, ningun error distinto de
-    VERSION_DESFASADA, y el estado final refleja exactamente al ganador."""
+    """IL5 / R-F04-033 tras C3. OP-12A enganchado a H (advisory -> hecho) frente a OP-21 sobre H, en serie
+    determinista y en los dos ordenes. Oraculo: gana el primero, el segundo recibe VERSION_DESFASADA, el estado
+    final es exactamente el del ganador, nadie queda colgado y NO hay 40P01 (ni reintento ni deadlock)."""
+    from test_139_f04_r1_concurrencia_serial import LOGGER, serie
+
+    caplog.set_level(logging.WARNING, logger=LOGGER)
     owner = contexto.owner_user_id
     h = hecho()
     servicio.crear_hecho(contexto, h)
@@ -246,21 +263,27 @@ def test_il5_r_f04_033_op12_enganchado_contra_op21_toca_inversion(
     v = servicio_efectos.registrar_efectos(contexto, hecho_id=h.hecho_id, row_version_esperada=1,
                                            efectos=[e], presupuestable=True).row_version
     a = dataclasses.replace(alta(h.hecho_id, contraparte, importe="5.0000"), hecho_row_version_esperada=v)
-    raiz = psycopg.connect(dsn)
-    raiz.execute("BEGIN")
-    raiz.execute("SET LOCAL ROLE gapto_owner")
-    raiz.execute("SELECT set_config('gapto.owner_user_id', %s, true)", (str(owner),))
-    raiz.execute("SELECT 1 FROM gapto.hechos_financieros WHERE id=%s FOR NO KEY UPDATE", (h.hecho_id,))
-    hilos, res = _en_hilos(
-        lambda: servicio_posiciones.crear_posicion(contexto, a),
-        lambda: servicio_correcciones.corregir(contexto, DatosCorreccion(
-            hecho_id=h.hecho_id, row_version_esperada=v, motivo="importe falso", toca_inversion=True,
-            efectos_a_actualizar={e.efecto_id: {"importe_delta": D("12.0000")}})),
-    )
-    _liberar_y_esperar(raiz, hilos)
-    codigos = sorted(str(_codigo(r)) for r in res)
-    assert codigos == sorted([str(None), str(CodigoError.VERSION_DESFASADA)]), res
-    posicion_gano = "r" in res[0]
+    if variante == "toca_inversion":
+        cambios, toca = {"importe_delta": D("12.0000")}, True
+    else:  # OP-21 sin advisory: ni toca_inversion ni importe_delta/tipo_efecto
+        cambios, toca = {"descripcion": "concepto corregido"}, False
+    pasos = {
+        "OP-12A": lambda: servicio_posiciones.crear_posicion(contexto, a),
+        "OP-21": lambda: servicio_correcciones.corregir(contexto, DatosCorreccion(
+            hecho_id=h.hecho_id, row_version_esperada=v, motivo="importe falso", toca_inversion=toca,
+            efectos_a_actualizar={e.efecto_id: cambios})),
+    }
+    segundo = "OP-21" if primero == "OP-12A" else "OP-12A"
+    traza = serie(dsn, caplog, [("hechos_financieros", h.hecho_id)], (primero, pasos[primero]),
+                  (segundo, pasos[segundo]))
+    traza.pop("resultados")
+    assert traza["primero_espera"] and traza["segundo_espera"], traza
+    assert not traza["vivos"], traza
+    assert traza["reintentos_40P01"] == 0 and traza["deadlocks_delta"] == 0, traza
+    assert traza[primero] == "OK" and traza[segundo] == CodigoError.VERSION_DESFASADA.value, traza
+    posicion_gano = primero == "OP-12A"
     assert cuenta_filas(admin, owner, "entidades", "id", a.entidad_id) == (1 if posicion_gano else 0)
-    assert leer_fila(admin, owner, "SELECT importe_delta FROM gapto.hecho_efectos WHERE id=%s",
-                     (e.efecto_id,)) == ((D("10.0000"),) if posicion_gano else (D("12.0000"),))
+    importe, descripcion = leer_fila(admin, owner, "SELECT importe_delta, descripcion FROM gapto.hecho_efectos "
+                                     "WHERE id=%s", (e.efecto_id,))
+    assert importe == (D("12.0000") if not posicion_gano and variante == "toca_inversion" else D("10.0000"))
+    assert (descripcion == "concepto corregido") == (not posicion_gano and variante == "sin_advisory")

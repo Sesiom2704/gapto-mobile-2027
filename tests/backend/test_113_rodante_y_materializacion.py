@@ -10,6 +10,8 @@
 #   El nucleo de esta suite es que NADA se infiere: ni la cabeza siguiente, ni
 #   el estado, ni la equivalencia de moneda, ni el hecho que satisface una
 #   previsión. Y que una realidad anulada deja de contar sin degradar el estado.
+# Version: 0.1.1 (F04-D060 · F04-R2 R2-A, contrato v0.6 §7.4): retirar_vinculo
+#   recibe tambien prevision_id_esperada. Sin cambios de aserciones.
 # Version: 0.1.0
 # ============================================================
 
@@ -889,6 +891,7 @@ def test_d021_retirada_de_vinculo_sin_sustituto(
     servicio_previsiones.retirar_vinculo(
         contexto,
         vinculo_id=vinculo_id,
+        prevision_id_esperada=cadena["cabeza"],
         prevision_row_version_esperada=actual.row_version,
         motivo="nunca debio existir",
     )

@@ -45,6 +45,8 @@
 # Version: 0.5.0 (F04-R1 CORR paso 2, caso secuencial de 1.1): OP-17 con una
 #   version obsoleta sobre una previsión ya REALIZADA -> ESTADO_PREVISION_INCOMPATIBLE
 #   (precedencia de la base: el estado de la lectura previa gana a la version).
+# Version: 0.5.1 (F04-D060 · F04-R2 R2-A, contrato v0.6 §7.4): retirar_vinculo
+#   recibe tambien prevision_id_esperada. Sin cambios de aserciones.
 # ============================================================
 
 from __future__ import annotations
@@ -450,7 +452,7 @@ def test_corregir_y_retirar_el_unico_vinculo_no_determinable(servicio, servicio_
     with pytest.raises(ErrorMotor) as excinfo:  # no se ha fabricado capacidad: un segundo vinculo sigue vetado
         vincular(servicio_previsiones, contexto, p1, hecho, "1.0000")
     _rechazo_porcion(excinfo, "NO_DETERMINABLE")
-    servicio_previsiones.retirar_vinculo(contexto, vinculo_id=v1,
+    servicio_previsiones.retirar_vinculo(contexto, vinculo_id=v1, prevision_id_esperada=p2,
                                          prevision_row_version_esperada=servicio_previsiones.estado_de(contexto, p2).row_version)
     assert vinculos_de(admin, contexto.owner_user_id, hecho) == []
     vincular(servicio_previsiones, contexto, p1, hecho, "1.0000")  # vuelve a haber sitio para UN vinculo

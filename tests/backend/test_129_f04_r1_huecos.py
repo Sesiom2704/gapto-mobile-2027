@@ -16,6 +16,10 @@
 #     - RVRX-REGLA: crear_version de la regla A cierra una version de la regla
 #       B, y corregir_excepcion de A reescribe una excepcion de B, bajo el lock
 #       de A y sin tocar la version de B.
+# Version: 0.2.0 (F04-D060 · F04-R2 R2-A, contrato v0.6 §7.3): OP21-PERTENENCIA
+#   queda CERRADO y sus tres casos se INVIERTEN a rechazo (efecto y relacion de
+#   H2 -> AGREGADO_NO_ENCONTRADO; conciliacion de H2 ->
+#   CONCILIACION_DE_OTRO_HECHO), con H2 intacto. RVRX-REGLA (F04-R3) no cambia.
 # Version: 0.1.1 (F04-R1 MANT-RV3): la ruta absoluta del escalado pasa a una
 #   referencia neutra al canal (test_rv3_000). Sin cambios de codigo.
 # Version: 0.1.0 (F04-R1 IMPL F5)
@@ -27,6 +31,9 @@ import datetime as dt
 import decimal
 import uuid
 
+import pytest
+
+from app.core.errores import CodigoError, ErrorMotor
 from app.core.modelos_prevision import DatosExcepcion, DatosRegla
 from app.core.modelos_tesoreria import DatosConciliacion, DatosMovimiento
 from app.services.correcciones_service import DatosCorreccion
@@ -47,18 +54,20 @@ def _corregir_h1(servicio_correcciones, contexto, admin, h1, **filas):
 
 
 # ==================================================================
-# OP21-PERTENENCIA
+# OP21-PERTENENCIA (cerrado por F04-R2 R2-A: casos invertidos a rechazo)
 # ==================================================================
 def test_caracterizacion_op21_actualiza_un_efecto_de_otro_hecho(servicio, servicio_efectos, servicio_correcciones,
                                                                 contexto, admin):
     h1, _ = crear_hecho_con_efectos(servicio, servicio_efectos, contexto)
     h2, efectos_h2 = crear_hecho_con_efectos(servicio, servicio_efectos, contexto)
     version_h2 = version_hecho(admin, contexto.owner_user_id, h2)
-    _corregir_h1(servicio_correcciones, contexto, admin, h1,
-                 efectos_a_actualizar={efectos_h2[0]: {"descripcion": "escrito desde H1"}})
+    with pytest.raises(ErrorMotor) as excinfo:
+        _corregir_h1(servicio_correcciones, contexto, admin, h1,
+                     efectos_a_actualizar={efectos_h2[0]: {"descripcion": "escrito desde H1"}})
+    assert excinfo.value.codigo is CodigoError.AGREGADO_NO_ENCONTRADO
     assert leer_fila(admin, contexto.owner_user_id, "SELECT hecho_id, descripcion FROM gapto.hecho_efectos "
-                     "WHERE id = %s", (efectos_h2[0],)) == (h2, "escrito desde H1")
-    assert version_hecho(admin, contexto.owner_user_id, h2) == version_h2  # H2 ni se bloqueo ni se versiono
+                     "WHERE id = %s", (efectos_h2[0],))[1] != "escrito desde H1"
+    assert version_hecho(admin, contexto.owner_user_id, h2) == version_h2
 
 
 def test_caracterizacion_op21_retira_una_relacion_de_otro_hecho(servicio, servicio_efectos, servicio_devoluciones,
@@ -67,9 +76,11 @@ def test_caracterizacion_op21_retira_una_relacion_de_otro_hecho(servicio, servic
     devolucion = datos_devolucion(original)
     servicio_devoluciones.devolver(contexto, devolucion)
     ajeno, _ = crear_hecho_con_efectos(servicio, servicio_efectos, contexto)
-    _corregir_h1(servicio_correcciones, contexto, admin, ajeno, relaciones_a_eliminar=(devolucion.relacion_id,))
+    with pytest.raises(ErrorMotor) as excinfo:
+        _corregir_h1(servicio_correcciones, contexto, admin, ajeno, relaciones_a_eliminar=(devolucion.relacion_id,))
+    assert excinfo.value.codigo is CodigoError.AGREGADO_NO_ENCONTRADO
     assert leer_fila(admin, contexto.owner_user_id, "SELECT count(*) FROM gapto.hecho_relaciones WHERE id = %s",
-                     (devolucion.relacion_id,)) == (0,)
+                     (devolucion.relacion_id,)) == (1,)
 
 
 def test_caracterizacion_op21_retira_una_conciliacion_de_otro_hecho(servicio, servicio_efectos, servicio_tesoreria,
@@ -84,9 +95,12 @@ def test_caracterizacion_op21_retira_una_conciliacion_de_otro_hecho(servicio, se
                                  hecho_row_version_esperada=version_hecho(admin, contexto.owner_user_id, h2),
                                  movimiento_row_version_esperada=mov.row_version)
     version_h2 = version_hecho(admin, contexto.owner_user_id, h2)
-    _corregir_h1(servicio_correcciones, contexto, admin, h1, conciliaciones_a_eliminar=(conciliacion.conciliacion_id,))
+    with pytest.raises(ErrorMotor) as excinfo:
+        _corregir_h1(servicio_correcciones, contexto, admin, h1,
+                     conciliaciones_a_eliminar=(conciliacion.conciliacion_id,))
+    assert excinfo.value.codigo is CodigoError.CONCILIACION_DE_OTRO_HECHO
     assert leer_fila(admin, contexto.owner_user_id, "SELECT count(*) FROM gapto.hecho_movimientos_tesoreria "
-                     "WHERE id = %s", (conciliacion.conciliacion_id,)) == (0,)
+                     "WHERE id = %s", (conciliacion.conciliacion_id,)) == (1,)
     assert version_hecho(admin, contexto.owner_user_id, h2) == version_h2
 
 
