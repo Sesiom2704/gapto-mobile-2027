@@ -22,12 +22,14 @@
 #     pero el mensaje no sale en el idioma pedido, FALLA.
 #   Base local desechable 0001..0340 (estos tests confirman filas). Datos
 #   sinteticos, creados como gapto_owner con la GUC del tenant (WM 12C.7).
-# Version: 0.1.0
+#   v0.2.0 (F04-R2 R2-B paso 0, DEU-ARNES-DSN-LOCALE): el DSN con
+#   lc_messages lo construye vs01_api_helpers.dsn_con_lc_messages, valido
+#   para DSN URL y clave=valor (antes solo URL: 6 errores de arnes en R2-A).
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
 
-import urllib.parse
 import uuid
 
 import psycopg
@@ -88,11 +90,6 @@ def test_contexto_sin_firma_conocida_no_se_traduce(contexto):
 
 
 # ------------------------------------------------------------------ capa con PostgreSQL en cada idioma
-def _dsn_con_lc(base: str, lc: str) -> str:
-    sep = "&" if "?" in base else "?"
-    return f"{base}{sep}options={urllib.parse.quote(f'-c lc_messages={lc}')}"
-
-
 @pytest.fixture(params=["C", "es_ES"])
 def idioma(request, monkeypatch):
     """Todas las conexiones del test (adaptador, UdT y helpers) con
@@ -106,7 +103,7 @@ def idioma(request, monkeypatch):
             "FROM pg_roles r WHERE r.rolname = current_user").fetchone()[0]
     if not puede:
         pytest.skip(MOTIVO_SKIP)
-    dsn = _dsn_con_lc(h.dsn(), lc)
+    dsn = h.dsn_con_lc_messages(h.dsn(), lc)
     mensaje = ""
     with psycopg.connect(dsn, autocommit=True) as c:
         try:

@@ -23,7 +23,12 @@
 #   (por defecto, las de su tipo segun scripts/dev/capacidades_sinteticas.py;
 #   `capacidades=()` crea una cuenta sin capacidades). Admite tipo y
 #   naturaleza en el alta.
-# Version: 0.5.0
+#   v0.6.0 (F04-R2 R2-B paso 0, DEU-ARNES-DSN-LOCALE, contrato v0.8 §10.6 bis):
+#   `dsn_con_lc_messages` fija lc_messages por conexion sobre cualquier forma
+#   del DSN (URL o clave=valor) con psycopg.conninfo, conservando un
+#   `options` previo. Sustituye a la concatenacion `?options=` de test_160 y
+#   test_183, que solo era valida con un DSN URL.
+# Version: 0.6.0
 # ============================================================
 
 from __future__ import annotations
@@ -34,6 +39,7 @@ import sys
 import uuid
 
 import psycopg
+from psycopg import conninfo
 
 RAIZ_BACKEND = pathlib.Path(__file__).resolve().parents[2] / "backend"
 if str(RAIZ_BACKEND) not in sys.path:
@@ -52,6 +58,16 @@ def dsn() -> str:
     if not valor:
         raise RuntimeError("Falta GAPTO_TEST_DATABASE_URL (base local desechable).")
     return valor
+
+
+def dsn_con_lc_messages(base: str, lc: str) -> str:
+    """DSN equivalente a `base` (URL o clave=valor) con lc_messages fijado
+    por conexion. Normaliza a clave=valor sin ambiguedad y anade
+    `-c lc_messages=<lc>` a un `options` existente en lugar de pisarlo."""
+    partes = conninfo.conninfo_to_dict(base)
+    previas = (partes.get("options") or "").strip()
+    partes["options"] = f"{previas} -c lc_messages={lc}".strip()
+    return conninfo.make_conninfo(**partes)
 
 
 def nombre_base() -> str:

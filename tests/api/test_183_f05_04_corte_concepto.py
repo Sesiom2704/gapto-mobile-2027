@@ -32,13 +32,14 @@
 #       mensaje del catalogo, reintentable) es IDENTICA con lc_messages C y
 #       es_ES, sin lista de traducciones (ninguna excepcion de PostgreSQL cruda
 #       alcanza HTTP). Complementa test_150, que no cambia.
-# Version: 0.1.0 (F05-03/F05-04 J3 §2.7)
+#   v0.2.0 (F04-R2 R2-B paso 0, DEU-ARNES-DSN-LOCALE): AJ-RLOCALE-03 usa
+#   vs01_api_helpers.dsn_con_lc_messages (DSN URL y clave=valor).
+# Version: 0.2.0
 # ============================================================
 
 from __future__ import annotations
 
 import decimal
-import urllib.parse
 import uuid
 
 import psycopg
@@ -191,11 +192,6 @@ def test_nota_de_ingreso_y_transferencia_canonica_antes_de_max_length(tenant):
 
 
 # ------------------------------------------------------------------ AJ-RLOCALE-03
-def _dsn_con_lc(base: str, lc: str) -> str:
-    sep = "&" if "?" in base else "?"
-    return f"{base}{sep}options={urllib.parse.quote(f'-c lc_messages={lc}')}"
-
-
 def test_aj_rlocale03_forma_funcional_del_error_igual_en_c_y_es_es(monkeypatch):
     with psycopg.connect(h.dsn(), autocommit=True) as c:
         puede = c.execute("SELECT r.rolsuper OR has_parameter_privilege(current_user, 'lc_messages', 'SET') "
@@ -205,7 +201,7 @@ def test_aj_rlocale03_forma_funcional_del_error_igual_en_c_y_es_es(monkeypatch):
     base = h.dsn()
     respuestas = {}
     for lc in ("C", "es_ES"):
-        monkeypatch.setenv("GAPTO_TEST_DATABASE_URL", _dsn_con_lc(base, lc))
+        monkeypatch.setenv("GAPTO_TEST_DATABASE_URL", h.dsn_con_lc_messages(base, lc))
         owner, actor = h.crear_tenant()
         cuenta_usd = h.crear_cuenta(owner, [(actor, 100)], moneda="USD")
         r = h.cliente(owner).post(GASTO, json=_sin(h.intencion(cuenta_usd), "concepto"), headers=h.AUTH)
