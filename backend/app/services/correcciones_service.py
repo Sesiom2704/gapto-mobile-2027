@@ -33,6 +33,22 @@
 #   D-080 · ADVISORY PRIMERO. Si la correccion toca superficies de inversion,
 #   el advisory (INVERSIONES, owner) se toma ANTES de cualquier row lock. Los
 #   locks genericos no lo sustituyen.
+# Version: 0.12.0
+#   0.12.0 (F04-R2 R2-B; contrato F04-R2 v0.8 §3.4, §3.4.1, §3.4.2): CAPACIDAD
+#   DEL ORIGINAL AL CORREGIR UNA DEVOLUCION (R-F04R2A-01). Si OP-21 toca los
+#   efectos (importe_delta o tipo_efecto, alta o baja) de un hecho que es
+#   ORIGEN de DEVOLUCION_DE, el conjunto {devolucion, original} se lee SIN lock
+#   antes de la raiz, se bloquea completo FOR NO KEY UPDATE por UUID en el
+#   nivel de hechos (primera ruta de OP-21 con dos raices, R-F04R2-19) y se
+#   relee: si cambio -> ConjuntoCambiado (reintento completo). Casos de
+#   §3.4.1: varias DEVOLUCION_DE -> FUERA_DE_ALCANCE_V1/MULTIPLES_ORIGINALES;
+#   cambio de naturaleza -> DEVOLUCION_NATURALEZA; retirar la relacion y
+#   cambiar el importe en la misma peticion -> COMBINACION_NO_SOPORTADA;
+#   original no ACTIVO -> ORIGINAL_NO_ACTIVO; devolucion ya ANULADA ->
+#   OPERACION_NO_PERMITIDA_EN_ESTADO. Tras escribir, lo devuelto del original
+#   no supera su capacidad final -> EXCEDE_CAPACIDAD_REVERSIBLE. Tambien a la
+#   baja (una sola via, con lock). `exigir_devuelto_dentro_de_capacidad` es el
+#   validador comun de §3.2/§3.4 que tambien usa OP-21P. Nada mas de OP-21 cambia.
 # Version: 0.11.0
 #   0.11.0 (F04-D060 · F04-R2 R2-A; contrato F04-R2 v0.6 §7.1-§7.3, §7.2.1):
 #   PERTENENCIA DE OP-21 COMPLETO. Toda fila hija que OP-21 actualiza o
@@ -158,6 +174,7 @@ from app.core.modelos_compuesto import (
     DatosContextoHecho,
 )
 from app.services import contexto_service as ctx
+from app.services.previsiones_service import ConjuntoCambiado
 from app.services import coherencia_posicion
 
 # F04-D046 R2 · A08-bis. Naturalezas elegibles para presupuesto (INV-11).
@@ -289,6 +306,29 @@ class ResultadoCorreccion:
     efectos_finales: int = 0
 
 
+def exigir_devuelto_dentro_de_capacidad(sesion: SesionMotor, hecho_id: uuid.UUID) -> None:
+    """F04-R2 §3.2 / §3.4: lo devuelto ACTIVO contra `hecho_id` no supera su
+    capacidad reversible final por naturaleza (estado final de la transaccion).
+    La comparten OP-21 (original de una devolucion corregida) y OP-21P (bajar el
+    importe de una compra por debajo de lo devuelto)."""
+    for naturaleza in repo_rel.naturalezas_devueltas(sesion, hecho_id):
+        resumen = repo_rel.capacidad_por_naturaleza(sesion, hecho_id, naturaleza)
+        capacidad = (
+            decimal.Decimal(0)
+            if resumen is None
+            else abs(decimal.Decimal(resumen["neto"]))
+        )
+        devuelto = decimal.Decimal(
+            repo_rel.devuelto_acumulado(sesion, hecho_id, naturaleza)
+        )
+        if devuelto > capacidad:
+            raise ErrorMotor(
+                CodigoError.EXCEDE_CAPACIDAD_REVERSIBLE,
+                "La correccion dejaria devuelto mas de lo que el hecho "
+                "reconoce: primero hay que corregir las devoluciones.",
+            )
+
+
 class CorreccionesService:
     """OP-21. Correccion agregada de un hecho y sus hijos."""
 
@@ -315,10 +355,12 @@ class CorreccionesService:
             #    0270/D-080 validan en el COMMIT tomando el mismo advisory.
             # 2. Root lock del hecho (D-171) y, F04-D053 B8, de las posiciones
             #    que alimenta, en ese orden; despues el control optimista.
+            # F04-R2 §3.4.2: conjunto {devolucion, original} ANTES de los locks.
+            originales = self._originales_previos(sesion, datos)
             posiciones = integridad_posicion.adquirir_raiz(
                 sesion,
                 owner,
-                hechos=[datos.hecho_id],
+                hechos=[datos.hecho_id, *(o for _, o in originales)],
                 advisory=bool(
                     datos.toca_inversion
                     or datos.entidades_a_crear
@@ -333,6 +375,7 @@ class CorreccionesService:
             fotos = integridad_posicion.fotografiar(
                 sesion, posiciones, hechos=[datos.hecho_id]
             )
+            self._exigir_conjunto_devolucion(sesion, datos, originales)
             nueva_version = repo_hechos.tocar_raiz(
                 sesion, datos.hecho_id, datos.row_version_esperada
             )
@@ -392,6 +435,10 @@ class CorreccionesService:
             #    esta guarda el motor confirmaria un estado imposible: haber
             #    devuelto mas de lo que el hecho llego a reconocer.
             self._revalidar_devoluciones(sesion, datos)
+            # F04-R2 §3.4: y, si este hecho ES una devolucion, la capacidad
+            # final de su original (estado final de la transaccion, Q8).
+            for _, original in originales:
+                self._exigir_capacidad_del_original(sesion, original)
 
             # 4bis. F04-D036. Misma logica que el paso 5: lo que se juzga es
             # el ESTADO FINAL. Una correccion puede retirar y reinstalar un
@@ -649,6 +696,79 @@ class CorreccionesService:
         )
         if not altas.vacio:
             ctx.escribir_contexto(sesion, owner, datos.hecho_id, altas, motivo=datos.motivo)
+
+    @staticmethod
+    def _toca_efectos(datos: DatosCorreccion) -> bool:
+        return bool(
+            datos.efectos_a_crear
+            or datos.efectos_a_eliminar
+            or any(
+                "importe_delta" in cambios or "tipo_efecto" in cambios
+                for cambios in datos.efectos_a_actualizar.values()
+            )
+        )
+
+    def _originales_previos(
+        self, sesion: SesionMotor, datos: DatosCorreccion
+    ) -> list[tuple[uuid.UUID, uuid.UUID]]:
+        """F04-R2 §3.4.2: lectura SIN lock de las DEVOLUCION_DE que origina la
+        raiz, solo si la correccion toca sus efectos. Prepara la adquisicion;
+        no autoriza nada (se relee bajo la raiz)."""
+        if not self._toca_efectos(datos):
+            return []
+        return repo_corr.originales_de_devolucion(sesion, datos.hecho_id)
+
+    def _exigir_conjunto_devolucion(
+        self,
+        sesion: SesionMotor,
+        datos: DatosCorreccion,
+        originales: list[tuple[uuid.UUID, uuid.UUID]],
+    ) -> None:
+        """F04-R2 §3.4.1 y §3.4.2, ya con {devolucion, original} bloqueados."""
+        if not self._toca_efectos(datos):
+            return
+        # Relectura SIEMPRE (tambien si la lectura previa salio vacia): si el
+        # conjunto cambio, la proteccion adquirida no es la necesaria.
+        if repo_corr.originales_de_devolucion(sesion, datos.hecho_id) != originales:
+            raise ConjuntoCambiado()
+        if not originales:
+            return
+        estado = repo_hechos.leer_estado(sesion, datos.hecho_id)
+        if estado is not None and estado[1] != "ACTIVO":
+            raise ErrorMotor(
+                CodigoError.OPERACION_NO_PERMITIDA_EN_ESTADO,
+                "La devolucion ya no esta activa: no se corrige.",
+                contexto_extra={"motivo": "DEVOLUCION_NO_ACTIVA"},
+            )
+
+        def fuera(detalle: str) -> ErrorMotor:
+            return ErrorMotor(
+                CodigoError.CORRECCION_AGREGADA_REQUERIDA,
+                "Esta correccion de una devolucion queda fuera del alcance de v1.",
+                contexto_extra={"motivo": "FUERA_DE_ALCANCE_V1", "detalle": detalle},
+            )
+
+        if len(originales) > 1:
+            raise fuera("MULTIPLES_ORIGINALES")
+        if any("tipo_efecto" in c for c in datos.efectos_a_actualizar.values()):
+            raise fuera("DEVOLUCION_NATURALEZA")
+        if {relacion for relacion, _ in originales} & set(datos.relaciones_a_eliminar):
+            raise fuera("COMBINACION_NO_SOPORTADA")
+        for _, original in originales:
+            estado_original = repo_hechos.leer_estado(sesion, original)
+            if estado_original is None or estado_original[1] != "ACTIVO":
+                raise ErrorMotor(
+                    CodigoError.OPERACION_NO_PERMITIDA_EN_ESTADO,
+                    "El original de la devolucion no esta activo: no se corrige sobre el.",
+                    contexto_extra={"motivo": "ORIGINAL_NO_ACTIVO"},
+                )
+
+    @staticmethod
+    def _exigir_capacidad_del_original(
+        sesion: SesionMotor, original: uuid.UUID
+    ) -> None:
+        """F04-R2 §3.4: devuelto acumulado del original <= su capacidad."""
+        exigir_devuelto_dentro_de_capacidad(sesion, original)
 
     @staticmethod
     def _revalidar_devoluciones(

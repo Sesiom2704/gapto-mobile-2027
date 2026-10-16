@@ -20,6 +20,11 @@
 #   servicio tomase antes sus row locks y el trigger pidiese despues el
 #   advisory, dos correcciones concurrentes podrian invertir el orden. Por eso
 #   se adquiere al principio de la transaccion, antes de cualquier fila.
+# Version: 0.4.0
+#   0.4.0 (F04-R2 R2-B; contrato F04-R2 v0.8 §3.4.2): `originales_de_devolucion`
+#   lee SIN lock las relaciones DEVOLUCION_DE que origina un hecho, para que
+#   OP-21 determine el conjunto {devolucion, original} ANTES de los locks
+#   definitivos y lo relea despues. No autoriza nada por si sola.
 # Version: 0.3.0
 #   0.3.0 (F04-D060 · F04-R2 R2-A; contrato F04-R2 v0.6 §7.1-§7.2.1):
 #   PERTENENCIA EN EL PROPIO DELETE/UPDATE. `actualizar_efecto`,
@@ -157,6 +162,21 @@ def leer_relacion(
         """,
         (relacion_id,),
     )
+
+
+def originales_de_devolucion(
+    sesion: SesionMotor, hecho_id: uuid.UUID
+) -> list[tuple[uuid.UUID, uuid.UUID]]:
+    """(relacion_id, original) de cada DEVOLUCION_DE cuyo ORIGEN es el hecho,
+    en orden de relacion. Sin lock: el llamante la repite bajo la raiz."""
+    with sesion.conexion.cursor() as cursor:
+        cursor.execute(
+            "SELECT r.id, r.hecho_destino_id FROM gapto.hecho_relaciones r "
+            "WHERE r.hecho_origen_id = %s::uuid AND r.tipo_relacion = 'DEVOLUCION_DE' "
+            "ORDER BY r.id",
+            (hecho_id,),
+        )
+        return [(f[0], f[1]) for f in cursor.fetchall()]
 
 
 def eliminar_conciliacion(

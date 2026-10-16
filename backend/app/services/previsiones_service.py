@@ -31,6 +31,14 @@
 #   sigue siendo ABIERTA: no hay estado PARCIAL persistido. Y el primer hecho
 #   ACTIVO congela la expectativa poniendo `recalculo_automatico=false`, de
 #   modo que una version posterior de la regla ya no reescribe ese importe.
+# Version: 0.7.0
+#   0.7.0 (F04-R2 R2-B; contrato F04-R2 v0.8 §6.1 niveles 5 y 6, §6.6):
+#   `conjunto_impacto_correccion_ancla` expone, SIN lock, las reglas y los
+#   sucesores que `impacto_correccion_ancla` bloqueara para un hecho. OP-21P y
+#   OP-21T corrigen la fecha de un hecho que retiene ya sus movimientos (nivel
+#   6); para no pedir reglas ni previsiones (nivel 5) despues, adquieren ese
+#   conjunto ANTES de los movimientos. `impacto_correccion_ancla` no cambia:
+#   vuelve a bloquear (ya poseido), relee y lanza ConjuntoCambiado si difiere.
 # Version: 0.6.0
 #   0.6.0 (F04-D060 · F04-R2 R2-A; contrato F04-R2 v0.6 §7.4): IDENTIDAD EN
 #   retirar_vinculo. El llamante pasa tambien `prevision_id_esperada`: la
@@ -2042,6 +2050,16 @@ def _conjunto_de_impacto(
         if sucesor is not None:
             sucesores.add(sucesor["id"])
     return filas, reglas, sorted(sucesores, key=str)
+
+
+def conjunto_impacto_correccion_ancla(
+    sesion: SesionMotor, hecho_id: uuid.UUID
+) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
+    """(reglas, sucesores) por UUID que `impacto_correccion_ancla` bloqueara
+    para `hecho_id`. Lectura sin lock: solo prepara la adquisicion del
+    llamante (nivel 5 de F04-R2 §6.1); la autorizacion la da la relectura."""
+    _, reglas, sucesores = _conjunto_de_impacto(sesion, hecho_id)
+    return reglas, sucesores
 
 
 def impacto_correccion_ancla(
