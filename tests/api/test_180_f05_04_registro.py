@@ -28,6 +28,11 @@
 #   operacion (ingreso, origen o destino de OP-10, gasto con la capacidad retirada)
 #   responde CUENTA_SIN_CAPACIDAD (409); la cuenta de otro owner sigue en
 #   CUENTA_DESCONOCIDA (422).
+# Version: 0.4.0 (F05-06 M3 §A; F05 §51 F05-D037, §57 F05-D043; F-D04 -> F05-06): casos
+#   19/20 con excepcion NOMINAL y acotada. F05-04 vedaba posiciones en toda la capa F05
+#   hasta F05-06 M3, que las autoriza: SOLO backend/app/api/ejecucion_reparto.py y
+#   dto_reparto.py pueden tocarlas, y en OpenAPI solo los esquemas y rutas de M3. El resto
+#   de F05 sigue vedado, y la lista de excepciones es cerrada.
 # ============================================================
 
 from __future__ import annotations
@@ -382,8 +387,22 @@ F05 = [p for d in ("api", "comun", "terceros", "contextos", "plantillas", "prefe
        for p in sorted((pathlib.Path(__file__).resolve().parents[2] / "backend" / "app" / d).rglob("*.py"))]
 
 
+#: F05-06 M3 (F05-D037/F05-D043): unicos modulos F05 que pueden tocar posiciones.
+EXCEPCIONES_M3 = frozenset({"ejecucion_reparto.py", "dto_reparto.py"})
+#: Esquemas y rutas HTTP de M3 que pueden mencionar posiciones (lista cerrada).
+ESQUEMAS_M3 = frozenset({"ResultadoPosicionHttp", "PosicionCreadaHttp", "PosicionPendiente", "PendienteConPersona",
+                         "IntencionCobroPago", "IntencionPerdon", "ResultadoGastoCompartidoHttp",
+                         "ResultadoCorreccionRepartoHttp", "RepartoDeHecho", "ParteDeHechoHttp", "PosicionDeParteHttp",
+                         "ElegibilidadAnulacion", "IntencionGastoCompartido", "IntencionCorregirReparto"})
+RUTAS_M3 = ("/v1/posiciones/", "/v1/intenciones/gasto-compartido", "/pendiente", "/reparto", "/anulacion")
+
+
 def test_caso19_20_ninguna_ruta_f05_crea_ni_expone_posiciones():
+    excepciones = [p for p in F05 if p.name in EXCEPCIONES_M3 and p.parent.name == "api"]
+    assert sorted(p.name for p in excepciones) == sorted(EXCEPCIONES_M3)  # lista cerrada y existente
     for p in F05:
+        if p in excepciones:
+            continue
         arbol = ast.parse(p.read_text(encoding="utf-8"))
         nombres = {n.id for n in ast.walk(arbol) if isinstance(n, ast.Name)}
         nombres |= {n.attr for n in ast.walk(arbol) if isinstance(n, ast.Attribute)}
@@ -398,8 +417,11 @@ def test_caso19_20_ninguna_ruta_f05_crea_ni_expone_posiciones():
 
 def test_ningun_esquema_http_serializa_posiciones(t):
     _, _, cli, _, _, _ = t
-    esquema = cli.app.openapi()
-    texto = str(esquema)
+    esquema = dict(cli.app.openapi())
+    componentes = {k: v for k, v in esquema.get("components", {}).get("schemas", {}).items() if k not in ESQUEMAS_M3}
+    rutas = {k: v for k, v in esquema.get("paths", {}).items() if not any(r in k for r in RUTAS_M3)}
+    assert set(esquema.get("components", {}).get("schemas", {})) - set(componentes) <= ESQUEMAS_M3
+    texto = str({"components": componentes, "paths": rutas})
     for prohibido in ("ResultadoPosicion", "posicion_id", "DatosAltaPosicion"):
         assert prohibido not in texto
 

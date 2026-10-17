@@ -10,7 +10,8 @@
 // v0.6.0 (F05-05 K3 §2.5/§2.6; F05 §49.4 A7/A8, D-SRCH-06/12): «Día a día» deja de ser territorio pendiente: monta la Actividad v0 (ActividadScreen) de forma PERSISTENTE, como Más (conserva periodo, filtros y scroll al cambiar de pestaña); sus hojas son inmersivas (el velo cubre la barra inferior). Tras un registro confirmado la Actividad vuelve a leer. Ajustes › Terceros › «Ver sus registros» abre en la pila de Más la Actividad filtrada por el tercero con todo el historial («‹ <tercero>» vuelve a la ficha). Mes y Patrimonio siguen pendientes.
 // v0.7.0 (F05-06 M4 §3; F09 §12.105 CAP): Ajustes › «Cuentas» (capacidades de cuenta, entrada provisional junto a Preferencias financieras) en la pila de Más; su hoja de confirmación es inmersiva (oculta la barra inferior).
 // v0.8.0 (F05-06 M2-B §B1; lámina DEV, D-DEV-01/06): «Registrar devolución» del detalle de un gasto en la Actividad abre la tarea inmersiva de devolución (DevolucionScreen) sobre la compra; al terminar, Día a día y Inicio vuelven a leer y «Ver la devolución» / «Ver la compra» abren ese detalle en Día a día (ida y vuelta). La Actividad recibe `nuevoId` para «Registrar abono».
-// Versión: 0.8.0
+// v0.9.0 (F05-06 M3 §B1; lámina REP v0.2): «Repartir» u «Otra persona» en el registro de un gasto abren el gasto compartido (GastoCompartidoScreen) ENCIMA del registro, que sigue montado y conserva lo común («Cambiar» vuelve a él). «Pendiente con <persona>» (PendienteConScreen) se abre desde el éxito del gasto compartido, el detalle de un gasto en la Actividad y la ficha del tercero; «Corregir reparto» (CorregirRepartoScreen), desde el detalle. Todas son tareas inmersivas (ocultan la barra inferior); al terminar con cambios, Día a día e Inicio vuelven a leer.
+// Versión: 0.9.0
 // ============================================================
 
 import * as Crypto from 'expo-crypto';
@@ -24,6 +25,7 @@ import { configApi } from './src/api/config';
 import { BarraInferior, Destino } from './src/components/BarraInferior';
 import { HojaTipos } from './src/components/HojaTipos';
 import type { TipoRegistro } from './src/domain/registro';
+import type { BaseCompartido } from './src/domain/reparto';
 import { CategoriasAjustesScreen } from './src/screens/CategoriasAjustesScreen';
 import { ContextosAjustesScreen } from './src/screens/ContextosAjustesScreen';
 import { CuentasCapacidadesScreen } from './src/screens/CuentasCapacidadesScreen';
@@ -33,7 +35,10 @@ import { PreferenciasAjustesScreen } from './src/screens/PreferenciasAjustesScre
 import { HomeScreen } from './src/screens/HomeScreen';
 import { AjustesScreen, MasScreen } from './src/screens/MasScreen';
 import { ActividadScreen } from './src/screens/ActividadScreen';
+import { CorregirRepartoScreen } from './src/screens/CorregirRepartoScreen';
 import { DevolucionScreen } from './src/screens/DevolucionScreen';
+import { GastoCompartidoScreen } from './src/screens/GastoCompartidoScreen';
+import { PendienteConScreen } from './src/screens/PendienteConScreen';
 import { RegistroGastoScreen } from './src/screens/RegistroGastoScreen';
 import { TerritorioPendiente } from './src/screens/TerritorioPendiente';
 import { TransferenciaScreen } from './src/screens/TransferenciaScreen';
@@ -66,6 +71,12 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
   const [devolucionDe, setDevolucionDe] = useState<{ origenId: string; clave: number } | null>(null);
   const [abrirEnDia, setAbrirEnDia] = useState<{ id: string; clave: number } | null>(null);
   const registrarDevolucion = useCallback((origenId: string) => setDevolucionDe({ origenId, clave: Date.now() }), []);
+  /** F05-06 M3: gasto compartido encima del registro; «Pendiente con» y «Corregir reparto». */
+  const [compartido, setCompartido] = useState<{ base: BaseCompartido; inicial: { repartir: boolean; otraPersona: boolean }; clave: number } | null>(null);
+  const [pendienteDe, setPendienteDe] = useState<{ terceroId: string; nombre: string; clave: number } | null>(null);
+  const [corregirDe, setCorregirDe] = useState<{ hechoId: string; clave: number } | null>(null);
+  const abrirPendiente = useCallback((t: { terceroId: string; nombre: string }) => setPendienteDe({ ...t, clave: Date.now() }), []);
+  const abrirCorregir = useCallback((hechoId: string) => setCorregirDe({ hechoId, clave: Date.now() }), []);
 
   const cerrarTarea = useCallback((registrado: boolean) => {
     setTarea(null);
@@ -93,7 +104,7 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
         {/* Día a día: Actividad v0 montada de forma persistente (conserva periodo, filtros y scroll). */}
         <View style={[s.raiz, destino !== 'DIA' && s.oculto]}>
           <ActividadScreen cliente={p.cliente} ahora={p.ahora} refresco={refresco} onRegistrar={() => setHojaTipos(true)} onInmersiva={setInmersivaDia}
-            onRegistrarDevolucion={registrarDevolucion} nuevoId={p.nuevoId} abrir={abrirEnDia} />
+            onRegistrarDevolucion={registrarDevolucion} nuevoId={p.nuevoId} abrir={abrirEnDia} onCorregirReparto={abrirCorregir} onPendienteCon={abrirPendiente} />
         </View>
         {(Object.keys(TITULOS) as (keyof typeof TITULOS)[]).map((d) =>
           destino === d ? <TerritorioPendiente key={d} titulo={TITULOS[d]} /> : null,
@@ -128,6 +139,7 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
               onAtras={() => setPantallaMas('AJUSTES')}
               onInmersiva={setInmersivaMas}
               volverA={registrosDe?.id ?? null}
+              onPendienteCon={abrirPendiente}
               onVerRegistros={(t) => {
                 setRegistrosDe(t);
                 setPantallaMas('REGISTROS_TERCERO');
@@ -189,6 +201,24 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
               plantilla={tarea.plantilla ?? null}
               inicial={tarea.inicial ?? null}
               onCambiarTipo={(t, conservar) => setTarea({ tipo: t, inicial: conservar, clave: tarea.clave + 1 })}
+              onGastoCompartido={(base, inicial) => setCompartido({ base, inicial, clave: Date.now() })}
+            />
+          </View>
+        ) : null}
+        {tarea && compartido ? (
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: c.background }]}>
+            <GastoCompartidoScreen
+              key={compartido.clave}
+              cliente={p.cliente}
+              nuevoId={p.nuevoId}
+              base={compartido.base}
+              inicial={compartido.inicial}
+              onVolver={() => setCompartido(null)}
+              onCerrar={(registrado, ver) => {
+                setCompartido(null);
+                if (registrado || !ver) cerrarTarea(registrado);
+                if (ver) abrirPendiente(ver);
+              }}
             />
           </View>
         ) : null}
@@ -224,6 +254,44 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
             />
           </View>
         ) : null}
+        {corregirDe ? (
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: c.background }]}>
+            <CorregirRepartoScreen
+              key={corregirDe.clave}
+              cliente={p.cliente}
+              hechoId={corregirDe.hechoId}
+              onCerrar={(cambios) => {
+                const id = corregirDe.hechoId;
+                setCorregirDe(null);
+                if (cambios) {
+                  setRefresco((n) => n + 1);
+                  setAbrirEnDia({ id, clave: Date.now() });
+                }
+              }}
+            />
+          </View>
+        ) : null}
+        {pendienteDe ? (
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: c.background }]}>
+            <PendienteConScreen
+              key={pendienteDe.clave}
+              cliente={p.cliente}
+              nuevoId={p.nuevoId}
+              ahora={p.ahora}
+              terceroId={pendienteDe.terceroId}
+              nombre={pendienteDe.nombre}
+              onCerrar={(cambios) => {
+                setPendienteDe(null);
+                if (cambios) setRefresco((n) => n + 1);
+              }}
+              onVerHecho={(id) => {
+                setPendienteDe(null);
+                setDestino('DIA');
+                setAbrirEnDia({ id, clave: Date.now() });
+              }}
+            />
+          </View>
+        ) : null}
         {hojaTipos ? (
           <HojaTipos
             onElegir={(t) => {
@@ -234,7 +302,7 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
           />
         ) : null}
       </View>
-      {tarea === null && devolucionDe === null && !hojaTipos && !(destino === 'MAS' && inmersivaMas) && !(destino === 'DIA' && inmersivaDia) ? <BarraInferior actual={destino} onCambiar={setDestino} /> : null}
+      {tarea === null && devolucionDe === null && pendienteDe === null && corregirDe === null && !hojaTipos && !(destino === 'MAS' && inmersivaMas) && !(destino === 'DIA' && inmersivaDia) ? <BarraInferior actual={destino} onCambiar={setDestino} /> : null}
     </View>
   );
 }

@@ -303,7 +303,19 @@
 #     backend/app/api/ejecucion_correccion.py (adaptador interno sin ruta HTTP, de la capa de
 #     capacidad F05) puede referenciarlo. No escribe categoria. El resto de la frontera
 #     sigue con OP-22 como unica puerta.
-# Version: 0.26.0
+# Version 0.27.0 (F05-06 M3 §A2/§A5; F05 §57 F05-D043; AJ-M3-DEC-09): altas aditivas.
+#     I1: el gasto compartido (ejecucion_reparto.registrar_gasto_compartido) invoca la
+#     guarda C-a + C07 tras la identidad y antes de componer (GUARDA, I4) y su composicion
+#     sella categoria_id en el efecto GASTO via OP-22 (A_FRONTERA); el DTO la deriva (R).
+#     I3: excepcion NOMINAL y acotada: solo backend/app/api/ejecucion_reparto.py puede
+#     referenciar CorreccionesService (OP-21), para «Corregir reparto» con WHITELIST: solo
+#     importe_atribuido de atribuciones existentes y el importe_delta del efecto de posicion
+#     coherente; nunca categoria_id ni tipo_efecto (§57.1.1). El resto de la frontera sigue
+#     con OP-22 como unica puerta.
+#     I13a (§B1): altas en IMPORTS_CAMINO del registro («Repartir» / «Otra persona»: la base
+#     del gasto compartido se sella con el mismo categoriaWire) y del cliente (solo tipos
+#     del wire de domain/reparto).
+# Version: 0.27.0
 # ============================================================
 
 from __future__ import annotations
@@ -551,6 +563,16 @@ REGISTRO.update({
     ("backend/app/api/dto_devolucion.py", "ContextoDevolucion"): ("R", "DTO F05-06 M2", "declaracion de campo"),
 })
 
+# F05-06 M3 (alta aditiva, v0.27.0): gasto compartido por OP-22 de una sola llamada.
+REGISTRO.update({
+    ("backend/app/api/dto_reparto.py", "IntencionGastoCompartido.categoria_id"): (
+        "R", "DTO F05-06 M3", "lectura derivada del estado categorial sellado"),
+    ("backend/app/api/ejecucion_reparto.py", "registrar_gasto_compartido.operacion"): (
+        "GUARDA", "F05-06 M3 intencion", "C-a + C07 tras la identidad y antes de componer (I4)"),
+    ("backend/app/api/ejecucion_reparto.py", "componer_gasto_compartido"): (
+        "A_FRONTERA", "M3 -> OP-22", "sella categoria_id en el efecto GASTO; guardado por I4"),
+})
+
 #: Servicios del motor que la frontera NO puede referenciar (I3): tienen
 #: caminos A_MOTOR, B o P con categoria. OP-22 es la unica puerta.
 SERVICIOS_VEDADOS_EN_FRONTERA = (
@@ -564,6 +586,9 @@ EXCEPCIONES_I3: dict[str, frozenset[str]] = {
     "backend/app/api/ejecucion_devolucion.py": frozenset({"DevolucionesService", "EfectosService"}),
     # F04-R2 R2-B (v0.26.0): capacidad de la cuenta nueva (§2.1.5) + OP-21P/OP-21T en una transaccion.
     "backend/app/api/ejecucion_correccion.py": frozenset({"CorreccionTesoreriaService"}),
+    # F05-06 M3 (v0.27.0): «Corregir reparto» = OP-21 con whitelist (solo importes; nunca
+    # categoria_id ni tipo_efecto), con la guarda REPARTO_CAMBIA_POSICIONES del motor.
+    "backend/app/api/ejecucion_reparto.py": frozenset({"CorreccionesService"}),
 }
 
 #: Construcciones con nombre de tabla dinamico (I6): (ruta, funcion) ->
@@ -1532,6 +1557,20 @@ IMPORTS_CAMINO[REG] = IMPORTS_CAMINO[REG] | {
     ("../components/FaltaCuenta", "useSinConfigurar"), ("../domain/capacidades", "TEXTO_FORMULARIO_SE_CONSERVA"),
 }
 
+# F05-06 M3 §B1 (alta aditiva): «Repartir» / «Otra persona» pasan al gasto compartido.
+# `baseDesdeBorrador` sella la dimension categorial con el MISMO `categoriaWire` del
+# registro (decision ya tomada por el usuario en el formulario): no propone, no
+# resuelve ni completa categoria. El cliente solo importa los tipos del wire de M3.
+IMPORTS_CAMINO[REG] = IMPORTS_CAMINO[REG] | {
+    ("../domain/reparto", "BaseCompartido"), ("../domain/reparto", "TEXTO_OTRA_PERSONA"),
+    ("../domain/reparto", "baseDesdeBorrador"),
+}
+IMPORTS_CAMINO[CLI] = IMPORTS_CAMINO[CLI] | {
+    ("../domain/reparto", f"type {t}") for t in (
+        "PayloadCobroPago", "PayloadCorregirReparto", "PayloadGastoCompartido", "PayloadPerdon", "PendienteConPersona",
+        "RepartoDeHecho", "ResultadoCorreccionReparto", "ResultadoGastoCompartido", "ResultadoPosicion")
+}
+
 MENCIONES_CLIENTE.update({
     "mobile/src/domain/senales.ts": "tipos del wire de las senales (categoria_id de cada candidata) y su vista en texto (F05-05, R)",
     "mobile/src/components/RecordarAfinidad.tsx": "«Recordar» del exito: envia el par tercero/categoria a /v1/afinidades (F05-05 A5, R; escribe la afinidad, no la categoria)",
@@ -1773,3 +1812,31 @@ def test_a1_ninguna_ruta_nueva_se_llama_sugeridas():
     rutas = re.findall(r'@app\.(?:get|post|put|patch|delete)\(\s*"([^"]+)"', texto)
     assert any(r.startswith("/v1/senales/") for r in rutas), "no hay rutas /v1/senales/*"
     assert sorted(r for r in rutas if "sugerid" in r.lower()) == ["/v1/categorias/sugeridas"], rutas
+
+
+# ------------------------------------------------------------------ F05-06 M3 (v0.27.0)
+def test_i4_gasto_compartido_guarda_tras_identidad_y_antes_de_componer():
+    """M3 §A2: mismo contrato I4 que VS-01 e INGRESO."""
+    fn = _nodo("backend/app/api/ejecucion_reparto.py", "registrar_gasto_compartido.operacion")
+    guardas = _llamadas(fn, "validar_categoria_y_magnitudes")
+    composiciones = _llamadas(fn, "componer_gasto_compartido")
+    assert len(guardas) == 1 and len(composiciones) == 1
+    assert guardas[0].lineno < composiciones[0].lineno
+    padres = [n for n in ast.walk(fn) if isinstance(n, ast.If) and any(g is guardas[0] for g in ast.walk(n))]
+    assert any(isinstance(i.test, ast.UnaryOp) and isinstance(i.test.op, ast.Not)
+               and isinstance(i.test.operand, ast.Name) and i.test.operand.id == "ya_materializada" for i in padres)
+
+
+def test_i3_m3_excepcion_acotada_a_la_whitelist_de_importes():
+    """La excepcion I3 de ejecucion_reparto (CorreccionesService) solo puede pasar a OP-21
+    importes: ni categoria_id ni tipo_efecto ni altas/bajas (§57.1.1; AJ-M3-DEC-09)."""
+    fn = _nodo("backend/app/api/ejecucion_reparto.py", "corregir_reparto.operacion")
+    llamadas = _llamadas(fn, "DatosCorreccion")
+    assert len(llamadas) == 1
+    argumentos = {k.arg for k in llamadas[0].keywords}
+    assert argumentos <= {"hecho_id", "row_version_esperada", "motivo", "efectos_a_actualizar",
+                          "atribuciones_a_actualizar"}, argumentos
+    claves = {c.value for n in ast.walk(fn) if isinstance(n, ast.Dict)
+              for c in n.keys if isinstance(c, ast.Constant) and isinstance(c.value, str)}
+    assert claves <= {"importe_atribuido", "porcentaje_aplicado", "importe_delta", "motivo"}, claves
+    assert "categoria_id" not in claves and "tipo_efecto" not in claves

@@ -33,6 +33,25 @@
 #   D-080 · ADVISORY PRIMERO. Si la correccion toca superficies de inversion,
 #   el advisory (INVERSIONES, owner) se toma ANTES de cualquier row lock. Los
 #   locks genericos no lo sustituyen.
+# Version: 0.13.0
+#   0.13.0 (F05-06 M3 §1 (i); F05-D043 §57.1.1; AJ-M3-DEC-01/02): GUARDA
+#   REPARTO_CAMBIA_POSICIONES. «Corregir reparto» v1 (opcion A) solo cambia
+#   importes o porcentajes de participantes existentes y datos de invitados
+#   sin posicion. Se rechaza con CORRECCION_AGREGADA_REQUERIDA (codigo
+#   existente) y contexto_extra.motivo = REPARTO_CAMBIA_POSICIONES toda la
+#   clase (b) de M3-PRE2 P3: retirar un efecto vinculado a una posicion; crear
+#   un efecto DERECHO_COBRO o DEUDA (invitado -> deudor); cambiar tipo_efecto
+#   desde o hacia esas naturalezas, o el de un efecto vinculado; retirar un
+#   vinculo hecho_entidades con una posicion o con un efecto vinculado
+#   (incluido AFECTA_A con efecto_id de V3, R-M3PRE2-02); vincular el hecho a
+#   una posicion; y, en un hecho con posiciones, dar de alta o de baja
+#   atribuciones (alta, baja o reasignacion de participante). Va DESPUES de
+#   adquirir_raiz y de la foto previa y ANTES de la primera escritura
+#   (tocar_raiz), sobre el estado releido bajo el lock; nunca por FK. Alcance:
+#   hechos de arquetipo GASTO; los de reduccion (REEMBOLSO, CONDONACION)
+#   conservan sus fronteras E1 de F04-D052 y sus codigos, y GENERADO_POR sigue
+#   rechazandose con ENTRADA_INVALIDA en _corregir_contexto. Ninguna otra regla
+#   de OP-21 cambia.
 # Version: 0.12.0
 #   0.12.0 (F04-R2 R2-B; contrato F04-R2 v0.8 §3.4, §3.4.1, §3.4.2): CAPACIDAD
 #   DEL ORIGINAL AL CORREGIR UNA DEVOLUCION (R-F04R2A-01). Si OP-21 toca los
@@ -329,6 +348,85 @@ def exigir_devuelto_dentro_de_capacidad(sesion: SesionMotor, hecho_id: uuid.UUID
             )
 
 
+#: F05-06 M3 (i). Naturalezas de efecto que alimentan una posicion.
+NATURALEZAS_DE_POSICION = frozenset({"DERECHO_COBRO", "DEUDA"})
+MOTIVO_REPARTO_CAMBIA_POSICIONES = "REPARTO_CAMBIA_POSICIONES"
+#: Arquetipo del gasto repartido entre personas (unico alcance de la guarda).
+ARQUETIPO_REPARTO = "GASTO"
+
+
+def _reparto_cambia_posiciones(detalle: str) -> ErrorMotor:
+    return ErrorMotor(
+        CodigoError.CORRECCION_AGREGADA_REQUERIDA,
+        "Esta correccion cambiaria quien debe a quien (crear, retirar o "
+        "reasignar una posicion): no es una correccion de reparto de v1.",
+        contexto_extra={"motivo": MOTIVO_REPARTO_CAMBIA_POSICIONES, "detalle": detalle},
+    )
+
+
+def exigir_reparto_sin_cambio_de_posiciones(sesion: SesionMotor, datos: DatosCorreccion) -> None:
+    """F05-06 M3 (i) · F05-D043 §57.1.1. Rechaza la clase (b) de M3-PRE2 P3.
+
+    Se evalua con el hecho y sus posiciones ya bloqueados (adquirir_raiz) y
+    antes de cualquier escritura, sobre el estado releido bajo el lock.
+
+    Alcance: hechos de arquetipo GASTO (el reparto entre personas de M3). Los
+    hechos de reduccion (REEMBOLSO, CONDONACION) y de alta de posicion
+    conservan sus fronteras certificadas (F04-D052 E1, coherencia_posicion) y
+    sus codigos: esta guarda no se interpone (test_145)."""
+    if repo_corr.tipo_de_hecho(sesion, datos.hecho_id) != ARQUETIPO_REPARTO:
+        return
+    with sesion.conexion.cursor() as cur:
+        cur.execute(
+            "SELECT v.id, v.efecto_id, p.contraparte_actor_id "
+            "FROM gapto.hecho_entidades v "
+            "JOIN gapto.derechos_obligaciones_financieras p ON p.entidad_id = v.entidad_id "
+            "WHERE v.hecho_id = %s",
+            (datos.hecho_id,),
+        )
+        vinculos = cur.fetchall()
+    efectos_vinculados = {fila[1] for fila in vinculos if fila[1] is not None}
+    tiene_posiciones = bool(vinculos)
+
+    for efecto_id in datos.efectos_a_eliminar:
+        if efecto_id in efectos_vinculados:
+            raise _reparto_cambia_posiciones("RETIRA_EFECTO_DE_POSICION")
+    for efecto in datos.efectos_a_crear:
+        if efecto.tipo_efecto in NATURALEZAS_DE_POSICION:
+            raise _reparto_cambia_posiciones("CREA_EFECTO_DE_POSICION")
+    for efecto_id, cambios in datos.efectos_a_actualizar.items():
+        if "tipo_efecto" in cambios and (
+            efecto_id in efectos_vinculados or cambios["tipo_efecto"] in NATURALEZAS_DE_POSICION
+        ):
+            raise _reparto_cambia_posiciones("CAMBIA_NATURALEZA_DE_POSICION")
+    if datos.entidades_a_eliminar:
+        # Solo vinculos CONTEXTUALES: GENERADO_POR (y el resto de relaciones
+        # propietarias) ya los rechaza OP-21 con ENTRADA_INVALIDA en
+        # _corregir_contexto (test_141), y ese contrato no cambia. El hueco es
+        # AFECTA_A/RELACIONADO_CON unido a una posicion o a un efecto vinculado
+        # (R-M3PRE2-02: asi vincula V3 el efecto con su posicion).
+        with sesion.conexion.cursor() as cur:
+            cur.execute(
+                "SELECT v.id FROM gapto.hecho_entidades v "
+                "LEFT JOIN gapto.derechos_obligaciones_financieras p ON p.entidad_id = v.entidad_id "
+                "WHERE v.id = ANY(%s::uuid[]) AND v.tipo_relacion = ANY(%s::text[]) "
+                "AND (p.entidad_id IS NOT NULL OR v.efecto_id = ANY(%s::uuid[]))",
+                (list(datos.entidades_a_eliminar), sorted(RELACIONES_CONTEXTUALES), list(efectos_vinculados)),
+            )
+            if cur.fetchone() is not None:
+                raise _reparto_cambia_posiciones("RETIRA_VINCULO_DE_POSICION")
+    if datos.entidades_a_crear:
+        with sesion.conexion.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM gapto.derechos_obligaciones_financieras WHERE entidad_id = ANY(%s::uuid[])",
+                ([e.entidad_id for e in datos.entidades_a_crear],),
+            )
+            if cur.fetchone() is not None:
+                raise _reparto_cambia_posiciones("VINCULA_POSICION")
+    if tiene_posiciones and (datos.atribuciones_a_crear or datos.atribuciones_a_eliminar):
+        raise _reparto_cambia_posiciones("ALTA_O_BAJA_DE_PARTICIPANTE")
+
+
 class CorreccionesService:
     """OP-21. Correccion agregada de un hecho y sus hijos."""
 
@@ -376,6 +474,10 @@ class CorreccionesService:
                 sesion, posiciones, hechos=[datos.hecho_id]
             )
             self._exigir_conjunto_devolucion(sesion, datos, originales)
+            # F05-06 M3 (i): ninguna correccion crea, retira, sustituye ni
+            # reasigna posiciones (F05-D043 §57.1.1). Bajo la raiz y antes de
+            # la primera escritura.
+            exigir_reparto_sin_cambio_de_posiciones(sesion, datos)
             nueva_version = repo_hechos.tocar_raiz(
                 sesion, datos.hecho_id, datos.row_version_esperada
             )
