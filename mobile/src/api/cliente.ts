@@ -15,12 +15,24 @@
 // v0.11.0 (F05-06 K-7; F05 §51.8): la categoría de la fila y del detalle de la Actividad trae `icon_key` (tipo aditivo, opcional). Sin rutas nuevas.
 // v0.12.0 (F05-06 M4 §2.4/§3; F09 §12.105 CAP): capacidades de cuenta. Lecturas GET /v1/cuentas/capacidades (lista A1), /v1/cuentas/sin-configurar (aviso B2), /v1/cuentas/{id}/capacidades (A2/B1), …/historial (B4) y …/{capacidad}/impacto (A4); comando POST …/{capacidad}/activar | desactivar con `row_version` de la cuenta (clasificación 'CAMBIO'). Tipos sin tipo de cuenta ni defaults (D-CAP-04).
 // v0.13.0 (F05-06 M2-B §B1; lámina DEV v0.1): devolución contextual. Lectura GET /v1/hechos/{origen}/devoluciones (contexto del formulario), POST /v1/hechos/{origen}/devoluciones (devolución con el abono «Todavía no» o «Ya cobrado») y POST /v1/hechos/{devolución}/abono («Registrar abono»), ambos con la clasificación de escritura (indeterminado = reintentar el MISMO UUID). La fila y el detalle de la Actividad traen `devolucion_de` y `abono`, y el detalle `devoluciones` (tipos aditivos, opcionales).
-// Versión: 0.13.0
+// v0.14.0 (F05-06 M3 §B1; lámina REP v0.2): reparto, pagador real y posiciones. POST /v1/intenciones/gasto-compartido (OP-22 de una sola llamada), POST /v1/posiciones/{id}/cobro | pago | perdon, con la clasificación de escritura (indeterminado = reintentar el MISMO UUID); lecturas GET /v1/terceros/{id}/pendiente («Pendiente con», OP-20) y GET /v1/hechos/{id}/reparto; «Corregir reparto» POST /v1/hechos/{id}/reparto con `row_version` (clasificación 'CAMBIO'). Tipos en domain/reparto (único import nuevo).
+// Versión: 0.14.0
 // ============================================================
 
 import type { Ambito, CategoriaNodo } from '../domain/categoria';
 import type { PayloadGastoPagado } from '../domain/intencion';
 import type { MagnitudCatalogo } from '../domain/magnitud';
+import type {
+  PayloadCobroPago,
+  PayloadCorregirReparto,
+  PayloadGastoCompartido,
+  PayloadPerdon,
+  PendienteConPersona,
+  RepartoDeHecho,
+  ResultadoCorreccionReparto,
+  ResultadoGastoCompartido,
+  ResultadoPosicion,
+} from '../domain/reparto';
 import type { SenalesCategorias, SenalesTerceros } from '../domain/senales';
 
 export interface ConfigApi {
@@ -665,6 +677,14 @@ export interface ClienteApi {
   contextoDevolucion(origenId: string): Promise<Respuesta<ContextoDevolucion>>;
   registrarDevolucion(origenId: string, p: PayloadDevolucion): Promise<Respuesta<ResultadoDevolucion>>;
   registrarAbono(devolucionId: string, p: PayloadAbono): Promise<Respuesta<ResultadoAbono>>;
+  // F05-06 M3
+  registrarGastoCompartido(p: PayloadGastoCompartido): Promise<Respuesta<ResultadoGastoCompartido>>;
+  pendienteCon(terceroId: string): Promise<Respuesta<PendienteConPersona>>;
+  cobrarPosicion(entidadId: string, p: PayloadCobroPago): Promise<Respuesta<ResultadoPosicion>>;
+  pagarPosicion(entidadId: string, p: PayloadCobroPago): Promise<Respuesta<ResultadoPosicion>>;
+  perdonarPosicion(entidadId: string, p: PayloadPerdon): Promise<Respuesta<ResultadoPosicion>>;
+  repartoDeHecho(hechoId: string): Promise<Respuesta<RepartoDeHecho>>;
+  corregirReparto(hechoId: string, p: PayloadCorregirReparto): Promise<Respuesta<ResultadoCorreccionReparto>>;
 }
 
 const CAT = '/v1/categorias';
@@ -676,6 +696,7 @@ const PLT = '/v1/plantillas';
 const ACC = '/v1/acciones-rapidas';
 const CAP = (id: string) => `/v1/cuentas/${encodeURIComponent(id)}/capacidades`;
 const HECHO = (id: string) => `/v1/hechos/${encodeURIComponent(id)}`;
+const POS = (id: string) => `/v1/posiciones/${encodeURIComponent(id)}`;
 const asoc = (cat: string, a?: string) => `${CAT}/${encodeURIComponent(cat)}/magnitudes${a ? `/${encodeURIComponent(a)}` : ''}`;
 const post = (cuerpo: unknown): RequestInit => ({ method: 'POST', body: JSON.stringify(cuerpo) });
 
@@ -822,5 +843,12 @@ export function crearCliente(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): C
     contextoDevolucion: (id) => llamar(`${HECHO(id)}/devoluciones`, { method: 'GET' }, false),
     registrarDevolucion: (id, payload) => llamar(`${HECHO(id)}/devoluciones`, post(payload), true),
     registrarAbono: (id, payload) => llamar(`${HECHO(id)}/abono`, post(payload), true),
+    registrarGastoCompartido: (payload) => llamar('/v1/intenciones/gasto-compartido', post(payload), true),
+    pendienteCon: (id) => llamar(`${TER}/${encodeURIComponent(id)}/pendiente`, { method: 'GET' }, false),
+    cobrarPosicion: (id, payload) => llamar(`${POS(id)}/cobro`, post(payload), true),
+    pagarPosicion: (id, payload) => llamar(`${POS(id)}/pago`, post(payload), true),
+    perdonarPosicion: (id, payload) => llamar(`${POS(id)}/perdon`, post(payload), true),
+    repartoDeHecho: (id) => llamar(`${HECHO(id)}/reparto`, { method: 'GET' }, false),
+    corregirReparto: (id, payload) => llamar(`${HECHO(id)}/reparto`, post(payload), 'CAMBIO'),
   };
 }

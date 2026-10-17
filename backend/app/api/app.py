@@ -176,7 +176,19 @@
 #          OP-09 sobre una devolucion pendiente
 #   La Actividad y su detalle ganan campos aditivos (devolucion_de, abono,
 #   devoluciones).
-# Version: 0.23.0
+#   v0.24.0 (F05-06 M3 §A2-§A5; F05 §51.2, §57 F05-D043; lamina REP v0.2):
+#   reparto, pagador real y posiciones (ejecucion_reparto.py):
+#     POST /v1/intenciones/gasto-compartido      OP-22 de una sola llamada
+#          (reparto, pagador real, aportaciones y posiciones explicitas)
+#     POST /v1/posiciones/{entidad_id}/cobro      OP-14 con cuenta Gapto
+#     POST /v1/posiciones/{entidad_id}/pago       OP-12B con cuenta Gapto
+#     POST /v1/posiciones/{entidad_id}/perdon     condonacion (sin dinero)
+#     GET  /v1/terceros/{tercero_id}/pendiente    «Pendiente con» (OP-20)
+#     GET  /v1/hechos/{hecho_id}/reparto          lectura sin locks del reparto
+#     POST /v1/hechos/{hecho_id}/reparto          «Corregir reparto» (OP-21
+#          con whitelist; REPARTO_CAMBIA_POSICIONES con su motivo)
+#     GET  /v1/hechos/{hecho_id}/anulacion        elegibilidad de OP-03 (iii)
+# Version: 0.24.0
 # ============================================================
 
 from __future__ import annotations
@@ -309,6 +321,19 @@ from app.api.dto_devolucion import (
     ResultadoDevolucionHttp,
 )
 from app.api.ejecucion_devolucion import contexto_devolucion, registrar_abono, registrar_devolucion
+from app.api.dto_reparto import (
+    ElegibilidadAnulacion,
+    IntencionCobroPago,
+    IntencionCorregirReparto,
+    IntencionGastoCompartido,
+    IntencionPerdon,
+    PendienteConPersona,
+    RepartoDeHecho,
+    ResultadoCorreccionRepartoHttp,
+    ResultadoGastoCompartidoHttp,
+    ResultadoPosicionHttp,
+)
+from app.api import ejecucion_reparto as rep
 from app.actividad import lecturas as lect_act
 from app.afinidades import lecturas as lect_afi
 from app.afinidades import servicio as serv_afi
@@ -333,7 +358,7 @@ from app.preferencias import lecturas as lect_pref
 from app.preferencias import servicio as serv_pref
 from app.senales import lecturas as senales
 from app.core.contexto import ContextoOperacion
-from app.core.errores import ErrorMotor
+from app.core.errores import CodigoError, ErrorMotor
 from app.core.unidad_trabajo import UnidadDeTrabajo
 
 _LOG = logging.getLogger("gapto.api.f05_00_b")
@@ -1002,6 +1027,105 @@ def create_app(
             "movimiento_id": salida.movimiento_id, "idempotente": salida.idempotente,
             "importe": str(salida.importe.quantize(_CENT)), "abono": "COBRADO", "aviso": _AVISO_F05,
         }
+
+    # ------------------------------------------------------------ F05-06 M3 reparto y posiciones
+    def _posicion_http(intencion, salida):
+        return {"intencion_id": intencion.intencion_id, "hecho_id": salida.hecho_id,
+                "entidad_id": salida.entidad_id, "idempotente": salida.idempotente,
+                "importe": str(intencion.importe.quantize(_CENT)),
+                "saldo": None if salida.saldo is None else str(salida.saldo.quantize(_CENT)),
+                "estado": salida.estado, "aviso": _AVISO_F05}
+
+    def _posiciones_http(posiciones):
+        return [{"entidad_id": p.entidad_id, "tipo": p.tipo, "tercero_id": p.tercero_id,
+                 "importe": str(p.importe.quantize(_CENT))} for p in posiciones]
+
+    @app.post("/v1/intenciones/gasto-compartido", response_model=ResultadoGastoCompartidoHttp,
+              dependencies=[Depends(autorizar)])
+    def gasto_compartido(intencion: IntencionGastoCompartido):
+        salida = rep.registrar_gasto_compartido(unidad, contexto(), intencion, reloj)
+        if isinstance(salida, RechazoRegistro):
+            status, cuerpo = eh.rechazo_integracion(salida.codigo, salida.detalle)
+            return JSONResponse(cuerpo, status_code=status)
+        return {
+            "intencion_id": intencion.intencion_id, "hecho_id": salida.hecho_id,
+            "idempotente": salida.idempotente, "importe": str(intencion.importe.quantize(_CENT)),
+            "moneda": intencion.moneda, "estado_atribucion": salida.estado_atribucion,
+            "tu_parte": None if salida.tu_parte is None else str(salida.tu_parte.quantize(_CENT)),
+            "movimiento": None if salida.movimiento is None else str(salida.movimiento.quantize(_CENT)),
+            "posiciones": _posiciones_http(salida.posiciones), "aviso": _AVISO_F05,
+        }
+
+    def _reduccion(fn, entidad_id, intencion):
+        salida = fn(unidad, contexto(), entidad_id, intencion, reloj)
+        if isinstance(salida, RechazoRegistro):
+            status, cuerpo = eh.rechazo_integracion(salida.codigo, salida.detalle)
+            return JSONResponse(cuerpo, status_code=status)
+        return _posicion_http(intencion, salida)
+
+    @app.post("/v1/posiciones/{entidad_id}/cobro", response_model=ResultadoPosicionHttp,
+              dependencies=[Depends(autorizar)])
+    def cobro_posicion(entidad_id: uuid.UUID, intencion: IntencionCobroPago):
+        return _reduccion(rep.cobrar, entidad_id, intencion)
+
+    @app.post("/v1/posiciones/{entidad_id}/pago", response_model=ResultadoPosicionHttp,
+              dependencies=[Depends(autorizar)])
+    def pago_posicion(entidad_id: uuid.UUID, intencion: IntencionCobroPago):
+        return _reduccion(rep.pagar, entidad_id, intencion)
+
+    @app.post("/v1/posiciones/{entidad_id}/perdon", response_model=ResultadoPosicionHttp,
+              dependencies=[Depends(autorizar)])
+    def perdon_posicion(entidad_id: uuid.UUID, intencion: IntencionPerdon):
+        return _reduccion(rep.perdonar, entidad_id, intencion)
+
+    @app.get("/v1/terceros/{tercero_id}/pendiente", response_model=PendienteConPersona,
+             dependencies=[Depends(autorizar)])
+    def pendiente_con(tercero_id: uuid.UUID):
+        ctx = contexto()
+        salida = unidad.ejecutar(ctx, lambda s: rep.pendiente_con(s, ctx, tercero_id),
+                                 nombre="F05-06 M3 pendiente_con (OP-20)")
+        if salida is None:
+            status, cuerpo = eh.rechazo_lectura("TERCERO_NO_ENCONTRADO")
+            return JSONResponse(cuerpo, status_code=status)
+        return {**salida, "aviso": _AVISO_F05}
+
+    @app.post("/v1/hechos/{hecho_id}/reparto", response_model=ResultadoCorreccionRepartoHttp,
+              dependencies=[Depends(autorizar)])
+    def corregir_reparto(hecho_id: uuid.UUID, intencion: IntencionCorregirReparto):
+        try:
+            salida = rep.corregir_reparto(unidad, contexto(), hecho_id, intencion)
+        except ErrorMotor as exc:
+            if exc.codigo is not CodigoError.CORRECCION_AGREGADA_REQUERIDA:
+                raise
+            motivo = (exc.contexto_extra or {}).get("motivo")
+            status, cuerpo = eh.traducir_error_motor(exc.codigo)
+            return JSONResponse({**cuerpo, "detalle": {"motivo": motivo}}, status_code=status)
+        if isinstance(salida, RechazoRegistro):
+            status, cuerpo = eh.rechazo_integracion(salida.codigo, salida.detalle)
+            return JSONResponse(cuerpo, status_code=status)
+        return {"hecho_id": salida.hecho_id, "row_version": salida.row_version,
+                "tu_parte": None if salida.tu_parte is None else str(salida.tu_parte.quantize(_CENT)),
+                "posiciones": _posiciones_http(salida.posiciones), "aviso": _AVISO_F05}
+
+    @app.get("/v1/hechos/{hecho_id}/reparto", response_model=RepartoDeHecho, dependencies=[Depends(autorizar)])
+    def reparto_de_hecho(hecho_id: uuid.UUID):
+        ctx = contexto()
+        salida = unidad.ejecutar(ctx, lambda s: rep.reparto_de_hecho(s, ctx, hecho_id),
+                                 nombre="F05-06 M3 reparto_de_hecho")
+        if salida is None:
+            status, cuerpo = eh.rechazo_lectura("HECHO_NO_ENCONTRADO")
+            return JSONResponse(cuerpo, status_code=status)
+        return salida
+
+    @app.get("/v1/hechos/{hecho_id}/anulacion", response_model=ElegibilidadAnulacion,
+             dependencies=[Depends(autorizar)])
+    def elegibilidad_anulacion(hecho_id: uuid.UUID):
+        salida = unidad.ejecutar(contexto(), lambda s: rep.elegibilidad_anulacion(s, hecho_id),
+                                 nombre="F05-06 M3 elegibilidad_anulacion")
+        if salida is None:
+            status, cuerpo = eh.rechazo_lectura("HECHO_NO_ENCONTRADO")
+            return JSONResponse(cuerpo, status_code=status)
+        return salida
 
     # ------------------------------------------------------------ F05-05 K2 §1.2-§1.4
     def _lectura_con_fecha(nombre_op: str, fecha: dt.date, operacion) -> dict | JSONResponse:

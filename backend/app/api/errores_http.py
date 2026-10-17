@@ -121,7 +121,15 @@
 #   v0.20.0 (F05-06 M2-D §1-§2): CUENTA_SIN_CAPACIDAD de ABONO_DEVOLUCION
 #   nombra la capacidad que llega en el detalle (RECIBIR_INGRESO: «recibir
 #   dinero», nunca «ingreso», D-DEV-04); el resto de operaciones no cambia.
-# Version: 0.20.0
+#   v0.21.0 (F05-06 M3 §A2-§A5; lamina REP v0.2): codigos del reparto y de
+#   las posiciones en lenguaje llano. _MAPA (aditivo): CORRECCION_AGREGADA_
+#   REQUERIDA, VERSION_DESFASADA, EXCEDE_SALDO_DEL_DERECHO, EXCEDE_SALDO_
+#   POSICION, INTEGRIDAD_POSICION_VIOLADA, POSICION_CERRADA (409) y CUENTA_
+#   GAPTO_REQUERIDA (422). Rechazos de capa F05: TERCERO_NO_PERSONA, POSICION_
+#   NO_ENCONTRADA, POSICION_NO_ADMITE_OPERACION, REPARTO_NO_CORREGIBLE (con su
+#   detalle {motivo}), REPARTO_NO_DEMOSTRABLE y HECHO_NO_ENCONTRADO. El resto
+#   de codigos y respuestas no cambia.
+# Version: 0.21.0
 # ============================================================
 
 from __future__ import annotations
@@ -175,6 +183,25 @@ _MAPA: dict[CodigoError, tuple[int, str, bool]] = {
     # F05-01 (lecturas de categorias): el recurso no existe o es de otro
     # tenant; no se distingue para no revelar existencia ajena.
     CodigoError.AGREGADO_NO_ENCONTRADO: (404, "No encontrado.", False),
+    # F05-06 M3 (reparto y posiciones; lamina REP v0.2).
+    CodigoError.CORRECCION_AGREGADA_REQUERIDA: (
+        409,
+        "Este cambio alteraría quién debe a quién: en esta versión solo se pueden cambiar los "
+        "importes de quienes ya están en el reparto. No se ha cambiado nada.",
+        False,
+    ),
+    CodigoError.VERSION_DESFASADA: (
+        409, "Este registro ha cambiado mientras lo corregías. Tus cambios no se han aplicado.", False),
+    CodigoError.EXCEDE_SALDO_DEL_DERECHO: (409, "Es más de lo que te debe. No se ha guardado nada.", False),
+    CodigoError.EXCEDE_SALDO_POSICION: (409, "Es más de lo que debes. No se ha guardado nada.", False),
+    CodigoError.INTEGRIDAD_POSICION_VIOLADA: (
+        409,
+        "No puede quedar por debajo de lo ya cobrado o perdonado. No se ha cambiado nada.",
+        False,
+    ),
+    CodigoError.POSICION_CERRADA: (409, "Esto ya está saldado. No se ha guardado nada.", False),
+    CodigoError.CUENTA_GAPTO_REQUERIDA: (
+        422, "Elige en qué cuenta entró o de qué cuenta salió el dinero (Efectivo incluido).", False),
     CodigoError.TENANT_AUSENTE: (500, "Error interno de configuración.", False),
     CodigoError.ACTOR_DESCONOCIDO: (500, "Error interno de configuración.", False),
 }
@@ -246,6 +273,19 @@ _RECHAZOS_INTEGRACION: dict[str, tuple[int, str]] = {
         "Un dato adicional tiene más decimales o es mayor de lo permitido. "
         "Revísalo: no se ha guardado nada.",
     ),
+    # F05-06 M3: reparto y posiciones (lamina REP v0.2).
+    "TERCERO_NO_PERSONA": (
+        409, "Solo se reparte con personas. Empresas y organismos no entran en un reparto. No se ha guardado nada."),
+    "POSICION_NO_ENCONTRADA": (404, "No encontrado."),
+    "POSICION_NO_ADMITE_OPERACION": (
+        409, "Esta operación no corresponde: un cobro es de lo que te deben y un pago, de lo que debes. "
+             "No se ha guardado nada."),
+    "REPARTO_NO_CORREGIBLE": (
+        409, "Este reparto no se puede corregir así. No se ha cambiado nada."),
+    "REPARTO_NO_DEMOSTRABLE": (
+        409, "No se puede comprobar que la deuda coincida con su parte: corrígelo desde lo que te debe. "
+             "No se ha cambiado nada."),
+    "HECHO_NO_ENCONTRADO": (404, "No encontrado."),
     # F05-06 M2: devolucion contextual (D-DEV, P-DEV).
     "DEVOLUCION_ORIGEN_NO_ACTIVO": (
         409, "Esta compra ya no está activa: no se puede registrar una devolución. No se ha guardado nada."),
@@ -297,7 +337,13 @@ def rechazo_integracion(codigo: str, detalle: dict | None = None) -> tuple[int, 
                                  "más, la diferencia no es una devolución. No se ha guardado nada."),
                      "reintentable": False, "detalle": dict(detalle)}
     status, mensaje = _RECHAZOS_INTEGRACION[codigo]
+    if codigo in _CON_DETALLE and detalle:
+        return status, {"codigo": codigo, "mensaje": mensaje, "reintentable": False, "detalle": dict(detalle)}
     return status, {"codigo": codigo, "mensaje": mensaje, "reintentable": False}
+
+
+#: F05-06 M3: rechazos cuyo detalle necesita la UI para el texto atenuado.
+_CON_DETALLE = frozenset({"REPARTO_NO_CORREGIBLE", "TERCERO_NO_PERSONA"})
 
 
 _RECHAZOS_CAPACIDAD: dict[str, tuple[int, str]] = {

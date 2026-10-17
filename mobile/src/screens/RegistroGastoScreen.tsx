@@ -11,7 +11,8 @@
 // v0.7.0 (F05-03/F05-04 J3 §2.7; F05 §46.3 A8; CORTE DE CONCEPTO, atómico con el servidor): desaparece el campo obligatorio «Concepto»; la «Nota (opcional)» va en «Más detalles» (contexto, nota) en gasto e ingreso. Vacía o solo espacios no viaja; nunca bloquea ni figura en «faltan». La pantalla de éxito muestra el título CALCULADO (nota > «Tercero · Categoría» > categoría > tercero > «Gasto · importe»), nunca persistido ni vacío.
 // v0.8.0 (F05-05 K3 §2.1/§2.2/§2.4; F05 §49.4 A1/A2/A2 bis/A5, §49.5 R1/R2; D-SRCH-01/05/11; lámina SRCH-ACT-AFI A1, A5, A7): las sugerencias de categoría (GET /v1/senales/categorias por tipo, fecha del formulario y tercero) se muestran en la sección «Sugeridas» del selector (que ahora tiene búsqueda) y como hasta 3 chips de ACCIÓN bajo «Categoría» mientras está pendiente. El selector se construye una vez y los chips invocan su MISMO callback de selección (`props.onElegir`): elegir un chip, una sugerida o el nodo en el árbol produce la misma intención (R1); sin tocar, el estado sigue PENDIENTE y nada habilita «Registrar» (C01). Con categoría elegida por el usuario, «Elegida por ti.». Éxito: tarjeta «¿Recordar <categoría> para <tercero>?» (escritura independiente; un fallo no afecta al hecho).
 // v0.9.0 (F05-06 M4 §3; lámina CAP B2/B3; D-CAP-06/08): al final de «Pagado con» / «Cobrado en», «¿Falta una cuenta? N sin configurar ›» (solo si N > 0) abre la lista de Cuentas encima del formulario, que conserva lo escrito; al volver se recargan las cuentas y el número. CUENTA_SIN_CAPACIDAD al guardar: se muestra el mensaje del servidor y «El resto del formulario se conserva.»; se recargan las cuentas (la que perdió la capacidad ya no sale) y la cuenta queda sin elegir y pendiente de decisión del usuario: ninguna propuesta la vuelve a rellenar.
-// Versión: 0.9.0
+// v0.10.0 (F05-06 M3 §B1; lámina REP v0.2 A1, B1; D-REP-01/03): en un gasto, «¿De quién es este gasto?» ofrece «Repartir» junto a «Solo mío» y «Pagado con» ofrece «Otra persona» tras las cuentas. Ambos abren el gasto compartido encima del formulario, que conserva lo común (importe, fecha, comercio, categoría y magnitudes, presupuesto y nota) y al que se vuelve con «Cambiar». Antes se valida lo común con la MISMA `validar` del sellado (sin la cuenta); el contexto todavía no viaja en un gasto compartido y se pide quitarlo, sin perderlo en silencio.
+// Versión: 0.10.0
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -43,6 +44,7 @@ import {
 import { ayer, ddmmaaaaAIso, fechaCortaIso, isoADdmmaaaa, isoLocal } from '../domain/fechas';
 import { formatearEur, parsearImporte } from '../domain/importe';
 import { Borrador, borradorInicial, Errores, esDesconocida, esFechaIso, SeleccionCategoria, validar } from '../domain/intencion';
+import { BaseCompartido, baseDesdeBorrador, TEXTO_OTRA_PERSONA } from '../domain/reparto';
 import { conservarMagnitudes, descartadas } from '../domain/magnitud';
 import type { IndicePreferencias, PropuestaVista } from '../domain/preferencias';
 import {
@@ -99,6 +101,8 @@ export const RECHAZOS_CATEGORIA = new Set([
 /** Cambio de categoría pendiente de confirmar porque descartaría valores informados (C07). */
 type CambioPendiente = { destino: SeleccionCategoria; perdidas: MagnitudCategoria[]; etiqueta: string };
 
+export const TEXTO_CONTEXTO_COMPARTIDO = 'Un gasto repartido o pagado por otra persona todavía no guarda el contexto. Quítalo en «Más detalles» para continuar.';
+
 export function RegistroGastoScreen(p: {
   cliente: ClienteApi;
   nuevoId: () => string;
@@ -112,6 +116,8 @@ export function RegistroGastoScreen(p: {
   inicial?: { importeTexto: string; fechaHecho: string; aviso: string | null } | null;
   /** F05-04: cambio a «Entre cuentas» (otra pantalla) antes del primer envío. */
   onCambiarTipo?: (hacia: TipoRegistro, conservar: { importeTexto: string; fechaHecho: string; aviso: string }) => void;
+  /** F05-06 M3: «Repartir» u «Otra persona» abren el gasto compartido con lo común ya validado. */
+  onGastoCompartido?: (base: BaseCompartido, inicial: { repartir: boolean; otraPersona: boolean }) => void;
 }) {
   const { c } = useTema();
   const inset = useSafeAreaInsets();
@@ -418,6 +424,15 @@ export function RegistroGastoScreen(p: {
       icon_key: n.icon_key,
       magnitudes: magnitudesPedibles(n),
     });
+  };
+
+  /** F05-06 M3: pasa al gasto compartido con lo común validado (sin la cuenta, que allí se elige o es «Otra persona»). */
+  const irACompartido = (inicial: { repartir: boolean; otraPersona: boolean }) => {
+    if (bloqueado || enviado || tipoReg !== 'GASTO' || !p.onGastoCompartido) return;
+    const { cuenta: _cuenta, ...resto } = validar(b, hoyIso, 'GASTO');
+    if (Object.keys(resto).length > 0) return setErrores(resto);
+    if (b.contextoId) return setAvisos([TEXTO_CONTEXTO_COMPARTIDO]);
+    p.onGastoCompartido(baseDesdeBorrador(b), inicial);
   };
 
   const onRegistrar = async () => {
@@ -823,12 +838,17 @@ export function RegistroGastoScreen(p: {
         </Campo>
 
         <Campo etiqueta={esIngreso ? '¿De quién es este ingreso?' : '¿De quién es este gasto?'} opcional>
-          <Chip
-            testID="solo-mio"
-            etiqueta="Solo mío"
-            seleccionado={b.soloMio}
-            onPress={() => cambiar({ soloMio: !b.soloMio })}
-          />
+          <View style={s.chips}>
+            <Chip
+              testID="solo-mio"
+              etiqueta="Solo mío"
+              seleccionado={b.soloMio}
+              onPress={() => cambiar({ soloMio: !b.soloMio })}
+            />
+            {!esIngreso && p.onGastoCompartido && !enviado ? (
+              <Chip testID="repartir" etiqueta="Repartir" seleccionado={false} onPress={() => irACompartido({ repartir: true, otraPersona: false })} />
+            ) : null}
+          </View>
           <Text testID="origen-atribucion" style={[tipo.footnote, { color: c.textSecondary }]}>
             {esIngreso
               ? b.soloMio ? 'Decisión tuya: el ingreso es 100 % tuyo.' : 'Sin indicar: se guardará sin reparto.'
@@ -857,6 +877,9 @@ export function RegistroGastoScreen(p: {
                   onPress={() => cambiar({ cuentaId: x.cuenta_id, cuentaOrigen: 'USUARIO', cuentaPropuesta: null, propuesta: x.propuesta_financiacion, propuestaRechazada: false })}
                 />
               ))}
+              {!esIngreso && p.onGastoCompartido && !enviado ? (
+                <Chip testID="otra-persona" etiqueta={TEXTO_OTRA_PERSONA} seleccionado={false} onPress={() => irACompartido({ repartir: false, otraPersona: true })} />
+              ) : null}
             </View>
           ) : null}
           {!bloqueado ? <AvisoFaltaCuenta testID="falta-cuenta" n={sinConfigurar.n} onPress={() => setPanelCuentas(true)} /> : null}

@@ -5,6 +5,7 @@
 // Descripción: Ajustes › Terceros (F05-03 J2 §2.5; F05 §46.3 A5, §46.4 R5; lámina REG-DYN / SET-TH / SET-CTX v0.1 S01, S02, P02). Lista con «Todos / Activos / Inactivos» y filtro LOCAL por nombre (normalización C06); fila nombre + naturaleza, «Inactivo» en los desactivados. Alta y edición (S02): Nombre y Naturaleza (Persona, Empresa, Organismo, Otro o «No lo sé»); «Los gastos ya registrados no cambian…». Antes del alta se consultan los posibles duplicados (P02: «Usar el existente», «Reactivar» o «Crear otro»; homónimos válidos, sin fusión). Desactivar / reactivar con row_version y sin borrado. VERSION_DESFASADA → recarga y aviso, sin reintento automático; INDETERMINADO → recarga; el alta reutiliza su UUID.
 // Versión: 0.1.0 (F05-03/F05-04 J2 §2.5)
 // Versión: 0.2.0 (F05-05 K3 §2.5; F05 §49.4 A5/A8, D-SRCH-10/12; lámina SRCH-ACT-AFI C1–C3): en la ficha del tercero (la misma vista de edición, para no cambiar la navegación de F05-04), «Uso en Gapto · N registros · último <fecha>» con «Ver sus registros ›» (Actividad filtrada por el tercero, todo el historial); «Categorías habituales» (afinidades guardadas: «Quitar» con confirmación C3, o «No disponible» si la categoría está desactivada; «+ Añadir categoría» con el selector jerárquico y búsqueda, solo activas, la ya habitual marcada «Ya es habitual»); «Según tu historial» con «Guardar» («N de tus M gastos en <tercero>»). Cada alta o retirada es una escritura independiente con su UUID; los errores se muestran y se recarga, sin reintento automático.
+// Versión: 0.3.0 (F05-06 M3 §B1; lámina REP v0.2 E5, P-REP-03): en la ficha de una persona, encima de «Ver sus registros», «Pendiente con <persona> · Te debe X · Le debes Y ›» (GET /v1/terceros/{id}/pendiente, solo si la raíz pasa `onPendienteCon`); solo aparece si hay algo pendiente. Con un saldo desconocido dice «Sin determinar», nunca 0,00 €.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -21,6 +22,7 @@ import { BotonSecundario, CargaArbol, SelectorCategorias } from '../components/S
 import { construirArbol } from '../domain/categoria';
 import { diaMesIso, isoLocal } from '../domain/fechas';
 import { detalleTercero, filtrar, NATURALEZAS } from '../domain/maestros';
+import { hayPendiente, PendienteConPersona, textoSaldo } from '../domain/reparto';
 import { useTema } from '../theme/tema';
 import { espacio, TACTIL_MIN, tipo } from '../theme/tokens';
 
@@ -55,6 +57,8 @@ export function TercerosAjustesScreen(p: {
   onVerRegistros?: (t: { id: string; nombre: string }) => void;
   /** F05-05: al volver de «Registros de», reabre la ficha de este tercero. */
   volverA?: string | null;
+  /** F05-06 M3: «Pendiente con <persona>» (E5). */
+  onPendienteCon?: (t: { terceroId: string; nombre: string }) => void;
 }) {
   const { c } = useTema();
   const inset = useSafeAreaInsets();
@@ -113,6 +117,19 @@ export function TercerosAjustesScreen(p: {
   const idFicha = vista.v === 'EDITAR' ? vista.id : null;
   useEffect(() => {
     if (idFicha) void cargarAfinidades(idFicha);
+  }, [idFicha]);
+  // F05-06 M3 (E5): lo pendiente con la persona de la ficha.
+  const [pendiente, setPendiente] = useState<PendienteConPersona | null>(null);
+  useEffect(() => {
+    setPendiente(null);
+    if (!idFicha || !p.onPendienteCon) return;
+    let vivo = true;
+    void p.cliente.pendienteCon(idFicha).then((r) => {
+      if (vivo && r.tipo === 'OK') setPendiente(r.datos);
+    });
+    return () => {
+      vivo = false;
+    };
   }, [idFicha]);
   // Al volver de «Registros de <tercero>», se reabre su ficha una vez.
   const reabierto = useRef(false);
@@ -260,6 +277,15 @@ export function TercerosAjustesScreen(p: {
               <Text testID="ajter-uso-texto" style={[tipo.body, { color: c.textPrimary }]}>
                 {actual.usos ? `${actual.usos} ${actual.usos === 1 ? 'registro' : 'registros'}${actual.ultimo_uso ? ` · último ${diaMesIso(actual.ultimo_uso)}` : ''}` : 'Sin registros'}
               </Text>
+              {pendiente && pendiente.tercero_id === actual.id && hayPendiente(pendiente) && p.onPendienteCon ? (
+                <Pressable testID="ajter-pendiente" accessibilityRole="link" onPress={() => p.onPendienteCon?.({ terceroId: actual.id, nombre: actual.nombre })}
+                  style={{ minHeight: TACTIL_MIN, justifyContent: 'center' }}>
+                  <Text style={[tipo.body, { color: c.accent }]}>{`Pendiente con ${actual.nombre} ›`}</Text>
+                  <Text testID="ajter-pendiente-texto" style={[tipo.footnote, { color: c.textSecondary }]}>
+                    {`Te debe ${textoSaldo(pendiente.te_debe)} · Le debes ${textoSaldo(pendiente.le_debes)}`}
+                  </Text>
+                </Pressable>
+              ) : null}
               {p.onVerRegistros ? (
                 <Pressable testID="ajter-ver-registros" accessibilityRole="link" onPress={() => p.onVerRegistros?.({ id: actual.id, nombre: actual.nombre })}
                   style={{ minHeight: TACTIL_MIN, justifyContent: 'center' }}>

@@ -8,6 +8,7 @@
 // Versión: 0.3.0 (F05-06 K-7; F05 §51.8, F09 §12.104 B1/B4): la fila y la cabecera del detalle muestran el icono de la categoría (`categoria.icon_key`); transferencia con el icono de intercambio; «Varias» y sin categoría, icono de reserva. Fondo neutro (tinte C3b pendiente). Nada más cambia.
 // Versión: 0.4.0 (F05-06 M2-B §B1; lámina DEV A3, A4, B1, B2; D-DEV-01, 06, 07; P-DEV-03, 04): devolución contextual. El detalle de un gasto que no es devolución ofrece «Registrar devolución» (abre la tarea de devolución, `onRegistrarDevolucion`); el de una compra con devoluciones las lista (tocar abre la devolución) con lo devuelto y el neto derivado; el de una devolución muestra «Devolución de: <compra> ›» (vuelve a la compra), el abono (recibido en <cuenta> o pendiente) y, si está pendiente, «Registrar abono» (hoja B2). La fila de una devolución con el abono pendiente admite el swipe «Cobrado» (en un contenedor que captura el movimiento horizontal, para que el Pressable de la fila no se quede el gesto) y la acción de accesibilidad «Cobrado»; los dos abren la misma hoja con confirmación de cuenta y fecha. `abrir` abre el detalle de un hecho desde fuera (ida y vuelta tras registrar). Tras un abono se recargan la lista y el detalle.
 // Versión: 0.5.0 (F05-06 M2-C; acta M2 iPhone O-1; P-DEV-04): pista visual del swipe «Cobrado». Al arrastrar a la izquierda la fila sigue al dedo (con tope `TOPE_SWIPE`) y deja ver detrás la franja «Confirmar abono»; al superar `UMBRAL_SWIPE` la franja pasa al color de acento. Al soltar, la fila vuelve con animación; por encima del umbral se abre la misma hoja de siempre. La franja es decorativa (oculta a VoiceOver); el toque, el scroll vertical, la acción accesible «Cobrado» y las demás filas no cambian.
+// Versión: 0.6.0 (F05-06 M3 §B1; lámina REP v0.2 E5/E6, P-REP-03/04): el detalle de un gasto que no es devolución lee su reparto (GET /v1/hechos/{id}/reparto, solo si la raíz pasa `onCorregirReparto`) y ofrece «Pendiente con <persona>» por cada parte con deuda y «Corregir reparto» cuando el servidor lo considera corregible; si no lo es, no se ofrece nada que el motor no admita. Ambos se abren fuera de la pantalla (tareas inmersivas de la raíz).
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -44,6 +45,7 @@ import { construirArbol } from '../domain/categoria';
 import { nombreCorto, ofreceRegistrarAbono, ofreceRegistrarDevolucion, TEXTO_NETO, textoDevolucionDe } from '../domain/devolucion';
 import { ayer, ddmmaaaaAIso, diaMesAnioIso, diaMesIso, isoLocal, mesAnioIso, mesDesplazadoIso } from '../domain/fechas';
 import { formatearEur } from '../domain/importe';
+import type { RepartoDeHecho } from '../domain/reparto';
 import { filtrar } from '../domain/maestros';
 import { useTema } from '../theme/tema';
 import { espacio, radio, TACTIL_MIN, tipo } from '../theme/tokens';
@@ -82,6 +84,9 @@ export function ActividadScreen(p: {
   nuevoId?: () => string;
   /** F05-06 M2: abre el detalle de un hecho desde fuera (ida y vuelta tras registrar una devolución). */
   abrir?: { id: string; clave: number } | null;
+  /** F05-06 M3: «Corregir reparto» y «Pendiente con <persona>» desde el detalle de un gasto. */
+  onCorregirReparto?: (hechoId: string) => void;
+  onPendienteCon?: (t: { terceroId: string; nombre: string }) => void;
 }) {
   const { c } = useTema();
   const inset = useSafeAreaInsets();
@@ -101,6 +106,7 @@ export function ActividadScreen(p: {
   const [recuento, setRecuento] = useState<number | null>(null);
   const [arbol, setArbol] = useState<CargaArbol>({ fase: 'CARGANDO' });
   const [opciones, setOpciones] = useState<{ cuenta: Opcion[]; tercero: Opcion[]; contexto: Opcion[] } | null>(null);
+  const [reparto, setReparto] = useState<RepartoDeHecho | null>(null);
   const [detalle, setDetalle] = useState<{ fase: 'CARGANDO' } | { fase: 'ERROR' } | { fase: 'OK'; d: DetalleActividad }>({ fase: 'CARGANDO' });
   const [cargandoMas, setCargandoMas] = useState(false);
   const peticion = useRef(0);
@@ -223,8 +229,13 @@ export function ActividadScreen(p: {
   const abrirDetalle = async (id: string) => {
     setHoja({ h: 'DETALLE', id });
     setDetalle({ fase: 'CARGANDO' });
+    setReparto(null);
     const r = await p.cliente.detalleActividad(id);
     setDetalle(r.tipo === 'OK' ? { fase: 'OK', d: r.datos } : { fase: 'ERROR' });
+    if (r.tipo === 'OK' && p.onCorregirReparto && ofreceRegistrarDevolucion(r.datos)) {
+      const rep = await p.cliente.repartoDeHecho(id);
+      if (rep.tipo === 'OK') setReparto(rep.datos);
+    }
   };
   useEffect(() => {
     if (p.abrir) void abrirDetalle(p.abrir.id);
@@ -506,6 +517,16 @@ export function ActividadScreen(p: {
           {detalle.fase === 'OK' && ofreceRegistrarDevolucion(detalle.d) && p.onRegistrarDevolucion ? (
             <BotonSecundario testID="detalle-registrar-devolucion" titulo="Registrar devolución"
               onPress={() => { const id = detalle.d.id; setHoja(null); p.onRegistrarDevolucion!(id); }} />
+          ) : null}
+          {detalle.fase === 'OK' && reparto && reparto.hecho_id === detalle.d.id && p.onPendienteCon
+            ? reparto.partes.filter((x) => x.posicion && x.tercero_id).map((x) => (
+                <BotonSecundario key={x.atribucion_id} testID={`detalle-pendiente-${x.tercero_id}`} titulo={`Pendiente con ${x.nombre}`}
+                  onPress={() => { setHoja(null); p.onPendienteCon!({ terceroId: x.tercero_id!, nombre: x.nombre }); }} />
+              ))
+            : null}
+          {detalle.fase === 'OK' && reparto && reparto.hecho_id === detalle.d.id && reparto.corregible && p.onCorregirReparto ? (
+            <BotonSecundario testID="detalle-corregir-reparto" titulo="Corregir reparto"
+              onPress={() => { const id = detalle.d.id; setHoja(null); p.onCorregirReparto!(id); }} />
           ) : null}
           {detalle.fase === 'OK' && ofreceRegistrarAbono(detalle.d) && p.nuevoId ? (
             <BotonSecundario testID="detalle-registrar-abono" titulo="Registrar abono" onPress={() => abrirAbono(detalle.d, detalle.d.id)} />

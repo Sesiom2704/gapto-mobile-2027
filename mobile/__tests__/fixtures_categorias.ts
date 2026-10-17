@@ -12,6 +12,7 @@
 // Versión: 0.8.0 (F05-06 M4 F2): el stub incluye las capacidades de cuenta: lista vacía y 0 sin configurar por defecto (el aviso B2 no aparece); detalle, historial, impacto y cambio no esperados (lanzan).
 // Versión: 0.9.0 (F05-06 M2-B): el stub incluye la devolución contextual: contexto, devolución y abono no esperados (lanzan).
 // Versión: 0.7.0 (F05-05 K3): el stub incluye los métodos de F05-05: señales, búsqueda de terceros, afinidades del tercero, Actividad (página vacía) e Inicio (nombre null y Resultado a cero) por defecto; alta y retirada de afinidad y detalle de la Actividad no esperados (lanzan).
+// Versión: 0.10.0 (F05-06 M3 §B2): el stub incluye reparto y posiciones: «Pendiente con» sin posiciones y un reparto no corregible (SIN_REPARTO) por defecto; gasto compartido, cobro, pago, perdón y corrección no esperados (lanzan).
 // ============================================================
 
 import type { ClienteApi, ListaPreferencias, PropuestaRegistro, Respuesta } from '../src/api/cliente';
@@ -119,6 +120,13 @@ export function clienteCategoriasStub(
     contextoDevolucion: noEsperado('contextoDevolucion'),
     registrarDevolucion: noEsperado('registrarDevolucion'),
     registrarAbono: noEsperado('registrarAbono'),
+    registrarGastoCompartido: noEsperado('registrarGastoCompartido'),
+    pendienteCon: jest.fn(async (id: string) => ({ tipo: 'OK', datos: { tercero_id: id, nombre: '', te_debe: null, le_debes: null, neto: null, neto_estado: 'SIN_POSICIONES', posiciones: [] } }) as any),
+    cobrarPosicion: noEsperado('cobrarPosicion'),
+    pagarPosicion: noEsperado('pagarPosicion'),
+    perdonarPosicion: noEsperado('perdonarPosicion'),
+    repartoDeHecho: jest.fn(async (id: string) => ({ tipo: 'OK', datos: { hecho_id: id, row_version: 1, importe: '0.00', estado_atribucion: 'NO_DISPONIBLE', corregible: false, motivo: 'SIN_REPARTO', partes: [] } }) as any),
+    corregirReparto: noEsperado('corregirReparto'),
   };
 }
 
