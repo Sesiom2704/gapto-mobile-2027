@@ -4,6 +4,7 @@
 // Ruta: mobile/__tests__/reparto.test.tsx
 // Descripción: Reparto, pagador real y posiciones (F05-06 M3 §B2; lámina REP v0.2; F05 §57). Dominio puro (partes iguales con el céntimo en la última fila, falta por repartir sin completar solo, lo que falta, payload sellado, deudas previstas, neto «Sin determinar», corrección solo de importes). Pantallas por estado: gasto pagado por otra persona (A1/A2: selector solo de personas E7, «Sí, le debo» / «No» / «No lo sé», revisión en cuatro bloques), cena repartida (B1–B4: «A partes iguales», «¿Te deben su parte?», revisión), reparto incompleto en oscuro (D1), envío (doble toque, INDETERMINADO con la MISMA identidad, rechazo), éxito con «Pendiente con»; «Pendiente con» (C1, C4, D2), cobro (C3), pago sin tercero (E8) y perdón; «Corregir reparto» (E6) con lo excluido atenuado y su motivo, revisión de impacto, motivo obligatorio, rechazos en lenguaje llano e INDETERMINADO sin reintento; detalle de la Actividad y registro («Repartir» / «Otra persona»).
 // Versión: 0.1.0 (F05-06 M3 §B2)
+// v0.1.1 (F05-06 M3 CORR-01, R-M3-05): dos personas con la misma parte; cada «Pendiente con» señala a su persona por el `tercero_id` del servidor, también con las posiciones en otro orden.
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
@@ -257,8 +258,8 @@ describe('A · pagado por otra persona', () => {
 });
 
 // ================================================================== B · cena
-async function cenaHastaReparto(c: ClienteApi, forzar?: 'dark') {
-  envolver(<GastoCompartidoScreen cliente={c} nuevoId={nuevoId} base={BASE_CENA} inicial={{ repartir: true, otraPersona: false }} onVolver={jest.fn()} onCerrar={jest.fn()} />, forzar);
+async function cenaHastaReparto(c: ClienteApi, forzar?: 'dark', onCerrar: jest.Mock = jest.fn()) {
+  envolver(<GastoCompartidoScreen cliente={c} nuevoId={nuevoId} base={BASE_CENA} inicial={{ repartir: true, otraPersona: false }} onVolver={jest.fn()} onCerrar={onCerrar} />, forzar);
   await screen.findByTestId('compartido-reparto');
   for (const nombre of ['Tania', 'Carlos']) {
     fireEvent.press(screen.getByTestId('reparto-anadir'));
@@ -306,6 +307,51 @@ describe('B · cena repartida', () => {
       reparto: { modo: 'REPARTIR', mi_parte: '14.50', partes: [{ tercero_id: 'tania', importe: '15.00', me_debe: 'SI' }, { tercero_id: 'carlos', importe: '15.00', me_debe: 'NO' }] },
     });
     expect(screen.getByTestId('compartido-exito-dinero').props.children).toBe('Movimiento real: −44,50 €');
+  });
+
+  // CORR-01 (R-M3-05): el éxito empareja cada posición por el tercero_id que fija el servidor, nunca por importe.
+  async function cenaPartesIguales(c: ClienteApi, onCerrar: jest.Mock = jest.fn()) {
+    await cenaHastaReparto(c, undefined, onCerrar);
+    fireEvent.changeText(screen.getByTestId('reparto-importe-yo'), '14,50');
+    fireEvent.changeText(screen.getByTestId('reparto-importe-tania'), '15');
+    fireEvent.changeText(screen.getByTestId('reparto-importe-carlos'), '15');
+    fireEvent.press(screen.getByTestId('reparto-listo'));
+    fireEvent.press(await screen.findByTestId('compartido-cuenta-bbva'));
+    fireEvent.press(screen.getByTestId('compartido-revisar'));
+    fireEvent.press(await screen.findByTestId('te-debe-tania-si'));
+    fireEvent.press(screen.getByTestId('te-debe-carlos-si'));
+    fireEvent.press(screen.getByTestId('te-deben-revisar'));
+    await screen.findByTestId('compartido-revision');
+    fireEvent.press(screen.getByTestId('registrar-compartido'));
+    await screen.findByTestId('compartido-exito');
+  }
+
+  test('CORR-01: dos personas con la misma parte; cada «Pendiente con» señala a su persona', async () => {
+    const onCerrar = jest.fn();
+    await cenaPartesIguales(cliente(), onCerrar);
+    expect(screen.getAllByTestId('compartido-ver-pendiente-tania')).toHaveLength(1);
+    expect(screen.getAllByTestId('compartido-ver-pendiente-carlos')).toHaveLength(1);
+    expect(screen.getByText('Pendiente con Tania')).toBeTruthy();
+    expect(screen.getByText('Pendiente con Carlos')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('compartido-ver-pendiente-carlos'));
+    expect(onCerrar).toHaveBeenLastCalledWith(true, { terceroId: 'carlos', nombre: 'Carlos' });
+    fireEvent.press(screen.getByTestId('compartido-ver-pendiente-tania'));
+    expect(onCerrar).toHaveBeenLastCalledWith(true, { terceroId: 'tania', nombre: 'Tania' });
+  });
+
+  test('CORR-01: el enlace sigue al tercero_id del servidor aunque el orden de las posiciones sea otro', async () => {
+    const onCerrar = jest.fn();
+    const registrarGastoCompartido = jest.fn(async (pl: any) => ({ tipo: 'OK', datos: {
+      intencion_id: pl.intencion_id, hecho_id: pl.intencion_id, idempotente: false, importe: pl.importe, moneda: 'EUR', estado_atribucion: 'COMPLETA',
+      tu_parte: pl.reparto.mi_parte, movimiento: `-${pl.importe}`,
+      posiciones: [{ entidad_id: 'pos-c', tipo: 'DERECHO_COBRO', tercero_id: 'carlos', importe: '15.00' },
+        { entidad_id: 'pos-t', tipo: 'DERECHO_COBRO', tercero_id: 'tania', importe: '15.00' }],
+      aviso: '' } }) as any);
+    await cenaPartesIguales(cliente({ registrarGastoCompartido }), onCerrar);
+    fireEvent.press(screen.getByTestId('compartido-ver-pendiente-carlos'));
+    expect(onCerrar).toHaveBeenLastCalledWith(true, { terceroId: 'carlos', nombre: 'Carlos' });
+    fireEvent.press(screen.getByTestId('compartido-ver-pendiente-tania'));
+    expect(onCerrar).toHaveBeenLastCalledWith(true, { terceroId: 'tania', nombre: 'Tania' });
   });
 
   test('D1: en oscuro, reparto incompleto: la parte vacía queda sin indicar y no se completa sola', async () => {

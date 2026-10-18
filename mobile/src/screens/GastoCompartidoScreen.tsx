@@ -4,6 +4,7 @@
 // Ruta: mobile/src/screens/GastoCompartidoScreen.tsx
 // Descripción: Gasto con reparto o pagado por otra persona (F05-06 M3; lámina REP v0.2 A1, A2, B1–B4, D1, E7, E8). Parte del registro, que conserva lo común (importe, fecha, comercio, categoría, presupuesto y nota) y se muestra fijo arriba con «Cambiar» para volver. A1: «Pagado con» admite «Otra persona» (D-REP-01): se pregunta quién pagó y «¿Le debes este dinero a X?» con «Sí, le debo X €» / «No» / «No lo sé» (D-REP-02; solo el «Sí» crea la obligación, INV-04; «No lo sé» no la crea, P-REP-01). B1/B2: «Repartir» abre el reparto por personas con importes (D-REP-03): el total nunca cambia, «Repartido» y «Falta por repartir» a la vista, lo vacío queda sin indicar (PARCIAL, G3) y nunca se completa solo; «A partes iguales» es un botón y el céntimo sobrante va a la última fila (D-REP-04). B3: «¿Te deben su parte?» persona a persona («Sí, me lo debe» / «No, invitado»; D-REP-05). A2/B4: revisión en cuatro bloques (D-REP-06): el gasto y su total, tu parte, el dinero (movimiento real o «No sale dinero de tus cuentas») y quién debe a quién. Se guarda en una sola operación (OP-22). Ciclo de envío del registro: UUID y payload sellados antes de enviar; doble toque ignorado; INDETERMINADO reintenta con la MISMA identidad; un rechazo definitivo libera la edición. Éxito con «Pendiente con <persona>» (P-REP-03).
 // Versión: 0.1.0 (F05-06 M3 §B1)
+// v0.1.1 (F05-06 M3 CORR-01, R-M3-05): en el éxito, cada «Pendiente con <persona>» sale del `tercero_id` que el servidor devuelve en cada posición creada, nunca de emparejar por importe (dos personas con la misma parte señalaban a la misma).
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -179,11 +180,8 @@ export function GastoCompartidoScreen(p: {
         </View>
         <View style={{ gap: espacio.s }}>
           {r.posiciones.map((x) => {
-            const tid = envio.payload.pagado_por.tipo === 'PERSONA' && x.tipo === 'OBLIGACION_PAGO'
-              ? envio.payload.pagado_por.tercero_id
-              : envio.payload.reparto.modo === 'REPARTIR'
-                ? envio.payload.reparto.partes.find((q) => q.me_debe === 'SI' && q.importe === x.importe)?.tercero_id ?? null
-                : null;
+            // CORR-01: la persona es la que fija el servidor para ESTA posición (nunca se deduce del importe).
+            const tid = x.tercero_id;
             if (!tid) return null;
             const nombre = nombreDe(tid);
             return (
