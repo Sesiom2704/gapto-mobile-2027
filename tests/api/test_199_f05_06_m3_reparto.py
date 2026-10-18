@@ -20,6 +20,9 @@
 #       el rechazo exacto de cada caso (b) y REPARTO_CAMBIA_POSICIONES;
 #     - elegibilidad de anulacion (lectura, sin locks).
 # Version: 0.1.0 (F05-06 M3 §A6)
+# Version: 0.2.0 (F05-06 M3 CORR-01, R-M3-05): dos personas con la misma
+#   parte; cada posicion devuelta lleva el tercero que fija el servidor y su
+#   entidad es la del actor de ESE tercero (contrato que empareja el cliente).
 # ============================================================
 
 from __future__ import annotations
@@ -94,6 +97,31 @@ def test_gd3_peluqueria_y_cena_oraculo_fisico_completo(t):
     assert m.huella(owner) == antes  # leer no escribe ni extingue nada
     # Carlos invitado: sin posiciones.
     assert m.pendiente(cli, carlos).json()["neto_estado"] == "SIN_POSICIONES"
+
+
+def test_corr01_partes_iguales_cada_posicion_con_su_tercero(t):
+    """CORR-01 (R-M3-05): Tania y Carlos deben 15,00 cada uno. Cada posicion
+    devuelta lleva SU tercero_id (del lado del servidor) y su entidad es la
+    del actor de ese tercero; «Pendiente con» de cada uno ve solo la suya."""
+    owner, _, cli, cta, _, tania, carlos = t
+    c = m.cuerpo("44.50", pagado_por=m.con_cuenta(cta), fecha=m.FECHA_CENA, nota="Cena a partes iguales",
+                 reparto=m.repartir("14.50", (tania, "15.00", "SI"), (carlos, "15.00", "SI")))
+    r = m.registrar(cli, c)
+    assert r.status_code == 200, r.text
+    devueltas = r.json()["posiciones"]
+    assert sorted((x["tipo"], x["tercero_id"], x["importe"]) for x in devueltas) == sorted(
+        [("DERECHO_COBRO", str(tania), "15.00"), ("DERECHO_COBRO", str(carlos), "15.00")])
+    assert len({x["entidad_id"] for x in devueltas}) == 2
+    hecho = uuid.UUID(c["intencion_id"])
+    contraparte = dict(m.leer(owner, "SELECT p.entidad_id, p.contraparte_actor_id FROM gapto.hecho_entidades v "
+                                     "JOIN gapto.derechos_obligaciones_financieras p ON p.entidad_id = v.entidad_id "
+                                     "WHERE v.hecho_id = %s", (hecho,)))
+    for x in devueltas:
+        assert contraparte[uuid.UUID(x["entidad_id"])] == m.actor_de(owner, uuid.UUID(x["tercero_id"])), x
+    for persona in (tania, carlos):
+        propia = next(x["entidad_id"] for x in devueltas if x["tercero_id"] == str(persona))
+        p = m.pendiente(cli, persona).json()
+        assert [x["entidad_id"] for x in p["posiciones"]] == [propia] and p["te_debe"] == "15.00", p
 
 
 def test_op22_una_sola_llamada_un_hecho_e_idempotente(t):

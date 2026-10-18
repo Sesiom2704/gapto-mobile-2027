@@ -41,7 +41,11 @@
 #     P7/E8     pago de la peluqueria con Efectivo (sin «Lo pagó otra
 #               persona»): movimiento -15; obligacion CERRADA;
 #     P8        perdonar los 15 que quedan: sin movimiento; derecho CERRADO;
-#     P9        «Pendiente con Tania» sin nada pendiente; E5 desaparece.
+#     P9        «Pendiente con Tania» sin nada pendiente; E5 desaparece;
+#     P10       CORR-01 (R-M3-05): cena 30,00 € a partes iguales (10/10/10),
+#               Tania y Carlos «Sí»: en el exito hay UN «Pendiente con» por
+#               persona y el de Carlos lleva a Carlos (te debe 10,00 €). BD:
+#               dos DERECHO_COBRO de 10, uno con Tania y otro con Carlos.
 #   C4 («Sin determinar») exige una posicion con apertura indeterminada (V3):
 #   no se crea desde la UI; lo cubren jest y test_199 (acta: con script).
 #   Capturas 393x852 @3x y manifest JSON con el estado de la BD.
@@ -49,6 +53,7 @@
 #   --web (o --dist), GAPTO_DATABASE_URL (base LOCAL), GAPTO_DEV_OWNER_USER_ID y
 #   GAPTO_DEV_TOKEN (nunca se imprime).
 # Version: 0.1.0 (F05-06 M3 §B3)
+# Version: 0.2.0 (F05-06 M3 CORR-01): P10, partes iguales con dos personas.
 # ============================================================
 
 from __future__ import annotations
@@ -422,9 +427,49 @@ def main() -> None:
         t("ajter-ver-registros").wait_for(timeout=15000)
         page.wait_for_timeout(800)
         comprobar(t("ajter-pendiente").count() == 0, "P9: E5 sigue con nada pendiente")
+
+        # ------------------------------------------------------------ P10 / CORR-01 partes iguales
+        page.goto(a.web)  # vuelta al inicio (la ficha del tercero oculta la barra inferior)
+        t("accion-registrar").wait_for(timeout=30000)
+        comun("30,00", rest, tagli)
+        t("repartir").click()
+        t("compartido-reparto").wait_for(timeout=15000)
+        for persona in (tania, carlos):
+            t("reparto-anadir").click()
+            t(f"persona-{persona}").click()
+            t(f"reparto-fila-{persona}").wait_for()
+        for x in ("yo", tania, carlos):
+            t(f"reparto-importe-{x}").fill("10")
+        comprobar(t("reparto-falta").inner_text() == "0,00 €", "P10: falta por repartir")
+        t("reparto-listo").click()
+        t("modo-repartir-resumen").wait_for()
+        t(f"compartido-cuenta-{tarjeta}").click()
+        t("compartido-revisar").click()
+        t("compartido-te-deben").wait_for()
+        t(f"te-debe-{tania}-si").click()
+        t(f"te-debe-{carlos}-si").click()
+        t("te-deben-revisar").click()
+        t("compartido-revision").wait_for()
+        r10 = post("/v1/intenciones/gasto-compartido", "registrar-compartido")
+        iguales = r10["hecho_id"]
+        t("compartido-exito").wait_for()
+        res["P10_posiciones_api"] = sorted([p["tercero_id"], p["importe"]] for p in r10["posiciones"])
+        comprobar(res["P10_posiciones_api"] == sorted([[tania, "10.00"], [carlos, "10.00"]]), f"P10: {r10['posiciones']}")
+        comprobar(t(f"compartido-ver-pendiente-{tania}").count() == 1, "P10: enlaces a Tania")
+        comprobar(t(f"compartido-ver-pendiente-{carlos}").count() == 1, "P10: sin enlace a Carlos")
+        res["P10_exito"] = page.locator('[data-testid="compartido-exito"]:visible').inner_text()
+        shot("P10_CORR01_exito_partes_iguales")
+        res["P10_bd"] = oraculo(dsn, owner, iguales)
+        comprobar([p[:4] for p in res["P10_bd"]["posiciones"]] == [["DERECHO_COBRO", "Carlos", "ACTIVA", "10.0000"],
+                                                                    ["DERECHO_COBRO", "Tania", "ACTIVA", "10.0000"]], f"P10: {res['P10_bd']}")
+        t(f"compartido-ver-pendiente-{carlos}").click()
+        t("pendiente-lista-te-debe").wait_for(timeout=15000)
+        res["P10_pendiente"] = t("pendiente-con").inner_text()
+        comprobar("Pendiente con Carlos" in texto() and t("pendiente-te-debe").inner_text() == "10,00 €", f"P10: {res['P10_pendiente']}")
+        shot("P10_CORR01_pendiente_con_carlos")
         nav.close()
 
-    res["hechos"] = {"peluqueria": pelu, "cena": cena}
+    res["hechos"] = {"peluqueria": pelu, "cena": cena, "partes_iguales": iguales}
     res["capturas"] = capturas
     res["errores_consola"] = consola
     (salida / f"M3_{run}_manifest.json").write_text(json.dumps(res, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
