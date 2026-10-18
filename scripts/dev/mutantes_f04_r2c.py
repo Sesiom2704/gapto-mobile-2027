@@ -25,6 +25,8 @@
 #        python scripts/dev/mutantes_f04_r2c.py [--solo ID,ID] [--salida fichero]
 #   No ejecutar en paralelo con otro arnes ni con la suite sobre el mismo arbol.
 # Version: 0.1.0 (F04-R2 R2-C P5/P7)
+# Version: 0.2.0 (F04-R2 R2-C COMP, AJ-R2C-CIERRE-02): W12 (sin W7) y W13 (W7
+#   sin reglas de saldo) con sus discriminantes de test_14e.
 # ============================================================
 
 from __future__ import annotations
@@ -247,6 +249,13 @@ MUTANTES = [
      [T + "test_gasto_pagado_con_aportacion"],
      "W1 y W2 ya retiraron todas las aportaciones y conciliaciones releidas bajo la raiz: la guarda es "
      "defensa en profundidad de I-03P-1; W01 y W02 matan su omision"),
+    ("W12", "W7 omitido: sin integridad_posicion.validar sobre el estado final (F04-D053)",
+     [(SVC, "            integridad_posicion.validar(sesion, fotos)                           # W7\n", "")],
+     [T + "test_w7_anular_el_gasto_que_declara_la_posicion_ya_reducida"], None),
+    ("W13", "W7 sin las reglas de saldo B2/B3 (modo OP-09: solo B5/B6)",
+     [(SVC, "            integridad_posicion.validar(sesion, fotos)                           # W7\n",
+       "            integridad_posicion.validar(sesion, fotos, reglas_saldo=False)       # W7\n")],
+     [T + "test_w7_anular_el_gasto_que_declara_la_posicion_ya_reducida"], None),
     # ---------------------------------------------------------------- orden de L y relectura
     ("L01", "orden de L: L5 (reglas/previsiones) antes que la raiz L3/L4",
      [(SVC, "            posiciones = integridad_posicion.adquirir_raiz(sesion, owner, hechos=[hecho_id])  # L3 + L4\n"

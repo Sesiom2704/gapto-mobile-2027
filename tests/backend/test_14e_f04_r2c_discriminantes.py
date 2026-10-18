@@ -26,6 +26,10 @@
 #     Refactor de OP-03 (§2.3.2 bis): impacto_correccion_ancla =
 #       aplicar(adquirir), sin cambio (sus suites no cambian expectativas).
 # Version: 0.1.0 (F04-R2 R2-C)
+# Version: 0.2.0 (F04-R2 R2-C COMP, AJ-R2C-CIERRE-02): W7 (integridad de
+#   posiciones, F04-D053) con su discriminante: gasto pagado con un
+#   DERECHO_COBRO declarado y un cobro posterior -> B2/B3 (SALDO_NEGATIVO) y
+#   B5 (POSICION_CERRADA); sin reduccion la anulacion pasa.
 # ============================================================
 
 from __future__ import annotations
@@ -661,3 +665,67 @@ def test_orden_de_fases_l_y_w(op22, op03p, servicio_previsiones, contexto, admin
     anular(op03p, contexto, admin, g.hecho)
     compacto = [e for i, e in enumerate(orden) if i == 0 or orden[i - 1] != e]
     assert compacto == ["L3", "L5", "L6", "W2", "W4", "W5", "W6"], orden
+
+
+# ==================================================================
+# W7 · integridad de posiciones (F04-D053; AJ-R2C-CIERRE-02)
+# ==================================================================
+def _gasto_con_derecho(op22, contexto, cuenta, contraparte):
+    """GASTO 100 pagado con la cuenta que declara un DERECHO_COBRO de 50 (OP-22)."""
+    from app.core.modelos_compuesto import DatosHechoCompuesto
+    from f08_motor import efecto as efecto_f08
+    from test_140_f04_r3_op22 import alta as alta_op22
+    from test_140_f04_r3_op22 import hecho as hecho_op22
+    from test_140_f04_r3_op22 import pago as pago_op22
+
+    h = hecho_op22()
+    a = alta_op22(h.hecho_id, contraparte, importe="50.0000")
+    op22.registrar_hecho_compuesto(nuevo(contexto), DatosHechoCompuesto(
+        hecho=h, efectos=[efecto_f08("GASTO", D("100.0000"))], posiciones=[a],
+        pagos=[pago_op22(h.hecho_id, cuenta, "-100.0000")]))
+    return h.hecho_id, a.entidad_id
+
+
+def _cobrar(servicio_posiciones, contexto, admin, entidad_id, importe, cuenta, *, cerrar=False):
+    from app.core.modelos_posicion import DatosCierre, DatosReembolso
+    from test_109_op12_posiciones import COBRO, delta, tesoreria_nueva
+
+    fecha = F("2027-06-10")
+    extra = {"cierre": DatosCierre(motivo_cierre="LIQUIDADA", fecha_cierre=fecha)} if cerrar else {}
+    version = _todas(admin, "SELECT row_version FROM gapto.entidades WHERE id = %s", (entidad_id,))[0][0]
+    servicio_posiciones.reembolsar(nuevo(contexto), entidad_id=entidad_id, entidad_row_version_esperada=version,
+                                   datos=DatosReembolso(delta=delta(importe, causa=COBRO, fecha_hecho=fecha, **extra),
+                                                        tesoreria=tesoreria_nueva(cuenta)))
+
+
+def _saldo_posicion(servicio_posiciones, contexto, entidad_id):
+    return servicio_posiciones.saldo(contexto, entidad_id).saldo.importe
+
+
+@pytest.mark.parametrize("cobro, cerrar, motivo", [
+    ("30.0000", False, "SALDO_NEGATIVO"),    # B2/B3: el +50 deja de contar -> -30
+    ("50.0000", True, "POSICION_CERRADA"),   # B5: la posicion cerrada no cambia
+])
+def test_w7_anular_el_gasto_que_declara_la_posicion_ya_reducida(op22, op03p, servicio_posiciones, contexto, admin,
+                                                                cuenta, contraparte, cobro, cerrar, motivo):
+    hecho, entidad = _gasto_con_derecho(op22, contexto, cuenta, contraparte)
+    _cobrar(servicio_posiciones, contexto, admin, entidad, cobro, cuenta, cerrar=cerrar)
+    saldo_antes = _saldo_posicion(servicio_posiciones, contexto, entidad)
+    antes = foto(admin, hecho, [cuenta])
+    ctx = nuevo(contexto)
+    with pytest.raises(ErrorMotor) as excinfo:
+        anular(op03p, contexto, admin, hecho, ctx=ctx)
+    assert excinfo.value.codigo is CodigoError.INTEGRIDAD_POSICION_VIOLADA, excinfo.value
+    assert excinfo.value.contexto_extra.get("motivo") == motivo, excinfo.value.contexto_extra
+    assert foto(admin, hecho, [cuenta]) == antes
+    assert _saldo_posicion(servicio_posiciones, contexto, entidad) == saldo_antes
+    assert auditorias(admin, ctx.request_id) == []
+
+
+def test_w7_sin_reduccion_la_anulacion_pasa(op22, op03p, servicio_posiciones, contexto, admin, cuenta, contraparte):
+    """Control: sin cobros el saldo pasa de 50 a 0 (nunca negativo) y W7 no rechaza."""
+    hecho, entidad = _gasto_con_derecho(op22, contexto, cuenta, contraparte)
+    assert _saldo_posicion(servicio_posiciones, contexto, entidad) == D("50.0000")
+    anular(op03p, contexto, admin, hecho)
+    assert _todas(admin, "SELECT estado FROM gapto.hechos_financieros WHERE id = %s", (hecho,)) == [("ANULADO",)]
+    assert _saldo_posicion(servicio_posiciones, contexto, entidad) == D("0")
