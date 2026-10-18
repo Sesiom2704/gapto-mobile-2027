@@ -31,6 +31,15 @@
 #   sigue siendo ABIERTA: no hay estado PARCIAL persistido. Y el primer hecho
 #   ACTIVO congela la expectativa poniendo `recalculo_automatico=false`, de
 #   modo que una version posterior de la regla ya no reescribe ese importe.
+# Version: 0.8.0
+#   0.8.0 (F04-R2 R2-C; contrato F04-R2 v0.9 §2.3.2 bis, AJ-R2C-CONTRATO-02):
+#   la propagacion F04-D022 se separa, SIN cambio semantico, en
+#   `adquirir_impacto_ancla` (calcular el conjunto sin lock, adquirir reglas FU
+#   -> previsiones por UUID y revalidar; si cambio, ConjuntoCambiado) y
+#   `aplicar_impacto_ancla` (procesar en el orden cronologico de siempre sobre
+#   lo ya bloqueado, sin adquirir nada nuevo). `impacto_correccion_ancla` =
+#   aplicar(adquirir): OP-02, OP-03, OP-21P y OP-21T no cambian. OP-03P adquiere
+#   en el nivel 5 (antes de los movimientos) y aplica en W6.
 # Version: 0.7.0
 #   0.7.0 (F04-R2 R2-B; contrato F04-R2 v0.8 §6.1 niveles 5 y 6, §6.6):
 #   `conjunto_impacto_correccion_ancla` expone, SIN lock, las reglas y los
@@ -121,6 +130,7 @@ import datetime as dt
 import decimal
 import re
 import uuid
+from dataclasses import dataclass
 from typing import Any, Sequence
 
 from app.core.contexto import ContextoOperacion
@@ -2062,8 +2072,45 @@ def conjunto_impacto_correccion_ancla(
     return reglas, sucesores
 
 
+@dataclass(frozen=True, slots=True)
+class PlanImpactoAncla:
+    """Conjunto de la propagacion de `hecho_id` YA bloqueado y revalidado
+    (reglas FU -> previsiones por UUID). Solo `aplicar_impacto_ancla` lo usa."""
+
+    hecho_id: uuid.UUID
+    filas: tuple[dict[str, Any], ...]
+    reglas: tuple[uuid.UUID, ...]
+    sucesores: tuple[uuid.UUID, ...]
+
+
+def adquirir_impacto_ancla(sesion: SesionMotor, hecho_id: uuid.UUID) -> PlanImpactoAncla:
+    """F04-R1 G-R1-D / F04-R2 §2.3.2 bis nivel 5: calcula el conjunto sin
+    lock, adquiere reglas FU y previsiones por UUID y lo relee; si cambio,
+    ConjuntoCambiado (reintento completo). No escribe nada."""
+    filas, reglas, sucesores = _conjunto_de_impacto(sesion, hecho_id)
+    _bloquear_reglas(sesion, reglas)
+    for sucesor_id in sucesores:
+        repo_prev.bloquear_prevision(sesion, sucesor_id)
+    releido = _conjunto_de_impacto(sesion, hecho_id)
+    if (
+        [f["prevision_id"] for f in releido[0]] != [f["prevision_id"] for f in filas]
+        or releido[1:] != (reglas, sucesores)
+    ):
+        raise ConjuntoCambiado()
+    return PlanImpactoAncla(hecho_id=hecho_id, filas=tuple(releido[0]), reglas=tuple(reglas),
+                            sucesores=tuple(sucesores))
+
+
 def impacto_correccion_ancla(
     sesion: SesionMotor, hecho_id: uuid.UUID
+) -> dict[str, Any]:
+    """Propaga lo que sea seguro y DEVUELVE el impacto derivado: es
+    `aplicar_impacto_ancla(adquirir_impacto_ancla(...))`, sin cambio semantico."""
+    return aplicar_impacto_ancla(sesion, adquirir_impacto_ancla(sesion, hecho_id))
+
+
+def aplicar_impacto_ancla(
+    sesion: SesionMotor, plan: PlanImpactoAncla
 ) -> dict[str, Any]:
     """Propaga lo que sea seguro y DEVUELVE el impacto derivado.
 
@@ -2089,22 +2136,10 @@ def impacto_correccion_ancla(
     propagadas: list[uuid.UUID] = []
     afectadas: list[uuid.UUID] = []
 
-    # F04-R1 G-R1-D: adquisicion (reglas -> previsiones, por UUID) separada del
-    # procesamiento (orden cronologico de siempre). El conjunto se determina sin
-    # lock, se adquiere y se relee; si cambio, reintento completo.
-    filas, reglas, sucesores = _conjunto_de_impacto(sesion, hecho_id)
-    _bloquear_reglas(sesion, reglas)
-    for sucesor_id in sucesores:
-        repo_prev.bloquear_prevision(sesion, sucesor_id)
-    releido = _conjunto_de_impacto(sesion, hecho_id)
-    if (
-        [f["prevision_id"] for f in releido[0]] != [f["prevision_id"] for f in filas]
-        or releido[1:] != (reglas, sucesores)
-    ):
-        raise ConjuntoCambiado()
-    filas = releido[0]
-
-    for fila in filas:
+    # F04-R1 G-R1-D: la adquisicion (reglas -> previsiones, por UUID) ya la hizo
+    # `adquirir_impacto_ancla`; aqui solo se procesa, en el orden cronologico de
+    # siempre, sobre lo bloqueado. No se adquiere ningun lock nuevo.
+    for fila in plan.filas:
         prevision_id = fila["prevision_id"]
         regla_id = fila["regla_id"]
         objetivo = fila["fecha_objetivo"]

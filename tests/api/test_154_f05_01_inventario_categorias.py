@@ -303,7 +303,13 @@
 #     backend/app/api/ejecucion_correccion.py (adaptador interno sin ruta HTTP, de la capa de
 #     capacidad F05) puede referenciarlo. No escribe categoria. El resto de la frontera
 #     sigue con OP-22 como unica puerta.
-# Version: 0.26.0
+# Version 0.27.0 (F04-R2 R2-C; contrato F04-R2 v0.9 §2.3.10, dictamen Q9): I3 aditiva. El
+#     servicio del motor OP-03P (AnulacionTesoreriaService) entra en los vedados de la
+#     frontera y se abre una excepcion NOMINAL y acotada: solo
+#     backend/app/api/ejecucion_anulacion.py (adaptador interno sin ruta HTTP) puede
+#     referenciarlo. Anular no escribe categoria (efectos intactos, I-03P-5). El resto de la
+#     frontera sigue con OP-22 como unica puerta.
+# Version: 0.27.0
 # ============================================================
 
 from __future__ import annotations
@@ -556,7 +562,7 @@ REGISTRO.update({
 SERVICIOS_VEDADOS_EN_FRONTERA = (
     "EfectosService", "SuplementosService", "DevolucionesService", "CorreccionesService",
     "ReglasService", "PrevisionesService", "insertar_efecto_si_no_existe", "actualizar_efecto",
-    "CorreccionTesoreriaService",
+    "CorreccionTesoreriaService", "AnulacionTesoreriaService",
 )
 #: Excepcion I3 ACOTADA (v0.24.0, F05-06 M2-A §A2): fichero -> servicios autorizados. La devolucion
 #: compone OP-13 + OP-05 en una transaccion del adaptador por mandato; la categoria la hereda OP-13.
@@ -564,6 +570,8 @@ EXCEPCIONES_I3: dict[str, frozenset[str]] = {
     "backend/app/api/ejecucion_devolucion.py": frozenset({"DevolucionesService", "EfectosService"}),
     # F04-R2 R2-B (v0.26.0): capacidad de la cuenta nueva (§2.1.5) + OP-21P/OP-21T en una transaccion.
     "backend/app/api/ejecucion_correccion.py": frozenset({"CorreccionTesoreriaService"}),
+    # F04-R2 R2-C (v0.27.0): OP-03P desde el adaptador interno, sin ruta HTTP (§2.3.10).
+    "backend/app/api/ejecucion_anulacion.py": frozenset({"AnulacionTesoreriaService"}),
 }
 
 #: Construcciones con nombre de tabla dinamico (I6): (ruta, funcion) ->

@@ -23,6 +23,7 @@
 #   Las identidades de OP-21P/OP-21T se importan DENTRO de los fixtures para
 #   que, sobre la base, cada test falle por si mismo (no la coleccion entera).
 # Version: 0.1.0 (F04-R2 R2-B)
+# Version: 0.2.0 (F04-R2 R2-C: altas nominales de OP-03P en WRITERS_UPDATE)
 # ============================================================
 
 from __future__ import annotations
@@ -877,6 +878,8 @@ def test_ninguna_ruta_de_r2b_anula_un_movimiento(op22, op21, servicio_transferen
 #: R2-B, justificadas: correccion_tesoreria_repository (OP-21P/OP-21T, correccion
 #: EN SITIO de hecho, movimiento, conciliacion y aportacion; contrato §2.1.3,
 #: §8.3: GRANT de 0130, sin DDL). Las demas son las existentes en bad0b5f.
+#: Altas de R2-C, justificadas: anulacion_tesoreria_repository (OP-03P, W4 y W5:
+#: ACTIVO -> ANULADO de movimiento y hecho; contrato v0.9 §2.3, §8.3: sin DDL ni GRANT).
 WRITERS_UPDATE = {
     ("backend/app/repositories/hechos_repository.py", "hechos_financieros"),
     ("backend/app/repositories/tesoreria_repository.py", "movimientos_tesoreria"),
@@ -885,6 +888,8 @@ WRITERS_UPDATE = {
     ("backend/app/repositories/correccion_tesoreria_repository.py", "movimientos_tesoreria"),
     ("backend/app/repositories/correccion_tesoreria_repository.py", "hecho_movimientos_tesoreria"),
     ("backend/app/repositories/correccion_tesoreria_repository.py", "hecho_aportaciones_pago"),
+    ("backend/app/repositories/anulacion_tesoreria_repository.py", "hechos_financieros"),
+    ("backend/app/repositories/anulacion_tesoreria_repository.py", "movimientos_tesoreria"),
 }
 
 
