@@ -27,6 +27,9 @@
 #   Oraculos comunes: nadie colgado, 0 reintentos 40P01 y 0 deadlocks nuevos;
 #   nunca un 23503 ni un P0001 sin traducir.
 # Version: 0.1.0 (F04-R2 R2-C)
+# Version: 0.2.0 (MANT DEU-F04-VINCULO-ANULADO): par 5 A-primero con
+#   corregir_vinculo: tras OP-03P la correccion de importe se RECHAZA
+#   (HECHO_DEL_VINCULO_ANULADO) y el vinculo no cambia (antes entraba: R-R2C-01).
 # ============================================================
 
 from __future__ import annotations
@@ -294,9 +297,10 @@ def test_5_op03p_frente_a_op17_y_corregir_vinculo(dsn, op22, op03p, servicio_pre
     asignados = _todas(admin, "SELECT importe_asignado FROM gapto.prevision_hechos WHERE hecho_id = %s", (g.hecho,))
     if orden == "A-primero" and ruta == "OP-17":  # la realidad ya no esta ACTIVA (serial OP-03P -> OP-17)
         assert traza[ruta] != OK and asignados == [], traza
-    elif orden == "A-primero":  # serial OP-03P -> corregir_vinculo: espera el lock del hecho y corrige un
-        # vinculo sobre un hecho ANULADO (AMB-009; corregir_vinculo no mira el estado del hecho, lectura existente)
-        assert traza["segundo_bloqueado"] and traza[ruta] == OK and asignados == [(D("45.0000"),)], traza
+    elif orden == "A-primero":  # serial OP-03P -> corregir_vinculo: espera el lock del hecho, relee el hecho
+        # ANULADO y rechaza (MANT DEU-F04-VINCULO-ANULADO); el vinculo queda como estaba (AMB-009)
+        assert traza["segundo_bloqueado"] and traza[ruta] == CodigoError.OPERACION_NO_PERMITIDA_EN_ESTADO.value, traza
+        assert asignados == [(D("40.0000"),)], traza
     else:  # serial ruta -> OP-03P: el vinculo queda sobre un hecho ANULADO (AMB-009), sin perderse
         assert traza[ruta] == OK and asignados in ([(D("45.0000"),)], [(D("40.0000"),)]), traza
 

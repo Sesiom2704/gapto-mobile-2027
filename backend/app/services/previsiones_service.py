@@ -31,6 +31,15 @@
 #   sigue siendo ABIERTA: no hay estado PARCIAL persistido. Y el primer hecho
 #   ACTIVO congela la expectativa poniendo `recalculo_automatico=false`, de
 #   modo que una version posterior de la regla ya no reescribe ese importe.
+# Version: 0.9.0
+#   0.9.0 (MANT DEU-F04-VINCULO-ANULADO, R-R2C-01; dictamen 2026-10-18 Q8):
+#   `corregir_vinculo` no corrige el importe de un vinculo que sigue en un hecho
+#   ANULADO. Bajo el lock del hecho que ya toma la ruta (hechos por UUID ->
+#   reglas -> prevision; el orden global no cambia), si la correccion cambia el
+#   importe SIN reasignar el hecho y el hecho actual no esta ACTIVO ->
+#   OPERACION_NO_PERMITIDA_EN_ESTADO (motivo HECHO_DEL_VINCULO_ANULADO).
+#   Reasignar el vinculo al hecho correcto (AMB-009 / F04-D021, test_113) o a
+#   otra prevision (preparacion C1 de F04-R1, test_139) sigue admitido.
 # Version: 0.8.0
 #   0.8.0 (F04-R2 R2-C; contrato F04-R2 v0.9 §2.3.2 bis, AJ-R2C-CONTRATO-02):
 #   la propagacion F04-D022 se separa, SIN cambio semantico, en
@@ -1032,6 +1041,18 @@ class PrevisionesService:
             afectadas = sorted({origen_id, destino_id}, key=str)
             hechos = {vinculo["hecho_id"], nuevo_hecho_id or vinculo["hecho_id"]}
             repo_rel.bloquear_hechos(sesion, sorted(hechos, key=str))
+            # MANT DEU-F04-VINCULO-ANULADO: bajo el lock del hecho, el importe de
+            # un vinculo que SIGUE en un hecho ANULADO no se corrige. Reasignarlo
+            # al hecho correcto (AMB-009, F04-D021; el nuevo se exige ACTIVO mas
+            # abajo) o a otra prevision (F04-R1 C1) sigue admitido.
+            if nuevo_importe is not None and nuevo_hecho_id is None:
+                estado_actual = repo_hechos.leer_estado(sesion, vinculo["hecho_id"])
+                if estado_actual is not None and estado_actual[1] != "ACTIVO":
+                    raise ErrorMotor(
+                        CodigoError.OPERACION_NO_PERMITIDA_EN_ESTADO,
+                        "El vinculo es de un hecho anulado: su realidad no se corrige.",
+                        contexto_extra={"motivo": "HECHO_DEL_VINCULO_ANULADO"},
+                    )
             reglas = sorted(
                 {r for r in (_regla_de(sesion, p) for p in afectadas) if r is not None},
                 key=str,
