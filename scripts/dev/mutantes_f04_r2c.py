@@ -27,6 +27,10 @@
 # Version: 0.1.0 (F04-R2 R2-C P5/P7)
 # Version: 0.2.0 (F04-R2 R2-C COMP, AJ-R2C-CIERRE-02): W12 (sin W7) y W13 (W7
 #   sin reglas de saldo) con sus discriminantes de test_14e.
+# Version: 0.3.0 (F04-R2 RECIERRE COMP, HUECO-02, §10.4): un mutante por punto de
+#   escritura de auditoria de OP-03P que quita SOLO esa llamada y deja la
+#   escritura: W14a/W14b/W14c (ELIMINAR de W1/W2/W3) y W15a/W15b (ANULAR con
+#   fotos de W4/W5), discriminados por test_14i y comprobar_feliz de test_14e.
 # ============================================================
 
 from __future__ import annotations
@@ -43,6 +47,7 @@ JOURNAL = RAIZ / ".mutantes_f04_r2c.journal.json"
 SVC = "backend/app/services/anulacion_tesoreria_service.py"
 REPO = "backend/app/repositories/anulacion_tesoreria_repository.py"
 T = "tests/backend/test_14e_f04_r2c_discriminantes.py::"
+T14I = "tests/backend/test_14i_f04_r2_recierre_comp.py::"
 C = "tests/backend/test_14f_f04_r2c_concurrencia_serial.py"
 ORDEN = T + "test_orden_de_fases_l_y_w"
 ATOM = T + "test_atomicidad_fallos_inyectados"
@@ -256,6 +261,34 @@ MUTANTES = [
      [(SVC, "            integridad_posicion.validar(sesion, fotos)                           # W7\n",
        "            integridad_posicion.validar(sesion, fotos, reglas_saldo=False)       # W7\n")],
      [T + "test_w7_anular_el_gasto_que_declara_la_posicion_ya_reducida"], None),
+    # ---------------------------------------------------------------- §10.4 auditoria por fila (HUECO-02)
+    ("W14a", "W1 escribe pero sin su auditoria ELIMINAR (aportacion)",
+     [(SVC, "                auditoria.registrar(sesion, tabla=repo.TABLA_APORTACIONES, registro_id=aportacion_id,\n"
+            "                                    accion=repo.ACCION_ELIMINAR, datos_antes_json=foto, motivo=motivo)\n",
+       "                pass  # MUTANTE: sin auditoria\n")],
+     [T + "test_gasto_pagado_con_aportacion"], None),
+    ("W14b", "W2 escribe pero sin su auditoria ELIMINAR (conciliacion)",
+     [(SVC, "                auditoria.registrar(sesion, tabla=repo.TABLA_CONCILIACIONES, registro_id=conciliacion_id,\n"
+            "                                    accion=repo.ACCION_ELIMINAR, datos_antes_json=foto, motivo=motivo)\n",
+       "                pass  # MUTANTE: sin auditoria\n")],
+     [T14I + "test_auditoria_por_fila_de_op03p_en_una_transferencia"], None),
+    ("W14c", "W3 escribe pero sin su auditoria ELIMINAR (fila de transferencias)",
+     [(SVC, "                auditoria.registrar(sesion, tabla=repo.TABLA_TRANSFERENCIAS, registro_id=transferencia_id,\n"
+            "                                    accion=repo.ACCION_ELIMINAR, datos_antes_json=foto, motivo=motivo)\n",
+       "                pass  # MUTANTE: sin auditoria\n")],
+     [T14I + "test_auditoria_por_fila_de_op03p_en_una_transferencia"], None),
+    ("W15a", "W4 anula pero sin su auditoria ANULAR con fotos (movimientos)",
+     [(SVC, "                auditoria.registrar(sesion, tabla=repo.TABLA_MOVIMIENTOS, registro_id=movimiento[\"id\"],\n"
+            "                                    accion=auditoria.ACCION_ANULAR, datos_antes_json=resultado[1],\n"
+            "                                    datos_despues_json=resultado[2], motivo=motivo)\n",
+       "                pass  # MUTANTE: sin auditoria\n")],
+     [T14I + "test_auditoria_por_fila_de_op03p_en_una_transferencia"], None),
+    ("W15b", "W5 anula pero sin su auditoria ANULAR con fotos (hecho)",
+     [(SVC, "            auditoria.registrar(sesion, tabla=repo.TABLA_HECHOS, registro_id=hecho_id,\n"
+            "                                accion=auditoria.ACCION_ANULAR, datos_antes_json=resultado[1],\n"
+            "                                datos_despues_json=resultado[2], motivo=motivo)\n",
+       "            pass  # MUTANTE: sin auditoria\n")],
+     [T14I + "test_auditoria_por_fila_de_op03p_en_una_transferencia"], None),
     # ---------------------------------------------------------------- orden de L y relectura
     ("L01", "orden de L: L5 (reglas/previsiones) antes que la raiz L3/L4",
      [(SVC, "            posiciones = integridad_posicion.adquirir_raiz(sesion, owner, hechos=[hecho_id])  # L3 + L4\n"
