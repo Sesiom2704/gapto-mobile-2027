@@ -189,6 +189,22 @@
 #          con whitelist; REPARTO_CAMBIA_POSICIONES con su motivo)
 #     GET  /v1/hechos/{hecho_id}/anulacion        elegibilidad de OP-03 (iii)
 # Version: 0.24.0
+#   v0.25.0 (F05-06 M5 §A5; F05 §59 F05-D044 decision 14; D-M5-15; laminas
+#   PREV v0.2 y HOME-01 v0.4): confirmacion de previsiones
+#   (previsiones/lecturas.py y ejecucion_prevision.py):
+#     GET  /v1/inicio/previsiones                 recuento comun, dos primeras
+#          de «Requiere atencion» y tres proximos (sin importes sumados)
+#     GET  /v1/previsiones/pendientes             lista «Pendientes» con «Por
+#          pagar» y «Por cobrar» separados
+#     GET  /v1/previsiones/{id}                   detalle en cualquier estado
+#     GET  /v1/previsiones/{id}/candidatos        «Ya lo registre» (?ampliado)
+#     POST /v1/previsiones/{id}/vincular          OP-17 suelto
+#     POST /v1/previsiones/{id}/omitir            «No hubo este mes»
+#   y el bloque opcional `prevision` en gasto-pagado, ingreso-cobrado,
+#   transferencia (OP-10 + OP-17, opcion A) y gasto-compartido. Ninguna ruta
+#   crea, cancela, corrige, retira ni recalcula previsiones. Los errores de
+#   prevision de esas rutas usan errores_http.rechazo_prevision.
+# Version: 0.25.0
 # ============================================================
 
 from __future__ import annotations
@@ -334,6 +350,18 @@ from app.api.dto_reparto import (
     ResultadoPosicionHttp,
 )
 from app.api import ejecucion_reparto as rep
+from app.api import ejecucion_prevision as ejp
+from app.api.dto_prevision import (
+    CandidatosPrevision,
+    DetallePrevision,
+    InicioPrevisiones,
+    IntencionOmitir,
+    IntencionVincular,
+    PendientesPrevisiones,
+    ResultadoOmitir,
+    ResultadoVinculo,
+)
+from app.previsiones import lecturas as lect_prev
 from app.actividad import lecturas as lect_act
 from app.afinidades import lecturas as lect_afi
 from app.afinidades import servicio as serv_afi
@@ -350,7 +378,7 @@ from app.contextos import servicio as serv_ctx
 from app.terceros import lecturas as lect_ter
 from app.terceros import servicio as serv_ter
 from app.comun import elegibilidad_cuentas as eleg
-from app.comun.fecha_funcional import Reloj, es_futura, reloj_sistema
+from app.comun.fecha_funcional import Reloj, es_futura, hoy_owner, reloj_sistema
 from app.categorias import servicio as serv_cat
 from app.magnitudes import lecturas as lect_mag
 from app.magnitudes import servicio as serv_mag
@@ -942,13 +970,37 @@ def create_app(
             return JSONResponse({**cuerpo, "mensaje": mensaje}, status_code=status)
         return salida
 
+    # ------------------------------------------------------------ F05-06 M5 errores de prevision
+    def _rechazo_motor_prevision(exc: ErrorMotor, detalle: dict | None = None) -> JSONResponse | None:
+        """Error del motor en una ruta de prevision -> texto propio (o None si no es de prevision)."""
+        if exc.codigo.value not in eh.CODIGOS_PREVISION:
+            return None
+        if exc.codigo is CodigoError.PORCION_DE_REALIDAD_EXCEDIDA:
+            detalle = {**(detalle or {}), "motivo": (exc.contexto_extra or {}).get("motivo")}
+        status, cuerpo = eh.rechazo_prevision(exc.codigo.value, detalle)
+        return JSONResponse(cuerpo, status_code=status)
+
+    def _con_prevision(intencion, ejecutar):
+        """Registro con bloque `prevision`: los errores de OP-17 llevan los textos de M5."""
+        if getattr(intencion, "prevision", None) is None:
+            return ejecutar()
+        try:
+            return ejecutar()
+        except ErrorMotor as exc:
+            respuesta = _rechazo_motor_prevision(exc)
+            if respuesta is None:
+                raise
+            return respuesta
+
     @app.post(
         "/v1/intenciones/gasto-pagado",
         response_model=ResultadoGastoPagado,
         dependencies=[Depends(autorizar)],
     )
     def gasto_pagado(intencion: IntencionGastoPagado) -> dict:
-        salida = registrar_gasto_pagado(unidad, contexto(), intencion, reloj)
+        salida = _con_prevision(intencion, lambda: registrar_gasto_pagado(unidad, contexto(), intencion, reloj))
+        if isinstance(salida, JSONResponse):
+            return salida
         if isinstance(salida, RechazoIntegracion):
             status, cuerpo = eh.rechazo_integracion(salida.codigo, salida.detalle)
             return JSONResponse(cuerpo, status_code=status)
@@ -967,6 +1019,8 @@ def create_app(
         }
 
     def _respuesta_registro(salida, intencion, tipo: str, estado_categorial) -> dict | JSONResponse:
+        if isinstance(salida, JSONResponse):
+            return salida
         if isinstance(salida, RechazoRegistro):
             status, cuerpo = eh.rechazo_integracion(salida.codigo, salida.detalle)
             return JSONResponse(cuerpo, status_code=status)
@@ -979,12 +1033,16 @@ def create_app(
 
     @app.post("/v1/intenciones/ingreso-cobrado", response_model=ResultadoRegistro, dependencies=[Depends(autorizar)])
     def ingreso_cobrado(intencion: IntencionIngresoCobrado):
-        salida = registrar_ingreso_cobrado(unidad, contexto(), intencion, reloj)
+        salida = _con_prevision(intencion, lambda: registrar_ingreso_cobrado(unidad, contexto(), intencion, reloj))
         return _respuesta_registro(salida, intencion, "INGRESO", intencion.categoria.estado)
 
     @app.post("/v1/intenciones/transferencia", response_model=ResultadoRegistro, dependencies=[Depends(autorizar)])
     def transferencia(intencion: IntencionTransferencia):
-        salida = registrar_transferencia(unidad, contexto(), intencion, reloj)
+        if intencion.prevision is not None:  # F05-06 M5 opcion A: OP-10 + OP-17 en una transaccion
+            salida = _con_prevision(intencion, lambda: ejp.registrar_transferencia_prevista(
+                unidad, contexto(), intencion, reloj))
+        else:
+            salida = registrar_transferencia(unidad, contexto(), intencion, reloj)
         return _respuesta_registro(salida, intencion, "TRANSFERENCIA", None)
 
     # ------------------------------------------------------------ F05-06 M2 devolucion contextual
@@ -1043,7 +1101,9 @@ def create_app(
     @app.post("/v1/intenciones/gasto-compartido", response_model=ResultadoGastoCompartidoHttp,
               dependencies=[Depends(autorizar)])
     def gasto_compartido(intencion: IntencionGastoCompartido):
-        salida = rep.registrar_gasto_compartido(unidad, contexto(), intencion, reloj)
+        salida = _con_prevision(intencion, lambda: rep.registrar_gasto_compartido(unidad, contexto(), intencion, reloj))
+        if isinstance(salida, JSONResponse):
+            return salida
         if isinstance(salida, RechazoRegistro):
             status, cuerpo = eh.rechazo_integracion(salida.codigo, salida.detalle)
             return JSONResponse(cuerpo, status_code=status)
@@ -1126,6 +1186,78 @@ def create_app(
             status, cuerpo = eh.rechazo_lectura("HECHO_NO_ENCONTRADO")
             return JSONResponse(cuerpo, status_code=status)
         return salida
+
+    # ------------------------------------------------------------ F05-06 M5 confirmacion de previsiones
+    def _no_encontrada() -> JSONResponse:
+        status, cuerpo = eh.rechazo_prevision("AGREGADO_NO_ENCONTRADO")
+        return JSONResponse(cuerpo, status_code=status)
+
+    def _estado_actual(prevision_id: uuid.UUID) -> dict | None:
+        """Estado releido tras un 409 (D-PREV-14), en una lectura aparte."""
+        d = unidad.ejecutar(contexto(), lambda s: lect_prev.detalle(s, prevision_id, hoy_owner(s, reloj)),
+                            nombre="F05-06 M5 estado tras rechazo")
+        if d is None:
+            return None
+        return {"estado": d["estado"], "estado_derivado": d["estado_derivado"], "row_version": d["row_version"],
+                "con_realidad": d["con_realidad"], "cubierto": d["cubierto"]}
+
+    @app.get("/v1/inicio/previsiones", response_model=InicioPrevisiones, dependencies=[Depends(autorizar)])
+    def inicio_previsiones():
+        salida = unidad.ejecutar(contexto(), lambda s: lect_prev.inicio(s, hoy_owner(s, reloj)),
+                                 nombre="F05-06 M5 inicio_previsiones")
+        return {**salida, "aviso": _AVISO_F05}
+
+    @app.get("/v1/previsiones/pendientes", response_model=PendientesPrevisiones, dependencies=[Depends(autorizar)])
+    def pendientes_previsiones():
+        salida = unidad.ejecutar(contexto(), lambda s: lect_prev.pendientes(s, hoy_owner(s, reloj)),
+                                 nombre="F05-06 M5 pendientes")
+        return {**salida, "aviso": _AVISO_F05}
+
+    @app.get("/v1/previsiones/{prevision_id}", response_model=DetallePrevision, dependencies=[Depends(autorizar)])
+    def detalle_prevision(prevision_id: uuid.UUID):
+        salida = unidad.ejecutar(contexto(), lambda s: lect_prev.detalle(s, prevision_id, hoy_owner(s, reloj)),
+                                 nombre="F05-06 M5 detalle_prevision")
+        return _no_encontrada() if salida is None else {**salida, "aviso": _AVISO_F05}
+
+    @app.get("/v1/previsiones/{prevision_id}/candidatos", response_model=CandidatosPrevision,
+             dependencies=[Depends(autorizar)])
+    def candidatos_prevision(prevision_id: uuid.UUID, ampliado: bool = Query(False)):
+        salida = unidad.ejecutar(contexto(), lambda s: lect_prev.candidatos(s, prevision_id, ampliado=ampliado),
+                                 nombre="F05-06 M5 candidatos")
+        return _no_encontrada() if salida is None else {**salida, "aviso": _AVISO_F05}
+
+    @app.post("/v1/previsiones/{prevision_id}/vincular", response_model=ResultadoVinculo,
+              dependencies=[Depends(autorizar)])
+    def vincular_prevision(prevision_id: uuid.UUID, intencion: IntencionVincular):
+        try:
+            salida = ejp.vincular(unidad, contexto(), prevision_id, intencion)
+        except ErrorMotor as exc:
+            respuesta = _rechazo_motor_prevision(exc)
+            if respuesta is None:
+                raise
+            return respuesta
+        if isinstance(salida, RechazoRegistro):
+            status, cuerpo = eh.rechazo_prevision(salida.codigo, salida.detalle)
+            return JSONResponse(cuerpo, status_code=status)
+        return {"intencion_id": intencion.intencion_id, "prevision_id": prevision_id, "hecho_id": salida.hecho_id,
+                "importe_vinculado": str(salida.importe.quantize(_CENT)), "estado": salida.estado,
+                "row_version": salida.row_version, "idempotente": salida.idempotente, "aviso": _AVISO_F05}
+
+    @app.post("/v1/previsiones/{prevision_id}/omitir", response_model=ResultadoOmitir,
+              dependencies=[Depends(autorizar)])
+    def omitir_prevision(prevision_id: uuid.UUID, intencion: IntencionOmitir):
+        try:
+            salida = ejp.omitir(unidad, contexto(), prevision_id, intencion)
+        except ErrorMotor as exc:
+            detalle = None
+            if exc.codigo in (CodigoError.ESTADO_PREVISION_INCOMPATIBLE, CodigoError.VERSION_DESFASADA):
+                detalle = {"estado_actual": _estado_actual(prevision_id)}
+            respuesta = _rechazo_motor_prevision(exc, detalle)
+            if respuesta is None:
+                raise
+            return respuesta
+        return {"intencion_id": intencion.intencion_id, "prevision_id": prevision_id, "estado": salida.estado,
+                "row_version": salida.row_version, "aviso": _AVISO_F05}
 
     # ------------------------------------------------------------ F05-05 K2 §1.2-§1.4
     def _lectura_con_fecha(nombre_op: str, fecha: dt.date, operacion) -> dict | JSONResponse:

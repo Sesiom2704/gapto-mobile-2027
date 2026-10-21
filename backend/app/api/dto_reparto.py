@@ -16,6 +16,8 @@
 #     importes de atribuciones existentes (AJ-M3-DEC-09).
 #   extra="forbid" en todo: un campo fuera de contrato es 422.
 # Version: 0.1.0 (F05-06 M3 §A2, §A4, §A5)
+# Version: 0.2.0 (F05-06 M5 D-M5-11): bloque OPCIONAL `prevision` en el gasto
+#   compartido (registro desde la prevision con reparto, una sola OP-22).
 # ============================================================
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ from typing import Annotated, Literal, Union
 
 from pydantic import Field, model_validator
 
+from app.api.dto_prevision import BloquePrevision
 from app.api.dto_registro import _ConNota, _Estricto
 from app.api.dto_vs01 import CategoriaSeleccionada, CategoriaVs01
 
@@ -87,6 +90,7 @@ class IntencionGastoCompartido(_ConNota):
     tercero_id: uuid.UUID | None = None  # el comercio («Peluqueria Lola», VENDEDOR)
     pagado_por: Pagador
     reparto: Reparto
+    prevision: BloquePrevision | None = None  # F05-06 M5
 
     @property
     def categoria_id(self) -> uuid.UUID | None:

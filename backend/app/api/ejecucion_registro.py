@@ -49,6 +49,17 @@
 #   ejecucion_gasto_pagado.py, el gasto VS-01. Los demas motivos
 #   (DESHABILITADA, CERRADA, LEDGER_POSTERIOR, NO_ENCONTRADA) siguen en
 #   CUENTA_DESCONOCIDA y MONEDA en MONEDA_INVALIDA.
+# Version: 0.4.0 (F05-06 M5 §A3/§A4; F05 §59 F05-D044 decisiones 2, 3 y 5):
+#   bloque `prevision`. Ingreso: el traductor lo lleva a OP-22
+#   (DatosPrevisionCompuesta); su replay compuesto lo decide OP-22 (igualdad
+#   exacta del agregado, prevision_hechos incluida). Para una intencion nueva
+#   con bloque, el tipo de la prevision debe ser el del registro
+#   (PREVISION_TIPO_DISTINTO, capa F05, sin escritura). La transferencia se
+#   separa en `transferir_bajo_locks` (mismo prologo y mismos locks) para que
+#   ejecucion_prevision.py componga OP-10 + OP-17 en la MISMA transaccion; su
+#   gancho `replay_extra` amplia la guarda de replay propia. La transferencia
+#   sin bloque rechaza ahora el replay de una intencion que se materializo
+#   CON prevision (su vinculo compuesto existe): nunca un exito parcial.
 # ============================================================
 
 from __future__ import annotations
@@ -61,7 +72,7 @@ from typing import Any
 from app.api.captura_magnitudes import validar_magnitudes
 from app.api.dto_registro import IntencionIngresoCobrado, IntencionTransferencia
 from app.api.elegibilidad_categoria import validar_seleccion_categoria
-from app.api.traductor_registro import componer_ingreso, componer_transferencia
+from app.api.traductor_registro import componer_ingreso, componer_transferencia, vinculo_compuesto
 from app.api.traductor_gasto_pagado import leer_actor_self
 from app.comun.elegibilidad_cuentas import CAPACIDAD_POR_OPERACION, MONEDA, SIN_CAPACIDAD, motivo_cuenta
 from app.comun.fecha_funcional import CODIGO_FECHA_FUTURA, Reloj, es_futura, reloj_sistema
@@ -69,6 +80,7 @@ from app.core.contexto import ContextoOperacion
 from app.core.errores import CodigoError, ErrorMotor
 from app.core.unidad_adscrita import UnidadDeTrabajoAdscrita
 from app.core.unidad_trabajo import SesionMotor, UnidadDeTrabajo
+from app.previsiones import lecturas as lect_prev
 from app.repositories import hechos_repository as repo_hechos
 from app.services.compuesto_service import HechosCompuestosService
 from app.services.previsiones_service import impacto_correccion_ancla
@@ -77,6 +89,7 @@ from app.services.transferencias_service import TransferenciasService
 CODIGO_TERCERO_NO_DISPONIBLE = "TERCERO_NO_DISPONIBLE"
 CODIGO_CONTEXTO_NO_DISPONIBLE = "CONTEXTO_NO_DISPONIBLE"
 CODIGO_CUENTA_SIN_CAPACIDAD = "CUENTA_SIN_CAPACIDAD"
+CODIGO_PREVISION_TIPO_DISTINTO = "PREVISION_TIPO_DISTINTO"
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,6 +191,16 @@ def validar_categoria_y_magnitudes(sesion: SesionMotor, categoria_id, tipo: str,
     return validar_magnitudes(sesion, categoria_id, magnitudes, desconocidas)
 
 
+def validar_tipo_prevision(sesion: SesionMotor, bloque, tipo: str) -> str | None:
+    """F05-06 M5: el registro desde la prevision es del tipo de la prevision.
+    Una prevision no visible no se rechaza aqui: OP-17 responde
+    AGREGADO_NO_ENCONTRADO. Solo para intencion nueva (sin escritura previa)."""
+    if bloque is None:
+        return None
+    actual = lect_prev.tipo_de_prevision(sesion, bloque.prevision_id)
+    return CODIGO_PREVISION_TIPO_DISTINTO if actual is not None and actual != tipo else None
+
+
 def _op22(sesion: SesionMotor) -> HechosCompuestosService:
     return HechosCompuestosService(UnidadDeTrabajoAdscrita(sesion), impacto_ancla=impacto_correccion_ancla)
 
@@ -201,6 +224,7 @@ def registrar_ingreso_cobrado(unidad: UnidadDeTrabajo, contexto: ContextoOperaci
                                                intencion.magnitudes_desconocidas)
                 or validar_tercero(sesion, intencion.tercero_id)
                 or validar_contexto(sesion, intencion.contexto_id)
+                or validar_tipo_prevision(sesion, intencion.prevision, "INGRESO")
             )
             if rechazo is not None:
                 return RechazoRegistro(rechazo)
@@ -239,25 +263,42 @@ def _replay_transferencia(sesion: SesionMotor, intencion: IntencionTransferencia
     )
 
 
+def transferir_bajo_locks(sesion: SesionMotor, contexto: ContextoOperacion, intencion: IntencionTransferencia,
+                          reloj: Reloj, replay_extra, validar_extra=None) -> Registrado | RechazoRegistro:
+    """Prologo y OP-10 adscrito, dentro de la transaccion del llamante:
+    cuentas FNKU por id -> identidad -> (intencion nueva) fecha, R1 con FS de la
+    capacidad y `validar_extra` -> OP-10. `replay_extra(sesion)` debe ser True
+    para reconocer el replay, ademas de la guarda propia."""
+    bloquear_cuentas(sesion, intencion.cuenta_origen_id, intencion.cuenta_destino_id)
+    if repo_hechos.leer_estado(sesion, intencion.intencion_id) is not None:
+        if not (_replay_transferencia(sesion, intencion) and replay_extra(sesion)):
+            raise ErrorMotor(CodigoError.IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION,
+                             "Esta transferencia ya existe con otros datos.")
+    else:
+        if es_futura(sesion, intencion.fecha_hecho, reloj):
+            return RechazoRegistro(CODIGO_FECHA_FUTURA)
+        if intencion.cuenta_origen_id == intencion.cuenta_destino_id:
+            raise ErrorMotor(CodigoError.MISMA_CUENTA, "Origen y destino deben ser cuentas distintas.")
+        rechazo_cuenta(sesion, intencion.cuenta_origen_id, "TRANSFERENCIA_ORIGEN", intencion.fecha_hecho)
+        rechazo_cuenta(sesion, intencion.cuenta_destino_id, "TRANSFERENCIA_DESTINO", intencion.fecha_hecho)
+        rechazo = None if validar_extra is None else validar_extra(sesion)
+        if rechazo is not None:
+            return RechazoRegistro(rechazo)
+    r = TransferenciasService(UnidadDeTrabajoAdscrita(sesion)).transferir(
+        contexto, componer_transferencia(intencion))
+    return Registrado(hecho_id=r.hecho_id, idempotente=r.idempotente, estado_atribucion=None)
+
+
 def registrar_transferencia(unidad: UnidadDeTrabajo, contexto: ContextoOperacion,
                             intencion: IntencionTransferencia,
                             reloj: Reloj = reloj_sistema) -> Registrado | RechazoRegistro:
+    vinculo = vinculo_compuesto(intencion.intencion_id)
+
+    def sin_vinculo_compuesto(sesion: SesionMotor) -> bool:
+        return vinculo not in lect_prev.vinculos_del_hecho(sesion, intencion.intencion_id)
+
     def operacion(sesion: SesionMotor) -> Registrado | RechazoRegistro:
-        bloquear_cuentas(sesion, intencion.cuenta_origen_id, intencion.cuenta_destino_id)
-        if repo_hechos.leer_estado(sesion, intencion.intencion_id) is not None:
-            if not _replay_transferencia(sesion, intencion):
-                raise ErrorMotor(CodigoError.IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION,
-                                 "Esta transferencia ya existe con otros datos.")
-        else:
-            if es_futura(sesion, intencion.fecha_hecho, reloj):
-                return RechazoRegistro(CODIGO_FECHA_FUTURA)
-            if intencion.cuenta_origen_id == intencion.cuenta_destino_id:
-                raise ErrorMotor(CodigoError.MISMA_CUENTA, "Origen y destino deben ser cuentas distintas.")
-            rechazo_cuenta(sesion, intencion.cuenta_origen_id, "TRANSFERENCIA_ORIGEN", intencion.fecha_hecho)
-            rechazo_cuenta(sesion, intencion.cuenta_destino_id, "TRANSFERENCIA_DESTINO", intencion.fecha_hecho)
-        r = TransferenciasService(UnidadDeTrabajoAdscrita(sesion)).transferir(
-            contexto, componer_transferencia(intencion))
-        return Registrado(hecho_id=r.hecho_id, idempotente=r.idempotente, estado_atribucion=None)
+        return transferir_bajo_locks(sesion, contexto, intencion, reloj, sin_vinculo_compuesto)
 
     return unidad.ejecutar(contexto, con_rechazo_capacidad(operacion, RechazoRegistro),
                            nombre="F05-04 transferencia (locks + OP-10)")

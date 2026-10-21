@@ -38,10 +38,15 @@
 #   reproduce el mismo agregado (OP-22 idempotente); con otro contenido,
 #   IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION.
 # Version: 0.1.0 (F05-06 M3 §A2, §A4, §A5)
+# Version: 0.2.0 (F05-06 M5 §A6 D-M5-11; F05 §59 F05-D044 decision 10): el gasto
+#   compartido SOLO transporta el bloque opcional `prevision` a la misma OP-22
+#   (vinculo por importe_total, sucesor si marcar_realizada; prevision de tipo
+#   GASTO para una intencion nueva). Sin el bloque, nada cambia.
 # ============================================================
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import decimal
 import uuid
@@ -66,9 +71,10 @@ from app.api.ejecucion_registro import (
     tomar_inversiones,
     validar_categoria_y_magnitudes,
     validar_tercero,
+    validar_tipo_prevision,
 )
 from app.api.traductor_gasto_pagado import id_magnitud_hecho, leer_actor_self
-from app.api.traductor_registro import contexto_hecho
+from app.api.traductor_registro import ESCALA, contexto_hecho, prevision_compuesta
 from app.comun.fecha_funcional import CODIGO_FECHA_FUTURA, Reloj, es_futura, reloj_sistema
 from app.core.contexto import ContextoOperacion
 from app.core.errores import CodigoError, ErrorMotor
@@ -309,10 +315,16 @@ def registrar_gasto_compartido(
                         actores.validar_tercero_persona(sesion, tercero)
                     except actores.RechazoActor as exc:
                         return RechazoRegistro(exc.codigo, {"tercero_id": str(exc.tercero_id)})
+            rechazo = validar_tipo_prevision(sesion, intencion.prevision, "GASTO")  # F05-06 M5
+            if rechazo is not None:
+                return RechazoRegistro(rechazo)
             actores_de = {t: actores.actor_de_tercero(sesion, t) for t in sorted(personas, key=str)}
         # 4. OP-22 adscrito: hecho -> efectos/atribuciones -> participantes ->
         #    posiciones -> pago -> aportaciones -> contexto, todo o nada.
         datos = componer_gasto_compartido(intencion, actor_self, actores_de)
+        if intencion.prevision is not None:  # F05-06 M5: ... -> regla -> prevision (OP-17 al final)
+            datos = dataclasses.replace(datos, prevision=prevision_compuesta(
+                intencion.intencion_id, intencion.prevision, intencion.importe.quantize(ESCALA)))
         op22 = HechosCompuestosService(UnidadDeTrabajoAdscrita(sesion), impacto_ancla=impacto_correccion_ancla)
         resultado = op22.registrar_hecho_compuesto(contexto, datos)
         return GastoCompartidoRegistrado(

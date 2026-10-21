@@ -325,6 +325,21 @@
 #     MANT); se conservan las DOS excepciones nominales de I3 (ejecucion_anulacion para
 #     OP-03P y ejecucion_reparto para OP-21) y todas las prohibiciones previas.
 # Version: 0.28.0
+# Version 0.29.0 (F05-06 M5 §A6; F05 §59 F05-D044 decision 1; AJ-M5-DEC-07): solo las altas
+#     de M5. I1: las lecturas de previsiones (backend/app/previsiones/lecturas.py) leen la
+#     categoria de la prevision y de los efectos candidatos (R). I3: excepcion NOMINAL y
+#     acotada: solo backend/app/api/ejecucion_prevision.py puede referenciar
+#     PrevisionesService, y un invariante AST nuevo (I3-M5) la limita a `vincular_realidad`
+#     y `omitir`: sin alias de importacion (ni del servicio ni del modulo), sin getattr /
+#     setattr / vars / attrgetter / __getattribute__, sin cadenas con nombres de metodos
+#     vedados, sin metodos `_privados` del servicio y sin otros nombres de
+#     previsiones_service; ningun otro fichero de la frontera reexporta el servicio ni el
+#     helper `_previsiones` de ejecucion_prevision. Ningun otro adaptador gana la excepcion
+#     (el conjunto de EXCEPCIONES_I3 queda cerrado). TransferenciasService no esta vedado.
+#     I7 (§B1): mobile/src/domain/prevision.ts sella en el wire del registro la categoria de
+#     la prevision como propuesta VISIBLE «De la previsión» (D-PREV-03; el usuario puede
+#     quitarla con «Sin categoría»; C-a y C07 en servidor). No escribe categorias_financieras.
+# Version: 0.29.0
 # ============================================================
 
 from __future__ import annotations
@@ -559,6 +574,15 @@ REGISTRO.update({
     ("backend/app/actividad/lecturas.py", "_componer"): ("R", "fila de la Actividad", "categoria de los efectos GASTO/INGRESO; varias"),
     ("backend/app/api/app.py", "create_app.actividad"): ("R", "GET /v1/actividad", "parametro de filtro de una lectura"),
 })
+# F05-06 M5 §A2 (alta aditiva): lecturas de previsiones, solo SELECT; la categoria de la
+# prevision se muestra y filtra candidatos; nunca se persiste.
+REGISTRO.update({
+    ("backend/app/previsiones/lecturas.py", "<modulo>"): (
+        "R", "SQL de lecturas de previsiones", "categoria de la prevision y de los efectos candidatos"),
+    ("backend/app/previsiones/lecturas.py", "_fila"): ("R", "fila de prevision", "categoria con ruta de la prevision"),
+    ("backend/app/previsiones/lecturas.py", "candidatos"): (
+        "R", "candidatos de «Ya lo registre»", "misma categoria de la prevision (filtro) y ruta del candidato"),
+})
 
 # F05-06 M2-A (alta aditiva, v0.24.0): devolucion contextual D-194. La categoria del efecto
 # origen se lee y se pasa a OP-13, que la hereda (B en el motor); el adaptador no la elige.
@@ -600,6 +624,8 @@ EXCEPCIONES_I3: dict[str, frozenset[str]] = {
     # F05-06 M3 (v0.28.0, tras el rebase sobre R2-C): «Corregir reparto» = OP-21 con whitelist (solo importes; nunca
     # categoria_id ni tipo_efecto), con la guarda REPARTO_CAMBIA_POSICIONES del motor.
     "backend/app/api/ejecucion_reparto.py": frozenset({"CorreccionesService"}),
+    # F05-06 M5 (v0.29.0): OP-17 suelto, omitir y OP-10 + OP-17; I3-M5 limita los metodos.
+    "backend/app/api/ejecucion_prevision.py": frozenset({"PrevisionesService"}),
 }
 
 #: Construcciones con nombre de tabla dinamico (I6): (ruta, funcion) ->
@@ -1220,6 +1246,12 @@ MENCIONES_CLIENTE.update({
     "mobile/src/screens/PlantillasAjustesScreen.tsx": "Ajustes > Plantillas: muestra la categoria propuesta y su aviso de no disponible (F05-04 J2 §2.5, R)",
     "mobile/src/components/GuardarPlantilla.tsx": "«Guardar como plantilla» del exito: envia la categoria del registro como propuesta de la plantilla (F05-04 J2 §2.4, R)",
     "mobile/src/domain/inicio.ts": "accesos de Inicio: lee la categoria de la plantilla para su icono (F05-04 J3 §2.1, R)",
+})
+# F05-06 M5 §B1 (alta aditiva): registro desde la prevision.
+MENCIONES_CLIENTE.update({
+    "mobile/src/domain/prevision.ts": "registro desde la prevision: sella {estado:'CATEGORIA', categoria_id, magnitudes} con la "
+                                      "categoria de la prevision, propuesta visible «De la previsión» que el usuario puede "
+                                      "quitar (D-PREV-03; A_FRONTERA via OP-22, C-a en servidor)",
 })
 
 
@@ -1851,3 +1883,109 @@ def test_i3_m3_excepcion_acotada_a_la_whitelist_de_importes():
               for c in n.keys if isinstance(c, ast.Constant) and isinstance(c.value, str)}
     assert claves <= {"importe_atribuido", "porcentaje_aplicado", "importe_delta", "motivo"}, claves
     assert "categoria_id" not in claves and "tipo_efecto" not in claves
+
+
+# ------------------------------------------------------------------ I3-M5 (F05-06 M5, AJ-M5-DEC-07)
+EXCEPCION_M5 = "backend/app/api/ejecucion_prevision.py"
+METODOS_M5 = frozenset({"vincular_realidad", "omitir"})
+VEDADOS_M5 = frozenset({"corregir_vinculo", "retirar_vinculo", "cancelar", "corregir_estado_terminal",
+                        "crear_manual", "recalcular_futuras", "generar_calendario", "generar_rodante"})
+INDIRECCIONES = frozenset({"getattr", "setattr", "delattr", "vars", "attrgetter", "methodcaller",
+                           "__getattribute__", "__dict__"})
+PUBLICOS_M5 = frozenset({"vincular", "omitir", "registrar_transferencia_prevista", "Vinculado", "Omitida",
+                         "CODIGO_PORCION_CAMBIADA", "CODIGO_PORCION_EXCEDIDA"})
+
+
+def _metodos_del_servicio() -> tuple[set[str], set[str]]:
+    from app.services.previsiones_service import PrevisionesService
+
+    nombres = {n for n in vars(PrevisionesService) if not n.startswith("__")}
+    return {n for n in nombres if n.startswith("_")}, {n for n in nombres if not n.startswith("_")}
+
+
+def violaciones_i3_m5(texto: str) -> list[str]:
+    """Violaciones del invariante I3-M5 en el fuente de ejecucion_prevision.py."""
+    arbol = ast.parse(texto)
+    privados, publicos = _metodos_del_servicio()
+    vedados = (publicos - METODOS_M5) | VEDADOS_M5 | privados
+    fallos: list[str] = []
+    for n in ast.walk(arbol):
+        if isinstance(n, ast.ImportFrom) and n.module == "app.services.previsiones_service":
+            for a in n.names:
+                if a.name != "PrevisionesService" or a.asname is not None:
+                    fallos.append(f"import {a.name} as {a.asname}")
+        elif isinstance(n, ast.Import):
+            for a in n.names:
+                if a.name.startswith("app.services.previsiones_service"):
+                    fallos.append(f"import de modulo {a.name}")
+        elif isinstance(n, ast.ImportFrom) and n.module == "app.services":
+            if any(a.name == "previsiones_service" for a in n.names):
+                fallos.append("import de modulo app.services.previsiones_service")
+        elif isinstance(n, ast.Attribute) and (n.attr in vedados or n.attr.startswith("generar_")):
+            fallos.append(f"atributo vedado {n.attr}")
+        elif isinstance(n, ast.Name) and n.id in INDIRECCIONES:
+            fallos.append(f"indireccion {n.id}")
+        elif isinstance(n, ast.Attribute) and n.attr in INDIRECCIONES:
+            fallos.append(f"indireccion {n.attr}")
+        elif isinstance(n, ast.Constant) and isinstance(n.value, str) and (
+                n.value in vedados or n.value.startswith("generar_")):
+            fallos.append(f"cadena con metodo vedado {n.value!r}")
+        elif isinstance(n, ast.Assign) and isinstance(n.value, ast.Name) and n.value.id == "PrevisionesService":
+            fallos.append("alias del servicio por asignacion")
+    # Toda llamada sobre el servicio (PrevisionesService(...).x o _previsiones(...).x) es de METODOS_M5.
+    for n in ast.walk(arbol):
+        if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Call):
+            f = n.value.func
+            nombre = f.id if isinstance(f, ast.Name) else getattr(f, "attr", None)
+            if nombre in ("PrevisionesService", "_previsiones") and n.attr not in METODOS_M5:
+                fallos.append(f"metodo no autorizado {n.attr}")
+    return fallos
+
+
+def test_i3_m5_excepcion_limitada_a_vincular_realidad_y_omitir():
+    assert violaciones_i3_m5((RAIZ / EXCEPCION_M5).read_bytes().decode("utf-8")) == []
+    arbol = ast.parse((RAIZ / EXCEPCION_M5).read_bytes().decode("utf-8"))
+    usados = {n.attr for n in ast.walk(arbol) if isinstance(n, ast.Attribute)} & (METODOS_M5 | VEDADOS_M5)
+    assert usados == METODOS_M5  # los dos, y solo los dos
+
+
+@pytest.mark.parametrize("plantado", [
+    "_x = lambda s: _previsiones(s).corregir_vinculo",
+    "from app.services.previsiones_service import PrevisionesService as P",
+    "from app.services.previsiones_service import exigir_porcion",
+    "import app.services.previsiones_service as ps",
+    "from app.services import previsiones_service",
+    "_x = getattr(PrevisionesService, 'vincular_realidad')",
+    "_x = 'corregir_vinculo'",
+    "_x = lambda s: _previsiones(s)._terminar",
+    "_x = lambda s: _previsiones(s).generar_rodante",
+    "_x = lambda s: PrevisionesService(s).estado_de",
+    "_Alias = PrevisionesService",
+    "_x = lambda s: _previsiones(s).cancelar",
+])
+def test_i3_m5_negativo_detecta_alias_indirecciones_y_privados(plantado):
+    texto = (RAIZ / EXCEPCION_M5).read_bytes().decode("utf-8") + "\n" + plantado + "\n"
+    assert violaciones_i3_m5(texto), plantado
+
+
+def test_i3_m5_ningun_otro_adaptador_gana_la_excepcion():
+    assert set(EXCEPCIONES_I3) == {
+        "backend/app/api/ejecucion_devolucion.py", "backend/app/api/ejecucion_correccion.py",
+        "backend/app/api/ejecucion_anulacion.py", "backend/app/api/ejecucion_reparto.py", EXCEPCION_M5}
+    assert [r for r, s in EXCEPCIONES_I3.items() if "PrevisionesService" in s] == [EXCEPCION_M5]
+    assert EXCEPCIONES_I3[EXCEPCION_M5] == frozenset({"PrevisionesService"})
+    assert "PrevisionesService" in SERVICIOS_VEDADOS_EN_FRONTERA
+    assert "TransferenciasService" not in SERVICIOS_VEDADOS_EN_FRONTERA
+
+
+def test_i3_m5_sin_referencias_desde_otros_ficheros_de_la_frontera():
+    for p in _productivos_py():
+        ruta = _rel(p)
+        if not ruta.startswith(FRONTERA) or ruta == EXCEPCION_M5:
+            continue
+        arbol = ast.parse(p.read_bytes().decode("utf-8"))
+        for n in ast.walk(arbol):
+            if isinstance(n, ast.ImportFrom) and n.module == "app.api.ejecucion_prevision":
+                assert {a.name for a in n.names} <= PUBLICOS_M5, (ruta, [a.name for a in n.names])
+            if isinstance(n, ast.Attribute) and n.attr in ({"_previsiones", "PrevisionesService"} | VEDADOS_M5):
+                raise AssertionError(f"{ruta} referencia {n.attr}")

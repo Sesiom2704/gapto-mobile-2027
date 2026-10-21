@@ -84,6 +84,10 @@
 #   payload de VS-01 con concepto sigue siendo valido e igual (regresion
 #   VS-01 y test_150 sin cambios). Un tipo no textual sigue siendo 422.
 # Version: 0.9.0
+#   v0.10.0 (F05-06 M5 §A3; F05 §59 F05-D044): bloque OPCIONAL `prevision`
+#   (dto_prevision.BloquePrevision) en IntencionGastoPagado: registro desde la
+#   prevision por OP-22. Sin el bloque, nada cambia.
+# Version: 0.10.0
 # ============================================================
 
 from __future__ import annotations
@@ -95,6 +99,8 @@ import uuid
 from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator, model_validator
+
+from app.api.dto_prevision import BloquePrevision
 
 AtribucionVs01 = Literal["SOLO_MIO", "SIN_INDICAR"]
 
@@ -209,6 +215,8 @@ class IntencionGastoPagado(_Estricto):
     # opcionales; sin ellos no hay fila de vinculo.
     tercero_id: uuid.UUID | None = None
     contexto_id: uuid.UUID | None = None
+    # F05-06 M5: registro desde la prevision (OP-22 con DatosPrevisionCompuesta).
+    prevision: BloquePrevision | None = None
 
     @property
     def estado_categorial(self) -> str:

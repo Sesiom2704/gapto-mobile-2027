@@ -30,6 +30,12 @@
 #   «gapto.f05.transferencia.» (distintos del de VS-01).
 #   Hecho y vinculos de contexto del gasto: ver contexto_hecho().
 # Version: 0.1.0 (F05-03/F05-04 J2 §1.7)
+# Version: 0.2.0 (F05-06 M5 §A3; F05 §59 F05-D044 decisiones 3 y 5): bloque
+#   `prevision` (registro desde la prevision). `prevision_compuesta` construye
+#   DatosPrevisionCompuesta con vinculo_id = uuid5(intencion_id, "vinculo"),
+#   importe_asignado = importe_total del hecho (nunca min(., esperado)) y
+#   uuid_sucesor = uuid5(intencion_id, "sucesor") siempre que marcar_realizada
+#   sea true. `uuid_sucesor` sirve tambien a OP-17 suelto y a omitir.
 # ============================================================
 
 from __future__ import annotations
@@ -37,6 +43,7 @@ from __future__ import annotations
 import decimal
 import uuid
 
+from app.api.dto_prevision import BloquePrevision
 from app.api.dto_registro import IntencionIngresoCobrado, IntencionTransferencia
 from app.core.modelos import DatosCreacionHecho
 from app.core.modelos_compuesto import (
@@ -45,6 +52,7 @@ from app.core.modelos_compuesto import (
     DatosHechoCompuesto,
     DatosMagnitudHecho,
     DatosPagoCompuesto,
+    DatosPrevisionCompuesta,
     DatosTerceroHecho,
 )
 from app.core.modelos_efectos import DatosAtribucion, DatosEfecto
@@ -62,6 +70,27 @@ ROL_TERCERO = {"GASTO": "VENDEDOR", "INGRESO": "OTRO"}
 
 def _id(intencion: uuid.UUID, prefijo: str, rol: str) -> uuid.UUID:
     return uuid.uuid5(intencion, f"{prefijo}{rol}")
+
+
+def uuid_sucesor(intencion_id: uuid.UUID) -> uuid.UUID:
+    """Cabeza RODANTE siguiente, determinista por intencion (D-M5-05)."""
+    return uuid.uuid5(intencion_id, "sucesor")
+
+
+def vinculo_compuesto(intencion_id: uuid.UUID) -> uuid.UUID:
+    """Vinculo OP-17 del registro desde la prevision (OP-22 / OP-10)."""
+    return uuid.uuid5(intencion_id, "vinculo")
+
+
+def prevision_compuesta(intencion_id: uuid.UUID, bloque: BloquePrevision,
+                        importe_total: decimal.Decimal) -> DatosPrevisionCompuesta:
+    """Bloque `prevision` -> DatosPrevisionCompuesta (D-M5-03/05)."""
+    return DatosPrevisionCompuesta(
+        prevision_id=bloque.prevision_id, prevision_row_version_esperada=bloque.row_version,
+        vinculo_id=vinculo_compuesto(intencion_id), importe_asignado=importe_total.quantize(ESCALA),
+        marcar_realizada=bloque.marcar_realizada,
+        uuid_sucesor=uuid_sucesor(intencion_id) if bloque.marcar_realizada else None,
+    )
 
 
 def contexto_hecho(intencion_id: uuid.UUID, prefijo: str, tipo: str, *, tercero_id, contexto_id,
@@ -117,6 +146,7 @@ def componer_ingreso(intencion: IntencionIngresoCobrado, actor_self_id: uuid.UUI
         aportaciones=[],
         contexto=contexto_hecho(iid, p, "INGRESO", tercero_id=intencion.tercero_id,
                                 contexto_id=intencion.contexto_id, magnitudes=magnitudes),
+        prevision=None if intencion.prevision is None else prevision_compuesta(iid, intencion.prevision, x),
     )
 
 

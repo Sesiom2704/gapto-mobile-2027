@@ -25,6 +25,10 @@
 #   `max_length` (validador `before`), que mide el valor normalizado: una
 #   cadena de espacios larga es ausencia (None), no 422.
 # Version: 0.2.0
+#   v0.3.0 (F05-06 M5 §A3; F05 §59 F05-D044): bloque OPCIONAL `prevision`
+#   (dto_prevision.BloquePrevision) en ingreso y transferencia: registro desde
+#   la prevision. Sin el bloque, nada cambia.
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
@@ -36,6 +40,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.api.dto_prevision import BloquePrevision
 from app.api.dto_vs01 import CategoriaVs01, CategoriaSeleccionada
 
 AtribucionRegistro = Literal["SOLO_MIO", "SIN_INDICAR"]
@@ -77,6 +82,7 @@ class IntencionIngresoCobrado(_ConNota):
     categoria: CategoriaVs01
     tercero_id: uuid.UUID | None = None  # «De», opcional
     contexto_id: uuid.UUID | None = None  # «Mas detalles», opcional
+    prevision: BloquePrevision | None = None  # F05-06 M5: registro desde la prevision
 
     @property
     def categoria_id(self) -> uuid.UUID | None:
@@ -100,6 +106,7 @@ class IntencionTransferencia(_ConNota):
     fecha_hecho: dt.date
     cuenta_origen_id: uuid.UUID
     cuenta_destino_id: uuid.UUID
+    prevision: BloquePrevision | None = None  # F05-06 M5: OP-10 + OP-17 (opcion A)
 
     # La misma cuenta se rechaza con MISMA_CUENTA en la ejecucion (campo «A»).
 

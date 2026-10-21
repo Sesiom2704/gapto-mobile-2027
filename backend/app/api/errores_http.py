@@ -130,6 +130,18 @@
 #   detalle {motivo}), REPARTO_NO_DEMOSTRABLE y HECHO_NO_ENCONTRADO. El resto
 #   de codigos y respuestas no cambia.
 # Version: 0.21.0
+#   v0.22.0 (F05-06 M5 §A5; F05 §59 F05-D044; D-M5-15): confirmacion de
+#   previsiones. _MAPA (aditivo): ESTADO_PREVISION_INCOMPATIBLE y
+#   PREVISION_YA_MATERIALIZADA_POR_ESTA_REALIDAD (409); ninguna ruta previa los
+#   alcanzaba. `rechazo_prevision`: textos llanos PROPIOS de las rutas de
+#   prevision y del registro con bloque `prevision` (PORCION_DE_REALIDAD_
+#   EXCEDIDA en EXCEDE y NO_DETERMINABLE, PORCION_CAMBIADA, PREVISION_YA_
+#   MATERIALIZADA, ESTADO_PREVISION_INCOMPATIBLE, VERSION_DESFASADA «Ha
+#   cambiado; revisa», OPERACION_NO_PERMITIDA_EN_ESTADO (hecho anulado),
+#   IDENTIDAD_REUTILIZADA, PREVISION_TIPO_DISTINTO); el texto global de
+#   VERSION_DESFASADA (M3) no cambia. Rechazo de integracion nuevo:
+#   PREVISION_TIPO_DISTINTO (409, sin escritura).
+# Version: 0.22.0
 # ============================================================
 
 from __future__ import annotations
@@ -202,6 +214,11 @@ _MAPA: dict[CodigoError, tuple[int, str, bool]] = {
     CodigoError.POSICION_CERRADA: (409, "Esto ya está saldado. No se ha guardado nada.", False),
     CodigoError.CUENTA_GAPTO_REQUERIDA: (
         422, "Elige en qué cuenta entró o de qué cuenta salió el dinero (Efectivo incluido).", False),
+    # F05-06 M5 (confirmacion de previsiones; lamina PREV v0.2).
+    CodigoError.ESTADO_PREVISION_INCOMPATIBLE: (
+        409, "Esta previsión ya no está pendiente. No se ha guardado nada.", False),
+    CodigoError.PREVISION_YA_MATERIALIZADA_POR_ESTA_REALIDAD: (
+        409, "Ese registro ya está enlazado a esta previsión. No se ha guardado nada.", False),
     CodigoError.TENANT_AUSENTE: (500, "Error interno de configuración.", False),
     CodigoError.ACTOR_DESCONOCIDO: (500, "Error interno de configuración.", False),
 }
@@ -301,7 +318,45 @@ _RECHAZOS_INTEGRACION: dict[str, tuple[int, str]] = {
              "No se ha guardado nada."),
     "HECHO_NO_ES_DEVOLUCION": (409, "Solo se registra un abono sobre una devolución. No se ha guardado nada."),
     "DEVOLUCION_NO_ACTIVA": (409, "Esta devolución ya no está activa. No se ha guardado nada."),
+    # F05-06 M5: registro desde la prevision.
+    "PREVISION_TIPO_DISTINTO": (
+        409, "Ese registro no es del mismo tipo que la previsión. No se ha guardado nada."),
 }
+
+
+#: F05-06 M5: textos de las rutas de prevision y del registro con bloque `prevision`.
+_RECHAZOS_PREVISION: dict[str, tuple[int, str]] = {
+    "PORCION_DE_REALIDAD_EXCEDIDA": (
+        409, "Ese registro ya está enlazado a otras previsiones por su importe completo. No se ha guardado nada."),
+    "PORCION_CAMBIADA": (
+        409, "Ese registro ha cambiado mientras lo elegías: revisa cuánto se vinculará. No se ha guardado nada."),
+    "PREVISION_YA_MATERIALIZADA_POR_ESTA_REALIDAD": (
+        409, "Ese registro ya está enlazado a esta previsión. No se ha guardado nada."),
+    "ESTADO_PREVISION_INCOMPATIBLE": (409, "Esta previsión ya no está pendiente. No se ha guardado nada."),
+    "VERSION_DESFASADA": (409, "Ha cambiado; revisa. No se ha guardado nada."),
+    "OPERACION_NO_PERMITIDA_EN_ESTADO": (
+        409, "Ese registro está anulado: no puede cubrir una previsión. No se ha guardado nada."),
+    "IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION": (
+        409, "Este registro ya existe con otros datos. No se ha guardado nada nuevo."),
+    "PREVISION_TIPO_DISTINTO": (
+        409, "Ese registro no es del mismo tipo que la previsión. No se ha guardado nada."),
+    "AGREGADO_NO_ENCONTRADO": (404, "No encontrado."),
+}
+_PORCION_NO_DETERMINABLE = ("El importe de ese registro no se puede comparar con lo ya enlazado: "
+                            "no se puede enlazar así. No se ha guardado nada.")
+CODIGOS_PREVISION = frozenset(_RECHAZOS_PREVISION)
+
+
+def rechazo_prevision(codigo: str, detalle: dict | None = None) -> tuple[int, dict]:
+    """F05-06 M5: rechazo de una ruta de prevision (motor o capa F05), con su
+    detalle (motivo de la porcion, porcion releida o estado actual)."""
+    status, mensaje = _RECHAZOS_PREVISION[codigo]
+    if codigo == "PORCION_DE_REALIDAD_EXCEDIDA" and (detalle or {}).get("motivo") == "NO_DETERMINABLE":
+        mensaje = _PORCION_NO_DETERMINABLE
+    cuerpo = {"codigo": codigo, "mensaje": mensaje, "reintentable": False}
+    if detalle:
+        cuerpo["detalle"] = dict(detalle)
+    return status, cuerpo
 
 
 #: CUENTA_SIN_CAPACIDAD (B3): operacion -> (lo que la cuenta ya no puede hacer, lo que no se ha guardado).

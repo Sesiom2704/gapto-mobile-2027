@@ -104,16 +104,25 @@
 #   ejecucion_registro.py (CuentaSinCapacidad + con_rechazo_capacidad).
 #   MONEDA y los demas motivos no cambian.
 # Version: 0.9.0
+#   v0.10.0 (F05-06 M5 §A3; F05 §59 F05-D044): SOLO transporta el bloque
+#   `prevision` a OP-22 (traductor_registro.prevision_compuesta: vinculo
+#   uuid5(intencion, "vinculo"), importe_total, sucesor si marcar_realizada) y,
+#   para una intencion NUEVA, exige que la prevision sea de tipo GASTO
+#   (PREVISION_TIPO_DISTINTO, sin escritura). El replay compuesto lo decide
+#   OP-22 por igualdad exacta del agregado (prevision_hechos incluida).
+# Version: 0.10.0
 # ============================================================
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 
 from app.api.captura_magnitudes import validar_magnitudes
 from app.api.dto_vs01 import IntencionGastoPagado
 from app.api.elegibilidad_categoria import validar_seleccion_categoria
-from app.api.traductor_gasto_pagado import componer, leer_actor_self, participacion_self_100
+from app.api.traductor_gasto_pagado import ESCALA, componer, leer_actor_self, participacion_self_100
+from app.api.traductor_registro import prevision_compuesta
 from app.api.ejecucion_registro import (
     CuentaSinCapacidad,
     con_rechazo_capacidad,
@@ -121,6 +130,7 @@ from app.api.ejecucion_registro import (
     tomar_inversiones,
     validar_contexto,
     validar_tercero,
+    validar_tipo_prevision,
 )
 from app.comun.elegibilidad_cuentas import MONEDA, SIN_CAPACIDAD, motivo_cuenta
 from app.comun.fecha_funcional import CODIGO_FECHA_FUTURA, Reloj, es_futura, reloj_sistema
@@ -214,11 +224,18 @@ def registrar_gasto_pagado(
             rechazo = validar_tercero(sesion, intencion.tercero_id) or validar_contexto(sesion, intencion.contexto_id)
             if rechazo is not None:
                 return RechazoIntegracion(rechazo)
+            # 3e. F05-06 M5: la prevision del bloque es de tipo GASTO.
+            rechazo = validar_tipo_prevision(sesion, intencion.prevision, "GASTO")
+            if rechazo is not None:
+                return RechazoIntegracion(rechazo)
 
         # 5. OP-22 adscrito a esta transaccion. La composicion sale SOLO del
         #    payload sellado; si la raiz existe, OP-22 exige igualdad EXACTA
         #    del agregado (F04-D050/F04-D051): la capa F05 no la duplica.
         datos = componer(intencion, actor)
+        if intencion.prevision is not None:
+            datos = dataclasses.replace(datos, prevision=prevision_compuesta(
+                intencion.intencion_id, intencion.prevision, intencion.importe.quantize(ESCALA)))
         op22 = HechosCompuestosService(
             UnidadDeTrabajoAdscrita(sesion), impacto_ancla=impacto_correccion_ancla
         )
