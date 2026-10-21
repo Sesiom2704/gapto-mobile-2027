@@ -16,7 +16,8 @@
 // v0.12.0 (F05-06 M4 §2.4/§3; F09 §12.105 CAP): capacidades de cuenta. Lecturas GET /v1/cuentas/capacidades (lista A1), /v1/cuentas/sin-configurar (aviso B2), /v1/cuentas/{id}/capacidades (A2/B1), …/historial (B4) y …/{capacidad}/impacto (A4); comando POST …/{capacidad}/activar | desactivar con `row_version` de la cuenta (clasificación 'CAMBIO'). Tipos sin tipo de cuenta ni defaults (D-CAP-04).
 // v0.13.0 (F05-06 M2-B §B1; lámina DEV v0.1): devolución contextual. Lectura GET /v1/hechos/{origen}/devoluciones (contexto del formulario), POST /v1/hechos/{origen}/devoluciones (devolución con el abono «Todavía no» o «Ya cobrado») y POST /v1/hechos/{devolución}/abono («Registrar abono»), ambos con la clasificación de escritura (indeterminado = reintentar el MISMO UUID). La fila y el detalle de la Actividad traen `devolucion_de` y `abono`, y el detalle `devoluciones` (tipos aditivos, opcionales).
 // v0.14.0 (F05-06 M3 §B1; lámina REP v0.2): reparto, pagador real y posiciones. POST /v1/intenciones/gasto-compartido (OP-22 de una sola llamada), POST /v1/posiciones/{id}/cobro | pago | perdon, con la clasificación de escritura (indeterminado = reintentar el MISMO UUID); lecturas GET /v1/terceros/{id}/pendiente («Pendiente con», OP-20) y GET /v1/hechos/{id}/reparto; «Corregir reparto» POST /v1/hechos/{id}/reparto con `row_version` (clasificación 'CAMBIO'). Tipos en domain/reparto (único import nuevo).
-// Versión: 0.14.0
+// v0.15.0 (F05-06 M5 §B1; láminas PREV v0.2 y HOME-01 v0.4): confirmación de previsiones. Lecturas GET /v1/inicio/previsiones, /v1/previsiones/pendientes, /v1/previsiones/{id} y …/candidatos (?ampliado); escrituras POST …/vincular («Ya lo registré», OP-17) y …/omitir («No hubo este mes»), ambas con la clasificación de escritura (indeterminado = reintentar el MISMO UUID). El bloque opcional `prevision` viaja en ingreso, transferencia y, por tipo estructural, en el gasto. Tipos propios en este fichero: sin imports nuevos.
+// Versión: 0.15.0
 // ============================================================
 
 import type { Ambito, CategoriaNodo } from '../domain/categoria';
@@ -350,6 +351,7 @@ export interface PayloadIngresoCobrado {
   tercero_id?: string | null;
   contexto_id?: string | null;
   nota?: string | null;
+  prevision?: BloquePrevisionWire;
 }
 
 export interface PayloadTransferencia {
@@ -360,6 +362,7 @@ export interface PayloadTransferencia {
   cuenta_origen_id: string;
   cuenta_destino_id: string;
   nota?: string | null;
+  prevision?: BloquePrevisionWire;
 }
 
 export interface ResultadoRegistroTipo {
@@ -570,6 +573,116 @@ export interface EntradaHistorialCapacidad {
   actor_es_owner: boolean;
 }
 
+// ------------------------------------------------------------------ F05-06 M5 · previsiones
+/** Bloque `prevision` del registro desde la previsión: `marcar_realizada` siempre explícito (D-M5-04). */
+export interface BloquePrevisionWire {
+  prevision_id: string;
+  row_version: number;
+  marcar_realizada: boolean;
+}
+export type TipoPrevision = 'GASTO' | 'INGRESO' | 'TRANSFERENCIA';
+export type NaturalezaPrevision = 'POR_PAGAR' | 'POR_COBRAR' | 'ENTRE_CUENTAS';
+export interface RefNombre {
+  id: string;
+  nombre: string;
+}
+export interface FilaPrevision {
+  id: string;
+  row_version: number;
+  estado: string;
+  tipo: TipoPrevision | string;
+  naturaleza: NaturalezaPrevision | null;
+  concepto: string;
+  tercero: RefNombre | null;
+  categoria: { id: string; nombre: string; ruta: string } | null;
+  fecha_desde: string | null;
+  fecha_hasta: string | null;
+  moneda: string;
+  /** null = «Desconocido», nunca 0. */
+  importe_esperado: string | null;
+  cubierto: string;
+  queda: string | null;
+  desviacion: string | null;
+  con_realidad: boolean;
+  pagos: number;
+  vencida: boolean;
+  cuenta_salida: RefNombre | null;
+  cuenta_entrada: RefNombre | null;
+  origen: 'MANUAL' | 'REGLA' | 'V3';
+  presupuestable: boolean;
+}
+export interface InicioPrevisiones {
+  hoy: string;
+  requiere_atencion: { n: number; primeras: FilaPrevision[] };
+  proximos: FilaPrevision[];
+}
+export interface ImportePorNaturaleza {
+  importe: string | null;
+  n: number;
+  desconocidos: number;
+}
+export interface PendientesPrevisiones {
+  hoy: string;
+  n: number;
+  por_pagar: ImportePorNaturaleza;
+  por_cobrar: ImportePorNaturaleza;
+  secciones: { vencidas: FilaPrevision[]; con_pago_parcial: FilaPrevision[]; sin_fecha: FilaPrevision[] };
+}
+export interface AccionPrevision {
+  disponible: boolean;
+  motivo: string | null;
+}
+export interface DetallePrevision extends FilaPrevision {
+  estado_derivado: 'REALIZADA_SIN_REALIDAD_ACTIVA' | 'REQUIERE_REVISION' | null;
+  vinculos: { vinculo_id: string; hecho_id: string; importe_asignado: string; fecha_hecho: string; concepto: string | null; importe_total: string | null }[];
+  acciones: { registrar: AccionPrevision; ya_lo_registre: AccionPrevision; omitir: AccionPrevision; swipe: AccionPrevision };
+}
+export interface CandidatoPrevision {
+  hecho_id: string;
+  fecha_hecho: string;
+  concepto: string | null;
+  tercero: string | null;
+  categoria: string | null;
+  cuenta: string | null;
+  importe_total: string;
+  /** Lo que se vinculará: toda la porción libre del registro (AJ-M5-DEC-05). */
+  porcion_disponible: string;
+}
+export interface CandidatosPrevision {
+  prevision_id: string;
+  ampliado: boolean;
+  ventana_dias: number;
+  mensaje: string | null;
+  candidatos: CandidatoPrevision[];
+}
+export interface PayloadVincular {
+  intencion_id: string;
+  row_version: number;
+  hecho_id: string;
+  importe_a_vincular: string;
+  marcar_realizada: boolean;
+}
+export interface ResultadoVinculo {
+  intencion_id: string;
+  prevision_id: string;
+  hecho_id: string;
+  importe_vinculado: string;
+  estado: string;
+  row_version: number;
+  idempotente: boolean;
+}
+export interface PayloadOmitir {
+  intencion_id: string;
+  row_version: number;
+  motivo: string | null;
+}
+export interface ResultadoOmitir {
+  intencion_id: string;
+  prevision_id: string;
+  estado: string;
+  row_version: number;
+}
+
 export type Respuesta<T> =
   | { tipo: 'OK'; datos: T }
   | { tipo: 'RECHAZADO'; codigo: string; mensaje: string; detalle?: Record<string, unknown> }
@@ -685,6 +798,13 @@ export interface ClienteApi {
   perdonarPosicion(entidadId: string, p: PayloadPerdon): Promise<Respuesta<ResultadoPosicion>>;
   repartoDeHecho(hechoId: string): Promise<Respuesta<RepartoDeHecho>>;
   corregirReparto(hechoId: string, p: PayloadCorregirReparto): Promise<Respuesta<ResultadoCorreccionReparto>>;
+  // F05-06 M5
+  inicioPrevisiones(): Promise<Respuesta<InicioPrevisiones>>;
+  pendientesPrevisiones(): Promise<Respuesta<PendientesPrevisiones>>;
+  detallePrevision(id: string): Promise<Respuesta<DetallePrevision>>;
+  candidatosPrevision(id: string, ampliado: boolean): Promise<Respuesta<CandidatosPrevision>>;
+  vincularPrevision(id: string, p: PayloadVincular): Promise<Respuesta<ResultadoVinculo>>;
+  omitirPrevision(id: string, p: PayloadOmitir): Promise<Respuesta<ResultadoOmitir>>;
 }
 
 const CAT = '/v1/categorias';
@@ -697,6 +817,7 @@ const ACC = '/v1/acciones-rapidas';
 const CAP = (id: string) => `/v1/cuentas/${encodeURIComponent(id)}/capacidades`;
 const HECHO = (id: string) => `/v1/hechos/${encodeURIComponent(id)}`;
 const POS = (id: string) => `/v1/posiciones/${encodeURIComponent(id)}`;
+const PREV = (id: string) => `/v1/previsiones/${encodeURIComponent(id)}`;
 const asoc = (cat: string, a?: string) => `${CAT}/${encodeURIComponent(cat)}/magnitudes${a ? `/${encodeURIComponent(a)}` : ''}`;
 const post = (cuerpo: unknown): RequestInit => ({ method: 'POST', body: JSON.stringify(cuerpo) });
 
@@ -850,5 +971,11 @@ export function crearCliente(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): C
     perdonarPosicion: (id, payload) => llamar(`${POS(id)}/perdon`, post(payload), true),
     repartoDeHecho: (id) => llamar(`${HECHO(id)}/reparto`, { method: 'GET' }, false),
     corregirReparto: (id, payload) => llamar(`${HECHO(id)}/reparto`, post(payload), 'CAMBIO'),
+    inicioPrevisiones: () => llamar('/v1/inicio/previsiones', { method: 'GET' }, false),
+    pendientesPrevisiones: () => llamar('/v1/previsiones/pendientes', { method: 'GET' }, false),
+    detallePrevision: (id) => llamar(PREV(id), { method: 'GET' }, false),
+    candidatosPrevision: (id, ampliado) => llamar(`${PREV(id)}/candidatos?ampliado=${ampliado ? 'true' : 'false'}`, { method: 'GET' }, false),
+    vincularPrevision: (id, payload) => llamar(`${PREV(id)}/vincular`, post(payload), true),
+    omitirPrevision: (id, payload) => llamar(`${PREV(id)}/omitir`, post(payload), true),
   };
 }

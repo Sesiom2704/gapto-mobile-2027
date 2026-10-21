@@ -1,0 +1,101 @@
+// ============================================================
+// GAPTO MOBILE 2027
+// Fichero: PendientesScreen.tsx
+// Ruta: mobile/src/screens/PendientesScreen.tsx
+// Descripción: Lista «Pendientes» (F05-06 M5 §B1; HOME-01 v0.4 I04; lámina PREV v0.2 B; D-PREV-10). Se abre desde la campana o «Ver todos». Arriba «Por pagar» y «Por cobrar» POR SEPARADO (nunca un total único; las transferencias no suman; «Desconocido» si solo hay importes desconocidos). Secciones «Vencidas», «Con pago parcial» y «Sin fecha» (vacía con el head físico vigente). Cada fila se toca para ver el detalle o se desliza para «Pagado» / «Cobrado» cuando lo admite. Carga y fallo con su estado; nunca «sin pendientes» si la lectura falla.
+// Versión: 0.1.0 (F05-06 M5 §B1)
+// ============================================================
+
+import React, { useCallback, useEffect, useState } from 'react';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+
+import type { ClienteApi, FilaPrevision, PendientesPrevisiones } from '../api/cliente';
+import { CabeceraNavegacion, EstadoDato } from '../components/Basicos';
+import { FilaPrevisionVista } from '../components/Prevision';
+import { useSwipePrevision } from '../components/SwipePrevision';
+import { admiteSwipe, textoNaturaleza } from '../domain/prevision';
+import { useTema } from '../theme/tema';
+import { espacio, importe as estiloImporte, TACTIL_MIN, tipo } from '../theme/tokens';
+
+type Carga = { fase: 'CARGANDO' } | { fase: 'OK'; datos: PendientesPrevisiones } | { fase: 'ERROR' };
+
+export function PendientesScreen(p: {
+  cliente: ClienteApi;
+  nuevoId: () => string;
+  ahora: () => Date;
+  refresco: number;
+  onAtras: () => void;
+  onDetalle: (fila: FilaPrevision) => void;
+  onFormularioCompleto: (fila: FilaPrevision, importe: string | null) => void;
+  onCambios: () => void;
+}) {
+  const { c } = useTema();
+  const [carga, setCarga] = useState<Carga>({ fase: 'CARGANDO' });
+  const cargar = useCallback(async () => {
+    setCarga({ fase: 'CARGANDO' });
+    const r = await p.cliente.pendientesPrevisiones();
+    setCarga(r.tipo === 'OK' ? { fase: 'OK', datos: r.datos } : { fase: 'ERROR' });
+  }, [p.cliente]);
+  useEffect(() => {
+    void cargar();
+  }, [cargar, p.refresco]);
+  const swipe = useSwipePrevision({
+    cliente: p.cliente, nuevoId: p.nuevoId, ahora: p.ahora,
+    onRegistrado: () => { p.onCambios(); void cargar(); },
+    onFormularioCompleto: p.onFormularioCompleto,
+  });
+
+  const seccion = (titulo: string, filas: FilaPrevision[], clave: string) =>
+    filas.length === 0 ? null : (
+      <View testID={`pendientes-${clave}`} style={{ gap: espacio.xs }}>
+        <Text accessibilityRole="header" style={[tipo.footnote, { color: c.textSecondary, fontWeight: '600' }]}>{titulo}</Text>
+        {filas.map((f, i) => (
+          <FilaPrevisionVista key={f.id} testID={`pendiente-${f.id}`} fila={f} usarQueda ultima={i === filas.length - 1}
+            onPress={() => p.onDetalle(f)} onSwipe={admiteSwipe(f) ? () => swipe.abrir(f) : undefined} />
+        ))}
+      </View>
+    );
+
+  return (
+    <View testID="pendientes" style={[s.raiz, { backgroundColor: c.background }]}>
+      <CabeceraNavegacion titulo="Pendientes" atras={{ etiqueta: 'Inicio', onPress: p.onAtras }} testIDAtras="pendientes-atras" />
+      <ScrollView contentContainerStyle={s.cuerpo} refreshControl={<RefreshControl refreshing={false} onRefresh={cargar} />}>
+        {carga.fase === 'CARGANDO' ? <EstadoDato testID="pendientes-cargando" estado="CARGANDO" /> : null}
+        {carga.fase === 'ERROR' ? (
+          <Pressable testID="pendientes-error" accessibilityRole="button" onPress={cargar} style={{ minHeight: TACTIL_MIN }}>
+            <EstadoDato estado="ERROR_CARGA" detalle="No se pudieron cargar los pendientes. Tocar para reintentar" />
+          </Pressable>
+        ) : null}
+        {carga.fase === 'OK' ? (
+          <>
+            <View style={s.naturalezas}>
+              <View style={s.naturaleza}>
+                <Text style={[tipo.footnote, { color: c.textSecondary }]}>Por pagar</Text>
+                <Text testID="por-pagar" style={[estiloImporte.secondary, { color: c.textPrimary, fontVariant: ['tabular-nums'] }]}>{textoNaturaleza(carga.datos.por_pagar, 'POR_PAGAR')}</Text>
+              </View>
+              <View style={s.naturaleza}>
+                <Text style={[tipo.footnote, { color: c.textSecondary }]}>Por cobrar</Text>
+                <Text testID="por-cobrar" style={[estiloImporte.secondary, { color: c.textPrimary, fontVariant: ['tabular-nums'] }]}>{textoNaturaleza(carga.datos.por_cobrar, 'POR_COBRAR')}</Text>
+              </View>
+            </View>
+            {carga.datos.n === 0 && carga.datos.secciones.sin_fecha.length === 0 ? (
+              <Text testID="pendientes-vacio" style={[tipo.body, { color: c.textSecondary }]}>No hay nada pendiente.</Text>
+            ) : null}
+            {seccion('Vencidas', carga.datos.secciones.vencidas, 'vencidas')}
+            {seccion('Con pago parcial', carga.datos.secciones.con_pago_parcial, 'parciales')}
+            {seccion('Sin fecha', carga.datos.secciones.sin_fecha, 'sin-fecha')}
+            <Text style={[tipo.footnote, { color: c.textSecondary }]}>Desliza una fila para «Pagado» o «Cobrado», o tócala para ver sus opciones.</Text>
+          </>
+        ) : null}
+      </ScrollView>
+      {swipe.hoja}
+    </View>
+  );
+}
+
+const s = StyleSheet.create({
+  raiz: { flex: 1 },
+  cuerpo: { padding: espacio.l, gap: espacio.l },
+  naturalezas: { flexDirection: 'row', gap: espacio.l },
+  naturaleza: { flex: 1, gap: espacio.xs },
+});

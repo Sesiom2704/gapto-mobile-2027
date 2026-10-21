@@ -11,7 +11,8 @@
 // v0.7.0 (F05-06 M4 §3; F09 §12.105 CAP): Ajustes › «Cuentas» (capacidades de cuenta, entrada provisional junto a Preferencias financieras) en la pila de Más; su hoja de confirmación es inmersiva (oculta la barra inferior).
 // v0.8.0 (F05-06 M2-B §B1; lámina DEV, D-DEV-01/06): «Registrar devolución» del detalle de un gasto en la Actividad abre la tarea inmersiva de devolución (DevolucionScreen) sobre la compra; al terminar, Día a día y Inicio vuelven a leer y «Ver la devolución» / «Ver la compra» abren ese detalle en Día a día (ida y vuelta). La Actividad recibe `nuevoId` para «Registrar abono».
 // v0.9.0 (F05-06 M3 §B1; lámina REP v0.2): «Repartir» u «Otra persona» en el registro de un gasto abren el gasto compartido (GastoCompartidoScreen) ENCIMA del registro, que sigue montado y conserva lo común («Cambiar» vuelve a él). «Pendiente con <persona>» (PendienteConScreen) se abre desde el éxito del gasto compartido, el detalle de un gasto en la Actividad y la ficha del tercero; «Corregir reparto» (CorregirRepartoScreen), desde el detalle. Todas son tareas inmersivas (ocultan la barra inferior); al terminar con cambios, Día a día e Inicio vuelven a leer.
-// Versión: 0.9.0
+// v0.10.0 (F05-06 M5 §B1; láminas PREV v0.2 y HOME-01 v0.4): la campana y «Ver todos ›» de Inicio abren «Pendientes» (PendientesScreen) y una fila de Inicio o de la lista abre el detalle de la previsión (PrevisionDetalleScreen), que contiene sus salidas («Registrar pago/cobro», «Ya lo registré», «No hubo este mes»); el swipe «Abrir el formulario completo» abre el detalle directamente en el registro con el importe escrito. Son tareas superpuestas (ocultan la barra inferior); al terminar con cambios, Inicio, «Pendientes» y Día a día vuelven a leer.
+// Versión: 0.10.0
 // ============================================================
 
 import * as Crypto from 'expo-crypto';
@@ -39,6 +40,8 @@ import { CorregirRepartoScreen } from './src/screens/CorregirRepartoScreen';
 import { DevolucionScreen } from './src/screens/DevolucionScreen';
 import { GastoCompartidoScreen } from './src/screens/GastoCompartidoScreen';
 import { PendienteConScreen } from './src/screens/PendienteConScreen';
+import { PendientesScreen } from './src/screens/PendientesScreen';
+import { PrevisionDetalleScreen } from './src/screens/PrevisionDetalleScreen';
 import { RegistroGastoScreen } from './src/screens/RegistroGastoScreen';
 import { TerritorioPendiente } from './src/screens/TerritorioPendiente';
 import { TransferenciaScreen } from './src/screens/TransferenciaScreen';
@@ -77,6 +80,11 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
   const [corregirDe, setCorregirDe] = useState<{ hechoId: string; clave: number } | null>(null);
   const abrirPendiente = useCallback((t: { terceroId: string; nombre: string }) => setPendienteDe({ ...t, clave: Date.now() }), []);
   const abrirCorregir = useCallback((hechoId: string) => setCorregirDe({ hechoId, clave: Date.now() }), []);
+  /** F05-06 M5: lista «Pendientes» y detalle de una previsión (con su registro, «Ya lo registré» y omitir). */
+  const [pendientes, setPendientes] = useState(false);
+  const [prevision, setPrevision] = useState<{ id: string; abrirRegistro: { importe: string | null } | null; desde: string; clave: number } | null>(null);
+  const abrirPrevision = useCallback((id: string, desde: string, abrirRegistro: { importe: string | null } | null = null) =>
+    setPrevision({ id, abrirRegistro, desde, clave: Date.now() }), []);
 
   const cerrarTarea = useCallback((registrado: boolean) => {
     setTarea(null);
@@ -99,6 +107,10 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
               setPantallaMas('PLANTILLAS');
               setDestino('MAS');
             }}
+            nuevoId={p.nuevoId}
+            onPendientes={() => setPendientes(true)}
+            onPrevision={(f) => abrirPrevision(f.id, 'Inicio')}
+            onFormularioCompleto={(f, importe) => abrirPrevision(f.id, 'Inicio', { importe })}
           />
         </View>
         {/* Día a día: Actividad v0 montada de forma persistente (conserva periodo, filtros y scroll). */}
@@ -292,6 +304,37 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
             />
           </View>
         ) : null}
+        {pendientes ? (
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: c.background }]}>
+            <PendientesScreen
+              cliente={p.cliente}
+              nuevoId={p.nuevoId}
+              ahora={p.ahora}
+              refresco={refresco}
+              onAtras={() => setPendientes(false)}
+              onDetalle={(f) => abrirPrevision(f.id, 'Pendientes')}
+              onFormularioCompleto={(f, importe) => abrirPrevision(f.id, 'Pendientes', { importe })}
+              onCambios={() => setRefresco((n) => n + 1)}
+            />
+          </View>
+        ) : null}
+        {prevision ? (
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: c.background }]}>
+            <PrevisionDetalleScreen
+              key={prevision.clave}
+              cliente={p.cliente}
+              nuevoId={p.nuevoId}
+              ahora={p.ahora}
+              previsionId={prevision.id}
+              abrirRegistro={prevision.abrirRegistro}
+              etiquetaAtras={prevision.desde}
+              onCerrar={(cambios) => {
+                setPrevision(null);
+                if (cambios) setRefresco((n) => n + 1);
+              }}
+            />
+          </View>
+        ) : null}
         {hojaTipos ? (
           <HojaTipos
             onElegir={(t) => {
@@ -302,7 +345,7 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
           />
         ) : null}
       </View>
-      {tarea === null && devolucionDe === null && pendienteDe === null && corregirDe === null && !hojaTipos && !(destino === 'MAS' && inmersivaMas) && !(destino === 'DIA' && inmersivaDia) ? <BarraInferior actual={destino} onCambiar={setDestino} /> : null}
+      {tarea === null && devolucionDe === null && pendienteDe === null && corregirDe === null && !pendientes && prevision === null && !hojaTipos && !(destino === 'MAS' && inmersivaMas) && !(destino === 'DIA' && inmersivaDia) ? <BarraInferior actual={destino} onCambiar={setDestino} /> : null}
     </View>
   );
 }

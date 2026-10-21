@@ -7,7 +7,8 @@
 // v0.3.0 (F05 — VS-01 · Alineación visual, A1): los bloques dejan de ser tarjetas blancas (F09 §6 «pocas tarjetas y pocos bordes», HOME-01): se asientan sobre el fondo y se separan con una línea estructural; «Acciones rápidas» usa el mismo bloque sin línea porque el hero ya delimita. El hero conserva su contrato (accentSurface, sin degradado ni ilustración: C3b fuera de alcance). La lectura parcial sigue en un bloque SEPARADO de «Este mes» (F05-D003 §16.6). Sin HEX ni tokens nuevos.
 // v0.4.0 (F05-03/F05-04 J3 §2.1; lámina HOME-01 v0.3; AJUSTE A1 «Marca en Inicio», AJ-MARCA-04 cerrado): cabecera con el símbolo (34 × 34 pt) y el nombre (132,25 × 24 pt, contain) de la entrega F09-MARCA-AJ04_R0, a 8 pt, como UN solo elemento accesible «GaptoMobile» con rol de cabecera; sin «2027» ni lema. Ilustración de Liquidez (112 × 112 pt, a 8 pt del borde derecho, centrada en vertical), decorativa y oculta a VoiceOver. Claro/oscuro por el esquema del sistema (MARK-RULE-01), nunca por el acento; se retira FUENTE_MARCA del nombre. «Acciones rápidas»: «Registrar» (abre la hoja de tipos, sin preselección) y hasta 3 accesos de plantillas (nombre corto e icono, o el de la categoría, o la reserva); sin accesos, «Añadir acceso» y el texto H03; «Editar» lleva a Ajustes › Plantillas. «Resultado» se presentará en verde / rojo con signo (neutro en 0) cuando exista su lectura: los bloques PENDIENTE_READ_MODEL no cambian (siguen «No disponible»).
 // v0.5.0 (F05-05 K3 §2.7; F05 §49.4 A9, D13, M5-06; lámina SRCH-ACT-AFI E1; HOME-01 v0.3, D-HOME-02/03): «Hola, <nombre>» en la cabecera (GET /v1/yo; sin nombre, no se muestra). «Este mes» con Ingresos, Gastos y Resultado reales (GET /v1/inicio/resultado-mes con la fecha del dispositivo): cifras tabulares, color SOLO en Resultado (verde, rojo o neutro con signo, `resultadoDelMes`), y debajo la línea «Solo lo que es tuyo. Sin indicar: …» con número e importe. Carga y error con su estado; nunca 0 € inventado. El presupuesto y el resto de Inicio no cambian.
-// Versión: 0.5.0
+// v0.6.0 (F05-06 M5 §B1; lámina HOME-01 v0.4, D-HOME-07; F09 §4.2, §4.5, §4.6): campana con contador junto al perfil (solo con pendientes; «!» si la lectura falla) que abre «Pendientes»; bloque «Requiere atención» con datos reales (GET /v1/inicio/previsiones): como mucho dos asuntos (vencidos por fecha y después los pagados en parte), recuento junto al título y «Ver todos ›», SIN importes sumados; con la lectura fallida, «No se pudieron cargar los pendientes · Reintentar» (nunca desaparece como si no hubiera nada); sin asuntos, ni campana ni bloque. «Próximos movimientos» con las tres siguientes previsiones (solo lectura, P-PREV-04). Cobros previstos con «+» neutro y «Cobro previsto»; pagos con «~». La línea de presupuesto no se pinta mientras F08 no la alimente. Lo previsto no suma a Liquidez ni al Resultado.
+// Versión: 0.6.0
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -15,11 +16,14 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import type { AccionRapida, ClienteApi, GastoMes, Plantilla, ResultadoMes } from '../api/cliente';
+import type { AccionRapida, ClienteApi, FilaPrevision, GastoMes, InicioPrevisiones, Plantilla, ResultadoMes } from '../api/cliente';
 import { BotonTexto, EstadoDato, Seccion } from '../components/Basicos';
+import { CampanaPendientes, FilaPrevisionVista } from '../components/Prevision';
+import { useSwipePrevision } from '../components/SwipePrevision';
 import { fechaCorta, isoLocal, mesLocal, nombreMes } from '../domain/fechas';
 import { formatearEur } from '../domain/importe';
 import { accesosDeInicio, resultadoDelMes, TEXTO_SIN_ACCESOS, textoSinIndicar } from '../domain/inicio';
+import { admiteSwipe, contadorCampana, TEXTO_FALLO_PENDIENTES, TEXTO_FALLO_PENDIENTES_DETALLE } from '../domain/prevision';
 import { glifoDe } from '../theme/iconosCategoria';
 import { useTema } from '../theme/tema';
 import { espacio, importe, radio, TACTIL_MIN, tipo } from '../theme/tokens';
@@ -39,10 +43,11 @@ const MARCA = {
 } as const;
 
 /** Bloques de HOME-01 cuyo read model no está autorizado en VS-01 (mandato §11). */
-export const PENDIENTE_READ_MODEL = ['LIQUIDEZ', 'MES_PRESUPUESTO', 'ATENCION', 'PROXIMOS', 'PATRIMONIO'] as const;
+export const PENDIENTE_READ_MODEL = ['LIQUIDEZ', 'PATRIMONIO'] as const;
 
 type Lectura = { fase: 'CARGANDO' } | { fase: 'OK'; datos: GastoMes } | { fase: 'ERROR' };
 type LecturaMes = { fase: 'CARGANDO' } | { fase: 'OK'; datos: ResultadoMes } | { fase: 'ERROR' };
+type LecturaPrevisiones = { fase: 'CARGANDO' } | { fase: 'OK'; datos: InicioPrevisiones } | { fase: 'ERROR' };
 
 export function HomeScreen(p: {
   cliente: ClienteApi;
@@ -54,6 +59,11 @@ export function HomeScreen(p: {
   onAcceso?: (plantilla: Plantilla) => void;
   /** «Editar» / «Añadir acceso»: Ajustes › Plantillas. */
   onEditarAccesos?: () => void;
+  /** F05-06 M5: campana y «Ver todos ›» abren «Pendientes»; una fila abre su detalle. */
+  onPendientes?: () => void;
+  onPrevision?: (fila: FilaPrevision) => void;
+  onFormularioCompleto?: (fila: FilaPrevision, importe: string | null) => void;
+  nuevoId?: () => string;
 }) {
   const { c, esquema } = useTema();
   const inset = useSafeAreaInsets();
@@ -62,7 +72,24 @@ export function HomeScreen(p: {
   const [mes, setMes] = useState<LecturaMes>({ fase: 'CARGANDO' });
   const [nombre, setNombre] = useState<string | null>(null);
   const [accesos, setAccesos] = useState<{ plantillas: Plantilla[]; acciones: AccionRapida[]; iconos: Map<string, string | null> } | null>(null);
+  const [previsiones, setPrevisiones] = useState<LecturaPrevisiones>({ fase: 'CARGANDO' });
   const marca = MARCA[esquema === 'dark' ? 'dark' : 'light'];
+
+  // F05-06 M5: lectura propia del bloque; si falla, el bloque lo dice (nunca «sin pendientes»).
+  const cargarPrevisiones = useCallback(async () => {
+    setPrevisiones({ fase: 'CARGANDO' });
+    try {
+      const r = await p.cliente.inicioPrevisiones();
+      setPrevisiones(r.tipo === 'OK' ? { fase: 'OK', datos: r.datos } : { fase: 'ERROR' });
+    } catch {
+      setPrevisiones({ fase: 'ERROR' });
+    }
+  }, [p.cliente]);
+  const swipe = useSwipePrevision({
+    cliente: p.cliente, nuevoId: p.nuevoId ?? (() => ''), ahora: p.ahora,
+    onRegistrado: () => void cargarPrevisiones(),
+    onFormularioCompleto: (f, imp) => p.onFormularioCompleto?.(f, imp),
+  });
 
   const cargar = useCallback(async () => {
     setGasto({ fase: 'CARGANDO' });
@@ -90,13 +117,18 @@ export function HomeScreen(p: {
   useEffect(() => {
     void cargar();
   }, [cargar, p.refresco]);
+  useEffect(() => {
+    void cargarPrevisiones();
+  }, [cargarPrevisiones, p.refresco]);
+  const contador = contadorCampana(previsiones.fase === 'OK' ? { fase: 'OK', n: previsiones.datos.requiere_atencion.n } : previsiones);
+  const atencion = previsiones.fase === 'OK' ? previsiones.datos.requiere_atencion : null;
 
   return (
     <ScrollView
       testID="home"
       style={{ backgroundColor: c.background }}
       contentContainerStyle={[s.contenido, { paddingTop: inset.top + espacio.l }]}
-      refreshControl={<RefreshControl refreshing={false} onRefresh={cargar} />}
+      refreshControl={<RefreshControl refreshing={false} onRefresh={() => { void cargar(); void cargarPrevisiones(); }} />}
     >
       {/* 1. Cabecera (§4.2): identidad, contexto discreto y perfil */}
       <View style={s.cabecera}>
@@ -110,6 +142,7 @@ export function HomeScreen(p: {
             {nombre ? <Text testID="hola" style={[tipo.subheadline, { color: c.textPrimary, fontWeight: '600' }]}>{`Hola, ${nombre}`}</Text> : null}
             <Text style={[tipo.footnote, { color: c.textSecondary }]}>{fechaCorta(hoy)}</Text>
           </View>
+          <CampanaPendientes contador={contador} onPress={() => p.onPendientes?.()} />
           <View accessibilityLabel="Perfil" style={[s.avatar, { backgroundColor: c.surfaceSecondary }]}>
             <Ionicons name="person-outline" size={18} color={c.textSecondary} />
           </View>
@@ -191,11 +224,7 @@ export function HomeScreen(p: {
         {mes.fase === 'OK' ? (
           <Text testID="mes-sin-indicar" style={[tipo.footnote, { color: c.textSecondary }]}>{textoSinIndicar(mes.datos)}</Text>
         ) : null}
-        <View style={[s.separador, { backgroundColor: c.separator }]} />
-        <View style={s.estadoFilaPres}>
-          <Text style={[tipo.footnote, { color: c.textPrimary }]}>Presupuesto de gasto</Text>
-          <EstadoDato estado="NO_DISPONIBLE" />
-        </View>
+        {/* D-HOME-07 (§4.5): sin línea ni barra de presupuesto mientras F08 no la alimente. */}
       </Seccion>
 
       {/* Lectura PARCIAL de VS-01 (F05-D003 §16.6): bloque separado, fuera del
@@ -211,18 +240,54 @@ export function HomeScreen(p: {
         </Text>
       </Seccion>
 
-      {/* 5. Requiere atención: solo aparece si existen asuntos; VS-01 no puede
-             determinarlo, así que no se renderiza (ver handoff, desviación F09-5). */}
+      {/* 5. Requiere atención (§4.6, HOME-01 v0.4): solo con asuntos; con la lectura fallida, su estado. */}
+      {previsiones.fase === 'ERROR' ? (
+        <Seccion testID="bloque-atencion" titulo="Requiere atención">
+          <View testID="atencion-error" style={{ gap: espacio.xs }}>
+            <Text style={[tipo.body, { color: c.textPrimary, fontWeight: '600' }]}>{TEXTO_FALLO_PENDIENTES}</Text>
+            <Text style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_FALLO_PENDIENTES_DETALLE}</Text>
+            <BotonTexto testID="atencion-reintentar" titulo="Reintentar" onPress={() => void cargarPrevisiones()} />
+          </View>
+        </Seccion>
+      ) : null}
+      {atencion && atencion.n > 0 ? (
+        <Seccion
+          testID="bloque-atencion"
+          titulo="Requiere atención"
+          derecha={
+            <View style={s.atencionDerecha}>
+              <Text testID="atencion-n" style={[tipo.subheadline, { color: c.textSecondary, fontWeight: '600' }]}>{String(atencion.n)}</Text>
+              <BotonTexto testID="atencion-ver-todos" titulo="Ver todos ›" onPress={() => p.onPendientes?.()} />
+            </View>
+          }
+        >
+          {atencion.primeras.map((f, i) => (
+            <FilaPrevisionVista key={f.id} testID={`atencion-${f.id}`} fila={f} ultima={i === atencion.primeras.length - 1}
+              onPress={() => p.onPrevision?.(f)} onSwipe={admiteSwipe(f) && p.nuevoId ? () => swipe.abrir(f) : undefined} />
+          ))}
+        </Seccion>
+      ) : null}
 
-      {/* 6. Próximos movimientos (§4.7) */}
+      {/* 6. Próximos movimientos (§4.7): solo lectura (P-PREV-04). */}
       <Seccion testID="bloque-proximos" titulo="Próximos movimientos">
-        <EstadoDato estado="NO_DISPONIBLE" detalle="Las previsiones aún no se muestran en esta versión." />
+        {previsiones.fase === 'CARGANDO' ? <EstadoDato estado="CARGANDO" /> : null}
+        {previsiones.fase === 'ERROR' ? <EstadoDato estado="ERROR_CARGA" detalle="Desliza hacia abajo para reintentar" /> : null}
+        {previsiones.fase === 'OK' && previsiones.datos.proximos.length === 0 ? (
+          <Text testID="proximos-vacio" style={[tipo.footnote, { color: c.textSecondary }]}>No hay movimientos previstos.</Text>
+        ) : null}
+        {previsiones.fase === 'OK'
+          ? previsiones.datos.proximos.map((f, i) => (
+              <FilaPrevisionVista key={f.id} testID={`proximo-${f.id}`} fila={f} enProximos ultima={i === previsiones.datos.proximos.length - 1}
+                onPress={p.onPrevision ? () => p.onPrevision?.(f) : undefined} />
+            ))
+          : null}
       </Seccion>
 
       {/* 7. Patrimonio total (§4.8), al final */}
       <Seccion testID="bloque-patrimonio" titulo="Patrimonio total">
         <EstadoDato estado="NO_DISPONIBLE" detalle="Aún no se calcula en esta versión." />
       </Seccion>
+      {swipe.hoja}
     </ScrollView>
   );
 }
@@ -309,5 +374,5 @@ const s = StyleSheet.create({
   columna: { flex: 1, gap: espacio.xs, paddingHorizontal: espacio.xs },
   divisor: { width: StyleSheet.hairlineWidth },
   separador: { height: 1 },
-  estadoFilaPres: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: espacio.s, flexWrap: 'wrap' },
+  atencionDerecha: { flexDirection: 'row', alignItems: 'center', gap: espacio.s },
 });

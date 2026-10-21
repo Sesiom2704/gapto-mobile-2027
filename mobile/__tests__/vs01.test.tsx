@@ -9,6 +9,7 @@
 // v0.5.0 (F05-02 B2): el cliente simulado sirve la propuesta del resolver con la única cuenta (DEFAULT_GENERAL); el fallback del cliente se retira (AJ-B1-09). Los casos VS-01 no cambian; los de preferencias viven en preferencias_registro.test.tsx.
 // Versión: 0.5.0
 // Versión: 0.7.0 (F05-05 K3 §2.7; F05 §49.4 A9, D13, M5-06; tabla «tests adaptados»): «Este mes» pasa a tener read model (Resultado del mes de A9), que sustituye en ESE bloque el «sin cifras» de F05-D003 §16.6. Se conservan las propiedades de VS-01: los bloques que siguen sin read model no muestran importes, la cifra PARCIAL de gasto-mes va en su tarjeta separada (nunca en «Este mes») y un fallo de gasto-mes nunca se presenta como 0 €; las aserciones se acotan al bloque correspondiente.
+// Versión: 0.8.0 (F05-06 M5 §B2; HOME-01 v0.4, D-HOME-07; tabla «tests adaptados»): la línea de presupuesto deja de pintarse hasta F08 y «Próximos movimientos» tiene read model (previsiones; vacío = «No hay movimientos previstos.», sin importes): «No disponible» queda en Liquidez y Patrimonio (≥ 2) y «Este mes» no lo muestra.
 // Versión: 0.6.0 (F05-03/F05-04 J2+J3 §2.2/§2.7; tabla «tests adaptados»): Inicio abre el gasto con «Registrar» + hoja de tipos; CORTE DE CONCEPTO (A8): la nota opcional se escribe en «Más detalles» (`escribirNota`) y «concepto» deja de figurar en «faltan» (dos oráculos de SPEC-08 actualizados). El payload con nota es el mismo (`concepto: 'Café'`).
 // ============================================================
 
@@ -140,7 +141,8 @@ test('Home renderiza el esqueleto HOME-01 sin cifras inventadas', async () => {
     expect(within(screen.getByTestId(id)).queryAllByText(/€/)).toHaveLength(0);
   }
   expect(within(screen.getByTestId('bloque-gasto-parcial')).queryAllByText(/€$/)).toHaveLength(1);
-  expect(screen.getAllByText('No disponible').length).toBeGreaterThanOrEqual(4);
+  expect(screen.getAllByText('No disponible').length).toBeGreaterThanOrEqual(2); // Liquidez y Patrimonio (M5: sin presupuesto ni «Próximos» no disponibles)
+  expect(await within(screen.getByTestId('bloque-proximos')).findByTestId('proximos-vacio')).toBeTruthy();
 });
 
 test('Home (F05-D003 §16.6): la cifra real va en tarjeta PARCIAL separada, nunca en «Este mes»', async () => {
@@ -149,7 +151,8 @@ test('Home (F05-D003 §16.6): la cifra real va en tarjeta PARCIAL separada, nunc
   await screen.findByText('12,40 €');
   // F05-05 A9: «Este mes» muestra el Resultado del mes (su propio read model), nunca la cifra parcial de gasto-mes.
   expect(within(screen.getByTestId('bloque-mes')).queryByText('12,40 €')).toBeNull();
-  expect(within(screen.getByTestId('bloque-mes')).getAllByText('No disponible').length).toBe(1); // presupuesto
+  expect(within(screen.getByTestId('bloque-mes')).queryAllByText('No disponible')).toHaveLength(0); // M5 (D-HOME-07): sin línea de presupuesto hasta F08
+  expect(within(screen.getByTestId('bloque-mes')).queryByText('Presupuesto de gasto')).toBeNull();
   const tarjeta = within(screen.getByTestId('bloque-gasto-parcial'));
   expect(tarjeta.getByText('12,40 €')).toBeTruthy();
   expect(tarjeta.getByTestId('gastos-parcial')).toBeTruthy(); // siempre marcada como parcial
