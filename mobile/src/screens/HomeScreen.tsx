@@ -7,7 +7,7 @@
 // v0.3.0 (F05 — VS-01 · Alineación visual, A1): los bloques dejan de ser tarjetas blancas (F09 §6 «pocas tarjetas y pocos bordes», HOME-01): se asientan sobre el fondo y se separan con una línea estructural; «Acciones rápidas» usa el mismo bloque sin línea porque el hero ya delimita. El hero conserva su contrato (accentSurface, sin degradado ni ilustración: C3b fuera de alcance). La lectura parcial sigue en un bloque SEPARADO de «Este mes» (F05-D003 §16.6). Sin HEX ni tokens nuevos.
 // v0.4.0 (F05-03/F05-04 J3 §2.1; lámina HOME-01 v0.3; AJUSTE A1 «Marca en Inicio», AJ-MARCA-04 cerrado): cabecera con el símbolo (34 × 34 pt) y el nombre (132,25 × 24 pt, contain) de la entrega F09-MARCA-AJ04_R0, a 8 pt, como UN solo elemento accesible «GaptoMobile» con rol de cabecera; sin «2027» ni lema. Ilustración de Liquidez (112 × 112 pt, a 8 pt del borde derecho, centrada en vertical), decorativa y oculta a VoiceOver. Claro/oscuro por el esquema del sistema (MARK-RULE-01), nunca por el acento; se retira FUENTE_MARCA del nombre. «Acciones rápidas»: «Registrar» (abre la hoja de tipos, sin preselección) y hasta 3 accesos de plantillas (nombre corto e icono, o el de la categoría, o la reserva); sin accesos, «Añadir acceso» y el texto H03; «Editar» lleva a Ajustes › Plantillas. «Resultado» se presentará en verde / rojo con signo (neutro en 0) cuando exista su lectura: los bloques PENDIENTE_READ_MODEL no cambian (siguen «No disponible»).
 // v0.5.0 (F05-05 K3 §2.7; F05 §49.4 A9, D13, M5-06; lámina SRCH-ACT-AFI E1; HOME-01 v0.3, D-HOME-02/03): «Hola, <nombre>» en la cabecera (GET /v1/yo; sin nombre, no se muestra). «Este mes» con Ingresos, Gastos y Resultado reales (GET /v1/inicio/resultado-mes con la fecha del dispositivo): cifras tabulares, color SOLO en Resultado (verde, rojo o neutro con signo, `resultadoDelMes`), y debajo la línea «Solo lo que es tuyo. Sin indicar: …» con número e importe. Carga y error con su estado; nunca 0 € inventado. El presupuesto y el resto de Inicio no cambian.
-// v0.6.0 (F05-06 M5 §B1; lámina HOME-01 v0.4, D-HOME-07; F09 §4.2, §4.5, §4.6): campana con contador junto al perfil (solo con pendientes; «!» si la lectura falla) que abre «Pendientes»; bloque «Requiere atención» con datos reales (GET /v1/inicio/previsiones): como mucho dos asuntos (vencidos por fecha y después los pagados en parte), recuento junto al título y «Ver todos ›», SIN importes sumados; con la lectura fallida, «No se pudieron cargar los pendientes · Reintentar» (nunca desaparece como si no hubiera nada); sin asuntos, ni campana ni bloque. «Próximos movimientos» con las tres siguientes previsiones (solo lectura, P-PREV-04). Cobros previstos con «+» neutro y «Cobro previsto»; pagos con «~». La línea de presupuesto no se pinta mientras F08 no la alimente. Lo previsto no suma a Liquidez ni al Resultado.
+// v0.6.0 (F05-06 M5 §B1; lámina HOME-01 v0.4, D-HOME-07; F09 §4.2, §4.5, §4.6): campana con contador junto al perfil (solo con pendientes; «!» si la lectura falla) que abre «Pendientes»; bloque «Requiere atención» con datos reales (GET /v1/inicio/previsiones): como mucho dos asuntos (vencidos por fecha y después los pagados en parte), recuento junto al título y «Ver todos ›», SIN importes sumados; con la lectura fallida, «No se pudieron cargar los pendientes · Reintentar» (nunca desaparece como si no hubiera nada); sin asuntos, ni campana ni bloque. «Próximos movimientos» con las tres siguientes previsiones (solo lectura, P-PREV-04). Cobros previstos con «+» neutro y «Cobro previsto»; pagos con «~». La línea de presupuesto no se pinta mientras F08 no la alimente. Lo previsto no suma a Liquidez ni al Resultado. Con la campana, el saludo de la cabecera se acorta con puntos suspensivos (una línea) y nunca invade la marca.
 // Versión: 0.6.0
 // ============================================================
 
@@ -138,8 +138,8 @@ export function HomeScreen(p: {
           <Image testID="marca-nombre" source={marca.nombre} style={s.nombre} resizeMode="contain" accessible={false} />
         </View>
         <View style={s.perfil}>
-          <View style={{ alignItems: 'flex-end' }}>
-            {nombre ? <Text testID="hola" style={[tipo.subheadline, { color: c.textPrimary, fontWeight: '600' }]}>{`Hola, ${nombre}`}</Text> : null}
+          <View style={{ alignItems: 'flex-end', flexShrink: 1 }}>
+            {nombre ? <Text testID="hola" numberOfLines={1} style={[tipo.subheadline, { color: c.textPrimary, fontWeight: '600' }]}>{`Hola, ${nombre}`}</Text> : null}
             <Text style={[tipo.footnote, { color: c.textSecondary }]}>{fechaCorta(hoy)}</Text>
           </View>
           <CampanaPendientes contador={contador} onPress={() => p.onPendientes?.()} />
@@ -359,12 +359,12 @@ function CeldaGastos({ lectura, onReintentar }: { lectura: Lectura; onReintentar
 const s = StyleSheet.create({
   contenido: { paddingHorizontal: espacio.l, paddingBottom: espacio.xxl, gap: espacio.xl },
   cabecera: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: espacio.m },
-  marca: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 },
+  marca: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 0 },
   simbolo: { width: 34, height: 34 },
   nombre: { width: 132.25, height: 24 },
   ilustracionCaja: { position: 'absolute', right: 8, top: 0, bottom: 0, justifyContent: 'center' },
   ilustracion: { width: 112, height: 112 },
-  perfil: { flexDirection: 'row', alignItems: 'center', gap: espacio.s },
+  perfil: { flexDirection: 'row', alignItems: 'center', gap: espacio.s, flexShrink: 1 },
   avatar: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   hero: { borderRadius: radio.l, padding: espacio.l, paddingRight: 112 + 8 + espacio.s, gap: espacio.s, minHeight: 112 + 16, overflow: 'hidden' },
   fila: { flexDirection: 'row' },
