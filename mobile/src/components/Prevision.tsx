@@ -5,6 +5,7 @@
 // Descripción: Piezas de la confirmación de previsiones (F05-06 M5 §B1; láminas PREV v0.2 y HOME-01 v0.4). FilaPrevisionVista: concepto, línea (vencida, pago parcial, «Entre cuentas») e importe por naturaleza («~», «+» en color neutro, «Desconocido»); el deslizamiento a la izquierda solo ABRE la confirmación del swipe («Pagado» / «Cobrado», DAY-RULE-03), y también como acción accesible. Campana con contador junto al perfil (I01; «!» si falla, nada sin pendientes). HojaSwipe (B1, D-PREV-12): previsión, esperado, consecuencia, importe real propuesto («Revisa»), cuenta y fecha antes de «Confirmar pago y cubrir». HojaOmitir (B3): motivo opcional y «No hubo este mes». AvisoEstadoActual (B7): tras un 409 la app no dice «hecho» y enseña el estado real.
 // Versión: 0.1.0 (F05-06 M5 §B1)
 // Versión: 0.2.0 (F05-06 M5 SWIPE; regla de Moisés del 2026-10-22): la fila usa el gesto común FilaDeslizable (sigue al dedo y deja ver «Pagado» / «Cobrado» detrás); lo que hace el gesto lo decide la pantalla (acción rápida con «Deshacer» o la hoja). La acción accesible hace lo mismo que el gesto.
+// Versión: 0.3.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2): la fila recibe los dos lados (`derecha` / `izquierda`) y va en tarjeta; las acciones accesibles «derecha» / «izquierda» llevan la etiqueta de cada lado. «Próximos» sigue siendo una lista de solo lectura, sin tarjeta ni gesto.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -13,10 +14,10 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { FilaPrevision } from '../api/cliente';
-import { importeFila, intervaloTexto, lineaFila, TEXTO_NO_SABEMOS, verboSwipe, estadoLegible, consecuencia } from '../domain/prevision';
+import { importeFila, intervaloTexto, lineaFila, TEXTO_NO_SABEMOS, estadoLegible, consecuencia } from '../domain/prevision';
 import { useTema } from '../theme/tema';
 import { espacio, importe as estiloImporte, radio, TACTIL_MIN, tipo } from '../theme/tokens';
-import { FilaDeslizable } from './AccionRapida';
+import { accesibilidadLados, FilaDeslizable, type LadoSwipe } from './AccionRapida';
 import { BotonPrimario, BotonTexto, Chip, Velo } from './Basicos';
 
 /** Fila de una previsión (Inicio, «Pendientes», «Próximos»). */
@@ -24,39 +25,44 @@ export function FilaPrevisionVista(p: {
   fila: FilaPrevision;
   testID: string;
   onPress?: () => void;
-  /** Solo si la previsión admite el swipe (gasto o ingreso, esperado conocido, cuenta y sin pagos): acción rápida u hoja. */
-  onSwipe?: () => void;
+  /** Lados del swipe (SWIPE-RULE): derecha confirma, izquierda «No hubo». */
+  derecha?: LadoSwipe;
+  izquierda?: LadoSwipe;
   enProximos?: boolean;
   usarQueda?: boolean;
   ultima?: boolean;
 }) {
   const { c } = useTema();
   const f = p.fila;
-  const onSwipe = p.onSwipe;
-  const verbo = verboSwipe(f.tipo);
+  const a11y = accesibilidadLados(p.derecha, p.izquierda, p.derecha || p.izquierda ? [{ name: 'activate' }] : []);
+  const enTarjeta = !p.enProximos;
+  const fila = (
+    <Pressable
+      testID={p.testID}
+      accessibilityRole={p.onPress ? 'button' : 'text'}
+      accessibilityLabel={`${f.concepto}. ${lineaFila(f, p.enProximos)}. ${importeFila(f, p.usarQueda)}`}
+      accessibilityActions={a11y.accessibilityActions}
+      onAccessibilityAction={(e) => {
+        if (a11y.ejecutar(e.nativeEvent.actionName)) return;
+        if (e.nativeEvent.actionName === 'activate') p.onPress?.();
+      }}
+      onPress={p.onPress}
+      disabled={!p.onPress}
+      style={({ pressed }) => [s.fila, enTarjeta && s.filaTarjeta, !enTarjeta && !p.ultima && { borderBottomColor: c.borderDefault, borderBottomWidth: StyleSheet.hairlineWidth }, { opacity: pressed ? 0.7 : 1 }]}
+    >
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text testID={`${p.testID}-concepto`} numberOfLines={1} style={[tipo.body, { color: c.textPrimary, fontWeight: '600' }]}>{f.concepto}</Text>
+        <Text testID={`${p.testID}-linea`} style={[tipo.caption, { color: f.vencida ? c.warning : c.textSecondary }]}>{lineaFila(f, p.enProximos)}</Text>
+      </View>
+      <Text testID={`${p.testID}-importe`} style={[estiloImporte.secondary, s.importeFila, { color: c.textPrimary, fontVariant: ['tabular-nums'] }]}>
+        {importeFila(f, p.usarQueda)}
+      </Text>
+    </Pressable>
+  );
+  if (!enTarjeta) return fila;
   return (
-    <FilaDeslizable id={p.testID} franjaId="prevision" franja={verbo} onDeslizar={onSwipe} fondo="background">
-      <Pressable
-        testID={p.testID}
-        accessibilityRole={p.onPress ? 'button' : 'text'}
-        accessibilityLabel={`${f.concepto}. ${lineaFila(f, p.enProximos)}. ${importeFila(f, p.usarQueda)}`}
-        accessibilityActions={onSwipe ? [{ name: 'activate' }, { name: 'swipe', label: verbo }] : undefined}
-        onAccessibilityAction={(e) => {
-          if (e.nativeEvent.actionName === 'swipe') onSwipe?.();
-          if (e.nativeEvent.actionName === 'activate') p.onPress?.();
-        }}
-        onPress={p.onPress}
-        disabled={!p.onPress}
-        style={({ pressed }) => [s.fila, !p.ultima && { borderBottomColor: c.borderDefault, borderBottomWidth: StyleSheet.hairlineWidth }, { opacity: pressed ? 0.7 : 1 }]}
-      >
-        <View style={{ flex: 1, gap: 2 }}>
-          <Text testID={`${p.testID}-concepto`} numberOfLines={1} style={[tipo.body, { color: c.textPrimary, fontWeight: '600' }]}>{f.concepto}</Text>
-          <Text testID={`${p.testID}-linea`} style={[tipo.caption, { color: f.vencida ? c.warning : c.textSecondary }]}>{lineaFila(f, p.enProximos)}</Text>
-        </View>
-        <Text testID={`${p.testID}-importe`} style={[estiloImporte.secondary, s.importeFila, { color: c.textPrimary, fontVariant: ['tabular-nums'] }]}>
-          {importeFila(f, p.usarQueda)}
-        </Text>
-      </Pressable>
+    <FilaDeslizable id={p.testID} derecha={p.derecha} izquierda={p.izquierda}>
+      {fila}
     </FilaDeslizable>
   );
 }
@@ -260,6 +266,7 @@ export function usarIntencion(nuevoId: () => string) {
 
 const s = StyleSheet.create({
   fila: { flexDirection: 'row', alignItems: 'center', gap: espacio.m, minHeight: TACTIL_MIN + 12, paddingVertical: espacio.s },
+  filaTarjeta: { paddingHorizontal: espacio.m + 2 },
   importeFila: { fontSize: 17, lineHeight: 22 },
   campana: { minWidth: TACTIL_MIN, minHeight: TACTIL_MIN, alignItems: 'center', justifyContent: 'center' },
   contador: { position: 'absolute', top: 4, right: 2, minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 4, alignItems: 'center', justifyContent: 'center' },

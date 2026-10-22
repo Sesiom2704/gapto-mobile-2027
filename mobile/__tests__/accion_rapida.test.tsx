@@ -8,7 +8,7 @@
 
 import { act, fireEvent, render, screen, within } from '@testing-library/react-native';
 import React from 'react';
-import { AppState } from 'react-native';
+import { AppState, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import type { ClienteApi, ContextoDevolucion, FilaActividad, FilaPrevision } from '../src/api/cliente';
@@ -18,6 +18,7 @@ import { ActividadScreen } from '../src/screens/ActividadScreen';
 import { HomeScreen } from '../src/screens/HomeScreen';
 import { PendientesScreen } from '../src/screens/PendientesScreen';
 import { ProveedorTema } from '../src/theme/tema';
+import { colores } from '../src/theme/tokens';
 
 import { clienteCategoriasStub } from './fixtures_categorias';
 
@@ -89,6 +90,28 @@ const dosEventosSeguidos = (testID: string, nombre: string) => {
     h({ nativeEvent: { actionName: nombre } });
   });
 };
+const OCULTOS = { includeHiddenElements: true };
+/** Gesto horizontal real sobre el contenedor común (historial de un toque de x=300 a x=300+dx). Devuelve si lo capturó. */
+let reloj = 0;
+function deslizar(testID: string, dx: number): boolean {
+  const z = screen.getByTestId(testID);
+  const evento = (x: number) => {
+    const ts = (reloj += 10);
+    const toque = { touchActive: true, startPageX: 300, startPageY: 20, startTimeStamp: ts - 30,
+      currentPageX: 300 + x, currentPageY: 20, currentTimeStamp: ts, previousPageX: 300, previousPageY: 20, previousTimeStamp: ts - 5 };
+    return { nativeEvent: { changedTouches: [], touches: [], pageX: 300 + x, pageY: 20, timestamp: ts },
+      touchHistory: { numberActiveTouches: 1, indexOfSingleActiveTouch: 0, mostRecentTimeStamp: ts, touchBank: [toque] } };
+  };
+  let captura = false;
+  act(() => {
+    captura = z.props.onMoveShouldSetResponderCapture(evento(dx / 3));
+    if (!captura) return;
+    z.props.onResponderGrant(evento(dx / 3));
+    z.props.onResponderMove(evento(dx));
+    z.props.onResponderRelease(evento(dx));
+  });
+  return captura;
+}
 const accion = (testID: string, nombre: string) => fireEvent(screen.getByTestId(testID), 'accessibilityAction', { nativeEvent: { actionName: nombre } });
 
 beforeEach(() => {
@@ -126,8 +149,9 @@ describe('dominio', () => {
   });
 
   test('texto del aviso', () => {
-    expect(textoAvisoRapido(fila())).toBe('Electricidad pagada');
-    expect(textoAvisoRapido(NOMINA)).toBe('Nómina cobrada');
+    expect(textoAvisoRapido(fila())).toBe('Electricidad pagada · 74,00 €');
+    expect(textoAvisoRapido(NOMINA)).toBe('Nómina cobrada · 2.100,00 €');
+    expect(textoAvisoRapido(fila({ importe_esperado: null }))).toBe('Electricidad pagada');
   });
 });
 
@@ -150,10 +174,10 @@ describe('Inicio', () => {
     await montarHome(c);
     expect(c.cuentasPago).toHaveBeenCalledWith(HOY); // la capacidad se lee con la lista, no en el gesto
     const antes = llamadas(c);
-    accion('atencion-luz', 'swipe');
+    accion('atencion-luz', 'derecha');
     expect(screen.queryByTestId('atencion-luz')).toBeNull(); // la fila sale
     expect(screen.queryByTestId('hoja-swipe')).toBeNull(); // sin hoja
-    expect(screen.getByTestId('aviso-rapida-luz-texto')).toHaveTextContent('Electricidad pagada');
+    expect(screen.getByTestId('aviso-rapida-luz-texto')).toHaveTextContent('Electricidad pagada · 74,00 €');
     expect(screen.getByTestId('aviso-rapida-luz-deshacer')).toHaveTextContent('Deshacer');
     await esperar(ESPERA_DESHACER_MS - 1);
     expect(c.registrarGastoPagado).not.toHaveBeenCalled();
@@ -173,7 +197,7 @@ describe('Inicio', () => {
     const c = cliente({ inicioPrevisiones: inicio([fila()]) });
     await montarHome(c);
     const antes = llamadas(c);
-    accion('atencion-luz', 'swipe');
+    accion('atencion-luz', 'derecha');
     await esperar(2000);
     fireEvent.press(screen.getByTestId('aviso-rapida-luz-deshacer'));
     expect(screen.getByTestId('atencion-luz')).toBeTruthy();
@@ -187,7 +211,7 @@ describe('Inicio', () => {
   test('datos incompletos (la cuenta prevista hoy no puede pagar) → la hoja de siempre, sin aviso', async () => {
     const c = cliente({ inicioPrevisiones: inicio([fila()]), cuentasPago: jest.fn(async () => ({ tipo: 'OK', datos: { cuentas: [PAGO[1]] } }) as any) });
     await montarHome(c);
-    accion('atencion-luz', 'swipe');
+    accion('atencion-luz', 'derecha');
     expect(screen.getByTestId('hoja-swipe')).toBeTruthy();
     expect(screen.queryByTestId('aviso-rapida-luz')).toBeNull();
     await esperar(ESPERA_DESHACER_MS * 2);
@@ -199,12 +223,12 @@ describe('Inicio', () => {
     const c = cliente({ inicioPrevisiones: inicio([fila()]),
       registrarGastoPagado: jest.fn(async () => ({ tipo: 'RECHAZADO', codigo: 'CUENTA_SIN_CAPACIDAD', mensaje }) as any) });
     await montarHome(c);
-    accion('atencion-luz', 'swipe');
+    accion('atencion-luz', 'derecha');
     await esperar(ESPERA_DESHACER_MS);
     await asentar();
     expect(c.registrarGastoPagado).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('atencion-luz')).toBeTruthy(); // la fila vuelve
-    expect(screen.getByTestId('fallo-rapida-luz-texto')).toHaveTextContent(`No se ha guardado: Electricidad pagada. ${mensaje}`);
+    expect(screen.getByTestId('fallo-rapida-luz-texto')).toHaveTextContent(`No se ha guardado: Electricidad pagada · 74,00 €. ${mensaje}`);
     expect(screen.queryByTestId('aviso-rapida-luz')).toBeNull();
     expect(screen.queryByTestId('fallo-rapida-luz-reintentar')).toBeNull(); // un rechazo no se reintenta igual
     expect(c.inicioPrevisiones).toHaveBeenCalledTimes(1); // no relee como si se hubiera guardado
@@ -215,7 +239,7 @@ describe('Inicio', () => {
   test('doble gesto → una sola intención y una sola petición', async () => {
     const c = cliente({ inicioPrevisiones: inicio([fila()]) });
     await montarHome(c);
-    dosEventosSeguidos('atencion-luz', 'swipe');
+    dosEventosSeguidos('atencion-luz', 'derecha');
     expect(screen.getAllByTestId('aviso-rapida-luz')).toHaveLength(1);
     await esperar(ESPERA_DESHACER_MS * 2);
     await asentar();
@@ -229,7 +253,7 @@ describe('Inicio', () => {
       .mockResolvedValue({ tipo: 'OK', datos: { intencion_id: 'x', hecho_id: 'x', idempotente: true } });
     const c = cliente({ inicioPrevisiones: inicio([fila()]), registrarGastoPagado: registrar as any });
     await montarHome(c);
-    accion('atencion-luz', 'swipe');
+    accion('atencion-luz', 'derecha');
     await esperar(ESPERA_DESHACER_MS);
     await asentar();
     expect(screen.getByTestId('fallo-rapida-luz-texto')).toHaveTextContent(/No sabemos si se guardó: Electricidad pagada/);
@@ -245,10 +269,10 @@ describe('Inicio', () => {
     const registrar = jest.fn().mockResolvedValue({ tipo: 'INDETERMINADO', mensaje: 'sin red' });
     const c = cliente({ inicioPrevisiones: inicio([fila()]), registrarGastoPagado: registrar as any });
     await montarHome(c);
-    accion('atencion-luz', 'swipe');
+    accion('atencion-luz', 'derecha');
     await esperar(ESPERA_DESHACER_MS);
     await asentar();
-    accion('atencion-luz', 'swipe');
+    accion('atencion-luz', 'derecha');
     await esperar(ESPERA_DESHACER_MS);
     await asentar();
     expect(registrar).toHaveBeenCalledTimes(2);
@@ -264,7 +288,7 @@ describe('Inicio', () => {
     try {
       const c = cliente({ inicioPrevisiones: inicio([fila()]) });
       await montarHome(c);
-      accion('atencion-luz', 'swipe');
+      accion('atencion-luz', 'derecha');
       await esperar(1000);
       await act(async () => oyente?.('background'));
       await esperar(ESPERA_DESHACER_MS * 2);
@@ -279,34 +303,72 @@ describe('Inicio', () => {
   test('la pantalla se desmonta durante la espera → no se envía nada', async () => {
     const c = cliente({ inicioPrevisiones: inicio([fila()]) });
     const r = await montarHome(c);
-    accion('atencion-luz', 'swipe');
+    accion('atencion-luz', 'derecha');
     r.unmount();
     await esperar(ESPERA_DESHACER_MS * 2);
     expect(c.registrarGastoPagado).not.toHaveBeenCalled();
   });
 
-  test('el gesto real sobre el contenedor común (pasado el umbral) lanza la acción rápida', async () => {
+  test('gesto real: a medias a la derecha enseña «Pagado» (nada se envía); tocarlo lo ejecuta; del todo lo ejecuta directamente', async () => {
     const c = cliente({ inicioPrevisiones: inicio([fila()]) });
     await montarHome(c);
-    const z = screen.getByTestId('fila-swipe-atencion-luz');
-    let reloj = 0;
-    const evento = (dx: number) => {
-      const ts = (reloj += 10);
-      const toque = { touchActive: true, startPageX: 300, startPageY: 20, startTimeStamp: 0,
-        currentPageX: 300 + dx, currentPageY: 20, currentTimeStamp: ts, previousPageX: 300, previousPageY: 20, previousTimeStamp: ts - 5 };
-      return { nativeEvent: { changedTouches: [], touches: [], pageX: 300 + dx, pageY: 20, timestamp: ts },
-        touchHistory: { numberActiveTouches: 1, indexOfSingleActiveTouch: 0, mostRecentTimeStamp: ts, touchBank: [toque] } };
-    };
-    await act(async () => {
-      expect(z.props.onMoveShouldSetResponderCapture(evento(-30))).toBe(true);
-      z.props.onResponderGrant(evento(-30));
-      z.props.onResponderMove(evento(-120));
-      z.props.onResponderRelease(evento(-120));
-    });
-    expect(screen.getByTestId('aviso-rapida-luz-texto')).toHaveTextContent('Electricidad pagada');
+    const antes = llamadas(c);
+    expect(deslizar('fila-swipe-atencion-luz', 100)).toBe(true); // a medias
+    await asentar();
+    expect(screen.getByTestId('swipe-boton-atencion-luz-derecha', OCULTOS)).toBeTruthy();
+    expect(within(screen.getByTestId('swipe-accion-atencion-luz-derecha', OCULTOS)).getByText('Pagado', OCULTOS)).toBeTruthy();
+    expect(screen.queryByTestId('aviso-rapida-luz')).toBeNull();
+    await esperar(ESPERA_DESHACER_MS * 2);
+    expect(llamadas(c)).toBe(antes);
+    fireEvent.press(screen.getByTestId('swipe-boton-atencion-luz-derecha', OCULTOS));
+    expect(screen.getByTestId('aviso-rapida-luz-texto')).toHaveTextContent('Electricidad pagada · 74,00 €');
+    fireEvent.press(screen.getByTestId('aviso-rapida-luz-deshacer'));
+    // del todo
+    expect(deslizar('fila-swipe-atencion-luz', 260)).toBe(true);
+    await asentar();
+    expect(screen.getByTestId('aviso-rapida-luz-texto')).toHaveTextContent('Electricidad pagada · 74,00 €');
     await esperar(ESPERA_DESHACER_MS);
     await asentar();
     expect(c.registrarGastoPagado).toHaveBeenCalledTimes(1);
+    expect((c.registrarGastoPagado as jest.Mock).mock.calls[0][0].intencion_id).toBe('00000000-0000-4000-8000-000000000001');
+  });
+
+  test('gesto real a la izquierda del todo: «No hubo este mes» (omitir sin motivo) a los 5 s; gris neutro, nunca rojo', async () => {
+    const omitir = jest.fn(async (_: string, pl: any) => ({ tipo: 'OK', datos: { intencion_id: pl.intencion_id, prevision_id: 'luz', estado: 'OMITIDA', row_version: 2 } }) as any);
+    const c = cliente({ inicioPrevisiones: inicio([fila()]), omitirPrevision: omitir as any });
+    await montarHome(c);
+    expect(deslizar('fila-swipe-atencion-luz', -90)).toBe(true); // a medias: se ve el botón
+    await asentar();
+    const fondo = StyleSheet.flatten(screen.getByTestId('fila-swipe-atencion-luz').props.style).backgroundColor;
+    expect(fondo).toBe(colores.light.surfaceSecondary);
+    expect(within(screen.getByTestId('swipe-accion-atencion-luz-izquierda', OCULTOS)).getByText('No hubo', OCULTOS)).toBeTruthy();
+    fireEvent.press(screen.getByTestId('swipe-boton-atencion-luz-izquierda', OCULTOS));
+    expect(screen.getByTestId('aviso-rapida-luz-texto')).toHaveTextContent('Electricidad · no hubo este mes');
+    await esperar(ESPERA_DESHACER_MS - 1);
+    expect(omitir).not.toHaveBeenCalled();
+    await esperar(1);
+    await asentar();
+    expect(omitir).toHaveBeenCalledWith('luz', { intencion_id: '00000000-0000-4000-8000-000000000001', row_version: 1, motivo: null });
+    expect(c.registrarGastoPagado).not.toHaveBeenCalled();
+  });
+
+  test('«No hubo» no se ofrece con pagos enlazados; la derecha con pago parcial o importe desconocido abre el formulario rellenado', async () => {
+    const SEGURO = fila({ id: 'seguro', concepto: 'Seguro hogar', importe_esperado: '120.00', cubierto: '40.00', queda: '80.00', con_realidad: true, pagos: 1 });
+    const AGUA = fila({ id: 'agua', concepto: 'Agua', importe_esperado: null, queda: null });
+    const onFormularioCompleto = jest.fn();
+    const c = cliente({ inicioPrevisiones: inicio([SEGURO, AGUA]) });
+    envolver(<HomeScreen cliente={c} ahora={AHORA} refresco={0} onRegistrar={jest.fn()} nuevoId={nuevoId} onPendientes={jest.fn()} onPrevision={jest.fn()} onFormularioCompleto={onFormularioCompleto} />);
+    await asentar();
+    expect(screen.getByTestId('atencion-seguro').props.accessibilityActions).toEqual([{ name: 'activate' }, { name: 'derecha', label: 'Pagado' }]);
+    expect(deslizar('fila-swipe-atencion-seguro', -260)).toBe(false); // sin lado izquierdo: el gesto no se toma
+    accion('atencion-seguro', 'derecha');
+    expect(onFormularioCompleto).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'seguro' }), '80,00');
+    expect(screen.getByTestId('atencion-agua').props.accessibilityActions).toEqual([{ name: 'activate' }, { name: 'derecha', label: 'Pagado' }, { name: 'izquierda', label: 'No hubo' }]);
+    accion('atencion-agua', 'derecha');
+    expect(onFormularioCompleto).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'agua' }), null);
+    expect(screen.queryByTestId('aviso-rapida-agua')).toBeNull();
+    await esperar(ESPERA_DESHACER_MS * 2);
+    expect(c.registrarGastoPagado).not.toHaveBeenCalled();
   });
 });
 
@@ -330,10 +392,10 @@ describe('«Pendientes»', () => {
     const c = cliente({ pendientesPrevisiones: pendientes([fila(), NOMINA]) });
     const onCambios = await montarPendientes(c);
     expect(c.cuentasElegibles).toHaveBeenCalledWith('INGRESO', HOY);
-    accion(`pendiente-${NOMINA.id}`, 'swipe');
+    accion(`pendiente-${NOMINA.id}`, 'derecha');
     expect(screen.queryByTestId(`pendiente-${NOMINA.id}`)).toBeNull();
     expect(screen.getByTestId('pendiente-luz')).toBeTruthy(); // las demás filas siguen
-    expect(screen.getByTestId(`aviso-rapida-${NOMINA.id}-texto`)).toHaveTextContent('Nómina cobrada');
+    expect(screen.getByTestId(`aviso-rapida-${NOMINA.id}-texto`)).toHaveTextContent('Nómina cobrada · 2.100,00 €');
     await esperar(ESPERA_DESHACER_MS - 1);
     expect(c.registrarIngresoCobrado).not.toHaveBeenCalled();
     await esperar(1);
@@ -351,7 +413,7 @@ describe('«Pendientes»', () => {
     const c = cliente({ pendientesPrevisiones: pendientes([NOMINA]) });
     const onCambios = await montarPendientes(c);
     const antes = llamadas(c);
-    accion(`pendiente-${NOMINA.id}`, 'swipe');
+    accion(`pendiente-${NOMINA.id}`, 'derecha');
     fireEvent.press(screen.getByTestId(`aviso-rapida-${NOMINA.id}-deshacer`));
     await esperar(ESPERA_DESHACER_MS * 2);
     await asentar();
@@ -363,7 +425,7 @@ describe('«Pendientes»', () => {
   test('sin poder leer la capacidad → la hoja', async () => {
     const c = cliente({ pendientesPrevisiones: pendientes([NOMINA]), cuentasElegibles: jest.fn(async () => ({ tipo: 'INDETERMINADO', mensaje: 'x' }) as any) });
     await montarPendientes(c);
-    accion(`pendiente-${NOMINA.id}`, 'swipe');
+    accion(`pendiente-${NOMINA.id}`, 'derecha');
     expect(screen.getByTestId('hoja-swipe')).toBeTruthy();
     expect(screen.queryByTestId(`aviso-rapida-${NOMINA.id}`)).toBeNull();
   });
@@ -403,15 +465,15 @@ async function montarActividad(c: ClienteApi) {
 }
 
 describe('Actividad', () => {
-  test('«Cobrado» con la cuenta original → «Devolución de Abrigo cobrada · Deshacer» → abono en la original con fecha de hoy a los 5 s', async () => {
+  test('«Recibido» con la cuenta original → «Abono de Abrigo recibido · Deshacer» → abono en la original con fecha de hoy a los 5 s', async () => {
     const c = clienteActividad();
     await montarActividad(c);
     expect(c.contextoDevolucion).toHaveBeenCalledWith('compra'); // la cuenta original se lee con la lista
     const antes = llamadas(c);
-    accion('fila-dev', 'cobrado');
+    accion('fila-dev', 'derecha');
     expect(screen.queryByTestId('fila-dev')).toBeNull();
     expect(screen.queryByTestId('hoja-abono')).toBeNull();
-    expect(screen.getByTestId('aviso-rapida-dev-texto')).toHaveTextContent('Devolución de Abrigo cobrada');
+    expect(screen.getByTestId('aviso-rapida-dev-texto')).toHaveTextContent('Abono de Abrigo recibido · 40,00 €');
     await esperar(ESPERA_DESHACER_MS - 1);
     expect(llamadas(c)).toBe(antes);
     await esperar(1);
@@ -425,7 +487,7 @@ describe('Actividad', () => {
     const c = clienteActividad();
     await montarActividad(c);
     const antes = llamadas(c);
-    accion('fila-dev', 'cobrado');
+    accion('fila-dev', 'derecha');
     fireEvent.press(screen.getByTestId('aviso-rapida-dev-deshacer'));
     await esperar(ESPERA_DESHACER_MS * 2);
     await asentar();
@@ -436,7 +498,7 @@ describe('Actividad', () => {
   test('sin cuenta original → la hoja de cuenta y fecha', async () => {
     const c = clienteActividad({ contextoDevolucion: jest.fn(async () => ({ tipo: 'OK', datos: { ...CTX, cuenta_compra: null } }) as any) });
     await montarActividad(c);
-    accion('fila-dev', 'cobrado');
+    accion('fila-dev', 'derecha');
     await asentar();
     expect(screen.getByTestId('hoja-abono')).toBeTruthy();
     expect(screen.queryByTestId('aviso-rapida-dev')).toBeNull();
@@ -447,7 +509,7 @@ describe('Actividad', () => {
     const mensaje = 'Esta devolución ya tiene su abono.';
     const c = clienteActividad({ registrarAbono: jest.fn(async () => ({ tipo: 'RECHAZADO', codigo: 'YA_CONCILIADO', mensaje }) as any) });
     await montarActividad(c);
-    accion('fila-dev', 'cobrado');
+    accion('fila-dev', 'derecha');
     await esperar(ESPERA_DESHACER_MS);
     await asentar();
     expect(screen.getByTestId('fila-dev')).toBeTruthy();
@@ -458,7 +520,7 @@ describe('Actividad', () => {
   test('doble gesto → una sola intención', async () => {
     const c = clienteActividad();
     await montarActividad(c);
-    dosEventosSeguidos('fila-dev', 'cobrado');
+    dosEventosSeguidos('fila-dev', 'derecha');
     expect(screen.getAllByTestId('aviso-rapida-dev')).toHaveLength(1);
     await esperar(ESPERA_DESHACER_MS * 2);
     await asentar();

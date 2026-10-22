@@ -4,6 +4,7 @@
 // Ruta: mobile/src/components/Formulario.tsx
 // Descripción: Piezas comunes de los formularios y listas de Ajustes de F05-03/F05-04 (Terceros, Contextos, Plantillas; láminas REG-DYN / SET-TH / SET-CTX v0.1 y SET-PLT v0.2): campo con etiqueta, caja de aviso (OK / aviso), cabecera de tarea «Cancelar · título», campo de selección que abre un selector, rótulo de grupo en mayúsculas y fila de lista con segunda línea. Mismo tratamiento que Ajustes › Preferencias (solo tokens semánticos).
 // Versión: 0.1.0 (F05-03/F05-04 J2 §2.5)
+// Versión: 0.2.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2 S9): `FilaLista` admite `enTarjeta` (la fila es una tarjeta, sin separador) e `izquierda` (lado izquierdo del swipe común, p. ej. «Desactivar», con su acción accesible).
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -13,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTema } from '../theme/tema';
 import { espacio, radio, TACTIL_MIN, tipo } from '../theme/tokens';
+import { accesibilidadLados, FilaDeslizable, type LadoSwipe } from './AccionRapida';
 import { BotonTexto } from './Basicos';
 
 export type AvisoCaja = { tipo: 'OK' | 'AVISO'; texto: string } | null;
@@ -110,15 +112,29 @@ export function RotuloGrupo({ texto, testID }: { texto: string; testID?: string 
   );
 }
 
-export function FilaLista(p: { testID: string; titulo: string; detalle?: string; apagada?: boolean; ultima?: boolean; derecha?: React.ReactNode; onPress: () => void }) {
+export function FilaLista(p: {
+  testID: string;
+  titulo: string;
+  detalle?: string;
+  apagada?: boolean;
+  ultima?: boolean;
+  derecha?: React.ReactNode;
+  onPress: () => void;
+  /** La fila es una tarjeta con swipe (SWIPE-RULE). */
+  enTarjeta?: boolean;
+  izquierda?: LadoSwipe;
+}) {
   const { c } = useTema();
-  return (
+  const a11y = accesibilidadLados(undefined, p.izquierda);
+  const fila = (
     <Pressable
       testID={p.testID}
       accessibilityRole="button"
       accessibilityLabel={[p.titulo, p.detalle].filter(Boolean).join('. ')}
+      accessibilityActions={a11y.accessibilityActions}
+      onAccessibilityAction={(e) => void a11y.ejecutar(e.nativeEvent.actionName)}
       onPress={p.onPress}
-      style={({ pressed }) => [s.fila, !p.ultima && { borderBottomColor: c.borderDefault, borderBottomWidth: StyleSheet.hairlineWidth }, { opacity: pressed ? 0.7 : 1 }]}
+      style={({ pressed }) => [s.fila, !p.enTarjeta && !p.ultima && { borderBottomColor: c.borderDefault, borderBottomWidth: StyleSheet.hairlineWidth }, { opacity: pressed ? 0.7 : 1 }]}
     >
       <View style={{ flex: 1, gap: 2 }}>
         <Text testID={`${p.testID}-titulo`} style={[tipo.body, { color: p.apagada ? c.textSecondary : c.textPrimary }]}>{p.titulo}</Text>
@@ -127,6 +143,12 @@ export function FilaLista(p: { testID: string; titulo: string; detalle?: string;
       {p.derecha}
       <Ionicons name="chevron-forward" size={18} color={c.textSecondary} />
     </Pressable>
+  );
+  if (!p.enTarjeta) return fila;
+  return (
+    <FilaDeslizable id={p.testID} izquierda={p.izquierda}>
+      {fila}
+    </FilaDeslizable>
   );
 }
 

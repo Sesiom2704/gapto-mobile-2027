@@ -5,6 +5,7 @@
 // Descripción: Swipe «Pagado» / «Cobrado» de una fila de previsión (F05-06 M5 §B1; lámina PREV v0.2 B1; D-PREV-08/12; DAY-RULE-03), compartido por Inicio y «Pendientes». El gesto solo ABRE la hoja: resumen (previsión, esperado, consecuencia «Quedará cubierta»), importe real propuesto y marcado «Revisa», cuenta prevista y fecha (la prevista si ya pasó, si no hoy). «Confirmar pago y cubrir» registra con OP-22 y `marcar_realizada = true`: es la declaración explícita. «Abrir el formulario completo» lleva al registro desde la previsión con el importe escrito. Un envío sin respuesta se reintenta con la MISMA identidad.
 // Versión: 0.1.0 (F05-06 M5 §B1)
 // Versión: 0.2.0 (F05-06 M5 SWIPE; regla de Moisés del 2026-10-22, sustituye a DAY-RULE-03 y D-PREV-08/12 en lo que contradigan): el swipe es una acción rápida de un solo gesto cuando `planRapidoPrevision` lo admite (esperado conocido, EUR, una sola cuenta prevista con la capacidad de hoy, sin realidad previa): la fila sale, el aviso «<Nombre> pagada/cobrada · Deshacer» dura 5 s y después se registra el esperado en la cuenta prevista con fecha de hoy y `marcar_realizada = true`, por la misma ruta y el mismo bloque `prevision` que la hoja (useAccionRapida). Las capacidades se leen al cargar las filas, para que el gesto y «Deshacer» no toquen el servidor. Si falta algo o no se pudieron leer, el gesto abre la hoja de siempre.
+// Versión: 0.3.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2): `lados(fila)` da los dos lados de la fila. Derecha «Pagado» / «Cobrado» (transferencia: «Hecha»): acción rápida si no hay dudas; si las hay, la hoja (esperado y cuenta conocidos) o el formulario completo ya rellenado (importe desconocido, pago parcial, transferencia). Izquierda «No hubo» solo sin pagos enlazados (`admiteNoHubo`): omite con motivo vacío y la misma identidad que la hoja de omitir, tras el aviso de 5 s.
 // ============================================================
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -12,8 +13,19 @@ import React, { useCallback, useEffect, useState } from 'react';
 import type { ClienteApi, FilaPrevision, Respuesta } from '../api/cliente';
 import { diaMesIso, isoLocal } from '../domain/fechas';
 import { parsearImporte } from '../domain/importe';
-import { admiteSwipe, componerRegistro, planRapidoPrevision, textoAvisoRapido, textoEditable, type CapacidadesHoy } from '../domain/prevision';
-import { useAccionRapida } from './AccionRapida';
+import {
+  admiteNoHubo,
+  admiteSwipe,
+  componerRegistro,
+  importeFormulario,
+  planRapidoPrevision,
+  textoAvisoNoHubo,
+  textoAvisoRapido,
+  textoEditable,
+  verboSwipe,
+  type CapacidadesHoy,
+} from '../domain/prevision';
+import { useAccionRapida, type LadoSwipe } from './AccionRapida';
 import { HojaSwipe, usarIntencion } from './Prevision';
 
 export function useSwipePrevision(p: {
@@ -66,10 +78,10 @@ export function useSwipePrevision(p: {
     setError(null);
   }, [intencion]);
 
-  /** Gesto o acción accesible: acción rápida si es inequívoca; si no, la hoja. */
+  /** Derecha (gesto o acción accesible): acción rápida si es inequívoca; si no, la hoja o el formulario rellenado. */
   const deslizar = (f: FilaPrevision) => {
     const plan = planRapidoPrevision(f, capacidades, hoy);
-    if (!plan) return abrir(f);
+    if (!plan) return admiteSwipe(f) ? abrir(f) : p.onFormularioCompleto(f, importeFormulario(f));
     rapida.lanzar({
       clave: f.id,
       texto: textoAvisoRapido(f),
@@ -79,6 +91,25 @@ export function useSwipePrevision(p: {
         return r.ruta === 'INGRESO' ? p.cliente.registrarIngresoCobrado(r.payload as never) : p.cliente.registrarGastoPagado(r.payload as never);
       },
     });
+  };
+
+  /** Izquierda «No hubo este mes»: omitir sin motivo, tras el aviso. */
+  const noHubo = (f: FilaPrevision) => {
+    if (!admiteNoHubo(f)) return;
+    rapida.lanzar({
+      clave: f.id,
+      texto: textoAvisoNoHubo(f),
+      enviar: (id) => p.cliente.omitirPrevision(f.id, { intencion_id: id, row_version: f.row_version, motivo: null }),
+    });
+  };
+
+  /** Los dos lados de una fila (null fuera de gasto, ingreso o transferencia abiertos). */
+  const lados = (f: FilaPrevision): { derecha?: LadoSwipe; izquierda?: LadoSwipe } => {
+    if (f.estado !== 'ABIERTA' || !['GASTO', 'INGRESO', 'TRANSFERENCIA'].includes(f.tipo)) return {};
+    return {
+      derecha: { etiqueta: f.tipo === 'TRANSFERENCIA' ? 'Hecha' : verboSwipe(f.tipo), icono: 'checkmark', tono: 'confirmar', onEjecutar: () => deslizar(f) },
+      izquierda: admiteNoHubo(f) ? { etiqueta: 'No hubo', icono: 'remove-circle-outline', tono: 'neutro', onEjecutar: () => noHubo(f) } : undefined,
+    };
   };
 
   const cerrar = () => setFila(null);
@@ -135,5 +166,5 @@ export function useSwipePrevision(p: {
       onCerrar={cerrar}
     />
   ) : null;
-  return { abrir, deslizar, oculta: rapida.oculta, avisos: rapida.avisos, hoja };
+  return { abrir, deslizar, noHubo, lados, oculta: rapida.oculta, avisos: rapida.avisos, hoja };
 }

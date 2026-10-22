@@ -9,12 +9,15 @@
 // Versión: 0.4.0 (F05-01 S7-MAG UI, hito 2): el controlador de magnitudes recibe `nuevoId` (identidad del alta rápida) y la ruta visible de cada categoría («Hogar › Luz») para la ficha y el impacto de deshabilitar.
 // Versión: 0.5.0 (F05-01 S7-MAG UI correctivo AJ-S7MAGUI-02): `cargar(true)` devuelve si la lectura del árbol fue OK; en silencio, un fallo conserva el árbol mostrado y el controlador de magnitudes lo identifica como posiblemente desfasado (nunca «estado actualizado» sin verificarlo).
 // Versión: 0.6.0 (F05-03/F05-04 J2 §2.6; lámina SET-PLT / HOME-QA v0.2 O01/O02): sin NINGUNA categoría, la lista ofrece «Empezar con categorías sugeridas» (O02, árbol del servidor y POST /v1/categorias/onboarding) o «Empezar desde cero» (estado vacío habitual con «Nueva categoría»). La oferta es una tarea inmersiva.
+// Versión: 0.7.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2 S9; SWIPE-RULE): cada categoría va en tarjeta; deslizar a la izquierda una categoría ACTIVA es «Desactivar» (tono de aviso, nunca rojo). Sin subcategorías activas: aviso «<Nombre> desactivada · Deshacer» y, a los 5 s, la misma ruta que la hoja con el modo «solo si no tiene subcategorías activas». Con subcategorías activas hay dudas: abre su detalle con la hoja «Desactivar» de siempre (rama o no). Se puede reactivar después; nunca borra registros.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { FilaDeslizable, accesibilidadLados, useAccionRapida, type LadoSwipe } from '../components/AccionRapida';
 
 import type { ClienteApi } from '../api/cliente';
 import type { Respuesta } from '../api/cliente';
@@ -238,6 +241,32 @@ export function CategoriasAjustesScreen(p: {
     setGuardando(false);
     if (r.tipo === 'RECHAZADO' && r.codigo === 'CONJUNTO_HERMANOS_DESFASADO') return cerrarYRecargar(MSG_CONJUNTO_DESFASADO);
     cerrarYRecargar(avisoFinal(r, 'No se ha podido guardar el orden.'));
+  };
+
+  // ------------------------------------------------------------------ swipe «Desactivar» (SWIPE-RULE)
+  const rapida = useAccionRapida({ nuevoId: p.nuevoId, onHecha: async () => { await cargar(true); } });
+  const ladoDesactivar = (n: CategoriaNodo): LadoSwipe | undefined => {
+    if (!n.enabled || !arbol) return undefined;
+    const conHijos = subcategoriasActivas(arbol, n.id).length > 0;
+    return {
+      etiqueta: 'Desactivar', icono: 'pause-circle-outline', tono: 'aviso',
+      onEjecutar: () => {
+        if (conHijos) {
+          // Hay dudas (¿también sus subcategorías?): la hoja de siempre.
+          setDetalleId(n.id);
+          return setTarea({ tipo: 'DESACTIVAR' });
+        }
+        rapida.lanzar({
+          clave: n.id,
+          texto: `${n.nombre} desactivada`,
+          enviar: async () => {
+            const r = await p.cliente.desactivarCategoria(n.id, { row_version: n.row_version, modo: 'SOLO_SI_SIN_HIJOS_ACTIVOS' });
+            if (r.tipo !== 'RECHAZADO') return r;
+            return { ...r, mensaje: r.codigo === 'CATEGORIA_TIENE_HIJOS_ACTIVOS' ? MSG_HIJOS_ACTIVOS : avisoFinal(r, 'No se ha podido desactivar.') ?? r.mensaje };
+          },
+        });
+      },
+    };
   };
 
   // ------------------------------------------------------------------ tareas inmersivas
@@ -479,13 +508,15 @@ export function CategoriasAjustesScreen(p: {
           </View>
         ) : null}
         {nodoNivel ? (
-          <Fila
-            testID="ver-detalle-nivel"
-            iconKey={nodoNivel.icon_key}
-            titulo={`Ver detalle de «${nodoNivel.nombre}»`}
-            enfasis
-            onPress={() => setDetalleId(nodoNivel.id)}
-          />
+          <View style={s.tarjetas}>
+            <Fila
+              testID="ver-detalle-nivel"
+              iconKey={nodoNivel.icon_key}
+              titulo={`Ver detalle de «${nodoNivel.nombre}»`}
+              enfasis
+              onPress={() => setDetalleId(nodoNivel.id)}
+            />
+          </View>
         ) : null}
         {arbol && arbol.porId.size === 0 && !desdeCero ? (
           <OfertaOnboarding onSugeridas={() => setTarea({ tipo: 'ONBOARDING' })} onDesdeCero={() => setDesdeCero(true)} />
@@ -497,7 +528,8 @@ export function CategoriasAjustesScreen(p: {
             </Text>
           </View>
         ) : null}
-        {filas.map((n) => {
+        <View style={s.tarjetas}>
+        {filas.filter((n) => !rapida.oculta(n.id)).map((n) => {
           const nHijos = hijosVisibles(n.id).length;
           const sub = [
             n.enabled ? null : 'Desactivada',
@@ -513,10 +545,13 @@ export function CategoriasAjustesScreen(p: {
               subtitulo={sub || undefined}
               inactiva={!n.enabled}
               onPress={() => (nHijos > 0 ? setNivel(n.id) : setDetalleId(n.id))}
+              izquierda={ladoDesactivar(n)}
             />
           );
         })}
+        </View>
       </ScrollView>
+      {rapida.avisos}
       <View style={[s.pie, { borderTopColor: c.separator }]}>
         {arbol && hijosDe(arbol, nivel).length > 1 ? (
           <BotonSecundario testID="editar-orden-abrir" titulo="Editar orden" onPress={() => { setAviso(null); setTarea({ tipo: 'ORDEN', padre: nivel }); }} />
@@ -527,15 +562,19 @@ export function CategoriasAjustesScreen(p: {
   );
 }
 
-function Fila(p: { testID: string; iconKey: string | null; titulo: string; subtitulo?: string; inactiva?: boolean; enfasis?: boolean; onPress: () => void }) {
+function Fila(p: { testID: string; iconKey: string | null; titulo: string; subtitulo?: string; inactiva?: boolean; enfasis?: boolean; onPress: () => void; izquierda?: LadoSwipe }) {
   const { c } = useTema();
+  const a11y = accesibilidadLados(undefined, p.izquierda);
   return (
+    <FilaDeslizable id={p.testID} izquierda={p.izquierda}>
     <Pressable
       testID={p.testID}
       accessibilityRole="button"
       accessibilityLabel={[p.titulo, p.subtitulo].filter(Boolean).join('. ')}
+      accessibilityActions={a11y.accessibilityActions}
+      onAccessibilityAction={(e) => void a11y.ejecutar(e.nativeEvent.actionName)}
       onPress={p.onPress}
-      style={({ pressed }) => [s.fila, { borderBottomColor: c.separator, opacity: pressed ? 0.7 : 1 }]}
+      style={({ pressed }) => [s.fila, s.filaTarjeta, { opacity: pressed ? 0.7 : 1 }]}
     >
       <IconoCategoriaVista iconKey={p.iconKey} />
       <View style={{ flex: 1, gap: 2 }}>
@@ -544,6 +583,7 @@ function Fila(p: { testID: string; iconKey: string | null; titulo: string; subti
       </View>
       <Ionicons name="chevron-forward" size={18} color={c.textSecondary} />
     </Pressable>
+    </FilaDeslizable>
   );
 }
 
@@ -577,6 +617,8 @@ const s = StyleSheet.create({
   filtro: { paddingHorizontal: espacio.l, paddingVertical: espacio.s },
   migas: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', paddingHorizontal: espacio.l, paddingVertical: espacio.m, borderBottomWidth: StyleSheet.hairlineWidth },
   fila: { flexDirection: 'row', alignItems: 'center', gap: espacio.m, minHeight: TACTIL_MIN + 8, paddingHorizontal: espacio.l, paddingVertical: espacio.s, borderBottomWidth: StyleSheet.hairlineWidth },
+  filaTarjeta: { borderBottomWidth: 0, paddingHorizontal: espacio.m },
+  tarjetas: { paddingHorizontal: espacio.l, paddingTop: espacio.s, gap: espacio.s },
   filaDato: { flexDirection: 'row', alignItems: 'center', gap: espacio.s, minHeight: TACTIL_MIN + 4, paddingHorizontal: espacio.l, borderBottomWidth: StyleSheet.hairlineWidth },
   cabDetalle: { flexDirection: 'row', alignItems: 'center', gap: espacio.m, padding: espacio.l },
   aviso: { flexDirection: 'row', alignItems: 'flex-start', gap: espacio.s, borderRadius: radio.m, padding: espacio.m, marginHorizontal: espacio.l, marginBottom: espacio.m },

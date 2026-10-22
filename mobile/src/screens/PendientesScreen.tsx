@@ -5,6 +5,7 @@
 // Descripción: Lista «Pendientes» (F05-06 M5 §B1; HOME-01 v0.4 I04; lámina PREV v0.2 B; D-PREV-10). Se abre desde la campana o «Ver todos». Arriba «Por pagar» y «Por cobrar» POR SEPARADO (nunca un total único; las transferencias no suman; «Desconocido» si solo hay importes desconocidos). Secciones «Vencidas», «Con pago parcial» y «Sin fecha» (vacía con el head físico vigente). Cada fila se toca para ver el detalle o se desliza para «Pagado» / «Cobrado» cuando lo admite. Carga y fallo con su estado; nunca «sin pendientes» si la lectura falla.
 // Versión: 0.1.0 (F05-06 M5 §B1)
 // Versión: 0.2.0 (F05-06 M5 SWIPE; regla de Moisés del 2026-10-22): deslizar una fila es una acción rápida con «Deshacer» cuando es inequívoca (useSwipePrevision › useAccionRapida); la fila sale mientras espera. Si falta algo, abre la hoja.
+// Versión: 0.3.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2): filas en tarjeta con los dos lados (derecha «Pagado» / «Cobrado», izquierda «No hubo» sin pagos enlazados).
 // ============================================================
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -50,11 +51,11 @@ export function PendientesScreen(p: {
   const seccion = (titulo: string, todas: FilaPrevision[], clave: string) => {
     const filas = todas.filter((f) => !swipe.oculta(f.id));
     return filas.length === 0 ? null : (
-      <View testID={`pendientes-${clave}`} style={{ gap: espacio.xs }}>
+      <View testID={`pendientes-${clave}`} style={{ gap: espacio.s }}>
         <Text accessibilityRole="header" style={[tipo.footnote, { color: c.textSecondary, fontWeight: '600' }]}>{titulo}</Text>
         {filas.map((f, i) => (
           <FilaPrevisionVista key={f.id} testID={`pendiente-${f.id}`} fila={f} usarQueda ultima={i === filas.length - 1}
-            onPress={() => p.onDetalle(f)} onSwipe={admiteSwipe(f) ? () => swipe.deslizar(f) : undefined} />
+            onPress={() => p.onDetalle(f)} {...swipe.lados(f)} />
         ))}
       </View>
     );
@@ -88,7 +89,7 @@ export function PendientesScreen(p: {
             {seccion('Vencidas', carga.datos.secciones.vencidas, 'vencidas')}
             {seccion('Con pago parcial', carga.datos.secciones.con_pago_parcial, 'parciales')}
             {seccion('Sin fecha', carga.datos.secciones.sin_fecha, 'sin-fecha')}
-            <Text style={[tipo.footnote, { color: c.textSecondary }]}>Desliza una fila para «Pagado» o «Cobrado», o tócala para ver sus opciones.</Text>
+            <Text style={[tipo.footnote, { color: c.textSecondary }]}>Desliza a la derecha para «Pagado» o «Cobrado» y a la izquierda para «No hubo»; o toca la fila para ver sus opciones.</Text>
           </>
         ) : null}
       </ScrollView>

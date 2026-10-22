@@ -5,6 +5,7 @@
 // Descripción: Confirmación de previsiones (F05-06 M5 §B2; láminas PREV v0.2 y HOME-01 v0.4; F05 §59). Dominio puro (importes por naturaleza, «Desconocido» nunca 0, cobertura y desviación, línea de la fila, «Por pagar» / «Por cobrar» separados, campana, «Se vinculará X €», bloque `prevision` solo con respuesta explícita, payloads por tipo y regla del swipe) y pantallas por estado, en claro y oscuro: Inicio (campana con 0, 2 y 3; bloque como mucho dos; sin importes sumados; estado de fallo con «Reintentar» y «!»; próximos de solo lectura), «Pendientes», detalle (acciones atenuadas con motivo, parcial, desconocido, terminal en solo lectura), registro desde la previsión («¿Queda cubierta?» sin respuesta, revisión que separa realidad y previsión, reintento con la MISMA identidad), swipe (consecuencia antes de «Confirmar pago y cubrir»), «Ya lo registré» (sin preselección, «Buscar en más fechas», toda la porción libre, PORCION_CAMBIADA relee) y omitir (409 con el estado actual; tras un fallo, «No sabemos si se guardó»).
 // Versión: 0.1.0 (F05-06 M5 §B2)
 // Versión: 0.2.0 (F05-06 M5 SWIPE; regla del 2026-10-22): el swipe de B1 abre la hoja solo cuando la acción rápida no es inequívoca (aquí, sin poder leer la capacidad de hoy); la acción rápida con «Deshacer» se prueba en accion_rapida.test.tsx.
+// Versión: 0.3.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2): acciones accesibles «derecha» (Pagado / Cobrado) e «izquierda» (No hubo); el importe desconocido y el pago parcial ya tienen gesto: la derecha abre el formulario rellenado y «No hubo» solo existe sin pagos enlazados (accion_rapida.test.tsx).
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
@@ -244,8 +245,8 @@ describe('Inicio', () => {
     await act(async () => undefined);
     montarHome(c);
     const filaLuz = await screen.findByTestId('atencion-luz');
-    expect(filaLuz.props.accessibilityActions).toEqual([{ name: 'activate' }, { name: 'swipe', label: 'Pagado' }]);
-    fireEvent(filaLuz, 'accessibilityAction', { nativeEvent: { actionName: 'swipe' } });
+    expect(filaLuz.props.accessibilityActions).toEqual([{ name: 'activate' }, { name: 'derecha', label: 'Pagado' }, { name: 'izquierda', label: 'No hubo' }]);
+    fireEvent(filaLuz, 'accessibilityAction', { nativeEvent: { actionName: 'derecha' } });
     expect(c.registrarGastoPagado).not.toHaveBeenCalled(); // nunca registra en un toque
     expect(screen.getByTestId('swipe-consecuencia')).toHaveTextContent('Quedará cubierta');
     expect(screen.getByTestId('swipe-esperado')).toHaveTextContent('~74,00 €');
@@ -259,11 +260,11 @@ describe('Inicio', () => {
       prevision: { prevision_id: 'luz', row_version: 1, marcar_realizada: true } });
   });
 
-  test('sin swipe con esperado desconocido o con pago parcial', async () => {
+  test('esperado desconocido o pago parcial: derecha al formulario; «No hubo» solo sin pagos enlazados', async () => {
     montarHome(cliente({ inicioPrevisiones: inicio(2, [fila({ id: 'agua', importe_esperado: null, queda: null }), SEGURO]) }));
-    expect((await screen.findByTestId('atencion-agua')).props.accessibilityActions).toBeUndefined();
+    expect((await screen.findByTestId('atencion-agua')).props.accessibilityActions).toEqual([{ name: 'activate' }, { name: 'derecha', label: 'Pagado' }, { name: 'izquierda', label: 'No hubo' }]);
     expect(screen.getByTestId('atencion-agua-importe')).toHaveTextContent('Desconocido');
-    expect(screen.getByTestId(`atencion-${SEGURO.id}`).props.accessibilityActions).toBeUndefined();
+    expect(screen.getByTestId(`atencion-${SEGURO.id}`).props.accessibilityActions).toEqual([{ name: 'activate' }, { name: 'derecha', label: 'Pagado' }]);
   });
 });
 

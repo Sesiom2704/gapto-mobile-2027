@@ -7,6 +7,7 @@
 // Versión: 0.2.0 (F05-06 M2-C; acta M2 iPhone O-1): pista visual del swipe «Cobrado» (la fila se desplaza con tope, franja «Confirmar abono» tenue y de acento pasado el umbral, vuelta al soltar; sin franja ni desplazamiento en una compra).
 // Versión: 0.3.0 (F05-06 M2-D §2-§3): cuenta del abono (opción b): «Sí, en <original>» y la propuesta de B2 aunque la original no esté en la lista de RECIBIR_INGRESO; sin cuenta original no hay propuesta; las listas piden la operación INGRESO; CUENTA_SIN_CAPACIDAD con el mensaje del servidor (capacidad del detalle) y sin «ingreso».
 // Versión: 0.4.0 (F05-06 M5 SWIPE; regla del 2026-10-22): con la cuenta original demostrable el swipe «Cobrado» es una acción rápida con «Deshacer» (accion_rapida.test.tsx); estos tests de la Actividad prueban la reserva sin cuenta original (abre la hoja), el gesto común y la franja, que ahora dice «Cobrado».
+// Versión: 0.5.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2 S7): la devolución pendiente se desliza a la DERECHA («Recibido»; izquierda «Más»); la compra ofrece «Repetir hoy» y «Más». Gesto común: a medias enseña el botón, del todo ejecuta.
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
@@ -26,7 +27,7 @@ import {
   superaLoQueQueda,
   textoDevolucionDe,
 } from '../src/domain/devolucion';
-import { ActividadScreen, TEXTO_FRANJA_COBRADO, TOPE_SWIPE } from '../src/screens/ActividadScreen';
+import { ActividadScreen, TEXTO_FRANJA_COBRADO } from '../src/screens/ActividadScreen';
 import { DevolucionScreen } from '../src/screens/DevolucionScreen';
 import { TEXTO_FORMULARIO_SE_CONSERVA } from '../src/domain/capacidades';
 import { ProveedorTema } from '../src/theme/tema';
@@ -426,96 +427,85 @@ describe('Actividad', () => {
   });
 
   const SIN_ORIGINAL = { contextoDevolucion: jest.fn(async () => ({ tipo: 'OK', datos: { ...CTX, cuenta_compra: null } }) as any) };
-  test('P-DEV-04: sin cuenta original, el swipe «Cobrado» abre la confirmación de cuenta y fecha (nunca registra solo)', async () => {
+  test('P-DEV-04: sin cuenta original, «Recibido» (derecha) abre la confirmación de cuenta y fecha (nunca registra solo)', async () => {
     const c = clienteActividad({ registrarAbono: jest.fn() as any, ...SIN_ORIGINAL });
     envolver(<ActividadScreen cliente={c} ahora={AHORA} nuevoId={nuevoId} onRegistrarDevolucion={jest.fn()} />);
     const f = await screen.findByTestId('fila-dev');
-    expect(f.props.accessibilityActions).toEqual([{ name: 'cobrado', label: 'Cobrado' }]);
-    expect(screen.getByTestId('fila-compra').props.accessibilityActions).toBeUndefined();
-    fireEvent(f, 'accessibilityAction', { nativeEvent: { actionName: 'cobrado' } });
+    expect(f.props.accessibilityActions).toEqual([{ name: 'derecha', label: 'Recibido' }, { name: 'izquierda', label: 'Más' }]);
+    expect(screen.getByTestId('fila-compra').props.accessibilityActions).toEqual([{ name: 'derecha', label: 'Repetir hoy' }, { name: 'izquierda', label: 'Más' }]);
+    fireEvent(f, 'accessibilityAction', { nativeEvent: { actionName: 'derecha' } });
     expect(await screen.findByTestId('hoja-abono')).toBeTruthy();
     expect(c.registrarAbono).not.toHaveBeenCalled();
   });
 
-  test('P-DEV-04: el gesto real (contenedor que captura el movimiento horizontal) abre la hoja solo pasado el umbral', async () => {
+  // Historial de un solo toque de x=300 a x=300+dx (formato del ResponderTouchHistoryStore).
+  let reloj = 0;
+  const evento = (dx: number, dy = 0) => {
+    const ts = (reloj += 10);
+    const toque = { touchActive: true, startPageX: 300, startPageY: 20, startTimeStamp: ts - 30,
+      currentPageX: 300 + dx, currentPageY: 20 + dy, currentTimeStamp: ts, previousPageX: 300, previousPageY: 20, previousTimeStamp: ts - 5 };
+    return { nativeEvent: { changedTouches: [], touches: [], pageX: 300 + dx, pageY: 20 + dy, timestamp: ts },
+      touchHistory: { numberActiveTouches: 1, indexOfSingleActiveTouch: 0, mostRecentTimeStamp: ts, touchBank: [toque] } };
+  };
+
+  test('P-DEV-04: el gesto real (contenedor que captura el movimiento horizontal) abre la hoja solo deslizando del todo', async () => {
     const c = clienteActividad({ registrarAbono: jest.fn() as any, ...SIN_ORIGINAL });
     envolver(<ActividadScreen cliente={c} ahora={AHORA} nuevoId={nuevoId} onRegistrarDevolucion={jest.fn()} />);
     await screen.findByTestId('fila-dev');
-    expect(screen.queryByTestId('fila-swipe-compra')).toBeNull();
     const z = screen.getByTestId('fila-swipe-dev');
-    // Historial de un solo toque que va de x=300 a x=300+dx (formato del ResponderTouchHistoryStore).
-    const evento = (dx: number, dy: number, ts: number) => {
-      const toque = { touchActive: true, startPageX: 300, startPageY: 20, startTimeStamp: ts - 5,
-        currentPageX: 300 + dx, currentPageY: 20 + dy, currentTimeStamp: ts, previousPageX: 300, previousPageY: 20, previousTimeStamp: ts - 5 };
-      const touchHistory = { numberActiveTouches: 1, indexOfSingleActiveTouch: 0, mostRecentTimeStamp: ts, touchBank: [toque] };
-      return { nativeEvent: { changedTouches: [], touches: [], pageX: 300 + dx, pageY: 20 + dy, timestamp: ts }, touchHistory };
-    };
-    let reloj = 0; // marcas de tiempo crecientes entre gestos: PanResponder solo cuenta movimientos posteriores
     const gesto = (dx: number, dy: number) => {
-      const captura = z.props.onMoveShouldSetResponderCapture(evento(dx / 2, dy / 2, (reloj += 10)));
+      const captura = z.props.onMoveShouldSetResponderCapture(evento(dx / 2, dy / 2));
       if (captura) {
-        z.props.onResponderGrant(evento(dx / 2, dy / 2, reloj));
-        z.props.onResponderMove(evento(dx, dy, (reloj += 10)));
-        z.props.onResponderRelease(evento(dx, dy, (reloj += 10)));
+        z.props.onResponderGrant(evento(dx / 2, dy / 2));
+        z.props.onResponderMove(evento(dx, dy));
+        z.props.onResponderRelease(evento(dx, dy));
       }
       return captura;
     };
     expect(gesto(0, -80)).toBe(false); // vertical: lo deja para el scroll
-    await act(async () => { gesto(-40, 0); }); // horizontal corto: captura pero no llega al umbral
+    await act(async () => { gesto(40, 0); }); // corto: captura pero no llega al umbral
     expect(screen.queryByTestId('hoja-abono')).toBeNull();
-    await act(async () => { expect(gesto(-100, 0)).toBe(true); });
+    await act(async () => { expect(gesto(100, 0)).toBe(true); }); // a medias: enseña el botón, no ejecuta
+    expect(screen.queryByTestId('hoja-abono')).toBeNull();
+    expect(screen.getByTestId('swipe-boton-dev-derecha', { includeHiddenElements: true })).toBeTruthy();
+    await act(async () => { expect(gesto(200, 0)).toBe(true); }); // desde abierta, del todo: ejecuta
     expect(await screen.findByTestId('hoja-abono')).toBeTruthy();
     expect(c.registrarAbono).not.toHaveBeenCalled();
   });
 
-  test('O-1: al arrastrar, la fila se desplaza y deja ver «Cobrado»; se intensifica pasado el umbral y vuelve al soltar', async () => {
+  test('O-1: al arrastrar, la fila se desplaza y deja ver «Recibido» en verde; vuelve al soltar; del todo abre la hoja', async () => {
     const c = clienteActividad({ registrarAbono: jest.fn() as any, ...SIN_ORIGINAL });
     envolver(<ActividadScreen cliente={c} ahora={AHORA} nuevoId={nuevoId} onRegistrarDevolucion={jest.fn()} />);
     await screen.findByTestId('fila-dev');
     const z = screen.getByTestId('fila-swipe-dev');
-    let reloj = 0;
-    const evento = (dx: number) => {
-      const ts = (reloj += 10);
-      const toque = { touchActive: true, startPageX: 300, startPageY: 20, startTimeStamp: 0,
-        currentPageX: 300 + dx, currentPageY: 20, currentTimeStamp: ts, previousPageX: 300, previousPageY: 20, previousTimeStamp: ts - 5 };
-      return { nativeEvent: { changedTouches: [], touches: [], pageX: 300 + dx, pageY: 20, timestamp: ts },
-        touchHistory: { numberActiveTouches: 1, indexOfSingleActiveTouch: 0, mostRecentTimeStamp: ts, touchBank: [toque] } };
-    };
     const x = () => StyleSheet.flatten(screen.getByTestId('fila-desplazable-dev').props.style).transform[0].translateX;
-    const OCULTOS = { includeHiddenElements: true }; // la franja es decorativa: oculta a VoiceOver (S1 no cambia)
-    const franja = () => screen.getByTestId('franja-cobrado-dev', OCULTOS);
-    const fondoFranja = () => StyleSheet.flatten(franja().props.style).backgroundColor;
-    expect(screen.queryByTestId('franja-cobrado-dev', OCULTOS)).toBeNull(); // en reposo no hay franja
-    expect(screen.queryByTestId('franja-cobrado-compra', OCULTOS)).toBeNull();
-    expect(screen.queryByTestId('fila-desplazable-compra')).toBeNull(); // una compra no se desplaza
+    const OCULTOS = { includeHiddenElements: true }; // el fondo es para el dedo: oculto a VoiceOver
+    expect(screen.queryByTestId('swipe-accion-dev-derecha', OCULTOS)).toBeNull(); // en reposo no hay fondo
 
-    // Por debajo del umbral: franja tenue y fila desplazada; al soltar vuelve y no abre la hoja.
+    // Por debajo del umbral: fondo verde suave con «Recibido»; al soltar vuelve y no abre la hoja.
     await act(async () => {
-      expect(z.props.onMoveShouldSetResponderCapture(evento(-20))).toBe(true);
-      z.props.onResponderGrant(evento(-20));
-      z.props.onResponderMove(evento(-50));
+      expect(z.props.onMoveShouldSetResponderCapture(evento(20))).toBe(true);
+      z.props.onResponderGrant(evento(20));
+      z.props.onResponderMove(evento(50));
     });
-    expect(within(franja()).getByText(TEXTO_FRANJA_COBRADO, OCULTOS)).toBeTruthy();
-    expect(screen.queryByTestId('franja-cobrado-dev')).toBeNull(); // no la ve la accesibilidad
-    expect(fondoFranja()).toBe(colores.light.accentSurface);
-    expect(x()).toBe(-50);
-    await act(async () => { z.props.onResponderRelease(evento(-50)); });
-    expect(screen.queryByTestId('franja-cobrado-dev', OCULTOS)).toBeNull();
+    expect(within(screen.getByTestId('swipe-accion-dev-derecha', OCULTOS)).getByText(TEXTO_FRANJA_COBRADO, OCULTOS)).toBeTruthy();
+    expect(screen.queryByTestId('swipe-accion-dev-derecha')).toBeNull(); // no la ve la accesibilidad
+    expect(StyleSheet.flatten(screen.getByTestId('fila-swipe-dev').props.style).backgroundColor).toBe(colores.light.accentSurface);
+    expect(x()).toBe(50);
+    await act(async () => { z.props.onResponderRelease(evento(50)); });
+    expect(screen.queryByTestId('swipe-accion-dev-derecha', OCULTOS)).toBeNull();
     await waitFor(() => expect(x()).toBe(0));
     expect(screen.queryByTestId('hoja-abono')).toBeNull();
 
-    // Pasado el umbral: franja de acento y desplazamiento con tope; al soltar abre la hoja y la fila vuelve.
+    // Del todo: ejecuta al soltar (arrastrar no abre nada) y la fila vuelve.
     await act(async () => {
-      expect(z.props.onMoveShouldSetResponderCapture(evento(-30))).toBe(true);
-      z.props.onResponderGrant(evento(-30));
-      z.props.onResponderMove(evento(-400));
+      expect(z.props.onMoveShouldSetResponderCapture(evento(30))).toBe(true);
+      z.props.onResponderGrant(evento(30));
+      z.props.onResponderMove(evento(400));
     });
-    expect(fondoFranja()).toBe(colores.light.accent);
-    expect(x()).toBe(-TOPE_SWIPE);
-    expect(screen.queryByTestId('hoja-abono')).toBeNull(); // arrastrar no abre nada: solo al soltar
-    await act(async () => { z.props.onResponderRelease(evento(-400)); });
+    expect(screen.queryByTestId('hoja-abono')).toBeNull();
+    await act(async () => { z.props.onResponderRelease(evento(400)); });
     expect(await screen.findByTestId('hoja-abono')).toBeTruthy();
-    expect(screen.queryByTestId('franja-cobrado-dev', OCULTOS)).toBeNull();
     await waitFor(() => expect(x()).toBe(0));
     expect(c.registrarAbono).not.toHaveBeenCalled();
   });

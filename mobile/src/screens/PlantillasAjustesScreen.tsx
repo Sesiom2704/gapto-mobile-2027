@@ -4,12 +4,15 @@
 // Ruta: mobile/src/screens/PlantillasAjustesScreen.tsx
 // Descripción: Ajustes › Plantillas (F05-03 J2 §2.5; F05 §45.3, §46.3 A7; lámina SET-PLT / REG-PLT / HOME-QA v0.2 S01–S05; REG-DYN S05). Lista S01 con el texto de la lámina y los grupos «EN INICIO · n DE 3» (orden de Inicio), «OTRAS PLANTILLAS» y «DESACTIVADAS»; cada fila con su resumen y «No disponible» cuando el servidor avisa de un campo que hoy no se puede usar. Formulario S02 ampliado (S05 de REG-DYN): Nombre (nunca autocompletado), Tipo Gasto/Ingreso, Tercero, Categoría (filtrada por tipo), Contexto, Proponer cuenta (las del registro de ese tipo), Proponer presupuesto, Mostrar en Inicio con nombre corto e icono («El de la categoría»). S03 límite de 3 con «Elegir cuál quitar»; S04 nombre repetido con «Ir a la plantilla»; S05 detalle con desactivar / reactivar (no vuelve a Inicio sola) y orden de Inicio. VERSION_DESFASADA → recarga y aviso, sin reintento automático. Los UUID del alta de la plantilla y del acceso se sellan al abrir el formulario.
 // Versión: 0.1.0 (F05-03/F05-04 J2 §2.5)
+// Versión: 0.4.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2 S9; SWIPE-RULE): cada plantilla va en tarjeta; deslizar a la izquierda una plantilla ACTIVA es «Desactivar» (tono de aviso, nunca rojo): aviso «<Nombre> desactivada · Deshacer» y, a los 5 s, la misma ruta que «Desactivar» del detalle. Se puede reactivar después.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { useAccionRapida, type LadoSwipe } from '../components/AccionRapida';
 
 import type { AccionRapida, ClienteApi, Contexto, CuentaElegible, CuentaPago, Plantilla, Respuesta, Tercero, TiposRegistro } from '../api/cliente';
 import { BotonPrimario, BotonTexto, CabeceraNavegacion, Chip, EstadoDato, Segmentado } from '../components/Basicos';
@@ -254,6 +257,14 @@ export function PlantillasAjustesScreen(p: {
       </>
     ) : null;
 
+  // ---------------------------------------------------------------- swipe «Desactivar» (SWIPE-RULE)
+  const rapida = useAccionRapida({ nuevoId: p.nuevoId, onHecha: async () => { await cargar(true); } });
+  const ladoDesactivar = (x: Plantilla): LadoSwipe | undefined =>
+    x.enabled
+      ? { etiqueta: 'Desactivar', icono: 'pause-circle-outline', tono: 'aviso', onEjecutar: () => void rapida.lanzar({
+          clave: x.id, texto: `${x.nombre} desactivada`, enviar: () => p.cliente.desactivarPlantilla(x.id, x.row_version) }) }
+      : undefined;
+
   // ---------------------------------------------------------------- formulario (S02)
   if (vista.v === 'FORM' && d) {
     const base = vista.id ? porId(vista.id) : null;
@@ -496,7 +507,7 @@ export function PlantillasAjustesScreen(p: {
 
   // ---------------------------------------------------------------- lista (S01)
   const grupos = d ? agruparPlantillas(d.plantillas, d.acciones) : null;
-  const filaPlantilla = (x: Plantilla, i: number, n: number, nombreFila?: string) => (
+  const filaPlantilla = (x: Plantilla, i: number, n: number, nombreFila?: string) => rapida.oculta(x.id) ? null : (
     <FilaLista
       key={x.id}
       testID={`ajplt-fila-${x.id}`}
@@ -506,6 +517,8 @@ export function PlantillasAjustesScreen(p: {
       ultima={i === n - 1}
       derecha={(x.avisos ?? []).length > 0 ? <EtiquetaNoDisponible testID={`ajplt-fila-${x.id}-no-disponible`} /> : undefined}
       onPress={() => abrirDetalle(x.id)}
+      enTarjeta
+      izquierda={ladoDesactivar(x)}
     />
   );
   return (
@@ -532,22 +545,23 @@ export function PlantillasAjustesScreen(p: {
         {grupos && grupos.enInicio.length > 0 ? (
           <View testID="ajplt-grupo-inicio" style={{ gap: espacio.s }}>
             <RotuloGrupo testID="ajplt-grupo-inicio-titulo" texto={`En Inicio · ${grupos.enInicio.length} de ${MAX_ACCESOS}`} />
-            <Tarjeta>{grupos.enInicio.map((g, i) => filaPlantilla(g.plantilla, i, grupos.enInicio.length))}</Tarjeta>
+            <View style={{ gap: espacio.s }}>{grupos.enInicio.map((g, i) => filaPlantilla(g.plantilla, i, grupos.enInicio.length))}</View>
           </View>
         ) : null}
         {grupos && grupos.otras.length > 0 ? (
           <View testID="ajplt-grupo-otras" style={{ gap: espacio.s }}>
             <RotuloGrupo texto="Otras plantillas" />
-            <Tarjeta>{grupos.otras.map((x, i) => filaPlantilla(x, i, grupos.otras.length))}</Tarjeta>
+            <View style={{ gap: espacio.s }}>{grupos.otras.map((x, i) => filaPlantilla(x, i, grupos.otras.length))}</View>
           </View>
         ) : null}
         {grupos && grupos.desactivadas.length > 0 ? (
           <View testID="ajplt-grupo-desactivadas" style={{ gap: espacio.s }}>
             <RotuloGrupo texto="Desactivadas" />
-            <Tarjeta>{grupos.desactivadas.map((x, i) => filaPlantilla(x, i, grupos.desactivadas.length))}</Tarjeta>
+            <View style={{ gap: espacio.s }}>{grupos.desactivadas.map((x, i) => filaPlantilla(x, i, grupos.desactivadas.length))}</View>
           </View>
         ) : null}
       </ScrollView>
+      {rapida.avisos}
     </View>
   );
 }

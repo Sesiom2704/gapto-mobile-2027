@@ -5,6 +5,7 @@
 // Descripción: Confirmación de previsiones (F05-06 M5; F05 §59 F05-D044; láminas PREV v0.2 y HOME-01 v0.4). Lógica pura: importes de fila por naturaleza («~74,00 €» por pagar, «+2.100,00 €» cobro previsto en color neutro, transferencias sin signo), «Desconocido» y nunca 0 (D-PREV-08), línea de la fila (vencida, pago parcial, próximo, «Entre cuentas»), cobertura («Pagado 40,00 de 120,00 · queda 80,00») y desviación («10,00 € más de lo previsto», nunca un «queda» negativo, D-PREV-13), «Por pagar» / «Por cobrar» por separado (D-PREV-10), contador de la campana (número, nada o «!» si la lectura falla; HOME-01 I03/I05), «Se vinculará X €» (D-PREV-11), consecuencia del swipe (D-PREV-12) y el bloque `prevision` del registro, que exige una respuesta explícita a «¿Queda cubierta?» (D-PREV-04, P-PREV-02). Sin estado ni red.
 // Versión: 0.1.0 (F05-06 M5 §B1)
 // Versión: 0.2.0 (F05-06 M5 SWIPE; regla de Moisés del 2026-10-22): `planRapidoPrevision` decide si el swipe es una acción rápida de un solo gesto (gasto o ingreso abierto, esperado conocido, EUR, una sola cuenta prevista que hoy tiene la capacidad, sin realidad previa): registra el esperado en esa cuenta con fecha de hoy y `marcar_realizada = true`, por la misma composición que la hoja. Si falta algo, null y el gesto abre la hoja. `textoAvisoRapido`: «<Nombre> pagada / cobrada».
+// Versión: 0.3.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2): el aviso lleva el importe («Nómina cobrada · 2.100,00 €»). Izquierda «No hubo este mes»: `admiteNoHubo` (abierta y sin pagos enlazados ni realidad) y su aviso. `importeFormulario`: el importe con el que el gesto abre el formulario cuando hay dudas (lo que queda, o el esperado; nada si es desconocido).
 // ============================================================
 
 import type { BloquePrevisionWire, CuentaElegible, CuentaPago, DetallePrevision, FilaPrevision, ImportePorNaturaleza } from '../api/cliente';
@@ -204,7 +205,24 @@ export function planRapidoPrevision(f: FilaPrevision, cap: CapacidadesHoy | null
   };
 }
 
-/** Texto del aviso de la acción rápida: «Nómina cobrada», «Electricidad pagada». */
-export function textoAvisoRapido(f: Pick<FilaPrevision, 'concepto' | 'tipo'>): string {
-  return `${f.concepto} ${f.tipo === 'INGRESO' ? 'cobrada' : 'pagada'}`;
+/** Texto del aviso de la acción rápida: «Nómina cobrada · 2.100,00 €», «Electricidad pagada · 74,00 €». */
+export function textoAvisoRapido(f: Pick<FilaPrevision, 'concepto' | 'tipo' | 'importe_esperado'>): string {
+  const base = `${f.concepto} ${f.tipo === 'INGRESO' ? 'cobrada' : 'pagada'}`;
+  return f.importe_esperado === null ? base : `${base} · ${formatearEur(f.importe_esperado)}`;
+}
+
+/** Izquierda «No hubo este mes» (omitir): solo una previsión abierta sin pagos enlazados ni realidad. */
+export function admiteNoHubo(f: Pick<FilaPrevision, 'estado' | 'pagos' | 'con_realidad'>): boolean {
+  return f.estado === 'ABIERTA' && f.pagos === 0 && !f.con_realidad;
+}
+
+/** Aviso de «No hubo»: «Alquiler · no hubo este mes». */
+export function textoAvisoNoHubo(f: Pick<FilaPrevision, 'concepto'>): string {
+  return `${f.concepto} · no hubo este mes`;
+}
+
+/** Importe con el que el gesto abre el formulario cuando hay dudas: lo que queda, el esperado o nada. */
+export function importeFormulario(f: Pick<FilaPrevision, 'queda' | 'importe_esperado'>): string | null {
+  const v = f.queda ?? f.importe_esperado;
+  return v === null ? null : textoEditable(v);
 }

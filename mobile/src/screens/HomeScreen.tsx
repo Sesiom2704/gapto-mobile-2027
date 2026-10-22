@@ -9,7 +9,8 @@
 // v0.5.0 (F05-05 K3 §2.7; F05 §49.4 A9, D13, M5-06; lámina SRCH-ACT-AFI E1; HOME-01 v0.3, D-HOME-02/03): «Hola, <nombre>» en la cabecera (GET /v1/yo; sin nombre, no se muestra). «Este mes» con Ingresos, Gastos y Resultado reales (GET /v1/inicio/resultado-mes con la fecha del dispositivo): cifras tabulares, color SOLO en Resultado (verde, rojo o neutro con signo, `resultadoDelMes`), y debajo la línea «Solo lo que es tuyo. Sin indicar: …» con número e importe. Carga y error con su estado; nunca 0 € inventado. El presupuesto y el resto de Inicio no cambian.
 // v0.6.0 (F05-06 M5 §B1; lámina HOME-01 v0.4, D-HOME-07; F09 §4.2, §4.5, §4.6): campana con contador junto al perfil (solo con pendientes; «!» si la lectura falla) que abre «Pendientes»; bloque «Requiere atención» con datos reales (GET /v1/inicio/previsiones): como mucho dos asuntos (vencidos por fecha y después los pagados en parte), recuento junto al título y «Ver todos ›», SIN importes sumados; con la lectura fallida, «No se pudieron cargar los pendientes · Reintentar» (nunca desaparece como si no hubiera nada); sin asuntos, ni campana ni bloque. «Próximos movimientos» con las tres siguientes previsiones (solo lectura, P-PREV-04). Cobros previstos con «+» neutro y «Cobro previsto»; pagos con «~». La línea de presupuesto no se pinta mientras F08 no la alimente. Lo previsto no suma a Liquidez ni al Resultado. Con la campana, el saludo de la cabecera se acorta con puntos suspensivos (una línea) y nunca invade la marca.
 // v0.7.0 (F05-06 M5 SWIPE; regla de Moisés del 2026-10-22): el swipe de «Requiere atención» es una acción rápida con «Deshacer» cuando es inequívoca (useSwipePrevision › useAccionRapida); la fila sale mientras espera y el aviso va sobre la pantalla, fuera del scroll (hermano del ScrollView). Si falta algo, abre la hoja.
-// Versión: 0.7.0
+// v0.8.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2): las filas de «Requiere atención» van en tarjeta con los dos lados de la SWIPE-RULE (derecha «Pagado» / «Cobrado», izquierda «No hubo» sin pagos enlazados).
+// Versión: 0.8.0
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -266,10 +267,12 @@ export function HomeScreen(p: {
             </View>
           }
         >
-          {primeras.map((f, i) => (
-            <FilaPrevisionVista key={f.id} testID={`atencion-${f.id}`} fila={f} ultima={i === primeras.length - 1}
-              onPress={() => p.onPrevision?.(f)} onSwipe={admiteSwipe(f) && p.nuevoId ? () => swipe.deslizar(f) : undefined} />
-          ))}
+          <View style={s.tarjetas}>
+            {primeras.map((f, i) => (
+              <FilaPrevisionVista key={f.id} testID={`atencion-${f.id}`} fila={f} ultima={i === primeras.length - 1}
+                onPress={() => p.onPrevision?.(f)} {...(p.nuevoId ? swipe.lados(f) : {})} />
+            ))}
+          </View>
         </Seccion>
       ) : null}
 
@@ -364,6 +367,7 @@ function CeldaGastos({ lectura, onReintentar }: { lectura: Lectura; onReintentar
 }
 
 const s = StyleSheet.create({
+  tarjetas: { gap: espacio.s },
   contenido: { paddingHorizontal: espacio.l, paddingBottom: espacio.xxl, gap: espacio.xl },
   cabecera: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: espacio.m },
   marca: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 0 },

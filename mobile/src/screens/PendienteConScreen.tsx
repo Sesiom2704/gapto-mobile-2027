@@ -4,6 +4,7 @@
 // Ruta: mobile/src/screens/PendienteConScreen.tsx
 // Descripción: «Pendiente con <persona>» y cómo se salda (F05-06 M3; lámina REP v0.2 C1–C4, D2, E2, E8). C1: lo que te debe y lo que le debes por separado, cada cosa con su origen; el neto es un dato secundario que «no salda nada» (D-REP-07, OP-20); sin «Compensar» (P-REP-02, opción A). C4: con algún saldo desconocido el neto es «Sin determinar», nunca 0,00 € (D-REP-09). C2: sobre una posición, «Registrar cobro» (derecho) o «Registrar pago» (obligación) y, aparte, «Perdonar», que no mueve dinero (D-REP-08, F04-D052). C3/E8: importe (parcial permitido, sin superar lo pendiente), cuenta Gapto obligatoria (Efectivo incluido; las que pueden recibir o pagar dinero) y fecha; dice que no es un ingreso ni un gasto nuevo, y que pagar tu deuda por un tercero no está disponible. Mismo ciclo de envío que el registro: identidad sellada antes de enviar, doble toque ignorado, INDETERMINADO reintenta la MISMA identidad, rechazo definitivo libera la edición. Al terminar se recarga la lista.
 // Versión: 0.1.0 (F05-06 M3 §B1)
+// Versión: 0.2.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2 S6; SWIPE-RULE): cada posición va en tarjeta con los dos lados. Derecha «Cobrado» / «Pagado» del saldo ENTERO: acción rápida (aviso «Cobrado de <persona> · <importe> · Deshacer» y, a los 5 s, la misma ruta de cobro o pago que el formulario, con fecha de hoy) solo con saldo conocido y UNA sola cuenta posible hoy (leída con la lista); si no, abre el formulario con el saldo escrito. Izquierda «Más»: abre las acciones de la posición. «Perdonar» nunca va en un swipe.
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -11,8 +12,9 @@ import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput,
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ClienteApi, CuentaElegible } from '../api/cliente';
+import { FilaDeslizable, accesibilidadLados, useAccionRapida, type LadoSwipe } from '../components/AccionRapida';
 import { BotonPrimario, BotonTexto, Chip, EstadoDato } from '../components/Basicos';
-import { Aviso, Bloque, CabeceraTarea, Campo, Inicial, s } from '../components/Reparto';
+import { Aviso, CabeceraTarea, Campo, Inicial, s } from '../components/Reparto';
 import { ayer, ddmmaaaaAIso, diaMesIso, fechaCortaIso, isoADdmmaaaa, isoLocal } from '../domain/fechas';
 import { formatearEur, parsearImporte } from '../domain/importe';
 import { esFechaIso } from '../domain/intencion';
@@ -151,6 +153,47 @@ export function PendienteConScreen(p: {
   const origen = (x: PosicionPendiente) =>
     [origenPosicion(x), x.origen_fecha ? diaMesIso(x.origen_fecha) : null].filter(Boolean).join(' · ');
 
+  // ---------------------------------------------------------------- swipe (SWIPE-RULE)
+  // Cuentas posibles hoy para cobrar (recibir dinero) y pagar, leídas con la lista: ni el gesto ni «Deshacer» tocan el servidor.
+  const [cuentasHoy, setCuentasHoy] = useState<{ cobro: CuentaElegible[] | null; pago: CuentaElegible[] | null } | null>(null);
+  const claveActivas = carga.fase === 'OK' ? carga.p.posiciones.filter((x) => x.estado === 'ACTIVA').map((x) => `${x.entidad_id}:${x.tipo}`).join('|') : '';
+  useEffect(() => {
+    let vigente = true;
+    setCuentasHoy(null);
+    if (!claveActivas) return;
+    const leer = (o: 'INGRESO' | 'GASTO') => p.cliente.cuentasElegibles(o, hoyIso).then((r) => (r.tipo === 'OK' ? r.datos.cuentas : null), () => null);
+    void Promise.all([
+      claveActivas.includes('DERECHO_COBRO') ? leer('INGRESO') : Promise.resolve(null),
+      claveActivas.includes('OBLIGACION_PAGO') ? leer('GASTO') : Promise.resolve(null),
+    ]).then(([cobro, pago]) => vigente && setCuentasHoy({ cobro, pago }));
+    return () => {
+      vigente = false;
+    };
+  }, [claveActivas, hoyIso]);
+  const rapida = useAccionRapida({ nuevoId: p.nuevoId, onHecha: async () => { setCambios(true); await cargar(); } });
+  const saldar = (x: PosicionPendiente) => {
+    const derecho = x.tipo === 'DERECHO_COBRO';
+    const lista = derecho ? cuentasHoy?.cobro : cuentasHoy?.pago;
+    if (x.saldo === null || !lista || lista.length !== 1) {
+      setSel(x);
+      return abrirAccion(derecho ? 'COBRO' : 'PAGO', x);
+    }
+    const saldo = x.saldo;
+    const cuenta = lista[0].cuenta_id;
+    rapida.lanzar({
+      clave: x.entidad_id,
+      texto: `${derecho ? `Cobrado de ${nombre}` : `Pagado a ${nombre}`} · ${formatearEur(saldo)}`,
+      enviar: async (id) => {
+        const r = await (derecho ? p.cliente.cobrarPosicion : p.cliente.pagarPosicion)(x.entidad_id, { intencion_id: id, importe: saldo, cuenta_id: cuenta, fecha: hoyIso });
+        return r.tipo === 'RECHAZADO' ? { ...r, mensaje: motivoRechazoPosicion(r.codigo) } : r;
+      },
+    });
+  };
+  const ladosPosicion = (x: PosicionPendiente): { derecha: LadoSwipe; izquierda: LadoSwipe } => ({
+    derecha: { etiqueta: x.tipo === 'DERECHO_COBRO' ? 'Cobrado' : 'Pagado', icono: 'checkmark', tono: 'confirmar', onEjecutar: () => saldar(x) },
+    izquierda: { etiqueta: 'Más', icono: 'ellipsis-horizontal', tono: 'neutro', onEjecutar: () => setSel(x) },
+  });
+
   // ---------------------------------------------------------------- C3/E8 cobro, pago y perdón
   if (sel && accion) {
     const esCobro = accion === 'COBRO';
@@ -260,25 +303,35 @@ export function PendienteConScreen(p: {
   }
 
   // ---------------------------------------------------------------- C1/C4 lista
-  const lista = (titulo: string, xs: PosicionPendiente[], testID: string) =>
-    xs.length === 0 ? null : (
-      <Bloque titulo={titulo} testID={testID}>
-        {xs.map((x) => (
-          <Pressable key={x.entidad_id} testID={`posicion-${x.entidad_id}`} accessibilityRole="button" onPress={() => setSel(x)} style={[s.kv, { minHeight: 44 }]}>
-            <View style={{ flex: 1 }}>
-              <Text style={[tipo.body, { color: c.textPrimary }]}>{origenPosicion(x)}</Text>
-              <Text style={[tipo.footnote, { color: c.textSecondary }]}>
-                {x.saldo === null
-                  ? 'Saldo inicial desconocido'
-                  : [x.origen_concepto && x.origen_tercero ? x.origen_tercero : null, x.origen_fecha ? diaMesIso(x.origen_fecha) : null].filter(Boolean).join(' · ')}
-              </Text>
-            </View>
-            <Text style={[tipo.bodyEmphasis, { color: c.textPrimary }]}>{textoSaldo(x.saldo)}</Text>
-            <Text style={[tipo.body, { color: c.textSecondary }]}>›</Text>
-          </Pressable>
-        ))}
-      </Bloque>
+  const lista = (titulo: string, todas: PosicionPendiente[], testID: string) => {
+    const xs = todas.filter((x) => !rapida.oculta(x.entidad_id));
+    return xs.length === 0 ? null : (
+      <View testID={testID} style={{ gap: espacio.s }}>
+        <Text style={[tipo.footnote, { color: c.textSecondary, fontWeight: '600' }]}>{titulo}</Text>
+        {xs.map((x) => {
+          const l = ladosPosicion(x);
+          const a11y = accesibilidadLados(l.derecha, l.izquierda);
+          return (
+            <FilaDeslizable key={x.entidad_id} id={`posicion-${x.entidad_id}`} derecha={l.derecha} izquierda={l.izquierda}>
+            <Pressable testID={`posicion-${x.entidad_id}`} accessibilityRole="button" onPress={() => setSel(x)} style={[s.kv, { minHeight: 44, padding: espacio.m }]}
+              accessibilityActions={a11y.accessibilityActions} onAccessibilityAction={(e) => void a11y.ejecutar(e.nativeEvent.actionName)}>
+              <View style={{ flex: 1 }}>
+                <Text style={[tipo.body, { color: c.textPrimary }]}>{origenPosicion(x)}</Text>
+                <Text style={[tipo.footnote, { color: c.textSecondary }]}>
+                  {x.saldo === null
+                    ? 'Saldo inicial desconocido'
+                    : [x.origen_concepto && x.origen_tercero ? x.origen_tercero : null, x.origen_fecha ? diaMesIso(x.origen_fecha) : null].filter(Boolean).join(' · ')}
+                </Text>
+              </View>
+              <Text style={[tipo.bodyEmphasis, { color: c.textPrimary }]}>{textoSaldo(x.saldo)}</Text>
+              <Text style={[tipo.body, { color: c.textSecondary }]}>›</Text>
+            </Pressable>
+            </FilaDeslizable>
+          );
+        })}
+      </View>
     );
+  };
   // Sin posiciones el servidor no informa importes: es 0,00 €, no «Sin determinar» (que solo vale con un saldo desconocido).
   const sinNada = carga.fase === 'OK' && (carga.p.neto_estado === 'SIN_POSICIONES' || carga.p.posiciones.every((x) => x.estado !== 'ACTIVA'));
   return (
@@ -319,6 +372,7 @@ export function PendienteConScreen(p: {
           </>
         ) : null}
       </ScrollView>
+      {rapida.avisos}
     </View>
   );
 }

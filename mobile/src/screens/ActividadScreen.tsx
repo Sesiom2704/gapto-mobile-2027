@@ -10,6 +10,7 @@
 // Versión: 0.5.0 (F05-06 M2-C; acta M2 iPhone O-1; P-DEV-04): pista visual del swipe «Cobrado». Al arrastrar a la izquierda la fila sigue al dedo (con tope `TOPE_SWIPE`) y deja ver detrás la franja «Confirmar abono»; al superar `UMBRAL_SWIPE` la franja pasa al color de acento. Al soltar, la fila vuelve con animación; por encima del umbral se abre la misma hoja de siempre. La franja es decorativa (oculta a VoiceOver); el toque, el scroll vertical, la acción accesible «Cobrado» y las demás filas no cambian.
 // Versión: 0.6.0 (F05-06 M3 §B1; lámina REP v0.2 E5/E6, P-REP-03/04): el detalle de un gasto que no es devolución lee su reparto (GET /v1/hechos/{id}/reparto, solo si la raíz pasa `onCorregirReparto`) y ofrece «Pendiente con <persona>» por cada parte con deuda y «Corregir reparto» cuando el servidor lo considera corregible; si no lo es, no se ofrece nada que el motor no admita. Ambos se abren fuera de la pantalla (tareas inmersivas de la raíz).
 // Versión: 0.7.0 (F05-06 M5 SWIPE; regla de Moisés del 2026-10-22, sustituye a DAY-RULE-03 en lo que contradiga): el swipe «Cobrado» de una devolución con el abono pendiente es una acción rápida cuando es inequívoca: importe de la devolución, cuenta ORIGINAL demostrable de la compra (P-DEV-02 con M2-D; el servidor la admite sin capacidad) y fecha de hoy. La fila sale, el aviso «Devolución de <compra> cobrada · Deshacer» dura 5 s y después se registra el abono (useAccionRapida). La cuenta original se lee con la lista, nunca en el gesto. Sin cuenta original (o sin poder leerla) el gesto abre la hoja de siempre. El gesto y la franja son los comunes (FilaDeslizable); la franja dice «Cobrado». «Registrar abono» del detalle sigue abriendo la hoja.
+// Versión: 0.8.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2 S7/S8; SWIPE-RULE): cada fila va en tarjeta con los dos lados. Derecha: «Recibido» en una devolución con el abono pendiente (acción rápida solo con la cuenta original demostrable; si no, la hoja) o «Repetir hoy» cuando el registro se puede reconstruir (`repetibleHoy`): al soltar se leen su detalle y las capacidades de hoy y, sin dudas, aviso «Repetido hoy: <registro> · <importe> · Deshacer» y a los 5 s una intención NUEVA con fecha de hoy por la ruta de registro del tipo; con dudas abre el detalle. La fila original no sale (es otra intención). Izquierda: «Más» (abre el detalle). Nunca anular, borrar ni corregir por swipe.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -19,7 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ClienteApi, DetalleActividad, FilaActividad, TipoActividad } from '../api/cliente';
 import { AbonoHoja } from '../components/AbonoHoja';
-import { FilaDeslizable, useAccionRapida } from '../components/AccionRapida';
+import { accesibilidadLados, FilaDeslizable, useAccionRapida, type LadoSwipe } from '../components/AccionRapida';
 import { BotonPrimario, BotonTexto, Chip } from '../components/Basicos';
 import { Hoja } from '../components/HojasCategoria';
 import { BotonSecundario, CargaArbol, IconoCategoriaVista, SelectorCategorias } from '../components/SelectorCategorias';
@@ -47,6 +48,7 @@ import { construirArbol } from '../domain/categoria';
 import { nombreCorto, ofreceRegistrarAbono, ofreceRegistrarDevolucion, TEXTO_NETO, textoDevolucionDe } from '../domain/devolucion';
 import { ayer, ddmmaaaaAIso, diaMesAnioIso, diaMesIso, isoLocal, mesAnioIso, mesDesplazadoIso } from '../domain/fechas';
 import { formatearEur } from '../domain/importe';
+import { componerRepetir, repetibleHoy, textoAvisoRepetir, type CapacidadesRepetir } from '../domain/repetir';
 import type { RepartoDeHecho } from '../domain/reparto';
 import { filtrar } from '../domain/maestros';
 import { useTema } from '../theme/tema';
@@ -271,10 +273,51 @@ export function ActividadScreen(p: {
     if (!ofreceRegistrarAbono(f) || !f.devolucion_de || !f.importe_total || !cuenta) return abrirAbono(f, null);
     rapida.lanzar({
       clave: f.id,
-      texto: `Devolución de ${nombreCorto(f.devolucion_de)} cobrada`,
+      texto: `Abono de ${nombreCorto(f.devolucion_de)} recibido · ${formatearEur(f.importe_total)}`,
       enviar: (id) => p.cliente.registrarAbono(f.id, { intencion_id: id, cuenta_id: cuenta.cuenta_id, fecha: hoyIso }),
     });
   };
+  // «Repetir hoy»: el detalle y las capacidades de hoy se leen al soltar; tras el aviso no hay ninguna petición hasta los 5 s.
+  const preparando = useRef(new Set<string>());
+  const repetir = async (f: FilaActividad) => {
+    if (!p.nuevoId || preparando.current.has(f.id) || rapida.oculta(`repetir-${f.id}`)) return;
+    preparando.current.add(f.id);
+    try {
+      const op = (o: 'INGRESO' | 'TRANSFERENCIA_ORIGEN' | 'TRANSFERENCIA_DESTINO') =>
+        p.cliente.cuentasElegibles(o, hoyIso).then((r) => (r.tipo === 'OK' ? r.datos.cuentas : null), () => null);
+      const [d, pago, ingreso, origen, destino] = await Promise.all([
+        p.cliente.detalleActividad(f.id).then((r) => (r.tipo === 'OK' ? r.datos : null), () => null),
+        f.tipo === 'GASTO' ? p.cliente.cuentasPago(hoyIso).then((r) => (r.tipo === 'OK' ? r.datos.cuentas : null), () => null) : Promise.resolve(null),
+        f.tipo === 'INGRESO' ? op('INGRESO') : Promise.resolve(null),
+        f.tipo === 'TRANSFERENCIA' ? op('TRANSFERENCIA_ORIGEN') : Promise.resolve(null),
+        f.tipo === 'TRANSFERENCIA' ? op('TRANSFERENCIA_DESTINO') : Promise.resolve(null),
+      ]);
+      const cap: CapacidadesRepetir = { pago, ingreso, origen, destino };
+      // Comprobación previa con una identidad de prueba: el payload real se compone con la identidad de la intención.
+      if (!d || !componerRepetir(f, d, cap, hoyIso, 'x')) return void abrirDetalle(f.id);
+      rapida.lanzar({
+        clave: `repetir-${f.id}`,
+        texto: textoAvisoRepetir(tituloTransferencia(f) ?? tituloFila(f), f),
+        enviar: async (id) => {
+          const r = componerRepetir(f, d, cap, hoyIso, id)!;
+          if (r.ruta === 'GASTO') return p.cliente.registrarGastoPagado(r.payload as never);
+          if (r.ruta === 'INGRESO') return p.cliente.registrarIngresoCobrado(r.payload as never);
+          return p.cliente.registrarTransferencia(r.payload as never);
+        },
+      });
+    } finally {
+      preparando.current.delete(f.id);
+    }
+  };
+  /** Lados de la fila (SWIPE-RULE): derecha «Recibido» o «Repetir hoy»; izquierda «Más». */
+  const lados = (f: FilaActividad): { derecha?: LadoSwipe; izquierda?: LadoSwipe } => {
+    const mas: LadoSwipe = { etiqueta: 'Más', icono: 'ellipsis-horizontal', tono: 'neutro', onEjecutar: () => void abrirDetalle(f.id) };
+    if (!p.nuevoId) return { izquierda: mas };
+    if (ofreceRegistrarAbono(f)) return { derecha: { etiqueta: TEXTO_FRANJA_COBRADO, icono: 'checkmark', tono: 'confirmar', onEjecutar: () => deslizarAbono(f) }, izquierda: mas };
+    if (repetibleHoy(f)) return { derecha: { etiqueta: 'Repetir hoy', icono: 'repeat', tono: 'confirmar', onEjecutar: () => void repetir(f) }, izquierda: mas };
+    return { izquierda: mas };
+  };
+
   const cerrarAbono = (registrado: boolean, volverA: string | null) => {
     if (registrado) void cargar();
     if (volverA) void abrirDetalle(volverA);
@@ -406,10 +449,9 @@ export function ActividadScreen(p: {
         {grupos.map((g) => (
           <View key={g.clave} testID={`grupo-${g.clave}`} style={{ gap: espacio.xs }}>
             <Text accessibilityRole="header" style={[tipo.footnote, { color: c.textSecondary, fontWeight: '600' }]}>{g.titulo}</Text>
-            <View style={[s.tarjeta, { backgroundColor: c.surfacePrimary }]}>
-              {g.filas.map((f, i) => (
-                <FilaVista key={f.id} f={f} conFecha={buscando || !!p.tercero} ultima={i === g.filas.length - 1} onPress={() => void abrirDetalle(f.id)}
-                  onCobrado={ofreceRegistrarAbono(f) && p.nuevoId ? () => deslizarAbono(f) : undefined} />
+            <View style={{ gap: espacio.s }}>
+              {g.filas.map((f) => (
+                <FilaVista key={f.id} f={f} conFecha={buscando || !!p.tercero} onPress={() => void abrirDetalle(f.id)} {...lados(f)} />
               ))}
             </View>
           </View>
@@ -575,26 +617,25 @@ export function ActividadScreen(p: {
 
 /** Umbral y tope del swipe «Cobrado»: los comunes de la acción rápida (P-DEV-04, O-1). */
 export { TOPE_SWIPE, UMBRAL_SWIPE } from '../components/AccionRapida';
-/** Texto de la franja que aparece detrás de la fila al deslizar (O-1, patrón iOS). */
-export const TEXTO_FRANJA_COBRADO = 'Cobrado';
+/** Etiqueta del lado derecho de una devolución con el abono pendiente (lámina SWIPE-01 S7). */
+export const TEXTO_FRANJA_COBRADO = 'Recibido';
 
-function FilaVista(p: { f: FilaActividad; conFecha: boolean; ultima: boolean; onPress: () => void; onCobrado?: () => void }) {
+function FilaVista(p: { f: FilaActividad; conFecha: boolean; onPress: () => void; derecha?: LadoSwipe; izquierda?: LadoSwipe }) {
   const { c } = useTema();
   const f = p.f;
   const titulo = tituloTransferencia(f) ?? tituloFila(f);
   const secundaria = textoCoincidencia(f) ?? secundariaFila(f);
   const marca = marcaReparto(f);
+  const a11y = accesibilidadLados(p.derecha, p.izquierda);
   const fila = (
     <Pressable
       testID={`fila-${f.id}`}
       accessibilityRole="button"
       accessibilityLabel={[titulo, secundaria, importeFila(f), marca].filter(Boolean).join('. ')}
-      accessibilityActions={p.onCobrado ? [{ name: 'cobrado', label: 'Cobrado' }] : undefined}
-      onAccessibilityAction={(e) => {
-        if (e.nativeEvent.actionName === 'cobrado') p.onCobrado?.();
-      }}
+      accessibilityActions={a11y.accessibilityActions}
+      onAccessibilityAction={(e) => void a11y.ejecutar(e.nativeEvent.actionName)}
       onPress={p.onPress}
-      style={({ pressed }) => [s.fila, { borderBottomColor: c.separator, borderBottomWidth: p.ultima ? 0 : StyleSheet.hairlineWidth, opacity: pressed ? 0.7 : 1 }]}
+      style={({ pressed }) => [s.fila, { opacity: pressed ? 0.7 : 1 }]}
     >
       <IconoFila f={f} testID={`actividad-icono-${f.id}`} />
       <View style={{ flex: 1, gap: 2 }}>
@@ -608,9 +649,8 @@ function FilaVista(p: { f: FilaActividad; conFecha: boolean; ultima: boolean; on
       </View>
     </Pressable>
   );
-  // Swipe «Cobrado»: solo en una devolución con el abono pendiente (gesto y franja comunes de la acción rápida).
   return (
-    <FilaDeslizable id={f.id} franjaId="cobrado" franja={TEXTO_FRANJA_COBRADO} onDeslizar={p.onCobrado}>
+    <FilaDeslizable id={f.id} derecha={p.derecha} izquierda={p.izquierda}>
       {fila}
     </FilaDeslizable>
   );
