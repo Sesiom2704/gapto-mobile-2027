@@ -11,6 +11,7 @@
 // Versión: 0.6.0 (F05-06 M5-B; F04-D065, F05-D047): el parcial ya ofrece «Dar por cubierta» (antes se exigía su ausencia, DEU-M5-CERRAR-PARCIAL). Bloque M5-B: «Queda sin cubrir ±X €», dónde se ofrecen las dos acciones, hoja con motivo obligatorio (sugerencia + texto), PREVISION_SIN_REALIDAD_ACTIVA y TRAMO_RODANTE_REQUIERE_REVISION en la hoja sin reintento automático, 409 con el estado actual, misma identidad tras un fallo, «Reabrir» en «Más» (REALIZADA, sin realidad activa, OMITIDA; versión del sucesor) y CANCELADA atenuada.
 // Versión: 0.7.0 (F05-06 M1, ajuste de M5-B): tras «Dar por cubierta», «Reabrir» o «No hubo» el detalle sigue abierto con el estado nuevo; «Atrás» cierra con cambios.
 // Versión: 0.8.0 (F05-06 M5-B v1.1): «Resueltas este mes»: etiquetas («Pagada», «Cobrada», «Cubierta», «No hubo»), apartado plegado con su recuento, filas sin swipe que abren el detalle y, desde él, «Más › Reabrir»; no suma a «Por pagar».
+// Versión: 0.9.0 (F05-06 M5-B cierre, AJ-M5BM1-CIERRE-02): procedencia de la fecha: con `resuelta_por = OBJETIVO` la línea dice «prevista el …», nunca la presenta como fecha de resolución.
 // ============================================================
 
 import './tiempos_rn';
@@ -696,6 +697,18 @@ describe('«Resueltas este mes»', () => {
     expect(screen.getByTestId('resuelta-luz').props.accessibilityActions).toBeUndefined();
     fireEvent.press(screen.getByTestId('resuelta-luz'));
     expect(onDetalle).toHaveBeenCalledWith(expect.objectContaining({ id: 'luz', estado: 'OMITIDA' }));
+  });
+
+  test('procedencia de la fecha: la objetivo se rotula «prevista el …», nunca como fecha de resolución', async () => {
+    const APROX = resuelta({ id: 'comunidad', concepto: 'Comunidad', resuelta_el: '2026-10-01', resuelta_por: 'OBJETIVO' });
+    expect(lineaResuelta(APROX)).toBe('No hubo · prevista el 1 oct');
+    expect(lineaResuelta({ ...PAGADA, resuelta_por: 'OBJETIVO' })).toBe('Pagada · prevista el 8 oct');
+    expect(lineaResuelta(NO_HUBO)).toBe('No hubo · 9 oct');
+    montarPendientes([NO_HUBO, APROX]);
+    fireEvent.press(await screen.findByTestId('resueltas-cabecera'));
+    expect(screen.getByTestId('resuelta-comunidad-linea')).toHaveTextContent('No hubo · prevista el 1 oct');
+    expect(screen.getByTestId('resuelta-comunidad').props.accessibilityLabel).toBe('Comunidad. No hubo · prevista el 1 oct');
+    expect(screen.getByTestId('resuelta-luz-linea')).toHaveTextContent('No hubo · 9 oct');
   });
 
   test('sin resueltas no hay apartado', async () => {

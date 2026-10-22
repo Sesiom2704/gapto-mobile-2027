@@ -8,6 +8,7 @@
 // Versión: 0.3.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2): el aviso lleva el importe («Nómina cobrada · 2.100,00 €»). Izquierda «No hubo este mes»: `admiteNoHubo` (abierta y sin pagos enlazados ni realidad) y su aviso. `importeFormulario`: el importe con el que el gesto abre el formulario cuando hay dudas (lo que queda, o el esperado; nada si es desconocido).
 // Versión: 0.4.0 (F05-06 M5-B; F04-D065, F05-D047): «Dar por cubierta» solo en una PARCIAL (`ofreceDarPorCubierta`), «Queda sin cubrir ±X €» con el pendiente derivado (`quedaSinCubrirTexto`; nunca se guarda), «Más» en las terminales (`ofreceMas`, para «Reabrir») y las sugerencias de motivo de las dos hojas.
 // Versión: 0.5.0 (F05-06 M5-B v1.1): «Resueltas este mes». `etiquetaResuelta` («No hubo» en una OMITIDA; «Pagada» / «Cobrada» en una REALIZADA cubierta del todo; «Cubierta» en el resto: dada por cubierta, transferencia o sin registro activo) y `lineaResuelta` («Pagada · 22 oct»).
+// Versión: 0.6.0 (F05-06 M5-B cierre, AJ-M5BM1-CIERRE-02): procedencia de la fecha. Con `resuelta_por = OBJETIVO` (sin auditoría de la transición) la línea dice «prevista el …»: la fecha objetivo nunca se rotula como fecha de resolución.
 // ============================================================
 
 import type { BloquePrevisionWire, CuentaElegible, CuentaPago, DetallePrevision, FilaPrevision, FilaResuelta, ImportePorNaturaleza } from '../api/cliente';
@@ -132,9 +133,13 @@ export function etiquetaResuelta(f: Pick<FilaResuelta, 'estado' | 'estado_deriva
   return 'Cubierta';
 }
 
-/** Línea de una resuelta: «No hubo · 22 oct». */
+/**
+ * Línea de una resuelta: «No hubo · 22 oct» con la fecha de la transición (AUDITORIA).
+ * Sin auditoría (OBJETIVO) la fecha es la objetivo, una aproximación: «No hubo · prevista el 1 oct» (AJ-M5BM1-CIERRE-02).
+ */
 export function lineaResuelta(f: FilaResuelta): string {
-  return `${etiquetaResuelta(f)} · ${diaMesIso(f.resuelta_el)}`;
+  const dia = diaMesIso(f.resuelta_el);
+  return `${etiquetaResuelta(f)} · ${f.resuelta_por === 'OBJETIVO' ? `prevista el ${dia}` : dia}`;
 }
 
 /** Título de la pantalla del estado actual tras un rechazo de omitir (D-PREV-14). */

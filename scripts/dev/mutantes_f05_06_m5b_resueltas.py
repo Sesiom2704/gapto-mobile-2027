@@ -14,6 +14,7 @@
 #        python scripts/dev/mutantes_f05_06_m5b_resueltas.py [--solo ID,ID] [--salida fichero]
 #   No ejecutar en paralelo con otro arnes ni con la suite sobre el mismo arbol.
 # Version: 0.1.0 (F05-06 M5-B v1.1)
+# Version: 0.2.0 (F05-06 M5-B cierre, AJ-M5BM1-CIERRE-02): X06, procedencia de la fecha en la UI.
 # ============================================================
 
 from __future__ import annotations
@@ -82,6 +83,9 @@ MUTANTES = [
     ("X05", "UI: tocar la fila no abre el detalle",
      [(PEND, "      onPress={() => p.onDetalle(f)}\n      style=", "      onPress={() => undefined}\n      style=")],
      [JEST + "sin swipe: tocar la fila"], None),
+    ("X06", "UI: la fecha objetivo se rotula como fecha de resolucion (sin procedencia)",
+     [(DOMP, "f.resuelta_por === 'OBJETIVO' ? `prevista el ${dia}` : dia", "dia")],
+     [JEST + "procedencia de la fecha"], None),
 ]
 
 
