@@ -8,8 +8,10 @@
 // v0.4.0 (F05-03/F05-04 J2 §1.5; F05 §46.5 E3; decisión OPCIÓN A2 del STOP 2, tabla «tests adaptados»): toda preferencia lleva tipo. El doble devuelve `tipos` en la lista; las preferencias de «Una categoría» son de tipo GASTO y el alta y la edición de «Guardar como preferencia» esperan `tipo_hecho_id: TIPOS.GASTO` en lugar de null.
 // v0.5.0 (F05-03/F05-04 J2+J3 §2.2/§2.7): navegación «Registrar» + hoja de tipos y nota opcional en «Más detalles» (corte de Concepto). Ningún oráculo de preferencias cambia.
 // Versión: 0.5.0
+// Versión: 0.6.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // ============================================================
 
+import './tiempos_rn';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
 import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';

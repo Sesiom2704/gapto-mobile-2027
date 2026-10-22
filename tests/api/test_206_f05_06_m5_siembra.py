@@ -9,6 +9,10 @@
 #   cubiertos por OP-22 + prevision, ABIERTA); manifiesto sin credenciales; los
 #   fixtures cumplen M5-RULE-01 (ninguna prevision de consumo generico).
 # Version: 0.1.0 (F05-06 M5 Fase 3)
+# Version: 0.2.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): siembra entre dias. El mismo
+#   dia da 0 altas; otro dia crea un juego nuevo de 7 previsiones (con su pago
+#   parcial) sin tocar el anterior (estado y row_version iguales) y sin duplicar
+#   terceros; identidades distintas por dia.
 # ============================================================
 
 from __future__ import annotations
@@ -87,3 +91,30 @@ def test_siembra_idempotente_y_manifiesto(siembra, tmp_path):
     # En Inicio: luz y nomina vencidas, seguro parcial -> 3 en Requiere atencion.
     ini = m.inicio(cli)
     assert ini["requiere_atencion"]["n"] == 3
+
+
+def test_siembra_entre_dias_juego_nuevo_sin_tocar_el_anterior(siembra):
+    owner, actor, cli, cta, ahorro = m.entorno()
+    d1, d2 = dt.date(2026, 10, 21), dt.date(2026, 10, 22)
+    primera = siembra.sembrar(h.dsn(), owner, rol_runtime="gapto_runtime", hoy=d1)
+    antes = m.leer(owner, "SELECT id, estado, row_version, fecha_esperada_hasta FROM gapto.previsiones ORDER BY id")
+    assert len(antes) == 7
+    otro = siembra.sembrar(h.dsn(), owner, rol_runtime="gapto_runtime", hoy=d2)
+    altas = [r for r in otro if r["alta"]]
+    # Siete previsiones nuevas y el pago parcial del seguro; ningun tercero nuevo.
+    assert len([r for r in altas if r["fixture"].startswith("prevision.")]) == 7
+    assert [r for r in altas if r["fixture"].startswith("tercero.")] == []
+    assert [r["fixture"] for r in altas if r["fixture"].startswith("hecho.")] == ["hecho.seguro.cubierto"]
+    ids1 = {r["uuid"] for r in primera if not r["fixture"].startswith("tercero.")}
+    ids2 = {r["uuid"] for r in otro if not r["fixture"].startswith("tercero.")}
+    assert ids1.isdisjoint(ids2)
+    assert {r["uuid"] for r in primera if r["fixture"].startswith("tercero.")} == {r["uuid"] for r in otro if r["fixture"].startswith("tercero.")}
+    # El juego anterior no cambia (estado, row_version y fechas).
+    despues = m.leer(owner, "SELECT id, estado, row_version, fecha_esperada_hasta FROM gapto.previsiones ORDER BY id")
+    assert len(despues) == 14
+    assert [x for x in despues if x[0] in {uuid.UUID(i) for i in ids1}] == antes
+    # Fechas relativas a cada dia: la luz del dia 2 vence un dia despues que la del dia 1.
+    hasta = dict(m.leer(owner, "SELECT id, fecha_esperada_hasta FROM gapto.previsiones WHERE concepto = 'Electricidad' ORDER BY fecha_esperada_hasta"))
+    assert sorted(hasta.values()) == [d1 - dt.timedelta(days=5), d2 - dt.timedelta(days=5)]
+    # Repetir el dia 2: 0 altas.
+    assert [r for r in siembra.sembrar(h.dsn(), owner, rol_runtime="gapto_runtime", hoy=d2) if r["alta"]] == []

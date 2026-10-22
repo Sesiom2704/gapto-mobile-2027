@@ -4,8 +4,10 @@
 // Ruta: mobile/__tests__/ajustes_maestros.test.tsx
 // Descripción: Ajustes › Terceros, Contextos y Plantillas, y la oferta de categorías sugeridas (F05-03 J2 §2.5/§2.6; láminas REG-DYN / SET-TH / SET-CTX v0.1 S01–S03, C01, P02 y SET-PLT / HOME-QA v0.2 S01–S05, O01/O02). Terceros: filtro Todos/Activos/Inactivos y por nombre, alta con duplicados (P02: usar, reactivar, crear otro) y UUID sellado al abrir, edición, desactivar y reactivar con row_version, VERSION_DESFASADA recarga y avisa. Contextos: texto de la lámina, «Viaje · 10–12 oct», alta C01 sin tipo preseleccionado y fechas validadas. Plantillas: grupos y resumen, «No disponible», alta con tipo/categoría por tipo y acceso en Inicio, nombre repetido S04, límite S03, detalle S05 y desactivar. Onboarding: solo sin categorías; crea con el comando del servidor.
 // Versión: 0.1.0 (F05-03/F05-04 J2 §2.5/§2.6)
+// Versión: 0.2.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // ============================================================
 
+import './tiempos_rn';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
 import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';

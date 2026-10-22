@@ -9,8 +9,10 @@
 // Versión: 0.4.0 (F05-03/F05-04 J2 §2.5; tabla «tests adaptados»): «Terceros» y «Contextos» también navegan y «Plantillas» aparece junto a «Preferencias financieras»; el árbol cerrado de diez secciones no cambia y las seis restantes siguen «No disponible» y no pulsables (antes ocho).
 // Versión: 0.5.0 (F05-05 K3 §2.9; F05 §49.4 A13, AJ-S7MAGUI-06): sin avisos `act(`. Causas: (1) cada `Icon` de @expo/vector-icons carga su fuente de forma asíncrona y actualiza su estado fuera de `act` (en jest la fuente nunca consta como cargada): este fichero declara la fuente cargada (`expo-font.isLoaded`), cambio del ENTORNO de test, no de ninguna aserción; (2) las lecturas iniciales de los destinos persistentes (Inicio y, desde F05-05, Día a día) terminan después del montaje: `irACategorias` las deja terminar dentro de `act` antes de navegar. Mismos tests y mismas aserciones.
 // Versión: 0.6.0 (F05-05 K4-E, hueco A13 de la matriz A/R): espía de console.error en cada test; el test falla si React avisa de una actualización «not wrapped in act». Los tests y sus aserciones no cambian.
+// Versión: 0.7.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // ============================================================
 
+import './tiempos_rn';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';

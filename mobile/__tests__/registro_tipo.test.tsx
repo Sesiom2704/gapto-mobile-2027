@@ -5,8 +5,10 @@
 // Descripción: Inicio HOME-01 v0.3 con la marca del AJUSTE A1 y el registro por tipo (F05-03/F05-04 J2+J3 §2.1–§2.4; láminas HOME-01 v0.3, HOME-QA v0.2 H01–H03, REG-DYN T01/T02/G01–G03/I01/X01/N01 y REG-PLT R01–R06). Inicio: cabecera de marca como UN elemento accesible «GaptoMobile» (sin «2027» ni lema), ilustración decorativa oculta, «Registrar» abre la hoja SIN preselección, accesos (máx. 3) y estado sin accesos. Ingreso cobrado: cuentas para cobrar, categorías por tipo, payload y éxito. Gasto con tercero (propuesta del registro por tipo). Cambio de tipo T02 antes del primer envío y fijado después. «No lo sé» en una obligatoria. Plantilla desde un acceso: chip, origen «De tu plantilla …», «Quitar» y campos tocados no se pisan. «Entre cuentas»: misma cuenta, payload, reintento con la MISMA identidad, FECHA_FUTURA. Éxito: «Guardar como plantilla» (nombre obligatorio y nunca autocompletado) y «Guardar como preferencia» para el tercero o la categoría. SHA de los 18 PNG de marca.
 // Versión: 0.1.0 (F05-03/F05-04 J2+J3 §2.1–§2.4; AJUSTE A1)
 // Versión: 0.2.0 (F05-03/F05-04 J3 §2.7 y §3): corte de Concepto (CNC-18/20) y casos de cierre §45.7-6 (plantilla con magnitud obligatoria) y §46.7-11 (duplicado activo «Usar el existente»).
+// Versión: 0.3.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // ============================================================
 
+import './tiempos_rn';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
 import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';

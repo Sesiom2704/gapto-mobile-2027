@@ -6,8 +6,10 @@
 // Versión: 0.1.0 (F05-02 B3)
 // Versión: 0.2.0 (F05-03/F05-04 J2 §1.5; F05 §46.5 E3; decisión OPCIÓN A2 del STOP 2, tabla «tests adaptados»): toda preferencia lleva tipo. Los dobles devuelven `tipos` en la lista y las preferencias de la lámina son de tipo GASTO (`TIPOS.GASTO`); los altas y ediciones esperan `tipo_hecho_id: TIPOS.GASTO` en lugar de null. La preferencia «por tipo» creada por API pasa a ser de OTRO tipo (`t-otro`): la de tipo GASTO sin categoría es ahora «Todos los gastos».
 // Versión: 0.3.0 (F05-03/F05-04 J2 §2.5; F05 §46.4 R6; tabla «tests adaptados»): S02 ofrece CUATRO ámbitos (antes dos): el caso conserva lo que comprobaba (cuentas de REG-01, espejo del CHECK, «Guardar» desactivado) y cuenta 4 radios en lugar de 2.
+// Versión: 0.4.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // ============================================================
 
+import './tiempos_rn';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
 import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';

@@ -12,8 +12,10 @@
 #       (gapto2027_dev en 5434), la base dev del E2E (gapto2027_dev en un
 #       cluster desechable 5460-5469) y la de los tests de la siembra
 #       (m5_siembra). Cualquier otro DSN aborta ANTES de conectar.
-#     - uuid5 deterministas por owner y fixture: una segunda ejecucion da 0
-#       altas (los servicios son idempotentes por identidad).
+#     - uuid5 deterministas por owner, DIA y fixture (previsiones, pago parcial y
+#       sus filas); los terceros, por owner y fixture (maestros compartidos).
+#       Repetirla el mismo dia da 0 altas (los servicios son idempotentes por
+#       identidad); otro dia crea un juego nuevo sin tocar el anterior.
 #     - Manifiesto `siembra_m5_manifest.json` con uuid, fixture, destino SIN
 #       credenciales, fecha y si fue alta o existente.
 #   Fixtures (M5-RULE-01: ocurrencias concretas; nunca consumo generico):
@@ -28,6 +30,10 @@
 #   Sin cuentas explicitas: la primera CORRIENTE y la primera AHORRO habilitadas en EUR (por nombre).
 #   El DSN se lee de la variable indicada y nunca se imprime.
 # Version: 0.1.0 (F05-06 M5 §C1 / Fase 3)
+# Version: 0.2.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): siembra entre dias. Antes el
+#   uuid5 dependia solo del fixture y las fechas de hoy: otro dia chocaba con la
+#   prevision del dia anterior (IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION, R2 de M5
+#   SWIPE). Ahora el juego de cada dia tiene su propia identidad.
 # ============================================================
 
 from __future__ import annotations
@@ -77,7 +83,13 @@ def exigir_destino(dsn: str) -> dict:
 
 
 def _id(owner: uuid.UUID, fixture: str) -> uuid.UUID:
+    """Identidad sin dia: maestros compartidos entre juegos (terceros)."""
     return uuid.uuid5(ESPACIO, f"{owner}:m5:{fixture}")
+
+
+def _id_dia(owner: uuid.UUID, hoy: dt.date, fixture: str) -> uuid.UUID:
+    """Identidad del juego de un dia: previsiones, pago parcial y sus filas."""
+    return uuid.uuid5(ESPACIO, f"{owner}:m5:{hoy.isoformat()}:{fixture}")
 
 
 def fixtures(hoy: dt.date) -> list[dict]:
@@ -153,7 +165,7 @@ def sembrar(dsn: str, owner: uuid.UUID, *, rol_runtime: str | None = None, hoy: 
 
     servicio = PrevisionesService(unidad)
     for f in fixtures(hoy):
-        pid = _id(owner, f"prevision.{f['fixture']}")
+        pid = _id_dia(owner, hoy, f"prevision.{f['fixture']}")
         existia = unidad.ejecutar(ctx(), lambda s, p=pid: s.uno("SELECT 1 FROM gapto.previsiones WHERE id = %s", (p,)),
                                   nombre="siembra M5 existe") is not None
         servicio.crear_manual(ctx(), DatosPrevisionManual(
@@ -182,7 +194,7 @@ def _cubrir(unidad, ctx, owner, pid, f, cuenta, terceros, hoy) -> dict:
     from app.services.compuesto_service import HechosCompuestosService
     from app.services.previsiones_service import impacto_correccion_ancla
 
-    hid = _id(owner, f"hecho.{f['fixture']}.cubierto")
+    hid = _id_dia(owner, hoy, f"hecho.{f['fixture']}.cubierto")
     x = D(f["cubierto"]).quantize(D("0.0001"))
     fecha = hoy - dt.timedelta(days=2)
 
@@ -191,22 +203,22 @@ def _cubrir(unidad, ctx, owner, pid, f, cuenta, terceros, hoy) -> dict:
             return False
         actor = leer_actor_self(s)
         version = s.uno("SELECT row_version FROM gapto.previsiones WHERE id = %s", (pid,))[0]
-        mov = _id(owner, f"mov.{f['fixture']}")
+        mov = _id_dia(owner, hoy, f"mov.{f['fixture']}")
         datos = DatosHechoCompuesto(
             hecho=DatosCreacionHecho(hecho_id=hid, fecha_hecho=fecha, moneda="EUR", presupuestable=True,
                                      estado_localizacion="DESCONOCIDA", tipo_hecho_codigo="GASTO", concepto=None, importe_total=x),
-            efectos=[DatosEfecto(efecto_id=_id(owner, f"efecto.{f['fixture']}"), tipo_efecto="GASTO", importe_delta=x,
+            efectos=[DatosEfecto(efecto_id=_id_dia(owner, hoy, f"efecto.{f['fixture']}"), tipo_efecto="GASTO", importe_delta=x,
                                  estado_atribucion="COMPLETA",
-                                 atribuciones=(DatosAtribucion(atribucion_id=_id(owner, f"atr.{f['fixture']}"), actor_id=actor,
+                                 atribuciones=(DatosAtribucion(atribucion_id=_id_dia(owner, hoy, f"atr.{f['fixture']}"), actor_id=actor,
                                                                importe_atribuido=x, criterio_atribucion="MANUAL",
                                                                porcentaje_aplicado=D("100")),))],
             pagos=[DatosPagoCompuesto(
                 movimiento=DatosMovimiento(movimiento_id=mov, cuenta_id=cuenta, fecha_movimiento=fecha, importe=-x,
                                            clase_movimiento="OPERACION", descripcion=None),
-                conciliacion=DatosConciliacion(conciliacion_id=_id(owner, f"conc.{f['fixture']}"), hecho_id=hid,
+                conciliacion=DatosConciliacion(conciliacion_id=_id_dia(owner, hoy, f"conc.{f['fixture']}"), hecho_id=hid,
                                                movimiento_tesoreria_id=mov, importe_asignado=-x))],
             prevision=DatosPrevisionCompuesta(prevision_id=pid, prevision_row_version_esperada=version,
-                                              vinculo_id=_id(owner, f"vinculo.{f['fixture']}"), importe_asignado=x,
+                                              vinculo_id=_id_dia(owner, hoy, f"vinculo.{f['fixture']}"), importe_asignado=x,
                                               marcar_realizada=False))
         HechosCompuestosService(UnidadDeTrabajoAdscrita(s), impacto_ancla=impacto_correccion_ancla).registrar_hecho_compuesto(
             s.contexto, datos)

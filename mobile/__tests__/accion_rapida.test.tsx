@@ -5,8 +5,10 @@
 // Descripción: Swipe como acción rápida en toda la app (F05-06 M5 SWIPE; regla de Moisés del 2026-10-22). Dominio (`planRapidoPrevision`: solo con la acción inequívoca, cada condición por sí misma; texto del aviso) y pantallas que la usan: Inicio, «Pendientes» y Actividad («Cobrado» de la devolución). En cada una: gesto → la fila sale y aparece «<Nombre> pagada/cobrada · Deshacer» → la petición sale a los 5 s, por la misma ruta y con el mismo bloque `prevision` que la hoja; «Deshacer» → 0 peticiones y la fila vuelve; datos incompletos → la hoja de siempre; rechazo → la fila vuelve con el motivo del servidor (nunca un éxito falso); doble gesto → una sola intención; INDETERMINADO → «Reintentar» con la MISMA identidad; segundo plano o pantalla desmontada durante la espera → nada. También el gesto real sobre el contenedor común (FilaDeslizable).
 // Versión: 0.1.0 (F05-06 M5 SWIPE)
 // Versión: 0.3.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados invertidos — la acción principal se desliza a la IZQUIERDA y la alternativa a la DERECHA; acciones accesibles con el nombre de la dirección nueva.
+// Versión: 0.4.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // ============================================================
 
+import './tiempos_rn';
 import { act, fireEvent, render, screen, within } from '@testing-library/react-native';
 import React from 'react';
 import { AppState, StyleSheet } from 'react-native';

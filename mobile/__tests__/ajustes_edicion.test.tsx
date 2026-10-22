@@ -4,8 +4,10 @@
 // Ruta: mobile/__tests__/ajustes_edicion.test.tsx
 // Descripción: Acciones EDIT-* de Ajustes › Categorías y Editar orden (mandato F05-01 S6-WIRE+UI §5, commit 2; lámina SET-CAT v1.0 S03–S06; D-UI-01). Cliente simulado: cada acción comprueba el comando y el payload EXACTOS con el `row_version` del estado cargado; confirmaciones (uso antes del ámbito y reconfirmación con el uso nuevo; RAMA solo con subcategorías activas; reactivar sin cascada); conflicto de versión e indeterminado recargan SIN reintento; Editar orden produce exactamente UNA llamada a /v1/categorias/reordenar con el conjunto completo y ninguna a /{id}/orden (también con el cliente HTTP real sobre un fetch simulado); orden sin cambios no envía nada.
 // Versión: 0.1.0 (F05-01 S6-WIRE+UI (este mandato))
+// Versión: 0.2.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // ============================================================
 
+import './tiempos_rn';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
 import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';

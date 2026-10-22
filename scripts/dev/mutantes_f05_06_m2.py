@@ -29,6 +29,10 @@
 #   con varias conciliaciones (la primera, como un LIMIT 1), MD05 excepcion que
 #   omite habilitada/cierre/owner/moneda; cliente MU05/MU06 propuesta de la
 #   original solo si esta en la lista (comportamiento de M2-B).
+# Version: 0.4.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): MU04 rehecho sobre el componente
+#   comun del swipe (mobile/src/components/AccionRapida.tsx, FilaDeslizable): el gesto de
+#   la fila de la devolucion ya no vive en ActividadScreen.tsx desde M5 SWIPE. Mismo
+#   mutante (el contenedor no captura el movimiento) y mismo discriminante.
 # ============================================================
 
 from __future__ import annotations
@@ -49,6 +53,7 @@ T196 = "tests/api/test_196_f05_06_m2_devolucion.py"
 T197 = "tests/api/test_197_f05_06_m2_concurrencia_serial.py"
 M_DOM = "mobile/src/domain/devolucion.ts"
 M_ACT = "mobile/src/screens/ActividadScreen.tsx"
+M_SWIPE = "mobile/src/components/AccionRapida.tsx"
 ELEG = "backend/app/comun/elegibilidad_cuentas.py"
 T198 = "tests/api/test_198_f05_06_m2d_cuenta_abono.py"
 M_DEV = "mobile/src/screens/DevolucionScreen.tsx"
@@ -117,7 +122,7 @@ MUTANTES = [
        "  return ETIQUETA_DEVOLUCION;")],
      [J_DEV], None),
     ("MU04", "cliente: swipe «Cobrado» sin capturar el movimiento (el Pressable se lo queda) (P-DEV-04)",
-     [(M_ACT, "      onMoveShouldSetPanResponderCapture: (_, g) => horizontal(g),", "      onMoveShouldSetPanResponderCapture: () => false,")],
+     [(M_SWIPE, "      onMoveShouldSetPanResponderCapture: (_, g) => horizontal(g),", "      onMoveShouldSetPanResponderCapture: () => false,")],
      [J_DEV], None),
     ("MD01", "abono: sin excepcion de la cuenta original (toda cuenta exige RECIBIR_INGRESO)",
      [(EJEC, "    if original is not None and cuenta_id == original:", "    if False:")],

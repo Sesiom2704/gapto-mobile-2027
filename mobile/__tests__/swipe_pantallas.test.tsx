@@ -5,8 +5,10 @@
 // Descripción: SWIPE-RULE en el resto de la app (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2 S6–S9). Tonos: confirmar (verde), neutro (gris) y aviso (naranja), nunca el rojo `critical`, en claro y oscuro. «Pendiente con <persona>»: derecha «Cobrado» / «Pagado» del saldo entero con UNA cuenta posible (aviso, 5 s, la ruta de cobro o pago con fecha de hoy); con varias cuentas abre el formulario con el saldo; izquierda «Más» abre las acciones; «Perdonar» nunca por swipe. Actividad «Repetir hoy»: intención NUEVA con los mismos datos y fecha de hoy por la ruta del tipo; no se ofrece con reparto, varias líneas o maestros desactivados; con magnitudes abre el detalle; «Deshacer» → ninguna escritura y ninguna petición tras el aviso; doble gesto → una intención. Ajustes: izquierda «Desactivar» en terceros, categorías (sin subcategorías activas; con ellas, la hoja de siempre) y plantillas, por su ruta actual, con «Deshacer»; error → la fila vuelve con el motivo.
 // Versión: 0.1.0 (F05-06 M5 SWIPE2)
 // Versión: 0.2.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados invertidos — la acción principal se desliza a la IZQUIERDA y la alternativa a la DERECHA; acciones accesibles con el nombre de la dirección nueva.
+// Versión: 0.3.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // ============================================================
 
+import './tiempos_rn';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';

@@ -7,8 +7,10 @@
 // Versión: 0.2.0 (F05-01 S7-MAG UI, hito 2): alta NUEVA con acción desactivada hasta completar y «Para crear falta: …», envío exacto, identidad reutilizada en el reintento indeterminado y renovada al editar, IDENTIDAD_REUTILIZADA, colisión con detalle (usar / rehabilitar y usar: segunda llamada solo si la primera confirma) y sin detalle (genérico + recargar catálogo); Editar orden con UNA llamada y el conjunto completo, «Sin cambios» sin envío; ficha global (M13); renombrar con colisión junto al nombre; deshabilitar sin impacto (una llamada), con impacto en dos pasos (M14) e impacto cambiado (M15) sin reenvío automático; rehabilitar.
 // Versión: 0.3.0 (F05-01 S7-MAG UI, D59): deshabilitar sin impacto pide confirmación simple («Cancelar» no envía nada; «Deshabilitar» envía UNA llamada sin confirmación de impacto); con impacto visible se mantiene M14.
 // Versión: 0.4.0 (F05-01 S7-MAG UI correctivo AJ-S7MAGUI-01/02/03/08): M09 con el aviso según la obligatoriedad elegida (sin elección, obligatoria, opcional; cambia con la elección); recarga tras un comando con alguna lectura fallida (árbol o catálogo): estado posiblemente desfasado con «Reintentar» (solo lecturas), nunca «Se ha recargado el estado actual»; deshabilitar con impacto visible: hoja M14 ANTES de cualquier POST y POST con el conjunto del catálogo; servidor con impacto vacío o distinto: M15 y nueva confirmación; sin impacto con impacto en el servidor: M15; rehabilitar y usar con fallo del segundo comando: hoja que reintenta solo la asociación.
+// Versión: 0.5.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // ============================================================
 
+import './tiempos_rn';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';

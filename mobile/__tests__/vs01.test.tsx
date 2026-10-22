@@ -11,8 +11,10 @@
 // Versión: 0.7.0 (F05-05 K3 §2.7; F05 §49.4 A9, D13, M5-06; tabla «tests adaptados»): «Este mes» pasa a tener read model (Resultado del mes de A9), que sustituye en ESE bloque el «sin cifras» de F05-D003 §16.6. Se conservan las propiedades de VS-01: los bloques que siguen sin read model no muestran importes, la cifra PARCIAL de gasto-mes va en su tarjeta separada (nunca en «Este mes») y un fallo de gasto-mes nunca se presenta como 0 €; las aserciones se acotan al bloque correspondiente.
 // Versión: 0.8.0 (F05-06 M5 §B2; HOME-01 v0.4, D-HOME-07; tabla «tests adaptados»): la línea de presupuesto deja de pintarse hasta F08 y «Próximos movimientos» tiene read model (previsiones; vacío = «No hay movimientos previstos.», sin importes): «No disponible» queda en Liquidez y Patrimonio (≥ 2) y «Este mes» no lo muestra.
 // Versión: 0.6.0 (F05-03/F05-04 J2+J3 §2.2/§2.7; tabla «tests adaptados»): Inicio abre el gasto con «Registrar» + hoja de tipos; CORTE DE CONCEPTO (A8): la nota opcional se escribe en «Más detalles» (`escribirNota`) y «concepto» deja de figurar en «faltan» (dos oráculos de SPEC-08 actualizados). El payload con nota es el mismo (`concepto: 'Café'`).
+// Versión: 0.9.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // ============================================================
 
+import './tiempos_rn';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 import React from 'react';

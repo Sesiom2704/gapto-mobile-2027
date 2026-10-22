@@ -7,8 +7,10 @@
 // Versión: 0.3.0 (F05-05 K4-E, huecos A7 de la matriz A/R): hojas «Otro mes» (mes elegido → desde/hasta del mes) y «Entre fechas» (hasta inclusivo → día siguiente en la consulta; desde > hasta bloqueado); filtros de categoría padre (con subcategorías: el cliente no envía incluir_subcategorias=false), tercero y contexto en la consulta.
 // Versión: 0.4.0 (F05-06 K-7; F05 §51.8, F09 §12.104 B1/B4): icono de la categoría en la fila y en la cabecera del detalle (`categoria.icon_key` → `IconoCategoriaVista`); transferencia con el icono de intercambio; «Varias» y sin categoría con el de reserva.
 // Versión: 0.2.0 (F05-05 K4-C; acta K4-A2 P12, caso 16 / DAY-Q08): «Cancelar» la búsqueda restaura el desplazamiento SOLO cuando la lista posterior ya está cargada (nunca durante «CARGANDO»); sin búsqueda previa no se desplaza.
+// Versión: 0.5.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // ============================================================
 
+import './tiempos_rn';
 import { Ionicons } from '@expo/vector-icons';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
 import React from 'react';

@@ -7,8 +7,10 @@
 // Versión: 0.4.0 (F05-05 K4-D, AJ-F0505C-04 / D-A6-1 invariante 5): motivo veraz en chips y «Sugeridas». Con el tercero elegido, una candidata general (FRECUENTE_TIPO, RECIENTE) nunca se presenta como «La guardaste para <tercero>» ni «Sueles usarla con <tercero>», ni en la línea de los chips ni en la fila de «Sugeridas».
 // Versión: 0.3.0 (F05-05 K3 §3, mutante SE19): con fecha futura no se piden sugerencias ni salen chips (R7).
 // Versión: 0.2.0 (F05-05 K3 §3; casos 6, 7 y 29 de §49.9): con la plantilla aplicada las sugerencias no alteran su propuesta ni salen chips; con la preferencia de cuenta del tercero, elegir por chip o por árbol da la MISMA consulta de propuesta y el MISMO payload; cambio de tercero y de tipo; categoría que deja de ser elegible entre carga y confirmación; reintento con el mismo UUID.
+// Versión: 0.5.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // ============================================================
 
+import './tiempos_rn';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';

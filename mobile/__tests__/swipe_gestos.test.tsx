@@ -4,8 +4,10 @@
 // Ruta: mobile/__tests__/swipe_gestos.test.tsx
 // Descripción: Gesto común del swipe tras la pasada de Moisés en el iPhone (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3). Lados invertidos con el gesto real en cada pantalla: a la IZQUIERDA la principal (verde: Pagado / Cobrado / Recibido / Repetir hoy), a la DERECHA la alternativa (No hubo / Más en gris; Desactivar en naranja); el círculo aparece en el lado que se descubre. Fila abierta a medias (patrón iOS): se cierra al abrir otra, al hacer scroll y al tocar fuera; tocar su botón la ejecuta y tocar la fila abre su detalle. Vibración con `expo-haptics` simulado: una sola vez al cruzar el umbral, impacto medio; si el módulo falla, aviso en consola y `Vibration` de reserva.
 // Versión: 0.1.0 (F05-06 M5 SWIPE3)
+// Versión: 0.2.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // ============================================================
 
+import './tiempos_rn';
 import { act, fireEvent, render, screen, within } from '@testing-library/react-native';
 import * as Haptics from 'expo-haptics';
 import React from 'react';

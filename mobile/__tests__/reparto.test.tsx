@@ -5,8 +5,10 @@
 // Descripción: Reparto, pagador real y posiciones (F05-06 M3 §B2; lámina REP v0.2; F05 §57). Dominio puro (partes iguales con el céntimo en la última fila, falta por repartir sin completar solo, lo que falta, payload sellado, deudas previstas, neto «Sin determinar», corrección solo de importes). Pantallas por estado: gasto pagado por otra persona (A1/A2: selector solo de personas E7, «Sí, le debo» / «No» / «No lo sé», revisión en cuatro bloques), cena repartida (B1–B4: «A partes iguales», «¿Te deben su parte?», revisión), reparto incompleto en oscuro (D1), envío (doble toque, INDETERMINADO con la MISMA identidad, rechazo), éxito con «Pendiente con»; «Pendiente con» (C1, C4, D2), cobro (C3), pago sin tercero (E8) y perdón; «Corregir reparto» (E6) con lo excluido atenuado y su motivo, revisión de impacto, motivo obligatorio, rechazos en lenguaje llano e INDETERMINADO sin reintento; detalle de la Actividad y registro («Repartir» / «Otra persona»).
 // Versión: 0.1.0 (F05-06 M3 §B2)
 // v0.1.1 (F05-06 M3 CORR-01, R-M3-05): dos personas con la misma parte; cada «Pendiente con» señala a su persona por el `tercero_id` del servidor, también con las posiciones en otro orden.
+// Versión: 0.2.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // ============================================================
 
+import './tiempos_rn';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
 import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';

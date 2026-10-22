@@ -4,8 +4,10 @@
 // Ruta: mobile/__tests__/capacidades.test.tsx
 // Descripción: Capacidades de cuenta en el cliente (F05-06 M4 §3; F09 §12.105 CAP, lámina CAP v0.1). Dominio: resumen de A1, textos de A3/A4 con «Lo ya registrado no cambia», lo que deja de funcionar, aviso B1 («De V3» solo si el servidor lo sabe), historial B4 y aviso B2. Pantallas: Ajustes › Cuentas (A1 con «Sin configurar» arriba), detalle A2/B1 con cuatro interruptores y «Otras» en solo lectura, hoja A3 que no cambia nada hasta confirmar, hoja A4 con el impacto antes de confirmar, VERSION_DESFASADA sin pisar y con recarga, cuenta cerrada en solo lectura, historial B4, modo oscuro. Registro: aviso B2 en «Pagado con», «Cobrado en», «Desde» y «A» (solo con N > 0), que abre Cuentas y vuelve conservando lo escrito; B3 CUENTA_SIN_CAPACIDAD con el mensaje del servidor, el formulario conservado y la cuenta ya no disponible ni elegida. Negativo: ninguna sugerencia ni texto por tipo de cuenta.
 // Versión: 0.1.0 (F05-06 M4 F2)
+// Versión: 0.2.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // ============================================================
 
+import './tiempos_rn';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
 import React from 'react';
 import { StyleSheet } from 'react-native';

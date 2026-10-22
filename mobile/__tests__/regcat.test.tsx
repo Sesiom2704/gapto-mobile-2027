@@ -8,8 +8,10 @@
 // Versión: 0.3.0 (F05-01 P7 · N3, Moisés D-P7-05, AJ-P7BAT-12): los tests AJ-09 afirman el literal exacto del aviso de nivel en las cuatro combinaciones {Desactivada, Solo ingresos} × {usables false, true} (las de «Desactivada» con fixture de cliente, PR-01) y del subtítulo de fila en las dos; el de «Solo ingresos» sin descendiente elegible es el discriminante de U17.
 // Versión: 0.4.0 (F05-02 B2): el cliente simulado sirve la propuesta del resolver con la única cuenta (DEFAULT_GENERAL), que sustituye al fallback retirado del cliente (AJ-B1-09). Ningún caso REG-CAT cambia.
 // Versión: 0.5.0 (F05-03/F05-04 J2+J3 §2.2/§2.7): navegación «Registrar» + hoja de tipos y nota opcional en «Más detalles» (corte de Concepto). Ningún oráculo REG-CAT cambia.
+// Versión: 0.6.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // ============================================================
 
+import './tiempos_rn';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import React from 'react';
 import { Text } from 'react-native';

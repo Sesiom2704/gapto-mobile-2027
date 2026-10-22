@@ -7,8 +7,10 @@
 // Versión: 0.2.0 (F05-06 M5 SWIPE; regla del 2026-10-22): el swipe de B1 abre la hoja solo cuando la acción rápida no es inequívoca (aquí, sin poder leer la capacidad de hoy); la acción rápida con «Deshacer» se prueba en accion_rapida.test.tsx.
 // Versión: 0.3.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2): acciones accesibles «derecha» (Pagado / Cobrado) e «izquierda» (No hubo); el importe desconocido y el pago parcial ya tienen gesto: la derecha abre el formulario rellenado y «No hubo» solo existe sin pagos enlazados (accion_rapida.test.tsx).
 // Versión: 0.4.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados invertidos — la acción principal se desliza a la IZQUIERDA y la alternativa a la DERECHA; acciones accesibles con el nombre de la dirección nueva.
+// Versión: 0.5.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // ============================================================
 
+import './tiempos_rn';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
 import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';

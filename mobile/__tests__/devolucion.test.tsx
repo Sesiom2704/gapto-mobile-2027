@@ -9,8 +9,10 @@
 // Versión: 0.4.0 (F05-06 M5 SWIPE; regla del 2026-10-22): con la cuenta original demostrable el swipe «Cobrado» es una acción rápida con «Deshacer» (accion_rapida.test.tsx); estos tests de la Actividad prueban la reserva sin cuenta original (abre la hoja), el gesto común y la franja, que ahora dice «Cobrado».
 // Versión: 0.5.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2 S7): la devolución pendiente se desliza a la DERECHA («Recibido»; izquierda «Más»); la compra ofrece «Repetir hoy» y «Más». Gesto común: a medias enseña el botón, del todo ejecuta.
 // Versión: 0.6.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados invertidos — la acción principal se desliza a la IZQUIERDA y la alternativa a la DERECHA; acciones accesibles con el nombre de la dirección nueva. La devolución pendiente se desliza a la IZQUIERDA («Recibido»).
+// Versión: 0.7.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // ============================================================
 
+import './tiempos_rn';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
 import React from 'react';
 import { StyleSheet } from 'react-native';
