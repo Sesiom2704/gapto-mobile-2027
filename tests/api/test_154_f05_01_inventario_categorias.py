@@ -353,6 +353,13 @@
 #     (corregir_vinculo, retirar_vinculo, cancelar, crear_manual, recalcular_
 #     futuras, generar_*) siguen vedados. Ningun otro adaptador gana la excepcion.
 # Version: 0.30.0
+# Version 0.31.0 (F05-06 M1; F05 §61.2-§61.3): ejecucion_correccion.py (OP-21P/OP-21T) y
+#     ejecucion_anulacion.py (OP-03P) ganan entradas HTTP (rutas en app.py) SIN cambiar su
+#     excepcion I3 ni los metodos del motor que alcanzan; app.py solo llama a esas entradas.
+#     No hay adaptador V3 ni excepcion de CorreccionesService para V3: Q9 en STOP
+#     (handoffs/STOP_M5BM1_Q9.md). La lectura de elegibilidad (actividad/edicion.py) es SQL
+#     de solo lectura y no menciona categorias. Sin cambios en las aserciones.
+# Version: 0.31.0
 # ============================================================
 
 from __future__ import annotations

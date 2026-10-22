@@ -27,12 +27,18 @@
 #   alcanza el motor por CorreccionTesoreriaService.corregir_pago /
 #   corregir_transferencia.
 # Version: 0.1.0 (F04-R2 R2-B)
+# Version: 0.2.0 (F05-06 M1; F05 §61.2; CONTRATO_M1 v0.1 §1): entradas HTTP
+#   corregir_pago_http y corregir_transferencia_http: traducen el DTO a los
+#   datos de OP-21P / OP-21T sin anadir ni quitar nada y llaman a las mismas
+#   funciones (mismo orden de locks, misma revalidacion en el motor). Ni la
+#   excepcion I3 ni los metodos alcanzados cambian.
 # ============================================================
 
 from __future__ import annotations
 
 from typing import Any
 
+from app.api.dto_edicion import IntencionCorregirPago, IntencionCorregirTransferencia
 from app.api.ejecucion_registro import (
     CuentaSinCapacidad,
     RechazoRegistro,
@@ -101,3 +107,23 @@ def corregir_transferencia(unidad: UnidadDeTrabajo, contexto: ContextoOperacion,
 
     return unidad.ejecutar(contexto, con_rechazo_capacidad(operacion, RechazoRegistro),
                            nombre="F04-R2 OP-21T (capacidad + motor)")
+
+
+# ------------------------------------------------------------------ F05-06 M1: entradas HTTP
+def corregir_pago_http(unidad: UnidadDeTrabajo, contexto: ContextoOperacion, hecho_id: Any,
+                       intencion: IntencionCorregirPago) -> ResultadoCorreccionTesoreria | RechazoRegistro:
+    return corregir_pago(unidad, contexto, DatosCorreccionPago(
+        hecho_id=hecho_id, row_version_esperada=intencion.row_version,
+        movimiento_row_version_esperada=intencion.movimiento_row_version, motivo=intencion.motivo,
+        error_de_registro=intencion.error_de_registro, importe=intencion.importe, fecha=intencion.fecha,
+        cuenta_id=intencion.cuenta_id))
+
+
+def corregir_transferencia_http(unidad: UnidadDeTrabajo, contexto: ContextoOperacion, hecho_id: Any,
+                                intencion: IntencionCorregirTransferencia
+                                ) -> ResultadoCorreccionTesoreria | RechazoRegistro:
+    return corregir_transferencia(unidad, contexto, DatosCorreccionTransferencia(
+        hecho_id=hecho_id, row_version_esperada=intencion.row_version,
+        movimientos_row_version_esperadas=dict(intencion.movimientos_row_version), motivo=intencion.motivo,
+        error_de_registro=intencion.error_de_registro, importe=intencion.importe, fecha=intencion.fecha,
+        cuenta_origen_id=intencion.cuenta_origen_id, cuenta_destino_id=intencion.cuenta_destino_id))

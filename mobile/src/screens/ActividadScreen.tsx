@@ -12,6 +12,7 @@
 // Versión: 0.7.0 (F05-06 M5 SWIPE; regla de Moisés del 2026-10-22, sustituye a DAY-RULE-03 en lo que contradiga): el swipe «Cobrado» de una devolución con el abono pendiente es una acción rápida cuando es inequívoca: importe de la devolución, cuenta ORIGINAL demostrable de la compra (P-DEV-02 con M2-D; el servidor la admite sin capacidad) y fecha de hoy. La fila sale, el aviso «Devolución de <compra> cobrada · Deshacer» dura 5 s y después se registra el abono (useAccionRapida). La cuenta original se lee con la lista, nunca en el gesto. Sin cuenta original (o sin poder leerla) el gesto abre la hoja de siempre. El gesto y la franja son los comunes (FilaDeslizable); la franja dice «Cobrado». «Registrar abono» del detalle sigue abriendo la hoja.
 // Versión: 0.8.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2 S7/S8; SWIPE-RULE): cada fila va en tarjeta con los dos lados. Derecha: «Recibido» en una devolución con el abono pendiente (acción rápida solo con la cuenta original demostrable; si no, la hoja) o «Repetir hoy» cuando el registro se puede reconstruir (`repetibleHoy`): al soltar se leen su detalle y las capacidades de hoy y, sin dudas, aviso «Repetido hoy: <registro> · <importe> · Deshacer» y a los 5 s una intención NUEVA con fecha de hoy por la ruta de registro del tipo; con dudas abre el detalle. La fila original no sale (es otra intención). Izquierda: «Más» (abre el detalle). Nunca anular, borrar ni corregir por swipe.
 // Versión: 0.9.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados `principal` («Recibido» / «Repetir hoy», se desliza a la izquierda) y `alternativa` («Más», a la derecha), del componente común. El scroll cierra la fila abierta.
+// Versión: 0.10.0 (F05-06 M1; lámina EDIT-HECHO v0.1 D-EDIT-01, 06, 07; CONTRATO_M1 v0.1 §2): el detalle ofrece «Más» (si la raíz pasa `onCorregirHecho`): lee la elegibilidad del servidor (GET …/edicion) y abre la hoja con «Corregir» (tarea inmersiva fuera de la pantalla) y «Anular por duplicado» (hoja B1 con la declaración explícita y el motivo), atenuadas con su motivo cuando no se admiten. Anular no borra: tras confirmar, «Registro anulado» y la lista vuelve a leer. Un reintento tras un fallo de conexión usa la MISMA intención. Sin swipe de editar ni anular.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -19,8 +20,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import type { ClienteApi, DetalleActividad, FilaActividad, TipoActividad } from '../api/cliente';
+import type { ClienteApi, DetalleActividad, EdicionHecho, FilaActividad, TipoActividad } from '../api/cliente';
 import { AbonoHoja } from '../components/AbonoHoja';
+import { HojaAnularDuplicado, HojaMasHecho } from '../components/EdicionHecho';
+import { usarIntencion } from '../components/Prevision';
 import { accesibilidadLados, FilaDeslizable, propsScrollSwipe, propsZonaSwipe, useAccionRapida, type LadoSwipe } from '../components/AccionRapida';
 import { BotonPrimario, BotonTexto, Chip } from '../components/Basicos';
 import { Hoja } from '../components/HojasCategoria';
@@ -49,6 +52,7 @@ import { construirArbol } from '../domain/categoria';
 import { nombreCorto, ofreceRegistrarAbono, ofreceRegistrarDevolucion, TEXTO_NETO, textoDevolucionDe } from '../domain/devolucion';
 import { ayer, ddmmaaaaAIso, diaMesAnioIso, diaMesIso, isoLocal, mesAnioIso, mesDesplazadoIso } from '../domain/fechas';
 import { formatearEur } from '../domain/importe';
+import { componerAnulacion, TEXTO_ANULADO } from '../domain/edicion';
 import { componerRepetir, repetibleHoy, textoAvisoRepetir, type CapacidadesRepetir } from '../domain/repetir';
 import type { RepartoDeHecho } from '../domain/reparto';
 import { filtrar } from '../domain/maestros';
@@ -65,7 +69,10 @@ type HojaAbierta =
   | { h: 'F_CATEGORIA' }
   | { h: 'F_LISTA'; campo: 'cuenta' | 'tercero' | 'contexto' }
   | { h: 'DETALLE'; id: string }
-  | { h: 'ABONO'; dev: { id: string; titulo: string; importe: string; origenId: string }; volverA: string | null };
+  | { h: 'ABONO'; dev: { id: string; titulo: string; importe: string; origenId: string }; volverA: string | null }
+  | { h: 'MAS'; id: string; titulo: string; e: EdicionHecho }
+  | { h: 'ANULAR'; id: string; titulo: string; e: EdicionHecho }
+  | { h: 'ANULADO'; titulo: string };
 type Opcion = { id: string; nombre: string; detalle?: string };
 
 export const TEXTO_ERROR = 'No se ha podido cargar la actividad';
@@ -92,6 +99,8 @@ export function ActividadScreen(p: {
   /** F05-06 M3: «Corregir reparto» y «Pendiente con <persona>» desde el detalle de un gasto. */
   onCorregirReparto?: (hechoId: string) => void;
   onPendienteCon?: (t: { terceroId: string; nombre: string }) => void;
+  /** F05-06 M1: «Corregir» desde «Más» del detalle (tarea inmersiva fuera de la pantalla). */
+  onCorregirHecho?: (hechoId: string, titulo: string) => void;
 }) {
   const { c } = useTema();
   const inset = useSafeAreaInsets();
@@ -317,6 +326,31 @@ export function ActividadScreen(p: {
     if (ofreceRegistrarAbono(f)) return { principal: { etiqueta: TEXTO_FRANJA_COBRADO, icono: 'checkmark', tono: 'confirmar', onEjecutar: () => deslizarAbono(f) }, alternativa: mas };
     if (repetibleHoy(f)) return { principal: { etiqueta: 'Repetir hoy', icono: 'repeat', tono: 'confirmar', onEjecutar: () => void repetir(f) }, alternativa: mas };
     return { alternativa: mas };
+  };
+
+  // ---------------------------------------------------------------- «Más»: corregir y anular (EDIT-HECHO v0.1)
+  const [mas, setMas] = useState<{ cargando: boolean; error: boolean }>({ cargando: false, error: false });
+  const [anular, setAnular] = useState({ declarado: false, motivo: '', otro: false, enviando: false, error: null as string | null });
+  const intencionAnular = usarIntencion(p.nuevoId ?? (() => ''));
+  const abrirMas = async (d: DetalleActividad) => {
+    setMas({ cargando: true, error: false });
+    const r = await p.cliente.edicionHecho(d.id);
+    if (r.tipo !== 'OK') return setMas({ cargando: false, error: true });
+    setMas({ cargando: false, error: false });
+    setHoja({ h: 'MAS', id: d.id, titulo: tituloTransferencia(d) ?? tituloFila(d), e: r.datos });
+  };
+  const confirmarAnular = async (h: { id: string; titulo: string; e: EdicionHecho }) => {
+    if (!anular.declarado || !anular.motivo.trim() || anular.enviando) return;
+    setAnular({ ...anular, enviando: true, error: null });
+    const r = await p.cliente.anularDuplicado(h.id, componerAnulacion(h.e, anular.motivo, anular.declarado, intencionAnular.actual()));
+    if (r.tipo === 'OK') {
+      intencionAnular.liberar();
+      setHoja({ h: 'ANULADO', titulo: h.titulo });
+      return void cargar();
+    }
+    if (r.tipo === 'INDETERMINADO') return setAnular({ ...anular, enviando: false, error: `${r.mensaje} Puedes reintentar: no se anulará dos veces.` });
+    intencionAnular.liberar();
+    setAnular({ ...anular, enviando: false, error: r.mensaje });
   };
 
   const cerrarAbono = (registrado: boolean, volverA: string | null) => {
@@ -604,8 +638,32 @@ export function ActividadScreen(p: {
           {detalle.fase === 'OK' && ofreceRegistrarAbono(detalle.d) && p.nuevoId ? (
             <BotonSecundario testID="detalle-registrar-abono" titulo="Registrar abono" onPress={() => abrirAbono(detalle.d, detalle.d.id)} />
           ) : null}
-          <Text style={[tipo.caption, { color: c.textSecondary }]}>{TEXTO_EDICION}</Text>
+          {detalle.fase === 'OK' && p.onCorregirHecho && p.nuevoId ? (
+            <>
+              <BotonSecundario testID="detalle-mas" titulo={mas.cargando ? 'Cargando…' : 'Más'} onPress={() => void abrirMas(detalle.d)} />
+              {mas.error ? <Text testID="detalle-mas-error" style={[tipo.caption, { color: c.critical }]}>No se han podido cargar las acciones. Vuelve a intentarlo.</Text> : null}
+            </>
+          ) : (
+            <Text style={[tipo.caption, { color: c.textSecondary }]}>{TEXTO_EDICION}</Text>
+          )}
           <BotonSecundario testID="detalle-cerrar" titulo="Cerrar" onPress={() => setHoja(null)} />
+        </Hoja>
+      ) : null}
+
+      {hoja?.h === 'MAS' ? (
+        <HojaMasHecho acciones={hoja.e.acciones} onCerrar={() => void abrirDetalle(hoja.id)}
+          onCorregir={() => { const { id, titulo } = hoja; setHoja(null); p.onCorregirHecho?.(id, titulo); }}
+          onAnular={() => { setAnular({ declarado: false, motivo: '', otro: false, enviando: false, error: null }); setHoja({ ...hoja, h: 'ANULAR' }); }} />
+      ) : null}
+      {hoja?.h === 'ANULAR' ? (
+        <HojaAnularDuplicado titulo={hoja.titulo} declarado={anular.declarado} onDeclarar={(v) => setAnular({ ...anular, declarado: v })}
+          motivo={anular.motivo} motivoOtro={anular.otro} onMotivo={(t, otro) => setAnular({ ...anular, motivo: t, otro })}
+          enviando={anular.enviando} error={anular.error} onConfirmar={() => void confirmarAnular(hoja)} onCerrar={() => void abrirDetalle(hoja.id)} />
+      ) : null}
+      {hoja?.h === 'ANULADO' ? (
+        <Hoja titulo={hoja.titulo} testID="hoja-anulado">
+          <Text testID="anulado-texto" style={[tipo.body, { color: c.textPrimary }]}>{TEXTO_ANULADO}</Text>
+          <BotonSecundario testID="anulado-cerrar" titulo="Cerrar" onPress={() => setHoja(null)} />
         </Hoja>
       ) : null}
 

@@ -5,6 +5,7 @@
 // Descripción: Detalle de una previsión y sus tres salidas (F05-06 M5 §B1; lámina PREV v0.2 A2, B2–B7; D-PREV-02/06/07/09/11/13/14). Lee GET /v1/previsiones/{id} en CUALQUIER estado: las terminales y las que necesitan revisión se ven solo en lectura y sin acciones. Muestra importe esperado («Desconocido», nunca 0), cuándo, cuenta, categoría, origen, cobertura («Pagado 40,00 € · 1 pago», «Queda 80,00 €») o desviación («10,00 € más de lo previsto») y «Es una previsión: no ha movido dinero.». Acciones: «Registrar pago/cobro» (PrevisionRegistroScreen), «Ya lo registré» (candidatos SIN preselección, «Buscar en más fechas», «Se vinculará X €» con toda la porción libre, «¿Queda cubierta?» sin respuesta y «Enlazar»; un cambio concurrente relee y lo vuelve a mostrar) y «No hubo este mes» (motivo opcional). Lo no disponible va atenuado con su motivo. Tras un 409 o un fallo de conexión se enseña el estado actual y nunca «hecho»; un reintento usa la MISMA identidad. En parciales: «Para cubrirla, registra o enlaza el resto.» (sin darla por cubierta, DEU-M5-CERRAR-PARCIAL).
 // Versión: 0.1.0 (F05-06 M5 §B1)
 // Versión: 0.2.0 (F05-06 M5-B; F04-D065, F05-D047; contrato M5-B §5): «Dar por cubierta» en una PARCIAL (hoja con Esperado / Registrado / Queda sin cubrir ±X €, motivo con sugerencias y confirmación explícita) y «Más» › «Reabrir» en REALIZADA, REALIZADA_SIN_REALIDAD_ACTIVA y OMITIDA (motivo obligatorio; envía la versión del sucesor cuando la lectura lo trae). Sin swipe. PREVISION_SIN_REALIDAD_ACTIVA y TRAMO_RODANTE_REQUIERE_REVISION se explican en la hoja con el texto del servidor (el primero informa de «No hubo este mes» sin ejecutarlo) y se relee el detalle; 409 de estado o versión y el reintento incierto acaban en el estado actual, como «No hubo». Un reintento tras un fallo de conexión usa la MISMA identidad.
+// Versión: 0.3.0 (F05-06 M1, ajuste de M5-B para las pruebas del iPhone): tras «No hubo este mes», «Dar por cubierta» o «Reabrir» el detalle NO se cierra: relee y enseña el estado nuevo con su confirmación, de modo que «Más › Reabrir» es alcanzable (las terminales no están en ninguna lista, DEU-M5-PREV-REVISION). «Atrás» cierra con cambios y las listas vuelven a leer.
 // ============================================================
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -69,6 +70,8 @@ export function PrevisionDetalleScreen(p: {
   const [omitir, setOmitir] = useState<{ motivo: string; enviando: boolean; error: string | null } | null>(null);
   const [aviso, setAviso] = useState<Aviso>(null);
   const [cambios, setCambios] = useState(false);
+  /** Tras «No hubo», «Dar por cubierta» o «Reabrir» la pantalla sigue abierta con el estado nuevo (y «Más › Reabrir»). */
+  const [hecho, setHecho] = useState<string | null>(null);
   const intencionOmitir = usarIntencion(p.nuevoId);
   const [transicion, setTransicion] = useState<Transicion>(null);
   const [mas, setMas] = useState(false);
@@ -134,6 +137,14 @@ export function PrevisionDetalleScreen(p: {
     );
   }
 
+  /** Relee el detalle sin pasar por «Cargando» y deja la confirmación a la vista. */
+  const quedarCon = async (texto: string) => {
+    setCambios(true);
+    setHecho(texto);
+    const r = await p.cliente.detallePrevision(p.previsionId);
+    if (r.tipo === 'OK') setCarga({ fase: 'OK', d: r.datos });
+  };
+
   const confirmarOmitir = async () => {
     if (!omitir) return;
     setOmitir({ ...omitir, enviando: true, error: null });
@@ -141,8 +152,7 @@ export function PrevisionDetalleScreen(p: {
     if (r.tipo === 'OK') {
       intencionOmitir.liberar();
       setOmitir(null);
-      setCambios(true);
-      return p.onCerrar(true);
+      return quedarCon('Marcada como «No hubo este mes». Si fue un error, puedes reabrirla desde «Más».');
     }
     if (r.tipo === 'INDETERMINADO') {
       setFueIncierto(true);
@@ -169,8 +179,7 @@ export function PrevisionDetalleScreen(p: {
     if (r.tipo === 'OK') {
       intencionTransicion.liberar();
       setTransicion(null);
-      setCambios(true);
-      return p.onCerrar(true);
+      return quedarCon(t.tipo === 'CUBIERTA' ? 'Dada por cubierta. Si fue un error, puedes reabrirla desde «Más».' : 'Reabierta: vuelve a estar pendiente.');
     }
     if (r.tipo === 'INDETERMINADO') {
       setFueIncierto(true);
@@ -229,6 +238,7 @@ export function PrevisionDetalleScreen(p: {
           {d.categoria ? <Fila etiqueta="Categoría" valor={d.categoria.ruta} /> : null}
           <Fila etiqueta="Origen" valor={ORIGEN[d.origen] ?? d.origen} />
         </View>
+        {hecho ? <Text testID="detalle-hecho" accessibilityRole="alert" style={[tipo.subheadline, { color: c.textPrimary }]}>{hecho}</Text> : null}
         <Text style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_NO_MUEVE}</Text>
         {d.importe_esperado === null && !terminal ? (
           <Text testID="detalle-sin-esperado" style={[tipo.footnote, { color: c.textSecondary }]}>Sin importe esperado no hay confirmación rápida: indica el importe real en el formulario.</Text>

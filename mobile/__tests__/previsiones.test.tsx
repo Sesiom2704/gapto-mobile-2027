@@ -9,6 +9,7 @@
 // Versión: 0.4.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados invertidos — la acción principal se desliza a la IZQUIERDA y la alternativa a la DERECHA; acciones accesibles con el nombre de la dirección nueva.
 // Versión: 0.5.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // Versión: 0.6.0 (F05-06 M5-B; F04-D065, F05-D047): el parcial ya ofrece «Dar por cubierta» (antes se exigía su ausencia, DEU-M5-CERRAR-PARCIAL). Bloque M5-B: «Queda sin cubrir ±X €», dónde se ofrecen las dos acciones, hoja con motivo obligatorio (sugerencia + texto), PREVISION_SIN_REALIDAD_ACTIVA y TRAMO_RODANTE_REQUIERE_REVISION en la hoja sin reintento automático, 409 con el estado actual, misma identidad tras un fallo, «Reabrir» en «Más» (REALIZADA, sin realidad activa, OMITIDA; versión del sucesor) y CANCELADA atenuada.
+// Versión: 0.7.0 (F05-06 M1, ajuste de M5-B): tras «Dar por cubierta», «Reabrir» o «No hubo» el detalle sigue abierto con el estado nuevo; «Atrás» cierra con cambios.
 // ============================================================
 
 import './tiempos_rn';
@@ -519,6 +520,10 @@ describe('M5-B detalle', () => {
     fireEvent.changeText(screen.getByTestId('dar-motivo'), '  La factura definitiva fue menor (abono en noviembre) ');
     await act(async () => fireEvent.press(screen.getByTestId('dar-confirmar')));
     expect(dar.mock.calls[0]).toEqual(['seguro', { intencion_id: expect.any(String), row_version: 1, motivo: 'La factura definitiva fue menor (abono en noviembre)' }]);
+    // M1 (ajuste de M5-B): la pantalla sigue abierta con el estado nuevo; «Atrás» cierra con cambios.
+    expect(await screen.findByTestId('detalle-hecho')).toHaveTextContent(/reabrirla desde «Más»/);
+    expect(onCerrar).not.toHaveBeenCalled();
+    fireEvent.press(screen.getByTestId('prevision-detalle-atras'));
     expect(onCerrar).toHaveBeenCalledWith(true);
   });
 
@@ -580,6 +585,8 @@ describe('M5-B detalle', () => {
     fireEvent.press(screen.getByTestId('reabrir-sugerencia-0'));
     await act(async () => fireEvent.press(screen.getByTestId('reabrir-confirmar')));
     expect(reabrir.mock.calls[0]).toEqual(['luz', { intencion_id: expect.any(String), row_version: 1, motivo: 'La marqué por error', sucesor_row_version: 4 }]);
+    expect(await screen.findByTestId('detalle-hecho')).toHaveTextContent(/Reabierta/);
+    fireEvent.press(screen.getByTestId('prevision-detalle-atras'));
     expect(onCerrar).toHaveBeenCalledWith(true);
   });
 
@@ -620,5 +627,21 @@ describe('M5-B detalle', () => {
     await act(async () => fireEvent.press(screen.getByTestId('reabrir-confirmar')));
     expect(await screen.findByTestId('reabrir-error')).toHaveTextContent(mensaje);
     await waitFor(() => expect(reabrir).toHaveBeenCalledTimes(1));
+  });
+
+  test('«No hubo» desde el detalle deja la previsión a la vista con «Más › Reabrir» (sin cerrarse)', async () => {
+    const omitida = realizada({ estado: 'OMITIDA' });
+    const leer = jest.fn().mockResolvedValueOnce({ tipo: 'OK', datos: detalle(fila()) }).mockResolvedValue({ tipo: 'OK', datos: omitida });
+    const omitir = jest.fn(async () => ({ tipo: 'OK', datos: { intencion_id: 'x', prevision_id: 'luz', estado: 'OMITIDA', row_version: 2 } }) as any);
+    const onCerrar = montarDetalle(cliente({ detallePrevision: leer as any, omitirPrevision: omitir }));
+    fireEvent.press(await screen.findByTestId('prevision-accion-omitir'));
+    await act(async () => fireEvent.press(screen.getByTestId('omitir-confirmar')));
+    expect(await screen.findByTestId('detalle-hecho')).toHaveTextContent(/No hubo este mes/);
+    expect(screen.getByTestId('prevision-estado')).toHaveTextContent('Omitida');
+    expect(onCerrar).not.toHaveBeenCalled();
+    fireEvent.press(screen.getByTestId('prevision-mas'));
+    expect(screen.getByTestId('mas-reabrir')).toBeEnabled();
+    fireEvent.press(screen.getByTestId('prevision-detalle-atras'));
+    expect(onCerrar).toHaveBeenCalledWith(true);
   });
 });

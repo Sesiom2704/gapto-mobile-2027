@@ -149,6 +149,12 @@
 #   MOTIVO_AUSENTE (422) y ENTRADA_INVALIDA (409, la cadena cambio). Ningun
 #   codigo existente cambia de texto ni de estado.
 # Version: 0.23.0
+#   0.24.0 (F05-06 M1; F05 §61.2; lamina EDIT-HECHO v0.1): MOTIVOS_EDICION, el
+#   texto llano de cada motivo de elegibilidad o de rechazo de OP-21P, OP-21T y
+#   OP-03P (contexto_extra.motivo o .detalle del motor), y rechazo_edicion, que
+#   conserva el status y el codigo de _MAPA y solo sustituye el mensaje cuando
+#   el motor dice por que. Ningun codigo existente cambia de status.
+# Version: 0.24.0
 # ============================================================
 
 from __future__ import annotations
@@ -596,3 +602,40 @@ _RECHAZOS_LECTURA: dict[str, tuple[int, str]] = {
 def rechazo_lectura(codigo: str) -> tuple[int, dict]:
     status, mensaje = _RECHAZOS_LECTURA[codigo]
     return status, {"codigo": codigo, "mensaje": mensaje, "reintentable": False}
+
+
+# ------------------------------------------------------------------ F05-06 M1 (EDIT-HECHO v0.1)
+#: Motivo del motor (o de la lectura de elegibilidad) -> texto llano. Lo no
+#: corregible se explica; nunca se oculta en silencio (D-EDIT-07).
+MOTIVOS_EDICION: dict[str, str] = {
+    "HECHO_ANULADO": "Este registro está anulado.",
+    "ORIGEN_IMPORTADO": "Registro migrado de la versión anterior (V3): en esta versión no se corrige ni se anula desde la app.",
+    "TIPO_NO_SOPORTADO": "Este tipo de registro no se corrige ni se anula desde aquí en esta versión.",
+    "DEVOLUCION": "Tiene una devolución registrada: no se corrige en esta versión.",
+    "DEPENDENCIAS_ACTIVAS": "No se puede anular: tiene una devolución u otra operación registrada. Si la compra no existió, anula antes esa operación.",
+    "INVERSION": "Pertenece a una inversión: no se corrige ni se anula desde aquí.",
+    "SIN_TESORERIA": "No tiene un movimiento de cuenta registrado: no se corrige ni se anula por esta vía.",
+    "VARIOS_MOVIMIENTOS": "Se pagó en varias partes o desde varias cuentas: no se corrige aquí en esta versión.",
+    "REPARTO": "Tiene reparto con otras personas: en esta versión no se corrige aquí. El reparto se corrige con «Corregir reparto».",
+    "MOVIMIENTO_COMPARTIDO": "El movimiento de la cuenta cubre también otros registros: no se corrige ni se anula desde aquí.",
+    "REVERSION_EXISTENTE": "El movimiento tiene una reversión: lo que pasó después se registra con su operación.",
+    "MOVIMIENTO_ANULADO": "El movimiento de la cuenta ya no está activo.",
+    "CONCILIACION_PARCIAL": "El movimiento de la cuenta no cubre el registro completo: no se corrige aquí en esta versión.",
+    "MULTIDIVISA": "La cuenta no está en la misma moneda que el registro.",
+    "MOVIMIENTO_REAL_NO_ANULABLE": "Solo se anula si confirmas que está repetido y el cargo no ocurrió dos veces. No se ha cambiado nada.",
+    "ACONTECIMIENTO_POSTERIOR": "Corregir es solo para datos que nunca fueron ciertos. Si algo cambió después, regístralo con su operación. No se ha cambiado nada.",
+    "FECHA_ANTERIOR_INICIO": "Un movimiento es anterior al inicio de la cuenta en la app: su saldo inicial ya lo incluye. No se ha cambiado nada.",
+}
+
+
+def rechazo_edicion(codigo: CodigoError, contexto_extra: dict | None) -> tuple[int, dict]:
+    """Rechazo del motor en una ruta de M1: status y codigo de _MAPA; el
+    mensaje, el del motivo concreto cuando el motor lo da."""
+    status, cuerpo = traducir_error_motor(codigo)
+    extra = contexto_extra or {}
+    motivo = extra.get("detalle") if extra.get("motivo") == "FUERA_DE_ALCANCE_V1" else extra.get("motivo")
+    if motivo in MOTIVOS_EDICION:
+        cuerpo = {**cuerpo, "mensaje": MOTIVOS_EDICION[motivo]}
+    if motivo is not None:
+        cuerpo = {**cuerpo, "detalle": {"motivo": motivo}}
+    return status, cuerpo

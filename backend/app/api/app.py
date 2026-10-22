@@ -214,6 +214,19 @@
 #          TRAMO_RODANTE_REQUIERE_REVISION 409 sin reintento automatico)
 #   Los 409 de estado o version devuelven el estado releido (como omitir).
 # Version: 0.26.0
+#   v0.27.0 (F05-06 M1; F05 §61.2 F05-D047; CONTRATO_M1 v0.1 §1; lamina
+#   EDIT-HECHO v0.1): corregir y anular desde la app, sin cambiar el motor:
+#     GET  /v1/hechos/{id}/edicion           elegibilidad visible (sin locks;
+#          informativa), versiones del hecho y de cada movimiento y ANULADO
+#          con su motivo (el hecho no desaparece)
+#     POST /v1/hechos/{id}/corregir-pago     OP-21P (ejecucion_correccion)
+#     POST /v1/transferencias/{id}/corregir  OP-21T (ejecucion_correccion)
+#     POST /v1/hechos/{id}/anular-duplicado  OP-03P con declaracion explicita
+#          (ejecucion_anulacion)
+#   Cada POST revalida en el motor bajo sus locks (AJ-M5BM1-06). La
+#   intencion_id es el request_id (reintento idempotente). Rechazos con
+#   errores_http.rechazo_edicion; VERSION_DESFASADA 409 con la edicion releida.
+# Version: 0.27.0
 # ============================================================
 
 from __future__ import annotations
@@ -228,6 +241,7 @@ from typing import Callable, Iterator, Literal
 
 import psycopg
 from fastapi import Body, Depends, FastAPI, Query, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -360,6 +374,16 @@ from app.api.dto_reparto import (
 )
 from app.api import ejecucion_reparto as rep
 from app.api import ejecucion_prevision as ejp
+from app.api import ejecucion_anulacion as eja
+from app.api import ejecucion_correccion as ejc
+from app.api.dto_edicion import (
+    EdicionHecho,
+    IntencionAnularDuplicado,
+    IntencionCorregirPago,
+    IntencionCorregirTransferencia,
+    ResultadoEdicion,
+)
+from app.actividad import edicion as lect_edi
 from app.api.dto_prevision import (
     CandidatosPrevision,
     DetallePrevision,
@@ -1198,6 +1222,57 @@ def create_app(
             status, cuerpo = eh.rechazo_lectura("HECHO_NO_ENCONTRADO")
             return JSONResponse(cuerpo, status_code=status)
         return salida
+
+    # ------------------------------------------------------------ F05-06 M1 corregir y anular (EDIT-HECHO v0.1)
+    def _leer_edicion(hecho_id: uuid.UUID) -> dict | None:
+        d = unidad.ejecutar(contexto(), lambda s: lect_edi.edicion(s, hecho_id), nombre="F05-06 M1 edicion")
+        if d is not None:
+            for accion in d["acciones"].values():
+                accion["motivo"] = eh.MOTIVOS_EDICION.get(accion["codigo"]) if accion["codigo"] else None
+        return d
+
+    def _escritura_edicion(hecho_id: uuid.UUID, intencion, ejecutar):
+        try:
+            salida = ejecutar(ContextoOperacion.de_usuario(cfg.owner_user_id, request_id=intencion.intencion_id))
+        except ErrorMotor as exc:
+            if exc.codigo in (CodigoError.INTERNO, CodigoError.VIOLACION_INVARIANTE_FISICA):
+                raise
+            status, cuerpo = eh.rechazo_edicion(exc.codigo, exc.contexto_extra)
+            if exc.codigo is CodigoError.VERSION_DESFASADA:
+                cuerpo = {**cuerpo, "detalle": {**cuerpo.get("detalle", {}), "edicion": jsonable_encoder(
+                    _leer_edicion(hecho_id))}}
+            return JSONResponse(cuerpo, status_code=status)
+        if isinstance(salida, RechazoRegistro):
+            status, cuerpo = eh.rechazo_integracion(salida.codigo, salida.detalle)
+            return JSONResponse(cuerpo, status_code=status)
+        estado = unidad.ejecutar(contexto(), lambda s: s.uno(
+            "SELECT estado FROM gapto.hechos_financieros WHERE id = %s", (hecho_id,)), nombre="F05-06 M1 estado")
+        return {"intencion_id": intencion.intencion_id, "hecho_id": hecho_id, "row_version": salida.hecho_row_version,
+                "estado": estado[0] if estado else "ACTIVO", "idempotente": salida.idempotente}
+
+    @app.get("/v1/hechos/{hecho_id}/edicion", response_model=EdicionHecho, dependencies=[Depends(autorizar)])
+    def edicion_hecho(hecho_id: uuid.UUID):
+        salida = _leer_edicion(hecho_id)
+        if salida is None:
+            status, cuerpo = eh.rechazo_lectura("HECHO_NO_ENCONTRADO")
+            return JSONResponse(cuerpo, status_code=status)
+        return salida
+
+    @app.post("/v1/hechos/{hecho_id}/corregir-pago", response_model=ResultadoEdicion, dependencies=[Depends(autorizar)])
+    def corregir_pago_hecho(hecho_id: uuid.UUID, intencion: IntencionCorregirPago):
+        return _escritura_edicion(hecho_id, intencion, lambda ctx: ejc.corregir_pago_http(unidad, ctx, hecho_id, intencion))
+
+    @app.post("/v1/transferencias/{hecho_id}/corregir", response_model=ResultadoEdicion,
+              dependencies=[Depends(autorizar)])
+    def corregir_transferencia_hecho(hecho_id: uuid.UUID, intencion: IntencionCorregirTransferencia):
+        return _escritura_edicion(hecho_id, intencion,
+                                  lambda ctx: ejc.corregir_transferencia_http(unidad, ctx, hecho_id, intencion))
+
+    @app.post("/v1/hechos/{hecho_id}/anular-duplicado", response_model=ResultadoEdicion,
+              dependencies=[Depends(autorizar)])
+    def anular_duplicado_hecho(hecho_id: uuid.UUID, intencion: IntencionAnularDuplicado):
+        return _escritura_edicion(hecho_id, intencion,
+                                  lambda ctx: eja.anular_duplicado_http(unidad, ctx, hecho_id, intencion))
 
     # ------------------------------------------------------------ F05-06 M5 confirmacion de previsiones
     def _no_encontrada() -> JSONResponse:

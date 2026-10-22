@@ -18,7 +18,8 @@
 // v0.14.0 (F05-06 M3 §B1; lámina REP v0.2): reparto, pagador real y posiciones. POST /v1/intenciones/gasto-compartido (OP-22 de una sola llamada), POST /v1/posiciones/{id}/cobro | pago | perdon, con la clasificación de escritura (indeterminado = reintentar el MISMO UUID); lecturas GET /v1/terceros/{id}/pendiente («Pendiente con», OP-20) y GET /v1/hechos/{id}/reparto; «Corregir reparto» POST /v1/hechos/{id}/reparto con `row_version` (clasificación 'CAMBIO'). Tipos en domain/reparto (único import nuevo).
 // v0.15.0 (F05-06 M5 §B1; láminas PREV v0.2 y HOME-01 v0.4): confirmación de previsiones. Lecturas GET /v1/inicio/previsiones, /v1/previsiones/pendientes, /v1/previsiones/{id} y …/candidatos (?ampliado); escrituras POST …/vincular («Ya lo registré», OP-17) y …/omitir («No hubo este mes»), ambas con la clasificación de escritura (indeterminado = reintentar el MISMO UUID). El bloque opcional `prevision` viaja en ingreso, transferencia y, por tipo estructural, en el gasto. Tipos propios en este fichero: sin imports nuevos.
 // v0.16.0 (F05-06 M5-B; F04-D065, F05-D047): «Dar por cubierta» POST /v1/previsiones/{id}/dar-por-realizada y «Reabrir» POST …/reabrir (con `sucesor_row_version` cuando la lectura trae sucesor), ambas con la clasificación de escritura como «No hubo» (indeterminado = misma identidad; el reintento devuelve el estado actual). El detalle añade `pendiente` (esperado − registrado, con signo; derivado, nunca guardado), `recalculable`, `sucesor` y las acciones `dar_por_cubierta` y `reabrir`.
-// Versión: 0.16.0
+// v0.17.0 (F05-06 M1; lámina EDIT-HECHO v0.1; F05 §61.2): GET /v1/hechos/{id}/edicion (elegibilidad visible, informativa: el servidor revalida) y las escrituras «Corregir» (POST /v1/hechos/{id}/corregir-pago, POST /v1/transferencias/{id}/corregir) y «Anular por duplicado» (POST /v1/hechos/{id}/anular-duplicado), con la clasificación de escritura (indeterminado = reintentar la MISMA intención: el motor la reconoce por su request_id y no corrige ni anula dos veces). Tipos propios en este fichero.
+// Versión: 0.17.0
 // ============================================================
 
 import type { Ambito, CategoriaNodo } from '../domain/categoria';
@@ -713,6 +714,69 @@ export interface ResultadoTransicion {
   row_version: number;
 }
 
+// ------------------------------------------------------------------ F05-06 M1 · corregir y anular
+export interface AccionEdicionWire {
+  disponible: boolean;
+  codigo: string | null;
+  motivo: string | null;
+}
+export interface MovimientoEdicion {
+  movimiento_id: string;
+  row_version: number;
+  pata: 'SALIDA' | 'ENTRADA';
+  cuenta: { id: string; nombre: string | null };
+  importe: string | null;
+  fecha: string;
+}
+export interface EdicionHecho {
+  hecho_id: string;
+  row_version: number;
+  estado: string;
+  tipo: string;
+  importe: string | null;
+  fecha: string;
+  moneda: string;
+  origen_v3: boolean;
+  anulado: { fecha: string | null; motivo: string | null } | null;
+  movimientos: MovimientoEdicion[];
+  acciones: { corregir: AccionEdicionWire; anular_duplicado: AccionEdicionWire };
+}
+export interface PayloadCorregirPago {
+  intencion_id: string;
+  row_version: number;
+  movimiento_row_version: number;
+  motivo: string;
+  error_de_registro: true;
+  importe?: string;
+  fecha?: string;
+  cuenta_id?: string;
+}
+export interface PayloadCorregirTransferencia {
+  intencion_id: string;
+  row_version: number;
+  movimientos_row_version: Record<string, number>;
+  motivo: string;
+  error_de_registro: true;
+  importe?: string;
+  fecha?: string;
+  cuenta_origen_id?: string;
+  cuenta_destino_id?: string;
+}
+export interface PayloadAnularDuplicado {
+  intencion_id: string;
+  row_version: number;
+  movimientos_row_version: Record<string, number>;
+  motivo: string;
+  duplicado_declarado: boolean;
+}
+export interface ResultadoEdicion {
+  intencion_id: string;
+  hecho_id: string;
+  row_version: number;
+  estado: string;
+  idempotente: boolean;
+}
+
 export type Respuesta<T> =
   | { tipo: 'OK'; datos: T }
   | { tipo: 'RECHAZADO'; codigo: string; mensaje: string; detalle?: Record<string, unknown> }
@@ -838,6 +902,11 @@ export interface ClienteApi {
   // F05-06 M5-B
   darPorCubiertaPrevision(id: string, p: PayloadDarPorCubierta): Promise<Respuesta<ResultadoTransicion>>;
   reabrirPrevision(id: string, p: PayloadReabrir): Promise<Respuesta<ResultadoTransicion>>;
+  // F05-06 M1
+  edicionHecho(id: string): Promise<Respuesta<EdicionHecho>>;
+  corregirPago(id: string, p: PayloadCorregirPago): Promise<Respuesta<ResultadoEdicion>>;
+  corregirTransferencia(id: string, p: PayloadCorregirTransferencia): Promise<Respuesta<ResultadoEdicion>>;
+  anularDuplicado(id: string, p: PayloadAnularDuplicado): Promise<Respuesta<ResultadoEdicion>>;
 }
 
 const CAT = '/v1/categorias';
@@ -1012,5 +1081,9 @@ export function crearCliente(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): C
     omitirPrevision: (id, payload) => llamar(`${PREV(id)}/omitir`, post(payload), true),
     darPorCubiertaPrevision: (id, payload) => llamar(`${PREV(id)}/dar-por-realizada`, post(payload), true),
     reabrirPrevision: (id, payload) => llamar(`${PREV(id)}/reabrir`, post(payload), true),
+    edicionHecho: (id) => llamar(`${HECHO(id)}/edicion`, { method: 'GET' }, false),
+    corregirPago: (id, payload) => llamar(`${HECHO(id)}/corregir-pago`, post(payload), true),
+    corregirTransferencia: (id, payload) => llamar(`/v1/transferencias/${encodeURIComponent(id)}/corregir`, post(payload), true),
+    anularDuplicado: (id, payload) => llamar(`${HECHO(id)}/anular-duplicado`, post(payload), true),
   };
 }

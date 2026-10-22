@@ -12,7 +12,8 @@
 // v0.8.0 (F05-06 M2-B §B1; lámina DEV, D-DEV-01/06): «Registrar devolución» del detalle de un gasto en la Actividad abre la tarea inmersiva de devolución (DevolucionScreen) sobre la compra; al terminar, Día a día y Inicio vuelven a leer y «Ver la devolución» / «Ver la compra» abren ese detalle en Día a día (ida y vuelta). La Actividad recibe `nuevoId` para «Registrar abono».
 // v0.9.0 (F05-06 M3 §B1; lámina REP v0.2): «Repartir» u «Otra persona» en el registro de un gasto abren el gasto compartido (GastoCompartidoScreen) ENCIMA del registro, que sigue montado y conserva lo común («Cambiar» vuelve a él). «Pendiente con <persona>» (PendienteConScreen) se abre desde el éxito del gasto compartido, el detalle de un gasto en la Actividad y la ficha del tercero; «Corregir reparto» (CorregirRepartoScreen), desde el detalle. Todas son tareas inmersivas (ocultan la barra inferior); al terminar con cambios, Día a día e Inicio vuelven a leer.
 // v0.10.0 (F05-06 M5 §B1; láminas PREV v0.2 y HOME-01 v0.4): la campana y «Ver todos ›» de Inicio abren «Pendientes» (PendientesScreen) y una fila de Inicio o de la lista abre el detalle de la previsión (PrevisionDetalleScreen), que contiene sus salidas («Registrar pago/cobro», «Ya lo registré», «No hubo este mes»); el swipe «Abrir el formulario completo» abre el detalle directamente en el registro con el importe escrito. Son tareas superpuestas (ocultan la barra inferior); al terminar con cambios, Inicio, «Pendientes» y Día a día vuelven a leer.
-// Versión: 0.10.0
+// v0.11.0 (F05-06 M1; lámina EDIT-HECHO v0.1): «Corregir» desde «Más» del detalle de un hecho en Día a día abre la tarea inmersiva CorregirHechoScreen; al terminar con cambios, Día a día e Inicio vuelven a leer y el detalle se reabre (rastro visible). «Anular por duplicado» vive en la propia Actividad.
+// Versión: 0.11.0
 // ============================================================
 
 import * as Crypto from 'expo-crypto';
@@ -36,6 +37,7 @@ import { PreferenciasAjustesScreen } from './src/screens/PreferenciasAjustesScre
 import { HomeScreen } from './src/screens/HomeScreen';
 import { AjustesScreen, MasScreen } from './src/screens/MasScreen';
 import { ActividadScreen } from './src/screens/ActividadScreen';
+import { CorregirHechoScreen } from './src/screens/CorregirHechoScreen';
 import { CorregirRepartoScreen } from './src/screens/CorregirRepartoScreen';
 import { DevolucionScreen } from './src/screens/DevolucionScreen';
 import { GastoCompartidoScreen } from './src/screens/GastoCompartidoScreen';
@@ -80,6 +82,9 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
   const [corregirDe, setCorregirDe] = useState<{ hechoId: string; clave: number } | null>(null);
   const abrirPendiente = useCallback((t: { terceroId: string; nombre: string }) => setPendienteDe({ ...t, clave: Date.now() }), []);
   const abrirCorregir = useCallback((hechoId: string) => setCorregirDe({ hechoId, clave: Date.now() }), []);
+  /** F05-06 M1: «Corregir» un registro (OP-21P / OP-21T). */
+  const [corregirHecho, setCorregirHecho] = useState<{ hechoId: string; titulo: string; clave: number } | null>(null);
+  const abrirCorregirHecho = useCallback((hechoId: string, titulo: string) => setCorregirHecho({ hechoId, titulo, clave: Date.now() }), []);
   /** F05-06 M5: lista «Pendientes» y detalle de una previsión (con su registro, «Ya lo registré» y omitir). */
   const [pendientes, setPendientes] = useState(false);
   const [prevision, setPrevision] = useState<{ id: string; abrirRegistro: { importe: string | null } | null; desde: string; clave: number } | null>(null);
@@ -116,7 +121,7 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
         {/* Día a día: Actividad v0 montada de forma persistente (conserva periodo, filtros y scroll). */}
         <View style={[s.raiz, destino !== 'DIA' && s.oculto]}>
           <ActividadScreen cliente={p.cliente} ahora={p.ahora} refresco={refresco} onRegistrar={() => setHojaTipos(true)} onInmersiva={setInmersivaDia}
-            onRegistrarDevolucion={registrarDevolucion} nuevoId={p.nuevoId} abrir={abrirEnDia} onCorregirReparto={abrirCorregir} onPendienteCon={abrirPendiente} />
+            onRegistrarDevolucion={registrarDevolucion} nuevoId={p.nuevoId} abrir={abrirEnDia} onCorregirReparto={abrirCorregir} onPendienteCon={abrirPendiente} onCorregirHecho={abrirCorregirHecho} />
         </View>
         {(Object.keys(TITULOS) as (keyof typeof TITULOS)[]).map((d) =>
           destino === d ? <TerritorioPendiente key={d} titulo={TITULOS[d]} /> : null,
@@ -283,6 +288,26 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
             />
           </View>
         ) : null}
+        {corregirHecho ? (
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: c.background }]}>
+            <CorregirHechoScreen
+              key={corregirHecho.clave}
+              cliente={p.cliente}
+              nuevoId={p.nuevoId}
+              ahora={p.ahora}
+              hechoId={corregirHecho.hechoId}
+              titulo={corregirHecho.titulo}
+              onCerrar={(cambios) => {
+                const id = corregirHecho.hechoId;
+                setCorregirHecho(null);
+                if (cambios) {
+                  setRefresco((n) => n + 1);
+                  setAbrirEnDia({ id, clave: Date.now() });
+                }
+              }}
+            />
+          </View>
+        ) : null}
         {pendienteDe ? (
           <View style={[StyleSheet.absoluteFill, { backgroundColor: c.background }]}>
             <PendienteConScreen
@@ -345,7 +370,7 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
           />
         ) : null}
       </View>
-      {tarea === null && devolucionDe === null && pendienteDe === null && corregirDe === null && !pendientes && prevision === null && !hojaTipos && !(destino === 'MAS' && inmersivaMas) && !(destino === 'DIA' && inmersivaDia) ? <BarraInferior actual={destino} onCambiar={setDestino} /> : null}
+      {tarea === null && devolucionDe === null && pendienteDe === null && corregirDe === null && corregirHecho === null && !pendientes && prevision === null && !hojaTipos && !(destino === 'MAS' && inmersivaMas) && !(destino === 'DIA' && inmersivaDia) ? <BarraInferior actual={destino} onCambiar={setDestino} /> : null}
     </View>
   );
 }

@@ -15,10 +15,15 @@
 #   Frontera I3 (test_154): excepcion NOMINAL y acotada a este fichero; solo
 #   alcanza el motor por AnulacionTesoreriaService.anular_registro.
 # Version: 0.1.0 (F04-R2 R2-C)
+# Version: 0.2.0 (F05-06 M1; F05 §61.2; CONTRATO_M1 v0.1 §1, §2.4): entrada
+#   HTTP anular_duplicado_http: la declaracion explicita del DTO
+#   (`duplicado_declarado`) es la unica via a `movimiento_en_banco = false`;
+#   sin ella el motor recibe None y rechaza. Misma funcion, mismo motor.
 # ============================================================
 
 from __future__ import annotations
 
+from app.api.dto_edicion import IntencionAnularDuplicado
 from app.core.contexto import ContextoOperacion
 from app.core.unidad_adscrita import UnidadDeTrabajoAdscrita
 from app.core.unidad_trabajo import SesionMotor, UnidadDeTrabajo
@@ -41,3 +46,14 @@ def anular_registro(unidad: UnidadDeTrabajo, contexto: ContextoOperacion,
         return motor(UnidadDeTrabajoAdscrita(sesion)).anular_registro(contexto, datos)
 
     return unidad.ejecutar(contexto, operacion, nombre="F04-R2 OP-03P (adaptador F05)")
+
+
+# ------------------------------------------------------------------ F05-06 M1: entrada HTTP
+def anular_duplicado_http(unidad: UnidadDeTrabajo, contexto: ContextoOperacion, hecho_id,
+                          intencion: IntencionAnularDuplicado) -> ResultadoAnulacionRegistro:
+    """«Anular por duplicado»: solo con la declaracion explicita el motor recibe
+    `movimiento_en_banco = false`; sin ella recibe None y rechaza (§2.3.3)."""
+    return anular_registro(unidad, contexto, DatosAnulacionRegistro(
+        hecho_id=hecho_id, row_version_esperada=intencion.row_version,
+        movimientos_row_version_esperadas=dict(intencion.movimientos_row_version), motivo=intencion.motivo,
+        movimiento_en_banco=False if intencion.duplicado_declarado is True else None))
