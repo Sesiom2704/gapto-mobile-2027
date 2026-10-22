@@ -7,6 +7,7 @@
 // Versión: 0.2.0 (F05-05 K3 §2.5; F05 §49.4 A5/A8, D-SRCH-10/12; lámina SRCH-ACT-AFI C1–C3): en la ficha del tercero (la misma vista de edición, para no cambiar la navegación de F05-04), «Uso en Gapto · N registros · último <fecha>» con «Ver sus registros ›» (Actividad filtrada por el tercero, todo el historial); «Categorías habituales» (afinidades guardadas: «Quitar» con confirmación C3, o «No disponible» si la categoría está desactivada; «+ Añadir categoría» con el selector jerárquico y búsqueda, solo activas, la ya habitual marcada «Ya es habitual»); «Según tu historial» con «Guardar» («N de tus M gastos en <tercero>»). Cada alta o retirada es una escritura independiente con su UUID; los errores se muestran y se recarga, sin reintento automático.
 // Versión: 0.3.0 (F05-06 M3 §B1; lámina REP v0.2 E5, P-REP-03): en la ficha de una persona, encima de «Ver sus registros», «Pendiente con <persona> · Te debe X · Le debes Y ›» (GET /v1/terceros/{id}/pendiente, solo si la raíz pasa `onPendienteCon`); solo aparece si hay algo pendiente. Con un saldo desconocido dice «Sin determinar», nunca 0,00 €.
 // Versión: 0.4.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2 S9; SWIPE-RULE): cada tercero va en tarjeta; deslizar a la izquierda un tercero ACTIVO es «Desactivar» (tono de aviso, nunca rojo): aviso «<Nombre> desactivado · Deshacer» y, a los 5 s, la misma ruta que el botón «Desactivar» del detalle. Se puede reactivar después; nunca borra registros.
+// Versión: 0.5.0 (swipe (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados `principal` / `alternativa` del componente común (principal a la izquierda); la raíz y el scroll cierran la fila abierta a medias (`propsZonaSwipe`, `propsScrollSwipe`).)
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -14,7 +15,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useAccionRapida, type LadoSwipe } from '../components/AccionRapida';
+import { propsScrollSwipe, propsZonaSwipe, useAccionRapida, type LadoSwipe } from '../components/AccionRapida';
 
 import type { ClienteApi, DetalleAfinidades, NaturalezaTercero, Respuesta, ResultadoComandoTercero, Tercero } from '../api/cliente';
 import { BotonPrimario, CabeceraNavegacion, Chip, EstadoDato, Segmentado } from '../components/Basicos';
@@ -393,7 +394,7 @@ export function TercerosAjustesScreen(p: {
 
   // ---------------------------------------------------------------- lista (S01)
   return (
-    <View testID="pantalla-terceros" style={{ flex: 1, backgroundColor: c.background }}>
+    <View testID="pantalla-terceros" style={{ flex: 1, backgroundColor: c.background }} {...propsZonaSwipe}>
       <CabeceraNavegacion
         titulo="Terceros"
         atras={{ etiqueta: 'Ajustes', onPress: p.onAtras }}
@@ -404,7 +405,7 @@ export function TercerosAjustesScreen(p: {
           </Pressable>
         }
       />
-      <ScrollView contentContainerStyle={[ef.cuerpo, { paddingBottom: inset.bottom + espacio.xxl }]} keyboardShouldPersistTaps="handled">
+      <ScrollView {...propsScrollSwipe} contentContainerStyle={[ef.cuerpo, { paddingBottom: inset.bottom + espacio.xxl }]} keyboardShouldPersistTaps="handled">
         <Segmentado<Filtro>
           testIDBase="ajter-filtro"
           etiquetaGrupo="Mostrar"
@@ -431,7 +432,7 @@ export function TercerosAjustesScreen(p: {
             {visibles.filter((t) => !rapida.oculta(t.id)).map((t, i) => (
               <FilaLista key={t.id} testID={`ajter-fila-${t.id}`} titulo={t.nombre} apagada={!t.enabled} ultima={i === visibles.length - 1}
                 detalle={[t.naturaleza ? detalleTercero({ naturaleza: t.naturaleza }) : null, t.enabled ? null : 'Inactivo'].filter(Boolean).join(' · ')}
-                onPress={() => abrirEditar(t)} enTarjeta izquierda={ladoDesactivar(t)} />
+                onPress={() => abrirEditar(t)} enTarjeta alternativa={ladoDesactivar(t)} />
             ))}
           </View>
         ) : null}

@@ -10,6 +10,7 @@
 // Versión: 0.5.0 (F05-01 S7-MAG UI correctivo AJ-S7MAGUI-02): `cargar(true)` devuelve si la lectura del árbol fue OK; en silencio, un fallo conserva el árbol mostrado y el controlador de magnitudes lo identifica como posiblemente desfasado (nunca «estado actualizado» sin verificarlo).
 // Versión: 0.6.0 (F05-03/F05-04 J2 §2.6; lámina SET-PLT / HOME-QA v0.2 O01/O02): sin NINGUNA categoría, la lista ofrece «Empezar con categorías sugeridas» (O02, árbol del servidor y POST /v1/categorias/onboarding) o «Empezar desde cero» (estado vacío habitual con «Nueva categoría»). La oferta es una tarea inmersiva.
 // Versión: 0.7.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2 S9; SWIPE-RULE): cada categoría va en tarjeta; deslizar a la izquierda una categoría ACTIVA es «Desactivar» (tono de aviso, nunca rojo). Sin subcategorías activas: aviso «<Nombre> desactivada · Deshacer» y, a los 5 s, la misma ruta que la hoja con el modo «solo si no tiene subcategorías activas». Con subcategorías activas hay dudas: abre su detalle con la hoja «Desactivar» de siempre (rama o no). Se puede reactivar después; nunca borra registros.
+// Versión: 0.8.0 (swipe (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados `principal` / `alternativa` del componente común (principal a la izquierda); la raíz y el scroll cierran la fila abierta a medias (`propsZonaSwipe`, `propsScrollSwipe`).)
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -17,7 +18,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { FilaDeslizable, accesibilidadLados, useAccionRapida, type LadoSwipe } from '../components/AccionRapida';
+import { FilaDeslizable, accesibilidadLados, propsScrollSwipe, propsZonaSwipe, useAccionRapida, type LadoSwipe } from '../components/AccionRapida';
 
 import type { ClienteApi } from '../api/cliente';
 import type { Respuesta } from '../api/cliente';
@@ -455,7 +456,7 @@ export function CategoriasAjustesScreen(p: {
   const migas = arbol && nodoNivel ? [...ancestros(arbol, nodoNivel.id), nodoNivel] : [];
   const padreNivel = nodoNivel && arbol && nodoNivel.parent_id ? arbol.porId.get(nodoNivel.parent_id) : undefined;
   return (
-    <View testID="pantalla-categorias" style={{ flex: 1, backgroundColor: c.background }}>
+    <View testID="pantalla-categorias" style={{ flex: 1, backgroundColor: c.background }} {...propsZonaSwipe}>
       <CabeceraNavegacion
         titulo={nodoNivel ? nodoNivel.nombre : 'Categorías'}
         atras={{ etiqueta: nodoNivel ? padreNivel?.nombre ?? 'Categorías' : 'Ajustes', onPress: () => (nodoNivel ? setNivel(nodoNivel.parent_id) : p.onAtras()) }}
@@ -494,7 +495,7 @@ export function CategoriasAjustesScreen(p: {
           ))}
         </View>
       ) : null}
-      <ScrollView contentContainerStyle={{ paddingBottom: espacio.xl }}>
+      <ScrollView {...propsScrollSwipe} contentContainerStyle={{ paddingBottom: espacio.xl }}>
         {carga.fase === 'CARGANDO' ? <View style={s.estado}><EstadoDato estado="CARGANDO" /></View> : null}
         {carga.fase === 'ERROR' ? (
           <Pressable testID="categorias-error" accessibilityRole="button" onPress={() => void cargar()} style={[s.estado, { minHeight: TACTIL_MIN }]}>
@@ -545,7 +546,7 @@ export function CategoriasAjustesScreen(p: {
               subtitulo={sub || undefined}
               inactiva={!n.enabled}
               onPress={() => (nHijos > 0 ? setNivel(n.id) : setDetalleId(n.id))}
-              izquierda={ladoDesactivar(n)}
+              alternativa={ladoDesactivar(n)}
             />
           );
         })}
@@ -562,11 +563,11 @@ export function CategoriasAjustesScreen(p: {
   );
 }
 
-function Fila(p: { testID: string; iconKey: string | null; titulo: string; subtitulo?: string; inactiva?: boolean; enfasis?: boolean; onPress: () => void; izquierda?: LadoSwipe }) {
+function Fila(p: { testID: string; iconKey: string | null; titulo: string; subtitulo?: string; inactiva?: boolean; enfasis?: boolean; onPress: () => void; alternativa?: LadoSwipe }) {
   const { c } = useTema();
-  const a11y = accesibilidadLados(undefined, p.izquierda);
+  const a11y = accesibilidadLados(undefined, p.alternativa);
   return (
-    <FilaDeslizable id={p.testID} izquierda={p.izquierda}>
+    <FilaDeslizable id={p.testID} alternativa={p.alternativa}>
     <Pressable
       testID={p.testID}
       accessibilityRole="button"

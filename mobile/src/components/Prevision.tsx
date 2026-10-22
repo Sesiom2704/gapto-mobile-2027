@@ -5,6 +5,7 @@
 // Descripción: Piezas de la confirmación de previsiones (F05-06 M5 §B1; láminas PREV v0.2 y HOME-01 v0.4). FilaPrevisionVista: concepto, línea (vencida, pago parcial, «Entre cuentas») e importe por naturaleza («~», «+» en color neutro, «Desconocido»); el deslizamiento a la izquierda solo ABRE la confirmación del swipe («Pagado» / «Cobrado», DAY-RULE-03), y también como acción accesible. Campana con contador junto al perfil (I01; «!» si falla, nada sin pendientes). HojaSwipe (B1, D-PREV-12): previsión, esperado, consecuencia, importe real propuesto («Revisa»), cuenta y fecha antes de «Confirmar pago y cubrir». HojaOmitir (B3): motivo opcional y «No hubo este mes». AvisoEstadoActual (B7): tras un 409 la app no dice «hecho» y enseña el estado real.
 // Versión: 0.1.0 (F05-06 M5 §B1)
 // Versión: 0.2.0 (F05-06 M5 SWIPE; regla de Moisés del 2026-10-22): la fila usa el gesto común FilaDeslizable (sigue al dedo y deja ver «Pagado» / «Cobrado» detrás); lo que hace el gesto lo decide la pantalla (acción rápida con «Deshacer» o la hoja). La acción accesible hace lo mismo que el gesto.
+// Versión: 0.4.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): los lados son `principal` (confirma) y `alternativa` («No hubo»); hacia dónde se desliza cada uno lo decide el componente común.
 // Versión: 0.3.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2): la fila recibe los dos lados (`derecha` / `izquierda`) y va en tarjeta; las acciones accesibles «derecha» / «izquierda» llevan la etiqueta de cada lado. «Próximos» sigue siendo una lista de solo lectura, sin tarjeta ni gesto.
 // ============================================================
 
@@ -25,16 +26,16 @@ export function FilaPrevisionVista(p: {
   fila: FilaPrevision;
   testID: string;
   onPress?: () => void;
-  /** Lados del swipe (SWIPE-RULE): derecha confirma, izquierda «No hubo». */
-  derecha?: LadoSwipe;
-  izquierda?: LadoSwipe;
+  /** Lados del swipe (SWIPE-RULE): la principal confirma, la alternativa es «No hubo». */
+  principal?: LadoSwipe;
+  alternativa?: LadoSwipe;
   enProximos?: boolean;
   usarQueda?: boolean;
   ultima?: boolean;
 }) {
   const { c } = useTema();
   const f = p.fila;
-  const a11y = accesibilidadLados(p.derecha, p.izquierda, p.derecha || p.izquierda ? [{ name: 'activate' }] : []);
+  const a11y = accesibilidadLados(p.principal, p.alternativa, p.principal || p.alternativa ? [{ name: 'activate' }] : []);
   const enTarjeta = !p.enProximos;
   const fila = (
     <Pressable
@@ -61,7 +62,7 @@ export function FilaPrevisionVista(p: {
   );
   if (!enTarjeta) return fila;
   return (
-    <FilaDeslizable id={p.testID} derecha={p.derecha} izquierda={p.izquierda}>
+    <FilaDeslizable id={p.testID} principal={p.principal} alternativa={p.alternativa}>
       {fila}
     </FilaDeslizable>
   );

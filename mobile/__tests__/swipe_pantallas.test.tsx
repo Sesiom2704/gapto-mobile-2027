@@ -4,6 +4,7 @@
 // Ruta: mobile/__tests__/swipe_pantallas.test.tsx
 // Descripción: SWIPE-RULE en el resto de la app (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2 S6–S9). Tonos: confirmar (verde), neutro (gris) y aviso (naranja), nunca el rojo `critical`, en claro y oscuro. «Pendiente con <persona>»: derecha «Cobrado» / «Pagado» del saldo entero con UNA cuenta posible (aviso, 5 s, la ruta de cobro o pago con fecha de hoy); con varias cuentas abre el formulario con el saldo; izquierda «Más» abre las acciones; «Perdonar» nunca por swipe. Actividad «Repetir hoy»: intención NUEVA con los mismos datos y fecha de hoy por la ruta del tipo; no se ofrece con reparto, varias líneas o maestros desactivados; con magnitudes abre el detalle; «Deshacer» → ninguna escritura y ninguna petición tras el aviso; doble gesto → una intención. Ajustes: izquierda «Desactivar» en terceros, categorías (sin subcategorías activas; con ellas, la hoja de siempre) y plantillas, por su ruta actual, con «Deshacer»; error → la fila vuelve con el motivo.
 // Versión: 0.1.0 (F05-06 M5 SWIPE2)
+// Versión: 0.2.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados invertidos — la acción principal se desliza a la IZQUIERDA y la alternativa a la DERECHA; acciones accesibles con el nombre de la dirección nueva.
 // ============================================================
 
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
@@ -104,13 +105,13 @@ async function montarPendiente(c: ClienteApi) {
 }
 
 describe('«Pendiente con <persona>»', () => {
-  test('derecha con una sola cuenta: «Cobrado de Tania · 15,00 € · Deshacer» y, a los 5 s, el cobro del saldo entero con fecha de hoy', async () => {
+  test('principal (izquierda) con una sola cuenta: «Cobrado de Tania · 15,00 € · Deshacer» y, a los 5 s, el cobro del saldo entero con fecha de hoy', async () => {
     const c = clientePendiente();
     await montarPendiente(c);
-    expect(screen.getByTestId('posicion-d1').props.accessibilityActions).toEqual([{ name: 'derecha', label: 'Cobrado' }, { name: 'izquierda', label: 'Más' }]);
-    expect(screen.getByTestId('posicion-o1').props.accessibilityActions).toEqual([{ name: 'derecha', label: 'Pagado' }, { name: 'izquierda', label: 'Más' }]);
+    expect(screen.getByTestId('posicion-d1').props.accessibilityActions).toEqual([{ name: 'izquierda', label: 'Cobrado' }, { name: 'derecha', label: 'Más' }]);
+    expect(screen.getByTestId('posicion-o1').props.accessibilityActions).toEqual([{ name: 'izquierda', label: 'Pagado' }, { name: 'derecha', label: 'Más' }]);
     const antes = llamadas(c);
-    accion('posicion-d1', 'derecha');
+    accion('posicion-d1', 'izquierda');
     expect(screen.queryByTestId('posicion-d1')).toBeNull();
     expect(screen.getByTestId('aviso-rapida-d1-texto')).toHaveTextContent('Cobrado de Tania · 15,00 €');
     await esperar(ESPERA_DESHACER_MS - 1);
@@ -125,13 +126,13 @@ describe('«Pendiente con <persona>»', () => {
     const c = clientePendiente();
     await montarPendiente(c);
     const antes = llamadas(c);
-    accion('posicion-o1', 'derecha');
+    accion('posicion-o1', 'izquierda');
     fireEvent.press(screen.getByTestId('aviso-rapida-o1-deshacer'));
     await esperar(ESPERA_DESHACER_MS * 2);
     await asentar();
     expect(llamadas(c)).toBe(antes);
     expect(screen.getByTestId('posicion-o1')).toBeTruthy();
-    accion('posicion-o1', 'derecha');
+    accion('posicion-o1', 'izquierda');
     await esperar(ESPERA_DESHACER_MS);
     await asentar();
     expect(c.pagarPosicion).toHaveBeenCalledWith('o1', expect.objectContaining({ importe: '12.50', cuenta_id: 'nomina', fecha: HOY }));
@@ -141,7 +142,7 @@ describe('«Pendiente con <persona>»', () => {
   test('con varias cuentas posibles hay dudas: abre el formulario de cobro con el saldo escrito; nada se envía', async () => {
     const c = clientePendiente({}, DOS);
     await montarPendiente(c);
-    accion('posicion-d1', 'derecha');
+    accion('posicion-d1', 'izquierda');
     await asentar();
     expect(screen.getByTestId('accion-cobro')).toBeTruthy();
     expect(screen.queryByTestId('aviso-rapida-d1')).toBeNull();
@@ -149,10 +150,10 @@ describe('«Pendiente con <persona>»', () => {
     expect(c.cobrarPosicion).not.toHaveBeenCalled();
   });
 
-  test('izquierda «Más» abre las acciones de la posición (sin escribir); «Perdonar» nunca es un lado del swipe', async () => {
+  test('alternativa (derecha) «Más» abre las acciones de la posición (sin escribir); «Perdonar» nunca es un lado del swipe', async () => {
     const c = clientePendiente();
     await montarPendiente(c);
-    accion('posicion-d1', 'izquierda');
+    accion('posicion-d1', 'derecha');
     expect(screen.getByTestId('posicion-acciones')).toBeTruthy();
     expect(c.perdonarPosicion).not.toHaveBeenCalled();
     expect(c.cobrarPosicion).not.toHaveBeenCalled();
@@ -161,7 +162,7 @@ describe('«Pendiente con <persona>»', () => {
   test('rechazo → la posición vuelve con el motivo en llano', async () => {
     const c = clientePendiente({ cobrarPosicion: jest.fn(async () => ({ tipo: 'RECHAZADO', codigo: 'POSICION_CERRADA', mensaje: 'x' }) as any) });
     await montarPendiente(c);
-    accion('posicion-d1', 'derecha');
+    accion('posicion-d1', 'izquierda');
     await esperar(ESPERA_DESHACER_MS);
     await asentar();
     expect(screen.getByTestId('posicion-d1')).toBeTruthy();
@@ -222,9 +223,9 @@ describe('Actividad · «Repetir hoy»', () => {
   test('«Repetir hoy» del café: aviso, ninguna petición tras el aviso, y a los 5 s un gasto NUEVO con fecha de hoy; la fila original sigue', async () => {
     const c = clienteActividad();
     await montarActividad(c);
-    expect(screen.getByTestId('fila-cafe').props.accessibilityActions).toEqual([{ name: 'derecha', label: 'Repetir hoy' }, { name: 'izquierda', label: 'Más' }]);
-    expect(screen.getByTestId('fila-cena').props.accessibilityActions).toEqual([{ name: 'izquierda', label: 'Más' }]); // con reparto no se ofrece
-    accion('fila-cafe', 'derecha');
+    expect(screen.getByTestId('fila-cafe').props.accessibilityActions).toEqual([{ name: 'izquierda', label: 'Repetir hoy' }, { name: 'derecha', label: 'Más' }]);
+    expect(screen.getByTestId('fila-cena').props.accessibilityActions).toEqual([{ name: 'derecha', label: 'Más' }]); // con reparto no se ofrece
+    accion('fila-cafe', 'izquierda');
     await asentar();
     expect(screen.getByTestId('aviso-rapida-repetir-cafe-texto')).toHaveTextContent('Repetido hoy: Café · 2,40 €');
     expect(screen.getByTestId('fila-cafe')).toBeTruthy();
@@ -240,7 +241,7 @@ describe('Actividad · «Repetir hoy»', () => {
   test('«Deshacer» → ninguna escritura', async () => {
     const c = clienteActividad();
     await montarActividad(c);
-    accion('fila-cafe', 'derecha');
+    accion('fila-cafe', 'izquierda');
     await asentar();
     const antes = llamadas(c);
     fireEvent.press(screen.getByTestId('aviso-rapida-repetir-cafe-deshacer'));
@@ -253,7 +254,7 @@ describe('Actividad · «Repetir hoy»', () => {
   test('con magnitudes hay dudas: abre el detalle («Más»); doble gesto → una sola intención', async () => {
     const c = clienteActividad({}, (id) => DET(CAFE, { magnitudes: [{ magnitud_id: 'm', nombre: 'Tazas', valor: '2', unidad: null }] }));
     await montarActividad(c);
-    accion('fila-cafe', 'derecha');
+    accion('fila-cafe', 'izquierda');
     await asentar();
     expect(screen.queryByTestId('aviso-rapida-repetir-cafe')).toBeNull();
     expect(c.detalleActividad).toHaveBeenCalledWith('cafe');
@@ -262,11 +263,11 @@ describe('Actividad · «Repetir hoy»', () => {
     await montarActividad(c2);
     const h = screen.getByTestId('fila-cafe').props.onAccessibilityAction;
     act(() => {
-      h({ nativeEvent: { actionName: 'derecha' } });
-      h({ nativeEvent: { actionName: 'derecha' } });
+      h({ nativeEvent: { actionName: 'izquierda' } });
+      h({ nativeEvent: { actionName: 'izquierda' } });
     });
     await asentar();
-    accion('fila-cafe', 'derecha');
+    accion('fila-cafe', 'izquierda');
     await asentar();
     await esperar(ESPERA_DESHACER_MS * 2);
     await asentar();
@@ -276,7 +277,7 @@ describe('Actividad · «Repetir hoy»', () => {
   test('rechazo → aviso con el motivo, sin éxito falso', async () => {
     const c = clienteActividad({ registrarGastoPagado: jest.fn(async () => ({ tipo: 'RECHAZADO', codigo: 'CUENTA_SIN_CAPACIDAD', mensaje: 'Cuenta nómina ya no puede pagar gastos.' }) as any) });
     await montarActividad(c);
-    accion('fila-cafe', 'derecha');
+    accion('fila-cafe', 'izquierda');
     await asentar();
     await esperar(ESPERA_DESHACER_MS);
     await asentar();
@@ -292,20 +293,20 @@ const SIMON: Tercero = { id: 'simon', nombre: 'Simón Valenzuela', naturaleza: '
 const VIEJO: Tercero = { id: 'viejo', nombre: 'Tienda cerrada', naturaleza: null, enabled: false, row_version: 1 };
 
 describe('Ajustes · «Desactivar»', () => {
-  test('terceros: izquierda «Desactivar» (naranja) solo en activos; «Deshacer» → 0 peticiones; a los 5 s, su ruta', async () => {
+  test('terceros: «Desactivar» (derecha, naranja) solo en activos; «Deshacer» → 0 peticiones; a los 5 s, su ruta', async () => {
     const desactivar = jest.fn(async () => ok({ tercero: { ...SIMON, enabled: false, row_version: 4 } }));
     const c = { ...clienteCategoriasStub(), listarTerceros: jest.fn(async () => ok({ terceros: [SIMON, VIEJO] })), desactivarTercero: desactivar } as unknown as ClienteApi;
     envolver(<TercerosAjustesScreen cliente={c} nuevoId={nuevoId} ahora={AHORA} onAtras={jest.fn()} onInmersiva={jest.fn()} />);
     await asentar();
-    expect(screen.getByTestId('ajter-fila-simon').props.accessibilityActions).toEqual([{ name: 'izquierda', label: 'Desactivar' }]);
+    expect(screen.getByTestId('ajter-fila-simon').props.accessibilityActions).toEqual([{ name: 'derecha', label: 'Desactivar' }]);
     expect(screen.getByTestId('ajter-fila-viejo').props.accessibilityActions).toBeUndefined();
     const antes = llamadas(c);
-    accion('ajter-fila-simon', 'izquierda');
+    accion('ajter-fila-simon', 'derecha');
     expect(screen.getByTestId('aviso-rapida-simon-texto')).toHaveTextContent('Simón Valenzuela desactivado');
     fireEvent.press(screen.getByTestId('aviso-rapida-simon-deshacer'));
     await esperar(ESPERA_DESHACER_MS * 2);
     expect(llamadas(c)).toBe(antes);
-    accion('ajter-fila-simon', 'izquierda');
+    accion('ajter-fila-simon', 'derecha');
     await esperar(ESPERA_DESHACER_MS);
     await asentar();
     expect(desactivar).toHaveBeenCalledWith('simon', 3);
@@ -321,7 +322,7 @@ describe('Ajustes · «Desactivar»', () => {
       cuentasPago: jest.fn(async () => ok({ cuentas: [] })), cuentasElegibles: jest.fn(async (op: string) => ok({ operacion: op, cuentas: [] })), desactivarPlantilla: desactivar } as unknown as ClienteApi;
     envolver(<PlantillasAjustesScreen cliente={c} nuevoId={nuevoId} ahora={AHORA} onAtras={jest.fn()} onInmersiva={jest.fn()} />);
     await asentar();
-    accion('ajplt-fila-super', 'izquierda');
+    accion('ajplt-fila-super', 'derecha');
     expect(screen.queryByTestId('ajplt-fila-super')).toBeNull();
     expect(screen.getByTestId('aviso-rapida-super-texto')).toHaveTextContent('Súper semanal desactivada');
     await esperar(ESPERA_DESHACER_MS);
@@ -337,12 +338,12 @@ describe('Ajustes · «Desactivar»', () => {
     const c = { ...clienteCategoriasStub(lista), desactivarCategoria: desactivar } as unknown as ClienteApi;
     envolver(<CategoriasAjustesScreen cliente={c} nuevoId={nuevoId} onAtras={jest.fn()} onInmersiva={jest.fn()} />);
     await asentar();
-    accion('fila-cafes', 'izquierda');
+    accion('fila-cafes', 'derecha');
     expect(screen.getByTestId('aviso-rapida-cafes-texto')).toHaveTextContent('Cafés desactivada');
     await esperar(ESPERA_DESHACER_MS);
     await asentar();
     expect(desactivar).toHaveBeenCalledWith('cafes', { row_version: 5, modo: 'SOLO_SI_SIN_HIJOS_ACTIVOS' });
-    accion('fila-hogar', 'izquierda');
+    accion('fila-hogar', 'derecha');
     await asentar();
     expect(screen.queryByTestId('aviso-rapida-hogar')).toBeNull();
     expect(desactivar).toHaveBeenCalledTimes(1);

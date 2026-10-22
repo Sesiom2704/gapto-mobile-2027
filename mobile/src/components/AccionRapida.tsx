@@ -5,12 +5,13 @@
 // Descripción: Swipe como acción rápida en toda la app (F05-06 M5 SWIPE; regla de Moisés del 2026-10-22, que sustituye a DAY-RULE-03 y a D-PREV-08/12 en lo que contradigan). Pieza común de todas las pantallas: FilaDeslizable (la fila sigue al dedo con tope y deja ver detrás la franja de la acción, de acento pasado el umbral; al soltar vuelve) y useAccionRapida (aviso «<Nombre> cobrada/pagada · Deshacer» durante 5 s; la petición sale al terminar la espera y «Deshacer» la cancela sin tocar el servidor). La identidad de la intención se fija al soltar y se conserva tras un INDETERMINADO, para que el reintento sea idempotente; un segundo gesto sobre la misma fila mientras espera o envía se ignora. Si la app pasa a segundo plano o la pantalla se desmonta durante la espera, no se envía nada. Un rechazo devuelve la fila con el motivo del servidor; nunca un éxito falso. Solo para acciones que crean o confirman realidad con datos completos: nunca anular, borrar, corregir ni omitir.
 // Versión: 0.1.0 (F05-06 M5 SWIPE)
 // Versión: 0.2.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2, estilo C; SWIPE-RULE): dos lados. A la DERECHA la acción principal y positiva (tono «confirmar»: círculo de 46 px de acento con etiqueta sobre `accentSurface`); a la IZQUIERDA la alternativa («No hubo» y «Más» en tono neutro; «Desactivar» en tono de aviso). Nunca el rojo (`critical`): `coloresTono` es el único mapa de tonos. Deslizar a medias deja el botón visible (tocarlo lo ejecuta); deslizar del todo lo ejecuta, con vibración ligera al pasar el umbral. Filas en tarjeta. Aviso flotante translúcido con ✓ en círculo (hasta dos líneas: el importe nunca se corta) y «Deshacer» con un anillo que se vacía en 5 s. Acciones accesibles «derecha» / «izquierda» con la etiqueta de cada lado (`accesibilidadLados`), la misma función que el gesto.
+// Versión: 0.3.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3; pasada de Moisés en el iPhone): lados INVERTIDOS. La acción principal (verde) se descubre deslizando a la IZQUIERDA (pulgar derecho) y la alternativa a la DERECHA; lo decide solo `PRINCIPAL_SE_DESLIZA` y las pantallas dan `principal` / `alternativa`. El círculo aparece en el lado que se descubre; las acciones accesibles se llaman por su dirección. Fila abierta a medias: tocarla abre su detalle; se cierra sola al abrir otra, al hacer scroll (`propsScrollSwipe`) o al tocar fuera de su botón (`propsZonaSwipe` en la raíz de la pantalla). Vibración (KO en el iPhone): se disparaba dentro del actualizador de estado, con el impacto más ligero y con los errores tragados; ahora `vibrarUmbral` vibra una vez al cruzar el umbral, con impacto medio, avisa en consola si falla y usa `Vibration` de reserva.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AccessibilityInfo, Animated, AppState, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
+import { AccessibilityInfo, Animated, AppState, PanResponder, Pressable, StyleSheet, Text, Vibration, View } from 'react-native';
 
 import type { Respuesta } from '../api/cliente';
 import { useTema } from '../theme/tema';
@@ -50,44 +51,111 @@ export function coloresTono(c: Colores, tono: TonoSwipe): { fondo: string; circu
   return { fondo: c.surfaceSecondary, circulo: c.textSecondary, sobreCirculo: c.background, etiqueta: c.textSecondary };
 }
 
-/** Acciones accesibles de una fila deslizable: las mismas funciones que el gesto. */
-export function accesibilidadLados(derecha?: LadoSwipe, izquierda?: LadoSwipe, extra: { name: string; label?: string }[] = []) {
+/** Dirección física de un deslizamiento: la fila se mueve hacia la izquierda (dx < 0) o hacia la derecha (dx > 0). */
+export type DireccionSwipe = 'izquierda' | 'derecha';
+/**
+ * Hacia dónde se desliza la acción PRINCIPAL (decisión de Moisés, lámina SWIPE-01 v0.3: a la izquierda, con el pulgar
+ * derecho). La alternativa va al lado contrario. Es el único sitio que decide los lados de toda la app.
+ */
+export const PRINCIPAL_SE_DESLIZA: DireccionSwipe = 'izquierda';
+const opuesta = (d: DireccionSwipe): DireccionSwipe => (d === 'izquierda' ? 'derecha' : 'izquierda');
+/** Lado (principal o alternativa) que corresponde a una dirección física. */
+export function ladoDeDireccion<T>(d: DireccionSwipe, lados: { principal?: T; alternativa?: T }): T | undefined {
+  return d === PRINCIPAL_SE_DESLIZA ? lados.principal : lados.alternativa;
+}
+
+/** Acciones accesibles de una fila deslizable: las mismas funciones que el gesto, con el nombre de su dirección. */
+export function accesibilidadLados(principal?: LadoSwipe, alternativa?: LadoSwipe, extra: { name: string; label?: string }[] = []) {
   const acciones = [...extra];
-  if (derecha) acciones.push({ name: 'derecha', label: derecha.etiqueta });
-  if (izquierda) acciones.push({ name: 'izquierda', label: izquierda.etiqueta });
+  if (principal) acciones.push({ name: PRINCIPAL_SE_DESLIZA, label: principal.etiqueta });
+  if (alternativa) acciones.push({ name: opuesta(PRINCIPAL_SE_DESLIZA), label: alternativa.etiqueta });
   return {
     accessibilityActions: acciones.length > 0 ? acciones : undefined,
     /** Devuelve true si la acción era de un lado. */
     ejecutar: (nombre: string): boolean => {
-      if (nombre === 'derecha' && derecha) return derecha.onEjecutar(), true;
-      if (nombre === 'izquierda' && izquierda) return izquierda.onEjecutar(), true;
-      return false;
+      if (nombre !== 'izquierda' && nombre !== 'derecha') return false;
+      const l = ladoDeDireccion(nombre, { principal, alternativa });
+      if (!l) return false;
+      cerrarFilaAbierta();
+      l.onEjecutar();
+      return true;
     },
   };
 }
+
+// ---------------------------------------------------------------- vibración al pasar el umbral
+/**
+ * Vibración al pasar el umbral de «del todo». Impacto MEDIO (el ligero apenas se nota en el iPhone). Si el módulo
+ * nativo falla, se avisa en la consola (Metro / Expo Go) y se usa la vibración básica de React Native: nunca en silencio.
+ * En iOS además exige «Vibración del sistema» activada (Ajustes › Sonidos y vibraciones).
+ */
+export function vibrarUmbral(): void {
+  let promesa: Promise<void> | undefined;
+  try {
+    promesa = Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  } catch (e) {
+    promesa = Promise.reject(e);
+  }
+  void promesa?.catch((e: unknown) => {
+    console.warn('[swipe] expo-haptics no ha vibrado; se usa Vibration', e);
+    Vibration.vibrate(15);
+  });
+}
+
+// ---------------------------------------------------------------- fila abierta (patrón iOS)
+// Como mucho UNA fila abierta a medias en toda la app. Se cierra al abrir otra, al hacer scroll o al tocar fuera de su
+// botón. Tocar la fila abre su detalle (y la cierra).
+type Abierta = { clave: symbol; cerrar: () => void };
+let filaAbierta: Abierta | null = null;
+let tocandoBotonDe: symbol | null = null;
+
+/** Cierra la fila abierta, si la hay (scroll, otra fila, tocar fuera). */
+export function cerrarFilaAbierta(): void {
+  const f = filaAbierta;
+  filaAbierta = null;
+  f?.cerrar();
+}
+
+/**
+ * Props de la raíz de una pantalla con filas deslizables: un toque que no empieza en el botón de la fila abierta la
+ * cierra. Los eventos de toque suben desde el hijo, así que el botón se marca antes de que llegue aquí.
+ */
+export const propsZonaSwipe = {
+  onTouchStart: () => {
+    const boton = tocandoBotonDe;
+    tocandoBotonDe = null;
+    if (filaAbierta && filaAbierta.clave !== boton) cerrarFilaAbierta();
+  },
+};
+/** Props del ScrollView de esas pantallas: empezar a desplazar cierra la fila abierta. */
+export const propsScrollSwipe = { onScrollBeginDrag: () => cerrarFilaAbierta() };
 
 type FaseSwipe = 'reposo' | 'arrastrando' | 'total';
 
 /** Fila en tarjeta con swipe a los dos lados. Sin lados se pinta la tarjeta sin gesto. */
 export function FilaDeslizable(p: {
-  /** Sufijo de los testID: `fila-swipe-<id>`, `fila-desplazable-<id>`, `swipe-accion-<id>-<lado>` y `swipe-boton-<id>-<lado>`. */
+  /** Sufijo de los testID: `fila-swipe-<id>`, `fila-desplazable-<id>`, `swipe-accion-<id>-<dirección>` y `swipe-boton-<id>-<dirección>`. */
   id: string;
-  derecha?: LadoSwipe;
-  izquierda?: LadoSwipe;
+  /** Acción principal (verde): se descubre deslizando hacia `PRINCIPAL_SE_DESLIZA`. */
+  principal?: LadoSwipe;
+  /** Alternativa («No hubo», «Más», «Desactivar»): se descubre deslizando al lado contrario. */
+  alternativa?: LadoSwipe;
   /** Sin tarjeta (la fila ya es tarjeta o vive dentro de otra). */
   sinTarjeta?: boolean;
   children: React.ReactNode;
 }) {
   const { c } = useTema();
-  const lados = useRef({ derecha: p.derecha, izquierda: p.izquierda });
-  lados.current = { derecha: p.derecha, izquierda: p.izquierda };
+  const lados = useRef({ principal: p.principal, alternativa: p.alternativa });
+  lados.current = { principal: p.principal, alternativa: p.alternativa };
+  const clave = useRef(Symbol(p.id)).current;
   const desplazamiento = useRef(new Animated.Value(0)).current;
   const ancho = useRef(ANCHO_INICIAL);
   const base = useRef(0); // posición al empezar el gesto (0, ABIERTO o −ABIERTO)
+  const pasado = useRef(false); // ya vibró en este arrastre
   const [fase, setFase] = useState<FaseSwipe>('reposo');
-  const [lado, setLado] = useState<'derecha' | 'izquierda' | null>(null);
-  const [abierta, setAbierta] = useState(false);
+  const [direccion, setDireccion] = useState<DireccionSwipe | null>(null);
   const total = () => Math.max(UMBRAL_SWIPE + 1, ancho.current * FRACCION_TOTAL);
+  const ladoHacia = (d: DireccionSwipe) => ladoDeDireccion(d, lados.current);
 
   const mover = (x: number, animar: boolean) => {
     if (animar) Animated.timing(desplazamiento, { toValue: x, duration: 180, useNativeDriver: false }).start();
@@ -95,60 +163,64 @@ export function FilaDeslizable(p: {
   };
   const cerrar = useCallback(() => {
     base.current = 0;
-    setAbierta(false);
+    pasado.current = false;
+    if (filaAbierta?.clave === clave) filaAbierta = null;
     setFase('reposo');
-    setLado(null);
+    setDireccion(null);
     mover(0, true);
   }, []);
-  const ejecutar = useCallback((cual: 'derecha' | 'izquierda') => {
-    const l = lados.current[cual];
+  const ejecutar = useCallback((d: DireccionSwipe) => {
+    const l = ladoHacia(d);
     cerrar();
     l?.onEjecutar();
   }, [cerrar]);
+  useEffect(() => () => {
+    if (filaAbierta?.clave === clave) filaAbierta = null;
+  }, []);
 
   const gesto = useMemo(() => {
-    const permitido = (dx: number) => (dx > 0 ? !!lados.current.derecha : !!lados.current.izquierda);
+    const dir = (dx: number): DireccionSwipe => (dx < 0 ? 'izquierda' : 'derecha');
     const horizontal = (g: { dx: number; dy: number }) =>
-      Math.abs(g.dx) > 12 && Math.abs(g.dx) > Math.abs(g.dy) && (base.current !== 0 || permitido(g.dx));
+      Math.abs(g.dx) > 12 && Math.abs(g.dx) > Math.abs(g.dy) && (base.current !== 0 || !!ladoHacia(dir(g.dx)));
     const posicion = (dx: number) => {
       const x = base.current + dx;
-      const max = lados.current.derecha ? ancho.current : 0;
-      const min = lados.current.izquierda ? -ancho.current : 0;
+      const max = ladoHacia('derecha') ? ancho.current : 0;
+      const min = ladoHacia('izquierda') ? -ancho.current : 0;
       return Math.max(min, Math.min(max, x));
     };
     return PanResponder.create({
       onMoveShouldSetPanResponder: (_, g) => horizontal(g),
       onMoveShouldSetPanResponderCapture: (_, g) => horizontal(g),
       onPanResponderTerminationRequest: () => false,
-      onPanResponderGrant: () => setFase('arrastrando'),
+      onPanResponderGrant: () => {
+        // Abrir otra fila cierra la que estaba abierta.
+        if (filaAbierta && filaAbierta.clave !== clave) cerrarFilaAbierta();
+        pasado.current = false;
+        setFase('arrastrando');
+      },
       onPanResponderMove: (_, g) => {
         const x = posicion(g.dx);
         mover(x, false);
-        setLado(x > 0 ? 'derecha' : x < 0 ? 'izquierda' : null);
+        setDireccion(x < 0 ? 'izquierda' : x > 0 ? 'derecha' : null);
         const pasa = Math.abs(x) >= total();
-        setFase((f) => {
-          if (pasa && f !== 'total') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
-          return pasa ? 'total' : 'arrastrando';
-        });
+        if (pasa && !pasado.current) vibrarUmbral();
+        pasado.current = pasa;
+        setFase(pasa ? 'total' : 'arrastrando');
       },
       onPanResponderRelease: (_, g) => {
         const x = posicion(g.dx);
-        if (x >= total() && lados.current.derecha) return ejecutar('derecha');
-        if (x <= -total() && lados.current.izquierda) return ejecutar('izquierda');
-        if (x >= UMBRAL_SWIPE && lados.current.derecha) {
-          base.current = ABIERTO_SWIPE;
-          setAbierta(true);
+        if (x <= -total() && ladoHacia('izquierda')) return ejecutar('izquierda');
+        if (x >= total() && ladoHacia('derecha')) return ejecutar('derecha');
+        const abrir = (d: DireccionSwipe, destino: number) => {
+          base.current = destino;
+          pasado.current = false;
+          filaAbierta = { clave, cerrar };
           setFase('arrastrando');
-          setLado('derecha');
-          return mover(ABIERTO_SWIPE, true);
-        }
-        if (x <= -UMBRAL_SWIPE && lados.current.izquierda) {
-          base.current = -ABIERTO_SWIPE;
-          setAbierta(true);
-          setFase('arrastrando');
-          setLado('izquierda');
-          return mover(-ABIERTO_SWIPE, true);
-        }
+          setDireccion(d);
+          mover(destino, true);
+        };
+        if (x <= -UMBRAL_SWIPE && ladoHacia('izquierda')) return abrir('izquierda', -ABIERTO_SWIPE);
+        if (x >= UMBRAL_SWIPE && ladoHacia('derecha')) return abrir('derecha', ABIERTO_SWIPE);
         cerrar();
       },
       onPanResponderTerminate: () => cerrar(),
@@ -158,24 +230,22 @@ export function FilaDeslizable(p: {
   const tarjeta = p.sinTarjeta ? null : [s.tarjeta, { borderColor: c.borderDefault }];
   const contenido = (
     <Animated.View testID={`fila-desplazable-${p.id}`} style={[{ backgroundColor: c.surfacePrimary, transform: [{ translateX: desplazamiento }] }, tarjeta]}>
-      {abierta ? (
-        // Abierta a medias: tocar la fila la cierra (no abre el detalle por accidente).
-        <Pressable testID={`swipe-cerrar-${p.id}`} accessibilityLabel="Cerrar" onPress={cerrar} style={StyleSheet.absoluteFill} />
-      ) : null}
       {p.children}
     </Animated.View>
   );
-  if (!p.derecha && !p.izquierda) return <View testID={`fila-tarjeta-${p.id}`} style={tarjeta ? s.envoltorio : undefined}>{contenido}</View>;
-  const l = lado ? lados.current[lado] : undefined;
+  if (!p.principal && !p.alternativa) return <View testID={`fila-tarjeta-${p.id}`} style={tarjeta ? s.envoltorio : undefined}>{contenido}</View>;
+  const l = direccion ? ladoHacia(direccion) : undefined;
   const col = l ? coloresTono(c, l.tono) : null;
   return (
     <View testID={`fila-swipe-${p.id}`} style={[s.swipe, !p.sinTarjeta && s.envoltorio, col && { backgroundColor: col.fondo }]}
       onLayout={(e) => (ancho.current = e.nativeEvent.layout.width || ANCHO_INICIAL)} {...gesto.panHandlers}>
-      {fase !== 'reposo' && l && lado && col ? (
-        // La acción accesible sigue en la fila; VoiceOver no ve el fondo (el botón es para el dedo).
-        <View testID={`swipe-accion-${p.id}-${lado}`} accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
-          style={[s.fondo, lado === 'derecha' ? s.fondoDerecha : s.fondoIzquierda]}>
-          <Pressable testID={`swipe-boton-${p.id}-${lado}`} onPress={() => ejecutar(lado)} style={[s.boton, lado === 'izquierda' && s.botonIzquierda]}>
+      {fase !== 'reposo' && l && direccion && col ? (
+        // La acción accesible sigue en la fila; VoiceOver no ve el fondo (el botón es para el dedo). El círculo aparece
+        // en el lado que se descubre: a la derecha al deslizar a la izquierda, y al revés.
+        <View testID={`swipe-accion-${p.id}-${direccion}`} accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+          style={[s.fondo, direccion === 'izquierda' ? s.fondoDerecha : s.fondoIzquierda]}>
+          <Pressable testID={`swipe-boton-${p.id}-${direccion}`} onTouchStart={() => (tocandoBotonDe = clave)} onPress={() => ejecutar(direccion)}
+            style={[s.boton, direccion === 'izquierda' && s.botonDerecha]}>
             <View style={[s.circulo, { backgroundColor: col.circulo }, fase === 'total' && s.circuloTotal]}>
               <Ionicons name={l.icono} size={22} color={col.sobreCirculo} />
             </View>
@@ -392,10 +462,10 @@ const s = StyleSheet.create({
   tarjeta: { borderRadius: radio.l, borderWidth: StyleSheet.hairlineWidth },
   swipe: { overflow: 'hidden' },
   fondo: { ...StyleSheet.absoluteFill, flexDirection: 'row', alignItems: 'center', paddingHorizontal: espacio.l },
-  fondoDerecha: { justifyContent: 'flex-start' },
-  fondoIzquierda: { justifyContent: 'flex-end' },
+  fondoDerecha: { justifyContent: 'flex-end' },
+  fondoIzquierda: { justifyContent: 'flex-start' },
   boton: { flexDirection: 'row', alignItems: 'center', gap: espacio.s, minHeight: TACTIL_MIN },
-  botonIzquierda: { flexDirection: 'row-reverse' },
+  botonDerecha: { flexDirection: 'row-reverse' },
   circulo: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
   circuloTotal: { transform: [{ scale: 1.08 }] },
   avisos: { position: 'absolute', left: espacio.l, right: espacio.l, bottom: espacio.l, gap: espacio.s, alignItems: 'center' },

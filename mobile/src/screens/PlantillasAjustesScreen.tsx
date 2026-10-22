@@ -5,6 +5,7 @@
 // Descripción: Ajustes › Plantillas (F05-03 J2 §2.5; F05 §45.3, §46.3 A7; lámina SET-PLT / REG-PLT / HOME-QA v0.2 S01–S05; REG-DYN S05). Lista S01 con el texto de la lámina y los grupos «EN INICIO · n DE 3» (orden de Inicio), «OTRAS PLANTILLAS» y «DESACTIVADAS»; cada fila con su resumen y «No disponible» cuando el servidor avisa de un campo que hoy no se puede usar. Formulario S02 ampliado (S05 de REG-DYN): Nombre (nunca autocompletado), Tipo Gasto/Ingreso, Tercero, Categoría (filtrada por tipo), Contexto, Proponer cuenta (las del registro de ese tipo), Proponer presupuesto, Mostrar en Inicio con nombre corto e icono («El de la categoría»). S03 límite de 3 con «Elegir cuál quitar»; S04 nombre repetido con «Ir a la plantilla»; S05 detalle con desactivar / reactivar (no vuelve a Inicio sola) y orden de Inicio. VERSION_DESFASADA → recarga y aviso, sin reintento automático. Los UUID del alta de la plantilla y del acceso se sellan al abrir el formulario.
 // Versión: 0.1.0 (F05-03/F05-04 J2 §2.5)
 // Versión: 0.4.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2 S9; SWIPE-RULE): cada plantilla va en tarjeta; deslizar a la izquierda una plantilla ACTIVA es «Desactivar» (tono de aviso, nunca rojo): aviso «<Nombre> desactivada · Deshacer» y, a los 5 s, la misma ruta que «Desactivar» del detalle. Se puede reactivar después.
+// Versión: 0.5.0 (swipe (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados `principal` / `alternativa` del componente común (principal a la izquierda); la raíz y el scroll cierran la fila abierta a medias (`propsZonaSwipe`, `propsScrollSwipe`).)
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -12,7 +13,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useAccionRapida, type LadoSwipe } from '../components/AccionRapida';
+import { propsScrollSwipe, propsZonaSwipe, useAccionRapida, type LadoSwipe } from '../components/AccionRapida';
 
 import type { AccionRapida, ClienteApi, Contexto, CuentaElegible, CuentaPago, Plantilla, Respuesta, Tercero, TiposRegistro } from '../api/cliente';
 import { BotonPrimario, BotonTexto, CabeceraNavegacion, Chip, EstadoDato, Segmentado } from '../components/Basicos';
@@ -518,11 +519,11 @@ export function PlantillasAjustesScreen(p: {
       derecha={(x.avisos ?? []).length > 0 ? <EtiquetaNoDisponible testID={`ajplt-fila-${x.id}-no-disponible`} /> : undefined}
       onPress={() => abrirDetalle(x.id)}
       enTarjeta
-      izquierda={ladoDesactivar(x)}
+      alternativa={ladoDesactivar(x)}
     />
   );
   return (
-    <View testID="pantalla-plantillas" style={{ flex: 1, backgroundColor: c.background }}>
+    <View testID="pantalla-plantillas" style={{ flex: 1, backgroundColor: c.background }} {...propsZonaSwipe}>
       <CabeceraNavegacion
         titulo="Plantillas"
         atras={{ etiqueta: 'Ajustes', onPress: p.onAtras }}
@@ -533,7 +534,7 @@ export function PlantillasAjustesScreen(p: {
           </Pressable>
         }
       />
-      <ScrollView contentContainerStyle={[ef.cuerpo, { paddingBottom: inset.bottom + espacio.xxl }]}>
+      <ScrollView {...propsScrollSwipe} contentContainerStyle={[ef.cuerpo, { paddingBottom: inset.bottom + espacio.xxl }]}>
         <Text testID="ajplt-intro" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_INTRO_PLANTILLAS}</Text>
         {carga.fase === 'CARGANDO' ? <EstadoDato testID="ajplt-cargando" estado="CARGANDO" /> : null}
         {carga.fase === 'ERROR' ? (

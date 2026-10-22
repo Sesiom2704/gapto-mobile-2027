@@ -4,6 +4,7 @@
 // Ruta: mobile/__tests__/accion_rapida.test.tsx
 // Descripción: Swipe como acción rápida en toda la app (F05-06 M5 SWIPE; regla de Moisés del 2026-10-22). Dominio (`planRapidoPrevision`: solo con la acción inequívoca, cada condición por sí misma; texto del aviso) y pantallas que la usan: Inicio, «Pendientes» y Actividad («Cobrado» de la devolución). En cada una: gesto → la fila sale y aparece «<Nombre> pagada/cobrada · Deshacer» → la petición sale a los 5 s, por la misma ruta y con el mismo bloque `prevision` que la hoja; «Deshacer» → 0 peticiones y la fila vuelve; datos incompletos → la hoja de siempre; rechazo → la fila vuelve con el motivo del servidor (nunca un éxito falso); doble gesto → una sola intención; INDETERMINADO → «Reintentar» con la MISMA identidad; segundo plano o pantalla desmontada durante la espera → nada. También el gesto real sobre el contenedor común (FilaDeslizable).
 // Versión: 0.1.0 (F05-06 M5 SWIPE)
+// Versión: 0.3.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados invertidos — la acción principal se desliza a la IZQUIERDA y la alternativa a la DERECHA; acciones accesibles con el nombre de la dirección nueva.
 // ============================================================
 
 import { act, fireEvent, render, screen, within } from '@testing-library/react-native';
@@ -174,7 +175,7 @@ describe('Inicio', () => {
     await montarHome(c);
     expect(c.cuentasPago).toHaveBeenCalledWith(HOY); // la capacidad se lee con la lista, no en el gesto
     const antes = llamadas(c);
-    accion('atencion-luz', 'derecha');
+    accion('atencion-luz', 'izquierda');
     expect(screen.queryByTestId('atencion-luz')).toBeNull(); // la fila sale
     expect(screen.queryByTestId('hoja-swipe')).toBeNull(); // sin hoja
     expect(screen.getByTestId('aviso-rapida-luz-texto')).toHaveTextContent('Electricidad pagada · 74,00 €');
@@ -197,7 +198,7 @@ describe('Inicio', () => {
     const c = cliente({ inicioPrevisiones: inicio([fila()]) });
     await montarHome(c);
     const antes = llamadas(c);
-    accion('atencion-luz', 'derecha');
+    accion('atencion-luz', 'izquierda');
     await esperar(2000);
     fireEvent.press(screen.getByTestId('aviso-rapida-luz-deshacer'));
     expect(screen.getByTestId('atencion-luz')).toBeTruthy();
@@ -211,7 +212,7 @@ describe('Inicio', () => {
   test('datos incompletos (la cuenta prevista hoy no puede pagar) → la hoja de siempre, sin aviso', async () => {
     const c = cliente({ inicioPrevisiones: inicio([fila()]), cuentasPago: jest.fn(async () => ({ tipo: 'OK', datos: { cuentas: [PAGO[1]] } }) as any) });
     await montarHome(c);
-    accion('atencion-luz', 'derecha');
+    accion('atencion-luz', 'izquierda');
     expect(screen.getByTestId('hoja-swipe')).toBeTruthy();
     expect(screen.queryByTestId('aviso-rapida-luz')).toBeNull();
     await esperar(ESPERA_DESHACER_MS * 2);
@@ -223,7 +224,7 @@ describe('Inicio', () => {
     const c = cliente({ inicioPrevisiones: inicio([fila()]),
       registrarGastoPagado: jest.fn(async () => ({ tipo: 'RECHAZADO', codigo: 'CUENTA_SIN_CAPACIDAD', mensaje }) as any) });
     await montarHome(c);
-    accion('atencion-luz', 'derecha');
+    accion('atencion-luz', 'izquierda');
     await esperar(ESPERA_DESHACER_MS);
     await asentar();
     expect(c.registrarGastoPagado).toHaveBeenCalledTimes(1);
@@ -239,7 +240,7 @@ describe('Inicio', () => {
   test('doble gesto → una sola intención y una sola petición', async () => {
     const c = cliente({ inicioPrevisiones: inicio([fila()]) });
     await montarHome(c);
-    dosEventosSeguidos('atencion-luz', 'derecha');
+    dosEventosSeguidos('atencion-luz', 'izquierda');
     expect(screen.getAllByTestId('aviso-rapida-luz')).toHaveLength(1);
     await esperar(ESPERA_DESHACER_MS * 2);
     await asentar();
@@ -253,7 +254,7 @@ describe('Inicio', () => {
       .mockResolvedValue({ tipo: 'OK', datos: { intencion_id: 'x', hecho_id: 'x', idempotente: true } });
     const c = cliente({ inicioPrevisiones: inicio([fila()]), registrarGastoPagado: registrar as any });
     await montarHome(c);
-    accion('atencion-luz', 'derecha');
+    accion('atencion-luz', 'izquierda');
     await esperar(ESPERA_DESHACER_MS);
     await asentar();
     expect(screen.getByTestId('fallo-rapida-luz-texto')).toHaveTextContent(/No sabemos si se guardó: Electricidad pagada/);
@@ -269,10 +270,10 @@ describe('Inicio', () => {
     const registrar = jest.fn().mockResolvedValue({ tipo: 'INDETERMINADO', mensaje: 'sin red' });
     const c = cliente({ inicioPrevisiones: inicio([fila()]), registrarGastoPagado: registrar as any });
     await montarHome(c);
-    accion('atencion-luz', 'derecha');
+    accion('atencion-luz', 'izquierda');
     await esperar(ESPERA_DESHACER_MS);
     await asentar();
-    accion('atencion-luz', 'derecha');
+    accion('atencion-luz', 'izquierda');
     await esperar(ESPERA_DESHACER_MS);
     await asentar();
     expect(registrar).toHaveBeenCalledTimes(2);
@@ -288,7 +289,7 @@ describe('Inicio', () => {
     try {
       const c = cliente({ inicioPrevisiones: inicio([fila()]) });
       await montarHome(c);
-      accion('atencion-luz', 'derecha');
+      accion('atencion-luz', 'izquierda');
       await esperar(1000);
       await act(async () => oyente?.('background'));
       await esperar(ESPERA_DESHACER_MS * 2);
@@ -303,28 +304,28 @@ describe('Inicio', () => {
   test('la pantalla se desmonta durante la espera → no se envía nada', async () => {
     const c = cliente({ inicioPrevisiones: inicio([fila()]) });
     const r = await montarHome(c);
-    accion('atencion-luz', 'derecha');
+    accion('atencion-luz', 'izquierda');
     r.unmount();
     await esperar(ESPERA_DESHACER_MS * 2);
     expect(c.registrarGastoPagado).not.toHaveBeenCalled();
   });
 
-  test('gesto real: a medias a la derecha enseña «Pagado» (nada se envía); tocarlo lo ejecuta; del todo lo ejecuta directamente', async () => {
+  test('gesto real: a medias a la izquierda enseña «Pagado» (nada se envía); tocarlo lo ejecuta; del todo lo ejecuta directamente', async () => {
     const c = cliente({ inicioPrevisiones: inicio([fila()]) });
     await montarHome(c);
     const antes = llamadas(c);
-    expect(deslizar('fila-swipe-atencion-luz', 100)).toBe(true); // a medias
+    expect(deslizar('fila-swipe-atencion-luz', -100)).toBe(true); // a medias
     await asentar();
-    expect(screen.getByTestId('swipe-boton-atencion-luz-derecha', OCULTOS)).toBeTruthy();
-    expect(within(screen.getByTestId('swipe-accion-atencion-luz-derecha', OCULTOS)).getByText('Pagado', OCULTOS)).toBeTruthy();
+    expect(screen.getByTestId('swipe-boton-atencion-luz-izquierda', OCULTOS)).toBeTruthy();
+    expect(within(screen.getByTestId('swipe-accion-atencion-luz-izquierda', OCULTOS)).getByText('Pagado', OCULTOS)).toBeTruthy();
     expect(screen.queryByTestId('aviso-rapida-luz')).toBeNull();
     await esperar(ESPERA_DESHACER_MS * 2);
     expect(llamadas(c)).toBe(antes);
-    fireEvent.press(screen.getByTestId('swipe-boton-atencion-luz-derecha', OCULTOS));
+    fireEvent.press(screen.getByTestId('swipe-boton-atencion-luz-izquierda', OCULTOS));
     expect(screen.getByTestId('aviso-rapida-luz-texto')).toHaveTextContent('Electricidad pagada · 74,00 €');
     fireEvent.press(screen.getByTestId('aviso-rapida-luz-deshacer'));
     // del todo
-    expect(deslizar('fila-swipe-atencion-luz', 260)).toBe(true);
+    expect(deslizar('fila-swipe-atencion-luz', -260)).toBe(true);
     await asentar();
     expect(screen.getByTestId('aviso-rapida-luz-texto')).toHaveTextContent('Electricidad pagada · 74,00 €');
     await esperar(ESPERA_DESHACER_MS);
@@ -333,16 +334,16 @@ describe('Inicio', () => {
     expect((c.registrarGastoPagado as jest.Mock).mock.calls[0][0].intencion_id).toBe('00000000-0000-4000-8000-000000000001');
   });
 
-  test('gesto real a la izquierda del todo: «No hubo este mes» (omitir sin motivo) a los 5 s; gris neutro, nunca rojo', async () => {
+  test('gesto real a la derecha del todo: «No hubo este mes» (omitir sin motivo) a los 5 s; gris neutro, nunca rojo', async () => {
     const omitir = jest.fn(async (_: string, pl: any) => ({ tipo: 'OK', datos: { intencion_id: pl.intencion_id, prevision_id: 'luz', estado: 'OMITIDA', row_version: 2 } }) as any);
     const c = cliente({ inicioPrevisiones: inicio([fila()]), omitirPrevision: omitir as any });
     await montarHome(c);
-    expect(deslizar('fila-swipe-atencion-luz', -90)).toBe(true); // a medias: se ve el botón
+    expect(deslizar('fila-swipe-atencion-luz', 90)).toBe(true); // a medias: se ve el botón
     await asentar();
     const fondo = StyleSheet.flatten(screen.getByTestId('fila-swipe-atencion-luz').props.style).backgroundColor;
     expect(fondo).toBe(colores.light.surfaceSecondary);
-    expect(within(screen.getByTestId('swipe-accion-atencion-luz-izquierda', OCULTOS)).getByText('No hubo', OCULTOS)).toBeTruthy();
-    fireEvent.press(screen.getByTestId('swipe-boton-atencion-luz-izquierda', OCULTOS));
+    expect(within(screen.getByTestId('swipe-accion-atencion-luz-derecha', OCULTOS)).getByText('No hubo', OCULTOS)).toBeTruthy();
+    fireEvent.press(screen.getByTestId('swipe-boton-atencion-luz-derecha', OCULTOS));
     expect(screen.getByTestId('aviso-rapida-luz-texto')).toHaveTextContent('Electricidad · no hubo este mes');
     await esperar(ESPERA_DESHACER_MS - 1);
     expect(omitir).not.toHaveBeenCalled();
@@ -352,19 +353,19 @@ describe('Inicio', () => {
     expect(c.registrarGastoPagado).not.toHaveBeenCalled();
   });
 
-  test('«No hubo» no se ofrece con pagos enlazados; la derecha con pago parcial o importe desconocido abre el formulario rellenado', async () => {
+  test('«No hubo» no se ofrece con pagos enlazados; la principal con pago parcial o importe desconocido abre el formulario rellenado', async () => {
     const SEGURO = fila({ id: 'seguro', concepto: 'Seguro hogar', importe_esperado: '120.00', cubierto: '40.00', queda: '80.00', con_realidad: true, pagos: 1 });
     const AGUA = fila({ id: 'agua', concepto: 'Agua', importe_esperado: null, queda: null });
     const onFormularioCompleto = jest.fn();
     const c = cliente({ inicioPrevisiones: inicio([SEGURO, AGUA]) });
     envolver(<HomeScreen cliente={c} ahora={AHORA} refresco={0} onRegistrar={jest.fn()} nuevoId={nuevoId} onPendientes={jest.fn()} onPrevision={jest.fn()} onFormularioCompleto={onFormularioCompleto} />);
     await asentar();
-    expect(screen.getByTestId('atencion-seguro').props.accessibilityActions).toEqual([{ name: 'activate' }, { name: 'derecha', label: 'Pagado' }]);
-    expect(deslizar('fila-swipe-atencion-seguro', -260)).toBe(false); // sin lado izquierdo: el gesto no se toma
-    accion('atencion-seguro', 'derecha');
+    expect(screen.getByTestId('atencion-seguro').props.accessibilityActions).toEqual([{ name: 'activate' }, { name: 'izquierda', label: 'Pagado' }]);
+    expect(deslizar('fila-swipe-atencion-seguro', 260)).toBe(false); // sin alternativa: el gesto a la derecha no se toma
+    accion('atencion-seguro', 'izquierda');
     expect(onFormularioCompleto).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'seguro' }), '80,00');
-    expect(screen.getByTestId('atencion-agua').props.accessibilityActions).toEqual([{ name: 'activate' }, { name: 'derecha', label: 'Pagado' }, { name: 'izquierda', label: 'No hubo' }]);
-    accion('atencion-agua', 'derecha');
+    expect(screen.getByTestId('atencion-agua').props.accessibilityActions).toEqual([{ name: 'activate' }, { name: 'izquierda', label: 'Pagado' }, { name: 'derecha', label: 'No hubo' }]);
+    accion('atencion-agua', 'izquierda');
     expect(onFormularioCompleto).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'agua' }), null);
     expect(screen.queryByTestId('aviso-rapida-agua')).toBeNull();
     await esperar(ESPERA_DESHACER_MS * 2);
@@ -392,7 +393,7 @@ describe('«Pendientes»', () => {
     const c = cliente({ pendientesPrevisiones: pendientes([fila(), NOMINA]) });
     const onCambios = await montarPendientes(c);
     expect(c.cuentasElegibles).toHaveBeenCalledWith('INGRESO', HOY);
-    accion(`pendiente-${NOMINA.id}`, 'derecha');
+    accion(`pendiente-${NOMINA.id}`, 'izquierda');
     expect(screen.queryByTestId(`pendiente-${NOMINA.id}`)).toBeNull();
     expect(screen.getByTestId('pendiente-luz')).toBeTruthy(); // las demás filas siguen
     expect(screen.getByTestId(`aviso-rapida-${NOMINA.id}-texto`)).toHaveTextContent('Nómina cobrada · 2.100,00 €');
@@ -413,7 +414,7 @@ describe('«Pendientes»', () => {
     const c = cliente({ pendientesPrevisiones: pendientes([NOMINA]) });
     const onCambios = await montarPendientes(c);
     const antes = llamadas(c);
-    accion(`pendiente-${NOMINA.id}`, 'derecha');
+    accion(`pendiente-${NOMINA.id}`, 'izquierda');
     fireEvent.press(screen.getByTestId(`aviso-rapida-${NOMINA.id}-deshacer`));
     await esperar(ESPERA_DESHACER_MS * 2);
     await asentar();
@@ -425,7 +426,7 @@ describe('«Pendientes»', () => {
   test('sin poder leer la capacidad → la hoja', async () => {
     const c = cliente({ pendientesPrevisiones: pendientes([NOMINA]), cuentasElegibles: jest.fn(async () => ({ tipo: 'INDETERMINADO', mensaje: 'x' }) as any) });
     await montarPendientes(c);
-    accion(`pendiente-${NOMINA.id}`, 'derecha');
+    accion(`pendiente-${NOMINA.id}`, 'izquierda');
     expect(screen.getByTestId('hoja-swipe')).toBeTruthy();
     expect(screen.queryByTestId(`aviso-rapida-${NOMINA.id}`)).toBeNull();
   });
@@ -470,7 +471,7 @@ describe('Actividad', () => {
     await montarActividad(c);
     expect(c.contextoDevolucion).toHaveBeenCalledWith('compra'); // la cuenta original se lee con la lista
     const antes = llamadas(c);
-    accion('fila-dev', 'derecha');
+    accion('fila-dev', 'izquierda');
     expect(screen.queryByTestId('fila-dev')).toBeNull();
     expect(screen.queryByTestId('hoja-abono')).toBeNull();
     expect(screen.getByTestId('aviso-rapida-dev-texto')).toHaveTextContent('Abono de Abrigo recibido · 40,00 €');
@@ -487,7 +488,7 @@ describe('Actividad', () => {
     const c = clienteActividad();
     await montarActividad(c);
     const antes = llamadas(c);
-    accion('fila-dev', 'derecha');
+    accion('fila-dev', 'izquierda');
     fireEvent.press(screen.getByTestId('aviso-rapida-dev-deshacer'));
     await esperar(ESPERA_DESHACER_MS * 2);
     await asentar();
@@ -498,7 +499,7 @@ describe('Actividad', () => {
   test('sin cuenta original → la hoja de cuenta y fecha', async () => {
     const c = clienteActividad({ contextoDevolucion: jest.fn(async () => ({ tipo: 'OK', datos: { ...CTX, cuenta_compra: null } }) as any) });
     await montarActividad(c);
-    accion('fila-dev', 'derecha');
+    accion('fila-dev', 'izquierda');
     await asentar();
     expect(screen.getByTestId('hoja-abono')).toBeTruthy();
     expect(screen.queryByTestId('aviso-rapida-dev')).toBeNull();
@@ -509,7 +510,7 @@ describe('Actividad', () => {
     const mensaje = 'Esta devolución ya tiene su abono.';
     const c = clienteActividad({ registrarAbono: jest.fn(async () => ({ tipo: 'RECHAZADO', codigo: 'YA_CONCILIADO', mensaje }) as any) });
     await montarActividad(c);
-    accion('fila-dev', 'derecha');
+    accion('fila-dev', 'izquierda');
     await esperar(ESPERA_DESHACER_MS);
     await asentar();
     expect(screen.getByTestId('fila-dev')).toBeTruthy();
@@ -520,7 +521,7 @@ describe('Actividad', () => {
   test('doble gesto → una sola intención', async () => {
     const c = clienteActividad();
     await montarActividad(c);
-    dosEventosSeguidos('fila-dev', 'derecha');
+    dosEventosSeguidos('fila-dev', 'izquierda');
     expect(screen.getAllByTestId('aviso-rapida-dev')).toHaveLength(1);
     await esperar(ESPERA_DESHACER_MS * 2);
     await asentar();

@@ -11,6 +11,7 @@
 // Versión: 0.6.0 (F05-06 M3 §B1; lámina REP v0.2 E5/E6, P-REP-03/04): el detalle de un gasto que no es devolución lee su reparto (GET /v1/hechos/{id}/reparto, solo si la raíz pasa `onCorregirReparto`) y ofrece «Pendiente con <persona>» por cada parte con deuda y «Corregir reparto» cuando el servidor lo considera corregible; si no lo es, no se ofrece nada que el motor no admita. Ambos se abren fuera de la pantalla (tareas inmersivas de la raíz).
 // Versión: 0.7.0 (F05-06 M5 SWIPE; regla de Moisés del 2026-10-22, sustituye a DAY-RULE-03 en lo que contradiga): el swipe «Cobrado» de una devolución con el abono pendiente es una acción rápida cuando es inequívoca: importe de la devolución, cuenta ORIGINAL demostrable de la compra (P-DEV-02 con M2-D; el servidor la admite sin capacidad) y fecha de hoy. La fila sale, el aviso «Devolución de <compra> cobrada · Deshacer» dura 5 s y después se registra el abono (useAccionRapida). La cuenta original se lee con la lista, nunca en el gesto. Sin cuenta original (o sin poder leerla) el gesto abre la hoja de siempre. El gesto y la franja son los comunes (FilaDeslizable); la franja dice «Cobrado». «Registrar abono» del detalle sigue abriendo la hoja.
 // Versión: 0.8.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2 S7/S8; SWIPE-RULE): cada fila va en tarjeta con los dos lados. Derecha: «Recibido» en una devolución con el abono pendiente (acción rápida solo con la cuenta original demostrable; si no, la hoja) o «Repetir hoy» cuando el registro se puede reconstruir (`repetibleHoy`): al soltar se leen su detalle y las capacidades de hoy y, sin dudas, aviso «Repetido hoy: <registro> · <importe> · Deshacer» y a los 5 s una intención NUEVA con fecha de hoy por la ruta de registro del tipo; con dudas abre el detalle. La fila original no sale (es otra intención). Izquierda: «Más» (abre el detalle). Nunca anular, borrar ni corregir por swipe.
+// Versión: 0.9.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados `principal` («Recibido» / «Repetir hoy», se desliza a la izquierda) y `alternativa` («Más», a la derecha), del componente común. El scroll cierra la fila abierta.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -20,7 +21,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ClienteApi, DetalleActividad, FilaActividad, TipoActividad } from '../api/cliente';
 import { AbonoHoja } from '../components/AbonoHoja';
-import { accesibilidadLados, FilaDeslizable, useAccionRapida, type LadoSwipe } from '../components/AccionRapida';
+import { accesibilidadLados, FilaDeslizable, propsScrollSwipe, propsZonaSwipe, useAccionRapida, type LadoSwipe } from '../components/AccionRapida';
 import { BotonPrimario, BotonTexto, Chip } from '../components/Basicos';
 import { Hoja } from '../components/HojasCategoria';
 import { BotonSecundario, CargaArbol, IconoCategoriaVista, SelectorCategorias } from '../components/SelectorCategorias';
@@ -309,13 +310,13 @@ export function ActividadScreen(p: {
       preparando.current.delete(f.id);
     }
   };
-  /** Lados de la fila (SWIPE-RULE): derecha «Recibido» o «Repetir hoy»; izquierda «Más». */
-  const lados = (f: FilaActividad): { derecha?: LadoSwipe; izquierda?: LadoSwipe } => {
+  /** Lados de la fila (SWIPE-RULE): principal «Recibido» o «Repetir hoy»; alternativa «Más». */
+  const lados = (f: FilaActividad): { principal?: LadoSwipe; alternativa?: LadoSwipe } => {
     const mas: LadoSwipe = { etiqueta: 'Más', icono: 'ellipsis-horizontal', tono: 'neutro', onEjecutar: () => void abrirDetalle(f.id) };
-    if (!p.nuevoId) return { izquierda: mas };
-    if (ofreceRegistrarAbono(f)) return { derecha: { etiqueta: TEXTO_FRANJA_COBRADO, icono: 'checkmark', tono: 'confirmar', onEjecutar: () => deslizarAbono(f) }, izquierda: mas };
-    if (repetibleHoy(f)) return { derecha: { etiqueta: 'Repetir hoy', icono: 'repeat', tono: 'confirmar', onEjecutar: () => void repetir(f) }, izquierda: mas };
-    return { izquierda: mas };
+    if (!p.nuevoId) return { alternativa: mas };
+    if (ofreceRegistrarAbono(f)) return { principal: { etiqueta: TEXTO_FRANJA_COBRADO, icono: 'checkmark', tono: 'confirmar', onEjecutar: () => deslizarAbono(f) }, alternativa: mas };
+    if (repetibleHoy(f)) return { principal: { etiqueta: 'Repetir hoy', icono: 'repeat', tono: 'confirmar', onEjecutar: () => void repetir(f) }, alternativa: mas };
+    return { alternativa: mas };
   };
 
   const cerrarAbono = (registrado: boolean, volverA: string | null) => {
@@ -329,7 +330,7 @@ export function ActividadScreen(p: {
   const grupos = carga.fase === 'OK' ? agrupar(carga.filas.filter((f) => !rapida.oculta(f.id)), buscando ? 'MES' : 'DIA', hoyIso, ayerIso) : [];
 
   return (
-    <View testID="pantalla-actividad" style={{ flex: 1, backgroundColor: c.background }}>
+    <View testID="pantalla-actividad" style={{ flex: 1, backgroundColor: c.background }} {...propsZonaSwipe}>
       <View style={{ paddingTop: inset.top + espacio.s, paddingHorizontal: espacio.l, gap: espacio.s }}>
         {p.tercero ? (
           <View style={s.filaCabecera}>
@@ -401,6 +402,7 @@ export function ActividadScreen(p: {
       <ScrollView
         ref={scroll}
         testID="actividad-lista"
+        {...propsScrollSwipe}
         onScroll={(e) => {
           desplazamiento.current = e.nativeEvent.contentOffset.y;
         }}
@@ -620,13 +622,13 @@ export { TOPE_SWIPE, UMBRAL_SWIPE } from '../components/AccionRapida';
 /** Etiqueta del lado derecho de una devolución con el abono pendiente (lámina SWIPE-01 S7). */
 export const TEXTO_FRANJA_COBRADO = 'Recibido';
 
-function FilaVista(p: { f: FilaActividad; conFecha: boolean; onPress: () => void; derecha?: LadoSwipe; izquierda?: LadoSwipe }) {
+function FilaVista(p: { f: FilaActividad; conFecha: boolean; onPress: () => void; principal?: LadoSwipe; alternativa?: LadoSwipe }) {
   const { c } = useTema();
   const f = p.f;
   const titulo = tituloTransferencia(f) ?? tituloFila(f);
   const secundaria = textoCoincidencia(f) ?? secundariaFila(f);
   const marca = marcaReparto(f);
-  const a11y = accesibilidadLados(p.derecha, p.izquierda);
+  const a11y = accesibilidadLados(p.principal, p.alternativa);
   const fila = (
     <Pressable
       testID={`fila-${f.id}`}
@@ -650,7 +652,7 @@ function FilaVista(p: { f: FilaActividad; conFecha: boolean; onPress: () => void
     </Pressable>
   );
   return (
-    <FilaDeslizable id={f.id} derecha={p.derecha} izquierda={p.izquierda}>
+    <FilaDeslizable id={f.id} principal={p.principal} alternativa={p.alternativa}>
       {fila}
     </FilaDeslizable>
   );

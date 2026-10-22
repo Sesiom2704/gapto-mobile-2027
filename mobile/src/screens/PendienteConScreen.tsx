@@ -5,6 +5,7 @@
 // Descripción: «Pendiente con <persona>» y cómo se salda (F05-06 M3; lámina REP v0.2 C1–C4, D2, E2, E8). C1: lo que te debe y lo que le debes por separado, cada cosa con su origen; el neto es un dato secundario que «no salda nada» (D-REP-07, OP-20); sin «Compensar» (P-REP-02, opción A). C4: con algún saldo desconocido el neto es «Sin determinar», nunca 0,00 € (D-REP-09). C2: sobre una posición, «Registrar cobro» (derecho) o «Registrar pago» (obligación) y, aparte, «Perdonar», que no mueve dinero (D-REP-08, F04-D052). C3/E8: importe (parcial permitido, sin superar lo pendiente), cuenta Gapto obligatoria (Efectivo incluido; las que pueden recibir o pagar dinero) y fecha; dice que no es un ingreso ni un gasto nuevo, y que pagar tu deuda por un tercero no está disponible. Mismo ciclo de envío que el registro: identidad sellada antes de enviar, doble toque ignorado, INDETERMINADO reintenta la MISMA identidad, rechazo definitivo libera la edición. Al terminar se recarga la lista.
 // Versión: 0.1.0 (F05-06 M3 §B1)
 // Versión: 0.2.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2 S6; SWIPE-RULE): cada posición va en tarjeta con los dos lados. Derecha «Cobrado» / «Pagado» del saldo ENTERO: acción rápida (aviso «Cobrado de <persona> · <importe> · Deshacer» y, a los 5 s, la misma ruta de cobro o pago que el formulario, con fecha de hoy) solo con saldo conocido y UNA sola cuenta posible hoy (leída con la lista); si no, abre el formulario con el saldo escrito. Izquierda «Más»: abre las acciones de la posición. «Perdonar» nunca va en un swipe.
+// Versión: 0.3.0 (swipe (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados `principal` / `alternativa` del componente común (principal a la izquierda); la raíz y el scroll cierran la fila abierta a medias (`propsZonaSwipe`, `propsScrollSwipe`).)
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -12,7 +13,7 @@ import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput,
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ClienteApi, CuentaElegible } from '../api/cliente';
-import { FilaDeslizable, accesibilidadLados, useAccionRapida, type LadoSwipe } from '../components/AccionRapida';
+import { FilaDeslizable, accesibilidadLados, propsScrollSwipe, propsZonaSwipe, useAccionRapida, type LadoSwipe } from '../components/AccionRapida';
 import { BotonPrimario, BotonTexto, Chip, EstadoDato } from '../components/Basicos';
 import { Aviso, CabeceraTarea, Campo, Inicial, s } from '../components/Reparto';
 import { ayer, ddmmaaaaAIso, diaMesIso, fechaCortaIso, isoADdmmaaaa, isoLocal } from '../domain/fechas';
@@ -189,9 +190,9 @@ export function PendienteConScreen(p: {
       },
     });
   };
-  const ladosPosicion = (x: PosicionPendiente): { derecha: LadoSwipe; izquierda: LadoSwipe } => ({
-    derecha: { etiqueta: x.tipo === 'DERECHO_COBRO' ? 'Cobrado' : 'Pagado', icono: 'checkmark', tono: 'confirmar', onEjecutar: () => saldar(x) },
-    izquierda: { etiqueta: 'Más', icono: 'ellipsis-horizontal', tono: 'neutro', onEjecutar: () => setSel(x) },
+  const ladosPosicion = (x: PosicionPendiente): { principal: LadoSwipe; alternativa: LadoSwipe } => ({
+    principal: { etiqueta: x.tipo === 'DERECHO_COBRO' ? 'Cobrado' : 'Pagado', icono: 'checkmark', tono: 'confirmar', onEjecutar: () => saldar(x) },
+    alternativa: { etiqueta: 'Más', icono: 'ellipsis-horizontal', tono: 'neutro', onEjecutar: () => setSel(x) },
   });
 
   // ---------------------------------------------------------------- C3/E8 cobro, pago y perdón
@@ -310,9 +311,9 @@ export function PendienteConScreen(p: {
         <Text style={[tipo.footnote, { color: c.textSecondary, fontWeight: '600' }]}>{titulo}</Text>
         {xs.map((x) => {
           const l = ladosPosicion(x);
-          const a11y = accesibilidadLados(l.derecha, l.izquierda);
+          const a11y = accesibilidadLados(l.principal, l.alternativa);
           return (
-            <FilaDeslizable key={x.entidad_id} id={`posicion-${x.entidad_id}`} derecha={l.derecha} izquierda={l.izquierda}>
+            <FilaDeslizable key={x.entidad_id} id={`posicion-${x.entidad_id}`} principal={l.principal} alternativa={l.alternativa}>
             <Pressable testID={`posicion-${x.entidad_id}`} accessibilityRole="button" onPress={() => setSel(x)} style={[s.kv, { minHeight: 44, padding: espacio.m }]}
               accessibilityActions={a11y.accessibilityActions} onAccessibilityAction={(e) => void a11y.ejecutar(e.nativeEvent.actionName)}>
               <View style={{ flex: 1 }}>
@@ -335,9 +336,9 @@ export function PendienteConScreen(p: {
   // Sin posiciones el servidor no informa importes: es 0,00 €, no «Sin determinar» (que solo vale con un saldo desconocido).
   const sinNada = carga.fase === 'OK' && (carga.p.neto_estado === 'SIN_POSICIONES' || carga.p.posiciones.every((x) => x.estado !== 'ACTIVA'));
   return (
-    <View style={{ flex: 1, backgroundColor: c.background }}>
+    <View style={{ flex: 1, backgroundColor: c.background }} {...propsZonaSwipe}>
       <CabeceraTarea titulo={`Pendiente con ${nombre}`} izquierda={<BotonTexto testID="pendiente-atras" titulo={`‹ ${nombre}`} onPress={() => p.onCerrar(cambios)} />} />
-      <ScrollView testID="pendiente-con" contentContainerStyle={[s.form, { paddingBottom: inset.bottom + espacio.xxl }]}>
+      <ScrollView testID="pendiente-con" {...propsScrollSwipe} contentContainerStyle={[s.form, { paddingBottom: inset.bottom + espacio.xxl }]}>
         {carga.fase === 'CARGANDO' ? <EstadoDato estado="CARGANDO" /> : null}
         {carga.fase === 'ERROR' ? (
           <View style={{ gap: espacio.s }}>

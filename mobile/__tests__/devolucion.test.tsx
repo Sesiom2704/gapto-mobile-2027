@@ -8,6 +8,7 @@
 // Versión: 0.3.0 (F05-06 M2-D §2-§3): cuenta del abono (opción b): «Sí, en <original>» y la propuesta de B2 aunque la original no esté en la lista de RECIBIR_INGRESO; sin cuenta original no hay propuesta; las listas piden la operación INGRESO; CUENTA_SIN_CAPACIDAD con el mensaje del servidor (capacidad del detalle) y sin «ingreso».
 // Versión: 0.4.0 (F05-06 M5 SWIPE; regla del 2026-10-22): con la cuenta original demostrable el swipe «Cobrado» es una acción rápida con «Deshacer» (accion_rapida.test.tsx); estos tests de la Actividad prueban la reserva sin cuenta original (abre la hoja), el gesto común y la franja, que ahora dice «Cobrado».
 // Versión: 0.5.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2 S7): la devolución pendiente se desliza a la DERECHA («Recibido»; izquierda «Más»); la compra ofrece «Repetir hoy» y «Más». Gesto común: a medias enseña el botón, del todo ejecuta.
+// Versión: 0.6.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados invertidos — la acción principal se desliza a la IZQUIERDA y la alternativa a la DERECHA; acciones accesibles con el nombre de la dirección nueva. La devolución pendiente se desliza a la IZQUIERDA («Recibido»).
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
@@ -427,13 +428,13 @@ describe('Actividad', () => {
   });
 
   const SIN_ORIGINAL = { contextoDevolucion: jest.fn(async () => ({ tipo: 'OK', datos: { ...CTX, cuenta_compra: null } }) as any) };
-  test('P-DEV-04: sin cuenta original, «Recibido» (derecha) abre la confirmación de cuenta y fecha (nunca registra solo)', async () => {
+  test('P-DEV-04: sin cuenta original, «Recibido» (izquierda) abre la confirmación de cuenta y fecha (nunca registra solo)', async () => {
     const c = clienteActividad({ registrarAbono: jest.fn() as any, ...SIN_ORIGINAL });
     envolver(<ActividadScreen cliente={c} ahora={AHORA} nuevoId={nuevoId} onRegistrarDevolucion={jest.fn()} />);
     const f = await screen.findByTestId('fila-dev');
-    expect(f.props.accessibilityActions).toEqual([{ name: 'derecha', label: 'Recibido' }, { name: 'izquierda', label: 'Más' }]);
-    expect(screen.getByTestId('fila-compra').props.accessibilityActions).toEqual([{ name: 'derecha', label: 'Repetir hoy' }, { name: 'izquierda', label: 'Más' }]);
-    fireEvent(f, 'accessibilityAction', { nativeEvent: { actionName: 'derecha' } });
+    expect(f.props.accessibilityActions).toEqual([{ name: 'izquierda', label: 'Recibido' }, { name: 'derecha', label: 'Más' }]);
+    expect(screen.getByTestId('fila-compra').props.accessibilityActions).toEqual([{ name: 'izquierda', label: 'Repetir hoy' }, { name: 'derecha', label: 'Más' }]);
+    fireEvent(f, 'accessibilityAction', { nativeEvent: { actionName: 'izquierda' } });
     expect(await screen.findByTestId('hoja-abono')).toBeTruthy();
     expect(c.registrarAbono).not.toHaveBeenCalled();
   });
@@ -463,12 +464,12 @@ describe('Actividad', () => {
       return captura;
     };
     expect(gesto(0, -80)).toBe(false); // vertical: lo deja para el scroll
-    await act(async () => { gesto(40, 0); }); // corto: captura pero no llega al umbral
+    await act(async () => { gesto(-40, 0); }); // corto: captura pero no llega al umbral
     expect(screen.queryByTestId('hoja-abono')).toBeNull();
-    await act(async () => { expect(gesto(100, 0)).toBe(true); }); // a medias: enseña el botón, no ejecuta
+    await act(async () => { expect(gesto(-100, 0)).toBe(true); }); // a medias: enseña el botón, no ejecuta
     expect(screen.queryByTestId('hoja-abono')).toBeNull();
-    expect(screen.getByTestId('swipe-boton-dev-derecha', { includeHiddenElements: true })).toBeTruthy();
-    await act(async () => { expect(gesto(200, 0)).toBe(true); }); // desde abierta, del todo: ejecuta
+    expect(screen.getByTestId('swipe-boton-dev-izquierda', { includeHiddenElements: true })).toBeTruthy();
+    await act(async () => { expect(gesto(-200, 0)).toBe(true); }); // desde abierta, del todo: ejecuta
     expect(await screen.findByTestId('hoja-abono')).toBeTruthy();
     expect(c.registrarAbono).not.toHaveBeenCalled();
   });
@@ -480,31 +481,31 @@ describe('Actividad', () => {
     const z = screen.getByTestId('fila-swipe-dev');
     const x = () => StyleSheet.flatten(screen.getByTestId('fila-desplazable-dev').props.style).transform[0].translateX;
     const OCULTOS = { includeHiddenElements: true }; // el fondo es para el dedo: oculto a VoiceOver
-    expect(screen.queryByTestId('swipe-accion-dev-derecha', OCULTOS)).toBeNull(); // en reposo no hay fondo
+    expect(screen.queryByTestId('swipe-accion-dev-izquierda', OCULTOS)).toBeNull(); // en reposo no hay fondo
 
     // Por debajo del umbral: fondo verde suave con «Recibido»; al soltar vuelve y no abre la hoja.
     await act(async () => {
-      expect(z.props.onMoveShouldSetResponderCapture(evento(20))).toBe(true);
-      z.props.onResponderGrant(evento(20));
-      z.props.onResponderMove(evento(50));
+      expect(z.props.onMoveShouldSetResponderCapture(evento(-20))).toBe(true);
+      z.props.onResponderGrant(evento(-20));
+      z.props.onResponderMove(evento(-50));
     });
-    expect(within(screen.getByTestId('swipe-accion-dev-derecha', OCULTOS)).getByText(TEXTO_FRANJA_COBRADO, OCULTOS)).toBeTruthy();
-    expect(screen.queryByTestId('swipe-accion-dev-derecha')).toBeNull(); // no la ve la accesibilidad
+    expect(within(screen.getByTestId('swipe-accion-dev-izquierda', OCULTOS)).getByText(TEXTO_FRANJA_COBRADO, OCULTOS)).toBeTruthy();
+    expect(screen.queryByTestId('swipe-accion-dev-izquierda')).toBeNull(); // no la ve la accesibilidad
     expect(StyleSheet.flatten(screen.getByTestId('fila-swipe-dev').props.style).backgroundColor).toBe(colores.light.accentSurface);
-    expect(x()).toBe(50);
-    await act(async () => { z.props.onResponderRelease(evento(50)); });
-    expect(screen.queryByTestId('swipe-accion-dev-derecha', OCULTOS)).toBeNull();
+    expect(x()).toBe(-50);
+    await act(async () => { z.props.onResponderRelease(evento(-50)); });
+    expect(screen.queryByTestId('swipe-accion-dev-izquierda', OCULTOS)).toBeNull();
     await waitFor(() => expect(x()).toBe(0));
     expect(screen.queryByTestId('hoja-abono')).toBeNull();
 
     // Del todo: ejecuta al soltar (arrastrar no abre nada) y la fila vuelve.
     await act(async () => {
-      expect(z.props.onMoveShouldSetResponderCapture(evento(30))).toBe(true);
-      z.props.onResponderGrant(evento(30));
-      z.props.onResponderMove(evento(400));
+      expect(z.props.onMoveShouldSetResponderCapture(evento(-30))).toBe(true);
+      z.props.onResponderGrant(evento(-30));
+      z.props.onResponderMove(evento(-400));
     });
     expect(screen.queryByTestId('hoja-abono')).toBeNull();
-    await act(async () => { z.props.onResponderRelease(evento(400)); });
+    await act(async () => { z.props.onResponderRelease(evento(-400)); });
     expect(await screen.findByTestId('hoja-abono')).toBeTruthy();
     await waitFor(() => expect(x()).toBe(0));
     expect(c.registrarAbono).not.toHaveBeenCalled();

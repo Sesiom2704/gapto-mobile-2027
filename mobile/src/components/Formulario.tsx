@@ -4,6 +4,7 @@
 // Ruta: mobile/src/components/Formulario.tsx
 // Descripción: Piezas comunes de los formularios y listas de Ajustes de F05-03/F05-04 (Terceros, Contextos, Plantillas; láminas REG-DYN / SET-TH / SET-CTX v0.1 y SET-PLT v0.2): campo con etiqueta, caja de aviso (OK / aviso), cabecera de tarea «Cancelar · título», campo de selección que abre un selector, rótulo de grupo en mayúsculas y fila de lista con segunda línea. Mismo tratamiento que Ajustes › Preferencias (solo tokens semánticos).
 // Versión: 0.1.0 (F05-03/F05-04 J2 §2.5)
+// Versión: 0.3.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): el lado de «Desactivar» se llama `alternativa` (se desliza a la derecha, lo decide el componente común).
 // Versión: 0.2.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2 S9): `FilaLista` admite `enTarjeta` (la fila es una tarjeta, sin separador) e `izquierda` (lado izquierdo del swipe común, p. ej. «Desactivar», con su acción accesible).
 // ============================================================
 
@@ -122,10 +123,10 @@ export function FilaLista(p: {
   onPress: () => void;
   /** La fila es una tarjeta con swipe (SWIPE-RULE). */
   enTarjeta?: boolean;
-  izquierda?: LadoSwipe;
+  alternativa?: LadoSwipe;
 }) {
   const { c } = useTema();
-  const a11y = accesibilidadLados(undefined, p.izquierda);
+  const a11y = accesibilidadLados(undefined, p.alternativa);
   const fila = (
     <Pressable
       testID={p.testID}
@@ -146,7 +147,7 @@ export function FilaLista(p: {
   );
   if (!p.enTarjeta) return fila;
   return (
-    <FilaDeslizable id={p.testID} izquierda={p.izquierda}>
+    <FilaDeslizable id={p.testID} alternativa={p.alternativa}>
       {fila}
     </FilaDeslizable>
   );

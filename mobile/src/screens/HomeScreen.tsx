@@ -10,7 +10,8 @@
 // v0.6.0 (F05-06 M5 §B1; lámina HOME-01 v0.4, D-HOME-07; F09 §4.2, §4.5, §4.6): campana con contador junto al perfil (solo con pendientes; «!» si la lectura falla) que abre «Pendientes»; bloque «Requiere atención» con datos reales (GET /v1/inicio/previsiones): como mucho dos asuntos (vencidos por fecha y después los pagados en parte), recuento junto al título y «Ver todos ›», SIN importes sumados; con la lectura fallida, «No se pudieron cargar los pendientes · Reintentar» (nunca desaparece como si no hubiera nada); sin asuntos, ni campana ni bloque. «Próximos movimientos» con las tres siguientes previsiones (solo lectura, P-PREV-04). Cobros previstos con «+» neutro y «Cobro previsto»; pagos con «~». La línea de presupuesto no se pinta mientras F08 no la alimente. Lo previsto no suma a Liquidez ni al Resultado. Con la campana, el saludo de la cabecera se acorta con puntos suspensivos (una línea) y nunca invade la marca.
 // v0.7.0 (F05-06 M5 SWIPE; regla de Moisés del 2026-10-22): el swipe de «Requiere atención» es una acción rápida con «Deshacer» cuando es inequívoca (useSwipePrevision › useAccionRapida); la fila sale mientras espera y el aviso va sobre la pantalla, fuera del scroll (hermano del ScrollView). Si falta algo, abre la hoja.
 // v0.8.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2): las filas de «Requiere atención» van en tarjeta con los dos lados de la SWIPE-RULE (derecha «Pagado» / «Cobrado», izquierda «No hubo» sin pagos enlazados).
-// Versión: 0.8.0
+// v0.9.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): la raíz y el scroll cierran la fila abierta a medias (patrón iOS); los lados los decide el componente común (principal a la izquierda).
+// Versión: 0.9.0
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -21,6 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { AccionRapida, ClienteApi, FilaPrevision, GastoMes, InicioPrevisiones, Plantilla, ResultadoMes } from '../api/cliente';
 import { BotonTexto, EstadoDato, Seccion } from '../components/Basicos';
 import { CampanaPendientes, FilaPrevisionVista } from '../components/Prevision';
+import { propsScrollSwipe, propsZonaSwipe } from '../components/AccionRapida';
 import { useSwipePrevision } from '../components/SwipePrevision';
 import { fechaCorta, isoLocal, mesLocal, nombreMes } from '../domain/fechas';
 import { formatearEur } from '../domain/importe';
@@ -129,9 +131,10 @@ export function HomeScreen(p: {
   const primeras = atencion ? atencion.primeras.filter((f) => !swipe.oculta(f.id)) : [];
 
   return (
-    <>
+    <View style={s.raiz} {...propsZonaSwipe}>
     <ScrollView
       testID="home"
+      {...propsScrollSwipe}
       style={{ backgroundColor: c.background }}
       contentContainerStyle={[s.contenido, { paddingTop: inset.top + espacio.l }]}
       refreshControl={<RefreshControl refreshing={false} onRefresh={() => { void cargar(); void cargarPrevisiones(); }} />}
@@ -298,7 +301,7 @@ export function HomeScreen(p: {
       {swipe.hoja}
     </ScrollView>
     {swipe.avisos}
-    </>
+    </View>
   );
 }
 
@@ -367,6 +370,7 @@ function CeldaGastos({ lectura, onReintentar }: { lectura: Lectura; onReintentar
 }
 
 const s = StyleSheet.create({
+  raiz: { flex: 1 },
   tarjetas: { gap: espacio.s },
   contenido: { paddingHorizontal: espacio.l, paddingBottom: espacio.xxl, gap: espacio.xl },
   cabecera: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: espacio.m },

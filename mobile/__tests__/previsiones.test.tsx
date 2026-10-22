@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-06 M5 §B2)
 // Versión: 0.2.0 (F05-06 M5 SWIPE; regla del 2026-10-22): el swipe de B1 abre la hoja solo cuando la acción rápida no es inequívoca (aquí, sin poder leer la capacidad de hoy); la acción rápida con «Deshacer» se prueba en accion_rapida.test.tsx.
 // Versión: 0.3.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2): acciones accesibles «derecha» (Pagado / Cobrado) e «izquierda» (No hubo); el importe desconocido y el pago parcial ya tienen gesto: la derecha abre el formulario rellenado y «No hubo» solo existe sin pagos enlazados (accion_rapida.test.tsx).
+// Versión: 0.4.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados invertidos — la acción principal se desliza a la IZQUIERDA y la alternativa a la DERECHA; acciones accesibles con el nombre de la dirección nueva.
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
@@ -245,8 +246,8 @@ describe('Inicio', () => {
     await act(async () => undefined);
     montarHome(c);
     const filaLuz = await screen.findByTestId('atencion-luz');
-    expect(filaLuz.props.accessibilityActions).toEqual([{ name: 'activate' }, { name: 'derecha', label: 'Pagado' }, { name: 'izquierda', label: 'No hubo' }]);
-    fireEvent(filaLuz, 'accessibilityAction', { nativeEvent: { actionName: 'derecha' } });
+    expect(filaLuz.props.accessibilityActions).toEqual([{ name: 'activate' }, { name: 'izquierda', label: 'Pagado' }, { name: 'derecha', label: 'No hubo' }]);
+    fireEvent(filaLuz, 'accessibilityAction', { nativeEvent: { actionName: 'izquierda' } });
     expect(c.registrarGastoPagado).not.toHaveBeenCalled(); // nunca registra en un toque
     expect(screen.getByTestId('swipe-consecuencia')).toHaveTextContent('Quedará cubierta');
     expect(screen.getByTestId('swipe-esperado')).toHaveTextContent('~74,00 €');
@@ -260,11 +261,11 @@ describe('Inicio', () => {
       prevision: { prevision_id: 'luz', row_version: 1, marcar_realizada: true } });
   });
 
-  test('esperado desconocido o pago parcial: derecha al formulario; «No hubo» solo sin pagos enlazados', async () => {
+  test('esperado desconocido o pago parcial: la principal abre el formulario; «No hubo» solo sin pagos enlazados', async () => {
     montarHome(cliente({ inicioPrevisiones: inicio(2, [fila({ id: 'agua', importe_esperado: null, queda: null }), SEGURO]) }));
-    expect((await screen.findByTestId('atencion-agua')).props.accessibilityActions).toEqual([{ name: 'activate' }, { name: 'derecha', label: 'Pagado' }, { name: 'izquierda', label: 'No hubo' }]);
+    expect((await screen.findByTestId('atencion-agua')).props.accessibilityActions).toEqual([{ name: 'activate' }, { name: 'izquierda', label: 'Pagado' }, { name: 'derecha', label: 'No hubo' }]);
     expect(screen.getByTestId('atencion-agua-importe')).toHaveTextContent('Desconocido');
-    expect(screen.getByTestId(`atencion-${SEGURO.id}`).props.accessibilityActions).toEqual([{ name: 'activate' }, { name: 'derecha', label: 'Pagado' }]);
+    expect(screen.getByTestId(`atencion-${SEGURO.id}`).props.accessibilityActions).toEqual([{ name: 'activate' }, { name: 'izquierda', label: 'Pagado' }]);
   });
 });
 

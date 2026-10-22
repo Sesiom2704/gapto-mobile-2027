@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-06 M5 §B1)
 // Versión: 0.2.0 (F05-06 M5 SWIPE; regla de Moisés del 2026-10-22): deslizar una fila es una acción rápida con «Deshacer» cuando es inequívoca (useSwipePrevision › useAccionRapida); la fila sale mientras espera. Si falta algo, abre la hoja.
 // Versión: 0.3.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2): filas en tarjeta con los dos lados (derecha «Pagado» / «Cobrado», izquierda «No hubo» sin pagos enlazados).
+// Versión: 0.4.0 (swipe (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados `principal` / `alternativa` del componente común (principal a la izquierda); la raíz y el scroll cierran la fila abierta a medias (`propsZonaSwipe`, `propsScrollSwipe`).)
 // ============================================================
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -14,6 +15,7 @@ import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'r
 import type { ClienteApi, FilaPrevision, PendientesPrevisiones } from '../api/cliente';
 import { CabeceraNavegacion, EstadoDato } from '../components/Basicos';
 import { FilaPrevisionVista } from '../components/Prevision';
+import { propsScrollSwipe, propsZonaSwipe } from '../components/AccionRapida';
 import { useSwipePrevision } from '../components/SwipePrevision';
 import { admiteSwipe, textoNaturaleza } from '../domain/prevision';
 import { useTema } from '../theme/tema';
@@ -62,9 +64,9 @@ export function PendientesScreen(p: {
   };
 
   return (
-    <View testID="pendientes" style={[s.raiz, { backgroundColor: c.background }]}>
+    <View testID="pendientes" style={[s.raiz, { backgroundColor: c.background }]} {...propsZonaSwipe}>
       <CabeceraNavegacion titulo="Pendientes" atras={{ etiqueta: 'Inicio', onPress: p.onAtras }} testIDAtras="pendientes-atras" />
-      <ScrollView contentContainerStyle={s.cuerpo} refreshControl={<RefreshControl refreshing={false} onRefresh={cargar} />}>
+      <ScrollView {...propsScrollSwipe} contentContainerStyle={s.cuerpo} refreshControl={<RefreshControl refreshing={false} onRefresh={cargar} />}>
         {carga.fase === 'CARGANDO' ? <EstadoDato testID="pendientes-cargando" estado="CARGANDO" /> : null}
         {carga.fase === 'ERROR' ? (
           <Pressable testID="pendientes-error" accessibilityRole="button" onPress={cargar} style={{ minHeight: TACTIL_MIN }}>
@@ -89,7 +91,7 @@ export function PendientesScreen(p: {
             {seccion('Vencidas', carga.datos.secciones.vencidas, 'vencidas')}
             {seccion('Con pago parcial', carga.datos.secciones.con_pago_parcial, 'parciales')}
             {seccion('Sin fecha', carga.datos.secciones.sin_fecha, 'sin-fecha')}
-            <Text style={[tipo.footnote, { color: c.textSecondary }]}>Desliza a la derecha para «Pagado» o «Cobrado» y a la izquierda para «No hubo»; o toca la fila para ver sus opciones.</Text>
+            <Text style={[tipo.footnote, { color: c.textSecondary }]}>Desliza a la izquierda para «Pagado» o «Cobrado» y a la derecha para «No hubo»; o toca la fila para ver sus opciones.</Text>
           </>
         ) : null}
       </ScrollView>
