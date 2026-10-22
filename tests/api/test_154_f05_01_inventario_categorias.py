@@ -340,6 +340,11 @@
 #     la prevision como propuesta VISIBLE «De la previsión» (D-PREV-03; el usuario puede
 #     quitarla con «Sin categoría»; C-a y C07 en servidor). No escribe categorias_financieras.
 # Version: 0.29.0
+# Version 0.29.1 (F05-06 M5 SWIPE2, cierre M5 v1.1 Fase 0; STOP_INT_M5_REGRESION): alta aditiva
+#     I7 de mobile/src/domain/repetir.ts. «Repetir hoy» reconstruye la intencion con la
+#     categoria del registro original, igual que intencion.ts y prevision.ts; la categoria
+#     sigue validandose en el servidor (C-a, C07). No escribe categorias_financieras.
+# Version: 0.29.1
 # ============================================================
 
 from __future__ import annotations
@@ -1252,6 +1257,11 @@ MENCIONES_CLIENTE.update({
     "mobile/src/domain/prevision.ts": "registro desde la prevision: sella {estado:'CATEGORIA', categoria_id, magnitudes} con la "
                                       "categoria de la prevision, propuesta visible «De la previsión» que el usuario puede "
                                       "quitar (D-PREV-03; A_FRONTERA via OP-22, C-a en servidor)",
+})
+# F05-06 M5 SWIPE2 (alta aditiva): «Repetir hoy» de la Actividad.
+MENCIONES_CLIENTE.update({
+    "mobile/src/domain/repetir.ts": "«Repetir hoy»: sella {estado:'CATEGORIA', categoria_id, magnitudes:[]} con la categoria del "
+                                    "registro repetido, por la ruta de registro del tipo (A_FRONTERA via OP-22, C-a en servidor; R)",
 })
 
 
