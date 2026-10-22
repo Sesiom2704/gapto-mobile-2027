@@ -20,6 +20,12 @@
 #   (MOTIVO_AUSENTE).
 #   EdicionHecho: elegibilidad visible (actividad/edicion.py), informativa.
 # Version: 0.1.0 (F05-06 M1)
+# Version: 0.2.0 (F05-06 M1 v1.1; Q9 opcion (a)): IntencionCorregirCategoriaV3,
+#   la LISTA BLANCA del wire de «Corregir categoria» de V3: version, motivo y
+#   `categoria_id` (obligatoria, sin «Sin categoria»). Cualquier otro campo
+#   (importe, fecha, cuenta, pagador, descripcion, concepto, notas, tipo,
+#   atribucion, efecto...) es 422 antes de llegar al adaptador. EdicionHecho
+#   anade `categoria` y `acciones.corregir_categoria`, ambos None fuera de V3.
 # ============================================================
 
 from __future__ import annotations
@@ -76,6 +82,13 @@ class IntencionAnularDuplicado(_Estricto):
     duplicado_declarado: StrictBool  # sin defecto: declaracion explicita
 
 
+class IntencionCorregirCategoriaV3(_Estricto):
+    intencion_id: uuid.UUID
+    row_version: int = Field(ge=1)
+    motivo: str | None = Field(default=None, max_length=LONGITUD_MOTIVO)
+    categoria_id: uuid.UUID
+
+
 class AccionEdicion(BaseModel):
     disponible: bool
     codigo: str | None
@@ -104,6 +117,14 @@ class AnuladoEdicion(BaseModel):
 class AccionesEdicion(BaseModel):
     corregir: AccionEdicion
     anular_duplicado: AccionEdicion
+    corregir_categoria: AccionEdicion | None = None
+
+
+class CategoriaEdicion(BaseModel):
+    efecto_id: uuid.UUID
+    naturaleza: Literal["GASTO", "INGRESO"]
+    categoria_id: uuid.UUID | None
+    nombre: str | None
 
 
 class EdicionHecho(BaseModel):
@@ -117,6 +138,7 @@ class EdicionHecho(BaseModel):
     origen_v3: bool
     anulado: AnuladoEdicion | None
     movimientos: list[MovimientoEdicion]
+    categoria: CategoriaEdicion | None = None
     acciones: AccionesEdicion
 
 

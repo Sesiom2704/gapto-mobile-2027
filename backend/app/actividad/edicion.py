@@ -14,14 +14,23 @@
 #   cuenta), y el estado ANULADO con su motivo (el hecho no desaparece).
 #   Motivos (codigos del motor, contexto_extra.motivo, o propios de la
 #   lectura cuando el motor no llega a decidir por falta de forma):
-#     HECHO_ANULADO, ORIGEN_IMPORTADO (registros de V3: Q9 en STOP, la app no
-#     los corrige ni los anula), TIPO_NO_SOPORTADO, DEVOLUCION (origen de una
+#     HECHO_ANULADO, ORIGEN_IMPORTADO (registros de V3: la app no los corrige
+#     ni los anula; desde 0.2.0 solo «Corregir categoria»), TIPO_NO_SOPORTADO, DEVOLUCION (origen de una
 #     devolucion: no se corrige), DEPENDENCIAS_ACTIVAS (no se anula), INVERSION,
 #     SIN_TESORERIA, VARIOS_MOVIMIENTOS, REPARTO (reparto con otras personas o
 #     posiciones: fuera de M1, «Corregir reparto»), MOVIMIENTO_COMPARTIDO,
 #     REVERSION_EXISTENTE, MOVIMIENTO_ANULADO, CONCILIACION_PARCIAL, MULTIDIVISA.
 #   Los textos de usuario viven en errores_http.MOTIVOS_EDICION.
 # Version: 0.1.0 (F05-06 M1)
+# Version: 0.2.0 (F05-06 M1 v1.1; Q9 opcion (a); F05-D047 §61.3 limitado a la
+#   categoria): «Corregir categoria» de un registro de V3. motivo_categoria_v3
+#   es la UNICA regla de forma (la usan esta lectura y el adaptador
+#   ejecucion_categoria_v3, que la reevalua dentro de su transaccion): solo un
+#   hecho importado, ACTIVO, GASTO o INGRESO, con un unico efecto de su misma
+#   naturaleza. Motivos: NO_IMPORTADO (fuera de esta via), HECHO_ANULADO,
+#   TIPO_NO_SOPORTADO, VARIOS_EFECTOS. La lectura devuelve
+#   `acciones.corregir_categoria` y `categoria` (efecto, naturaleza y
+#   categoria actual) SOLO para registros de V3 (None en el resto). Sin locks.
 # ============================================================
 
 from __future__ import annotations
@@ -138,8 +147,43 @@ def _motivo_anular(sesion: SesionMotor, hecho_id: uuid.UUID, hecho: dict[str, An
     return None
 
 
+def motivo_categoria_v3(sesion: SesionMotor, hecho_id: uuid.UUID,
+                        hecho: dict[str, Any] | None = None) -> tuple[str | None, dict[str, Any] | None]:
+    """(motivo, efecto {id, naturaleza}) de «Corregir categoria» de V3, sin locks. motivo None ->
+    el efecto unico que se corrige; NO_ENCONTRADO si el hecho no es visible."""
+    hecho = hecho or repo.leer_hecho(sesion, hecho_id)
+    if hecho is None:
+        return "NO_ENCONTRADO", None
+    if not repo.importado(sesion, [("hechos_financieros", hecho_id)]):
+        return "NO_IMPORTADO", None
+    if hecho["estado"] != "ACTIVO":
+        return "HECHO_ANULADO", None
+    if hecho["tipo"] not in ("GASTO", "INGRESO"):
+        return "TIPO_NO_SOPORTADO", None
+    efectos = repo.efectos(sesion, hecho_id)
+    if len(efectos) != 1:
+        return "VARIOS_EFECTOS", None
+    if efectos[0]["tipo_efecto"] != hecho["tipo"]:
+        return "TIPO_NO_SOPORTADO", None
+    return None, {"id": efectos[0]["id"], "naturaleza": efectos[0]["tipo_efecto"]}
+
+
+def _categoria_v3(sesion: SesionMotor, hecho_id: uuid.UUID, hecho: dict[str, Any]
+                  ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """(accion, categoria actual) de V3; (None, None) si el hecho no es de V3."""
+    motivo, efecto = motivo_categoria_v3(sesion, hecho_id, hecho)
+    if motivo == "NO_IMPORTADO":
+        return None, None
+    if efecto is None:
+        return _accion(motivo), None
+    fila = sesion.uno("SELECT e.categoria_id, c.nombre FROM gapto.hecho_efectos e LEFT JOIN "
+                      "gapto.categorias_financieras c ON c.id = e.categoria_id WHERE e.id = %s", (efecto["id"],))
+    return _accion(None), {"efecto_id": efecto["id"], "naturaleza": efecto["naturaleza"],
+                           "categoria_id": fila[0] if fila else None, "nombre": fila[1] if fila else None}
+
+
 def edicion(sesion: SesionMotor, hecho_id: uuid.UUID) -> dict[str, Any] | None:
-    """Elegibilidad visible de «Corregir» y «Anular por duplicado» (o None si no existe)."""
+    """Elegibilidad visible de «Corregir», «Anular por duplicado» y, en V3, «Corregir categoria» (o None)."""
     hecho = repo.leer_hecho(sesion, hecho_id)
     if hecho is None:
         return None
@@ -147,6 +191,7 @@ def edicion(sesion: SesionMotor, hecho_id: uuid.UUID) -> dict[str, Any] | None:
                          (hecho_id,))
     _, movimientos = _movimientos(sesion, hecho_id)
     comun = _comun(sesion, hecho_id, hecho, movimientos)
+    accion_categoria, categoria = _categoria_v3(sesion, hecho_id, hecho)
     patas = []
     for m in sorted(movimientos, key=lambda x: (D(x["importe"]) > 0, str(x["id"]))):
         patas.append({"movimiento_id": m["id"], "row_version": m["row_version"],
@@ -160,8 +205,10 @@ def edicion(sesion: SesionMotor, hecho_id: uuid.UUID) -> dict[str, Any] | None:
         "anulado": None if hecho["estado"] == "ACTIVO" else {
             "fecha": anulado[0].date() if anulado and anulado[0] else None, "motivo": anulado[1] if anulado else None},
         "movimientos": patas,
+        "categoria": categoria,
         "acciones": {
             "corregir": _accion(_motivo_corregir(sesion, hecho_id, hecho, movimientos, comun)),
             "anular_duplicado": _accion(_motivo_anular(sesion, hecho_id, hecho, movimientos, comun)),
+            "corregir_categoria": accion_categoria,
         },
     }

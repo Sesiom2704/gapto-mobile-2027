@@ -16,6 +16,7 @@
 // Versión: 0.11.0 (F05-06 M5 §B2): el stub incluye las previsiones: Inicio y «Pendientes» vacíos por defecto (ni campana ni bloque), candidatos vacíos; detalle, vincular y omitir no esperados (lanzan).
 // Versión: 0.12.0 (F05-06 M5-B): el stub incluye «Dar por cubierta» y «Reabrir» (escrituras no esperadas: lanzan).
 // Versión: 0.13.0 (F05-06 M1): el stub incluye la edición del hecho (lectura y escrituras no esperadas: lanzan).
+// Versión: 0.14.0 (F05-06 M1 v1.1): el stub incluye «Corregir categoría» de V3 (escritura no esperada: lanza).
 // ============================================================
 
 import type { ClienteApi, ListaPreferencias, PropuestaRegistro, Respuesta } from '../src/api/cliente';
@@ -142,6 +143,7 @@ export function clienteCategoriasStub(
     corregirPago: noEsperado('corregirPago'),
     corregirTransferencia: noEsperado('corregirTransferencia'),
     anularDuplicado: noEsperado('anularDuplicado'),
+    corregirCategoria: noEsperado('corregirCategoria'),
   };
 }
 

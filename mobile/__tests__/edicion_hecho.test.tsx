@@ -4,6 +4,7 @@
 // Ruta: mobile/__tests__/edicion_hecho.test.tsx
 // Descripción: «Corregir» y «Anular por duplicado» (F05-06 M1; lámina EDIT-HECHO v0.1; CONTRATO_M1 v0.1 §2; F05 §61.2). Dominio puro (cambios antes → después, lo que falta, payloads con SOLO lo que cambia y `error_de_registro` explícito, declaración sin defecto) y pantallas en claro y oscuro: «Más» del detalle con la elegibilidad del servidor (atenuada con su motivo y sin envío), anular con declaración y motivo obligatorios («Otro…» con texto), ANULADO tras confirmar y la lista releída, misma identidad tras un fallo de conexión; corregir con el formulario precargado, «Editado» con el valor anterior, revisión del impacto, motivo obligatorio, conflicto de versión sin pisar (B3) y registro no corregible explicado. Sin swipe.
 // Versión: 0.1.0 (F05-06 M1)
+// Versión: 0.2.0 (F05-06 M1 v1.1; Q9 opción (a)): «Corregir categoría» de V3: payload de la lista blanca, «Más» solo con la acción del servidor (corregir y anular de V3 siguen atenuados), hoja con lo que no cambia, selector, motivo obligatorio, «Categoría corregida» y lista releída, misma intención tras un fallo de conexión y rechazo explicado. El texto de ORIGEN_IMPORTADO es el del servidor v1.1.
 // ============================================================
 
 import './tiempos_rn';
@@ -12,12 +13,12 @@ import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import type { ClienteApi, DetalleActividad, EdicionHecho, FilaActividad } from '../src/api/cliente';
-import { cambiosEdicion, componerAnulacion, componerCorreccion, faltaEdicion, formularioInicial } from '../src/domain/edicion';
+import { cambiosEdicion, categoriaLista, componerAnulacion, componerCorreccion, componerCorreccionCategoria, faltaEdicion, formularioInicial } from '../src/domain/edicion';
 import { ActividadScreen } from '../src/screens/ActividadScreen';
 import { CorregirHechoScreen } from '../src/screens/CorregirHechoScreen';
 import { ProveedorTema } from '../src/theme/tema';
 
-import { clienteCategoriasStub } from './fixtures_categorias';
+import { clienteCategoriasStub, nodo } from './fixtures_categorias';
 
 jest.mock('expo-font', () => ({ ...jest.requireActual('expo-font'), isLoaded: () => true }));
 
@@ -139,7 +140,7 @@ describe('«Más» del detalle', () => {
   });
 
   test('lo no admitido se ve atenuado con su motivo y no se envía', async () => {
-    const motivo = 'Registro migrado de la versión anterior (V3): en esta versión no se corrige ni se anula desde la app.';
+    const motivo = 'Registro migrado de la versión anterior (V3): en esta versión solo se corrige su categoría, con «Corregir categoría».';
     const c = clienteActividad({ ...PAGO, origen_v3: true, acciones: { corregir: NO('ORIGEN_IMPORTADO', motivo), anular_duplicado: NO('ORIGEN_IMPORTADO', motivo) } },
       { anularDuplicado: jest.fn() as any });
     const onCorregirHecho = await abrirMas(c, jest.fn(), 'dark');
@@ -294,5 +295,109 @@ describe('Corregir', () => {
     montarCorregir(clienteCorregir({ ...PAGO, acciones: { ...PAGO.acciones, corregir: NO('REPARTO', motivo) } }));
     expect(await screen.findByTestId('corregir-hecho-no-corregible')).toHaveTextContent(motivo);
     expect(screen.queryByTestId('corregir-hecho-form')).toBeNull();
+  });
+});
+
+// ==================================================================
+// Corregir categoría de V3 (Q9 opción (a))
+// ==================================================================
+const MOTIVO_V3 = 'Registro migrado de la versión anterior (V3): en esta versión solo se corrige su categoría, con «Corregir categoría».';
+const V3: EdicionHecho = {
+  ...PAGO, origen_v3: true,
+  categoria: { efecto_id: 'ef1', naturaleza: 'GASTO', categoria_id: 'hogar', nombre: 'Hogar' },
+  acciones: { corregir: NO('ORIGEN_IMPORTADO', MOTIVO_V3), anular_duplicado: NO('ORIGEN_IMPORTADO', MOTIVO_V3), corregir_categoria: SI },
+};
+const ARBOL = [nodo({ id: 'hogar', nombre: 'Hogar' }), nodo({ id: 'obras', nombre: 'Obras', orden: 1 })];
+
+function clienteV3(o: Partial<ClienteApi> = {}): ClienteApi {
+  return clienteActividad(V3, { arbolCategorias: clienteCategoriasStub(ARBOL).arbolCategorias, ...o });
+}
+
+async function abrirCategoria(c: ClienteApi, forzar?: 'dark') {
+  await abrirMas(c, jest.fn(), forzar);
+  fireEvent.press(screen.getByTestId('mas-corregir-categoria'));
+  await screen.findByTestId('hoja-corregir-categoria');
+}
+
+async function elegir(id: string) {
+  await act(async () => fireEvent.press(screen.getByTestId('categoria-elegir')));
+  fireEvent.press(await screen.findByTestId(`cat-${id}`));
+  await screen.findByTestId('hoja-corregir-categoria');
+}
+
+describe('Corregir categoría de V3', () => {
+  test('dominio: payload de la lista blanca (versión, motivo y categoría) y lo que falta para guardar', () => {
+    expect(componerCorreccionCategoria(V3, 'obras', '  Categoría mal asignada en V3 ', 'i')).toEqual({
+      intencion_id: 'i', row_version: 3, motivo: 'Categoría mal asignada en V3', categoria_id: 'obras' });
+    expect(categoriaLista(V3, 'obras', 'x')).toBe(true);
+    expect(categoriaLista(V3, 'hogar', 'x')).toBe(false); // la misma categoría no es un cambio
+    expect(categoriaLista(V3, 'obras', '  ')).toBe(false);
+    expect(categoriaLista(V3, null, 'x')).toBe(false);
+  });
+
+  test('«Más» de V3: «Corregir categoría» disponible; corregir y anular atenuados con su motivo (oscuro)', async () => {
+    const c = clienteV3();
+    await abrirMas(c, jest.fn(), 'dark');
+    expect(screen.getByTestId('mas-corregir-categoria')).toBeEnabled();
+    for (const id of ['mas-corregir', 'mas-anular']) {
+      expect(screen.getByTestId(id)).toBeDisabled();
+      expect(screen.getByTestId(`${id}-motivo`)).toHaveTextContent(MOTIVO_V3);
+    }
+  });
+
+  test('fuera de V3 no se ofrece «Corregir categoría»', async () => {
+    await abrirMas(clienteActividad(PAGO));
+    expect(screen.queryByTestId('mas-corregir-categoria')).toBeNull();
+  });
+
+  test('elegir, motivo obligatorio, guardar: «Categoría corregida», lista releída y «Ver registro»', async () => {
+    const corregir = jest.fn(async (_id: string, pl: any) => ({ tipo: 'OK', datos: { intencion_id: pl.intencion_id, hecho_id: 'compra', row_version: 4, estado: 'ACTIVO', idempotente: false } }) as any);
+    const c = clienteV3({ corregirCategoria: corregir });
+    await abrirCategoria(c);
+    expect(screen.getByTestId('categoria-solo')).toHaveTextContent(/El importe, la fecha, la cuenta y la descripción no cambian/);
+    expect(screen.getByTestId('categoria-actual')).toHaveTextContent('Ahora: Hogar');
+    expect(screen.getByTestId('categoria-guardar')).toBeDisabled();
+    await elegir('obras');
+    expect(screen.getByTestId('categoria-elegir')).toHaveTextContent('Nueva: Obras');
+    expect(screen.getByTestId('categoria-guardar')).toBeDisabled(); // falta el motivo
+    fireEvent.press(screen.getByTestId('categoria-motivo-otro'));
+    expect(screen.getByTestId('categoria-guardar')).toBeDisabled(); // «Otro…» sin texto
+    fireEvent.press(screen.getByTestId('categoria-motivo-0'));
+    const lecturas = (c.actividad as jest.Mock).mock.calls.length;
+    await act(async () => fireEvent.press(screen.getByTestId('categoria-guardar')));
+    expect(corregir.mock.calls[0]).toEqual(['compra', { intencion_id: expect.any(String), row_version: 3, motivo: 'Categoría mal asignada en V3', categoria_id: 'obras' }]);
+    expect(await screen.findByTestId('categoria-ok-texto')).toHaveTextContent(/Categoría corregida/);
+    await waitFor(() => expect((c.actividad as jest.Mock).mock.calls.length).toBeGreaterThan(lecturas));
+    await act(async () => fireEvent.press(screen.getByTestId('categoria-ok-ver')));
+    expect(await screen.findByTestId('detalle-mas')).toBeTruthy();
+  });
+
+  test('elegir la misma categoría no habilita guardar', async () => {
+    await abrirCategoria(clienteV3());
+    await elegir('hogar');
+    fireEvent.press(screen.getByTestId('categoria-motivo-1'));
+    expect(screen.getByTestId('categoria-guardar')).toBeDisabled();
+  });
+
+  test('tras un fallo de conexión el reintento usa la MISMA intención; un rechazo se explica', async () => {
+    const corregir = jest.fn()
+      .mockResolvedValueOnce({ tipo: 'INDETERMINADO', mensaje: 'No se ha podido confirmar el registro.' })
+      .mockResolvedValueOnce({ tipo: 'RECHAZADO', codigo: 'CATEGORIA_NO_ELEGIBLE', mensaje: 'Esa categoría ya no se puede elegir para este registro.' });
+    await abrirCategoria(clienteV3({ corregirCategoria: corregir as any }));
+    await elegir('obras');
+    fireEvent.press(screen.getByTestId('categoria-motivo-0'));
+    await act(async () => fireEvent.press(screen.getByTestId('categoria-guardar')));
+    expect(await screen.findByTestId('categoria-error')).toHaveTextContent(/no se cambiará dos veces/);
+    await act(async () => fireEvent.press(screen.getByTestId('categoria-guardar')));
+    expect(corregir.mock.calls[1][1].intencion_id).toBe(corregir.mock.calls[0][1].intencion_id);
+    expect(await screen.findByTestId('categoria-error')).toHaveTextContent(/ya no se puede elegir/);
+  });
+
+  test('«Cancelar» vuelve al detalle sin enviar', async () => {
+    const corregir = jest.fn();
+    await abrirCategoria(clienteV3({ corregirCategoria: corregir as any }));
+    await act(async () => fireEvent.press(screen.getByTestId('categoria-cancelar')));
+    expect(await screen.findByTestId('detalle-mas')).toBeTruthy();
+    expect(corregir).not.toHaveBeenCalled();
   });
 });

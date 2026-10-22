@@ -13,6 +13,7 @@
 // Versión: 0.8.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2 S7/S8; SWIPE-RULE): cada fila va en tarjeta con los dos lados. Derecha: «Recibido» en una devolución con el abono pendiente (acción rápida solo con la cuenta original demostrable; si no, la hoja) o «Repetir hoy» cuando el registro se puede reconstruir (`repetibleHoy`): al soltar se leen su detalle y las capacidades de hoy y, sin dudas, aviso «Repetido hoy: <registro> · <importe> · Deshacer» y a los 5 s una intención NUEVA con fecha de hoy por la ruta de registro del tipo; con dudas abre el detalle. La fila original no sale (es otra intención). Izquierda: «Más» (abre el detalle). Nunca anular, borrar ni corregir por swipe.
 // Versión: 0.9.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados `principal` («Recibido» / «Repetir hoy», se desliza a la izquierda) y `alternativa` («Más», a la derecha), del componente común. El scroll cierra la fila abierta.
 // Versión: 0.10.0 (F05-06 M1; lámina EDIT-HECHO v0.1 D-EDIT-01, 06, 07; CONTRATO_M1 v0.1 §2): el detalle ofrece «Más» (si la raíz pasa `onCorregirHecho`): lee la elegibilidad del servidor (GET …/edicion) y abre la hoja con «Corregir» (tarea inmersiva fuera de la pantalla) y «Anular por duplicado» (hoja B1 con la declaración explícita y el motivo), atenuadas con su motivo cuando no se admiten. Anular no borra: tras confirmar, «Registro anulado» y la lista vuelve a leer. Un reintento tras un fallo de conexión usa la MISMA intención. Sin swipe de editar ni anular.
+// Versión: 0.11.0 (F05-06 M1 v1.1; Q9 opción (a)): en un registro de V3, «Más › Corregir categoría» (solo si el servidor trae la acción): hoja con lo que no cambia, categoría actual → nueva (selector del registro con la naturaleza del efecto), motivo y «Guardar categoría». Al guardar, «Categoría corregida» y la lista vuelve a leer; «Ver registro» reabre el detalle. Un reintento tras un fallo de conexión usa la MISMA intención. Corregir y anular de V3 siguen atenuados con su motivo.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -22,7 +23,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ClienteApi, DetalleActividad, EdicionHecho, FilaActividad, TipoActividad } from '../api/cliente';
 import { AbonoHoja } from '../components/AbonoHoja';
-import { HojaAnularDuplicado, HojaMasHecho } from '../components/EdicionHecho';
+import { HojaAnularDuplicado, HojaCorregirCategoria, HojaMasHecho } from '../components/EdicionHecho';
 import { usarIntencion } from '../components/Prevision';
 import { accesibilidadLados, FilaDeslizable, propsScrollSwipe, propsZonaSwipe, useAccionRapida, type LadoSwipe } from '../components/AccionRapida';
 import { BotonPrimario, BotonTexto, Chip } from '../components/Basicos';
@@ -48,11 +49,11 @@ import {
   tituloFila,
   tituloTransferencia,
 } from '../domain/actividad';
-import { construirArbol } from '../domain/categoria';
+import { construirArbol, elegible, motivoNoSeleccionable, visibleEnRegistro } from '../domain/categoria';
 import { nombreCorto, ofreceRegistrarAbono, ofreceRegistrarDevolucion, TEXTO_NETO, textoDevolucionDe } from '../domain/devolucion';
 import { ayer, ddmmaaaaAIso, diaMesAnioIso, diaMesIso, isoLocal, mesAnioIso, mesDesplazadoIso } from '../domain/fechas';
 import { formatearEur } from '../domain/importe';
-import { componerAnulacion, TEXTO_ANULADO } from '../domain/edicion';
+import { categoriaLista, componerAnulacion, componerCorreccionCategoria, TEXTO_ANULADO, TEXTO_CATEGORIA_CORREGIDA } from '../domain/edicion';
 import { componerRepetir, repetibleHoy, textoAvisoRepetir, type CapacidadesRepetir } from '../domain/repetir';
 import type { RepartoDeHecho } from '../domain/reparto';
 import { filtrar } from '../domain/maestros';
@@ -72,7 +73,10 @@ type HojaAbierta =
   | { h: 'ABONO'; dev: { id: string; titulo: string; importe: string; origenId: string }; volverA: string | null }
   | { h: 'MAS'; id: string; titulo: string; e: EdicionHecho }
   | { h: 'ANULAR'; id: string; titulo: string; e: EdicionHecho }
-  | { h: 'ANULADO'; titulo: string };
+  | { h: 'ANULADO'; titulo: string }
+  | { h: 'CATEGORIA'; id: string; titulo: string; e: EdicionHecho }
+  | { h: 'CATEGORIA_ELEGIR'; id: string; titulo: string; e: EdicionHecho }
+  | { h: 'CATEGORIA_OK'; id: string; titulo: string };
 type Opcion = { id: string; nombre: string; detalle?: string };
 
 export const TEXTO_ERROR = 'No se ha podido cargar la actividad';
@@ -351,6 +355,31 @@ export function ActividadScreen(p: {
     if (r.tipo === 'INDETERMINADO') return setAnular({ ...anular, enviando: false, error: `${r.mensaje} Puedes reintentar: no se anulará dos veces.` });
     intencionAnular.liberar();
     setAnular({ ...anular, enviando: false, error: r.mensaje });
+  };
+
+  // ---------------------------------------------------------------- «Corregir categoría» de V3 (Q9 opción (a))
+  const SIN_CAT = { nueva: null as { id: string; nombre: string } | null, motivo: '', otro: false, enviando: false, error: null as string | null };
+  const [cat, setCat] = useState(SIN_CAT);
+  const intencionCategoria = usarIntencion(p.nuevoId ?? (() => ''));
+  const elegirCategoria = async (h: { id: string; titulo: string; e: EdicionHecho }) => {
+    setHoja({ ...h, h: 'CATEGORIA_ELEGIR' });
+    if (arbol.fase !== 'OK') {
+      const r = await p.cliente.arbolCategorias();
+      setArbol(r.tipo === 'OK' ? { fase: 'OK', arbol: construirArbol(r.datos.categorias) } : { fase: 'ERROR' });
+    }
+  };
+  const guardarCategoria = async (h: { id: string; titulo: string; e: EdicionHecho }) => {
+    if (!cat.nueva || !categoriaLista(h.e, cat.nueva.id, cat.motivo) || cat.enviando) return;
+    setCat({ ...cat, enviando: true, error: null });
+    const r = await p.cliente.corregirCategoria(h.id, componerCorreccionCategoria(h.e, cat.nueva.id, cat.motivo, intencionCategoria.actual()));
+    if (r.tipo === 'OK') {
+      intencionCategoria.liberar();
+      setHoja({ h: 'CATEGORIA_OK', id: h.id, titulo: h.titulo });
+      return void cargar();
+    }
+    if (r.tipo === 'INDETERMINADO') return setCat({ ...cat, enviando: false, error: `${r.mensaje} Puedes reintentar: no se cambiará dos veces.` });
+    intencionCategoria.liberar();
+    setCat({ ...cat, enviando: false, error: r.mensaje });
   };
 
   const cerrarAbono = (registrado: boolean, volverA: string | null) => {
@@ -653,7 +682,38 @@ export function ActividadScreen(p: {
       {hoja?.h === 'MAS' ? (
         <HojaMasHecho acciones={hoja.e.acciones} onCerrar={() => void abrirDetalle(hoja.id)}
           onCorregir={() => { const { id, titulo } = hoja; setHoja(null); p.onCorregirHecho?.(id, titulo); }}
-          onAnular={() => { setAnular({ declarado: false, motivo: '', otro: false, enviando: false, error: null }); setHoja({ ...hoja, h: 'ANULAR' }); }} />
+          onAnular={() => { setAnular({ declarado: false, motivo: '', otro: false, enviando: false, error: null }); setHoja({ ...hoja, h: 'ANULAR' }); }}
+          onCorregirCategoria={() => { setCat(SIN_CAT); setHoja({ ...hoja, h: 'CATEGORIA' }); }} />
+      ) : null}
+      {hoja?.h === 'CATEGORIA' ? (
+        <HojaCorregirCategoria titulo={hoja.titulo} actual={hoja.e.categoria?.nombre ?? null} nueva={cat.nueva?.nombre ?? null}
+          onElegir={() => void elegirCategoria(hoja)} motivo={cat.motivo} motivoOtro={cat.otro}
+          onMotivo={(t, otro) => setCat({ ...cat, motivo: t, otro })} listo={categoriaLista(hoja.e, cat.nueva?.id ?? null, cat.motivo)}
+          enviando={cat.enviando} error={cat.error} onGuardar={() => void guardarCategoria(hoja)} onCerrar={() => void abrirDetalle(hoja.id)} />
+      ) : null}
+      {hoja?.h === 'CATEGORIA_ELEGIR' ? (
+        <SelectorCategorias
+          titulo="Elegir categoría"
+          modo="REGISTRO"
+          carga={arbol}
+          naturaleza={hoja.e.categoria?.naturaleza ?? 'GASTO'}
+          esVisible={(n) => (arbol.fase === 'OK' ? visibleEnRegistro(arbol.arbol, n, hoja.e.categoria?.naturaleza ?? 'GASTO') : false)}
+          esSeleccionable={(n) => elegible(n, hoja.e.categoria?.naturaleza ?? 'GASTO')}
+          motivo={(n) => motivoNoSeleccionable(n, hoja.e.categoria?.naturaleza ?? 'GASTO')}
+          seleccionadaId={cat.nueva?.id ?? hoja.e.categoria?.categoria_id ?? null}
+          onElegir={(n) => { setCat({ ...cat, nueva: { id: n.id, nombre: n.nombre }, error: null }); setHoja({ ...hoja, h: 'CATEGORIA' }); }}
+          onCerrar={() => setHoja({ ...hoja, h: 'CATEGORIA' })}
+          onReintentar={() => void elegirCategoria(hoja)}
+          buscar
+          testID="selector-categoria-v3"
+        />
+      ) : null}
+      {hoja?.h === 'CATEGORIA_OK' ? (
+        <Hoja titulo={hoja.titulo} testID="hoja-categoria-ok">
+          <Text testID="categoria-ok-texto" style={[tipo.body, { color: c.textPrimary }]}>{TEXTO_CATEGORIA_CORREGIDA}</Text>
+          <BotonSecundario testID="categoria-ok-ver" titulo="Ver registro" onPress={() => void abrirDetalle(hoja.id)} />
+          <BotonSecundario testID="categoria-ok-cerrar" titulo="Cerrar" onPress={() => setHoja(null)} />
+        </Hoja>
       ) : null}
       {hoja?.h === 'ANULAR' ? (
         <HojaAnularDuplicado titulo={hoja.titulo} declarado={anular.declarado} onDeclarar={(v) => setAnular({ ...anular, declarado: v })}

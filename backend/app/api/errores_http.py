@@ -155,6 +155,12 @@
 #   conserva el status y el codigo de _MAPA y solo sustituye el mensaje cuando
 #   el motor dice por que. Ningun codigo existente cambia de status.
 # Version: 0.24.0
+#   0.25.0 (F05-06 M1 v1.1; Q9 opcion (a)): rechazo de integracion nuevo
+#   CATEGORIA_V3_NO_CORREGIBLE (409, con detalle {motivo} y el texto de
+#   MOTIVOS_EDICION); MOTIVOS_EDICION anade NO_IMPORTADO y VARIOS_EFECTOS, y
+#   ORIGEN_IMPORTADO dice que en V3 solo se corrige la categoria. Ningun codigo
+#   existente cambia de status.
+# Version: 0.25.0
 # ============================================================
 
 from __future__ import annotations
@@ -417,6 +423,9 @@ def rechazo_integracion(codigo: str, detalle: dict | None = None) -> tuple[int, 
                      "mensaje": (f"Supera lo que queda por devolver de esta compra ({queda} €). Si te han abonado "
                                  "más, la diferencia no es una devolución. No se ha guardado nada."),
                      "reintentable": False, "detalle": dict(detalle)}
+    if codigo == "CATEGORIA_V3_NO_CORREGIBLE":
+        return 409, {"codigo": codigo, "mensaje": f"{MOTIVOS_EDICION[detalle['motivo']]} No se ha cambiado nada.",
+                     "reintentable": False, "detalle": dict(detalle)}
     status, mensaje = _RECHAZOS_INTEGRACION[codigo]
     if codigo in _CON_DETALLE and detalle:
         return status, {"codigo": codigo, "mensaje": mensaje, "reintentable": False, "detalle": dict(detalle)}
@@ -609,7 +618,9 @@ def rechazo_lectura(codigo: str) -> tuple[int, dict]:
 #: corregible se explica; nunca se oculta en silencio (D-EDIT-07).
 MOTIVOS_EDICION: dict[str, str] = {
     "HECHO_ANULADO": "Este registro está anulado.",
-    "ORIGEN_IMPORTADO": "Registro migrado de la versión anterior (V3): en esta versión no se corrige ni se anula desde la app.",
+    "ORIGEN_IMPORTADO": "Registro migrado de la versión anterior (V3): en esta versión solo se corrige su categoría, con «Corregir categoría».",
+    "NO_IMPORTADO": "Solo los registros migrados de la versión anterior (V3) se corrigen por esta vía. Usa «Corregir».",
+    "VARIOS_EFECTOS": "Tiene varias partes con su propia categoría: no se corrige aquí en esta versión.",
     "TIPO_NO_SOPORTADO": "Este tipo de registro no se corrige ni se anula desde aquí en esta versión.",
     "DEVOLUCION": "Tiene una devolución registrada: no se corrige en esta versión.",
     "DEPENDENCIAS_ACTIVAS": "No se puede anular: tiene una devolución u otra operación registrada. Si la compra no existió, anula antes esa operación.",

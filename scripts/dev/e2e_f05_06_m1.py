@@ -20,13 +20,19 @@
 #         declaracion y el motivo; oraculo: hecho y movimiento ANULADO;
 #     P3  transferencia 500 -> «Más» › «Corregir» -> 450; oraculo: dos patas a
 #         450 y sin efectos;
-#     P4  registro de V3 -> «Más»: las dos acciones atenuadas con su motivo y
-#         sin envio (ningun POST).
+#     P4  registro de V3 -> «Más»: corregir y anular atenuados con su motivo y
+#         sin envio (ningun POST);
+#     P5  (v1.1, Q9 opcion (a)) el mismo registro de V3 -> «Más › Corregir
+#         categoría»: lo que no cambia, «Sin categoría» -> «Obras», motivo y
+#         guardar; oraculo: solo cambia la categoria del efecto (importe,
+#         efecto y movimiento intactos) y auditoria con el motivo.
 #   Capturas 393x852 @3x (claro y oscuro) y manifest JSON con el estado.
 #   Requiere (ya levantados): API en --api con CORS para --web, cliente web en
 #   --web (o --dist), GAPTO_DATABASE_URL (base LOCAL), GAPTO_DEV_OWNER_USER_ID y
 #   GAPTO_DEV_TOKEN (nunca se imprime).
 # Version: 0.1.0 (F05-06 M1)
+# Version: 0.2.0 (F05-06 M1 v1.1; Q9 opcion (a)): P5 «Corregir categoría» de
+#   V3; las categorias «Hogar» y «Obras» se dan de alta por la API del catalogo.
 # ============================================================
 
 from __future__ import annotations
@@ -69,11 +75,20 @@ def marcar_v3(dsn: str, owner: str, hecho_id: str) -> None:
                                     "'CREADO', 'ALTA')", (origen, hecho_id))
 
 
+def categoria(base: str, nombre: str) -> str:
+    """Alta por la API del catalogo (S4), como e2e_regcat."""
+    cid = str(uuid.uuid4())
+    api(base, "POST", "/v1/categorias", {"id": cid, "nombre": nombre, "parent_id": None, "ambito": "GASTO",
+                                         "presupuestable_default": True, "icon_key": None})
+    return cid
+
+
 def estado(dsn: str, owner: str, hid: str) -> dict:
     q = lambda sql: _sql(dsn, owner, "gapto_runtime", sql, (hid,))  # noqa: E731
     return {
         "hecho": [[a, str(b)] for a, b in q("SELECT estado, importe_total FROM gapto.hechos_financieros WHERE id = %s")],
         "efectos": sorted(str(a) for (a,) in q("SELECT importe_delta FROM gapto.hecho_efectos WHERE hecho_id = %s")),
+        "categorias": sorted(str(a) for (a,) in q("SELECT categoria_id FROM gapto.hecho_efectos WHERE hecho_id = %s")),
         "movimientos": sorted([a, str(b)] for a, b in q(
             "SELECT m.estado, m.importe FROM gapto.hecho_movimientos_tesoreria hm JOIN gapto.movimientos_tesoreria m "
             "ON m.id = hm.movimiento_tesoreria_id WHERE hm.hecho_id = %s")),
@@ -105,13 +120,14 @@ def main() -> None:
     duplicado = gasto(a.api, nomina, "4.00", "Café", ayer)
     v3 = gasto(a.api, nomina, "65.00", "FONTANERO BAÑO", ayer)
     marcar_v3(dsn, owner, v3)
+    hogar, obras = categoria(a.api, "Hogar"), categoria(a.api, "Obras")
     transf = str(uuid.uuid4())
     api(a.api, "POST", "/v1/intenciones/transferencia", {
         "intencion_id": transf, "importe": "500.00", "moneda": "EUR", "fecha_hecho": ayer,
         "cuenta_origen_id": nomina, "cuenta_destino_id": ahorro, "nota": "Nómina → Ahorro"})
     res: dict = {"etiqueta": ETIQUETA, "run_id": run, "hoy": str(hoy), "cuentas": {"nomina": nomina, "ahorro": ahorro},
                  "hechos": {"compra": compra, "cafe": cafe, "duplicado": duplicado, "v3": v3, "transferencia": transf},
-                 "pasos": {}}
+                 "categorias": {"hogar": hogar, "obras": obras}, "pasos": {}}
     capturas: list[str] = []
     consola: list[str] = []
     posts: list[str] = []
@@ -239,6 +255,36 @@ def main() -> None:
             comprobar(len(posts) == n_posts, "P4: ningun POST")
             comprobar(estado(dsn, owner, v3)["hecho"] == [["ACTIVO", "65.0000"]], "P4: V3 intacto")
             res["pasos"]["P4"] = "OK"
+
+            # ------------------------------------------------------------ P5 corregir la categoria de V3
+            antes = estado(dsn, owner, v3)
+            comprobar(antes["categorias"] == ["None"], f"P5: sin categoria al empezar {antes}")
+            t("mas-corregir-categoria").click()
+            t("hoja-corregir-categoria").wait_for(timeout=15000)
+            comprobar("no cambian" in t("categoria-solo").inner_text(), "P5: lo que no cambia")
+            comprobar("Sin categoría" in t("categoria-actual").inner_text(), "P5: categoria actual")
+            comprobar(t("categoria-guardar").is_disabled(), "P5: sin categoria nueva no se guarda")
+            t("categoria-elegir").click()
+            t(f"cat-{obras}").wait_for(timeout=15000)
+            t(f"cat-{obras}").click()
+            t("hoja-corregir-categoria").wait_for(timeout=15000)
+            comprobar(t("categoria-guardar").is_disabled(), "P5: sin motivo no se guarda")
+            t("categoria-motivo-0").click()
+            shot("P5_V3_categoria")
+            oscuro("P5_V3_categoria")
+            r = post(f"/v1/hechos/{v3}/corregir-categoria", "categoria-guardar")
+            t("categoria-ok-texto").wait_for(timeout=15000)
+            shot("P5_V3_categoria_corregida")
+            d = estado(dsn, owner, v3)
+            comprobar(d["categorias"] == [obras], f"P5: categoria {d}")
+            comprobar((d["hecho"], d["efectos"], d["movimientos"]) == (antes["hecho"], antes["efectos"], antes["movimientos"]),
+                      f"P5: sin efecto retroactivo {d}")
+            # La auditoria de la categoria es la del EFECTO (OP-21 audita la fila que cambia).
+            d["motivos_efecto"] = sorted({str(m) for (m,) in _sql(dsn, owner, "gapto_runtime",
+                "SELECT a.motivo FROM gapto.auditoria a JOIN gapto.hecho_efectos ef ON ef.id = a.registro_id "
+                "WHERE ef.hecho_id = %s AND a.motivo IS NOT NULL", (v3,))})
+            comprobar("Categoría mal asignada en V3" in d["motivos_efecto"], f"P5: auditoria {d['motivos_efecto']}")
+            res["pasos"]["P5"] = {"respuesta": r, "estado": d}
 
         t("accion-registrar").wait_for(timeout=30000)
         t("tab-DIA").click()

@@ -360,6 +360,21 @@
 #     (handoffs/STOP_M5BM1_Q9.md). La lectura de elegibilidad (actividad/edicion.py) es SQL
 #     de solo lectura y no menciona categorias. Sin cambios en las aserciones.
 # Version: 0.31.0
+# Version 0.32.0 (F05-06 M1 v1.1; Q9 opcion (a); F05-D047 §61.3 limitado a la categoria):
+#     I3: excepcion NOMINAL y acotada: backend/app/api/ejecucion_categoria_v3.py puede
+#     referenciar CorreccionesService (OP-21) para «Corregir categoria» de V3. Invariante
+#     AST nuevo (I3-V3): solo `corregir`; DatosCorreccion una vez y solo con hecho_id,
+#     row_version_esperada, motivo y efectos_a_actualizar; el unico campo de efecto es
+#     categoria_id (CAMPOS_V3_CORREGIBLES = {categoria_id}); sin alias, sin indirecciones y
+#     sin nombres de los demas campos de OP-21. I4-V3: identidad -> C-a + C07
+#     (validar_categoria_y_magnitudes) -> DatosCorreccion -> corregir. I1: altas R de la
+#     lectura (actividad/edicion._categoria_v3) y de los DTO, GUARDA de la lista blanca y
+#     A_FRONTERA de la operacion. El conjunto de EXCEPCIONES_I3 queda cerrado con el nuevo
+#     fichero; ningun otro adaptador gana la excepcion. I7: altas de mobile/src/domain/edicion.ts
+#     (payload de la lista blanca) y de ActividadScreen.tsx (lee la categoria actual del efecto).
+#     EXCLUIDOS: alta del arnes scripts/dev/mutantes_f05_06_m1_v3.py (sus mutantes son texto).
+#     I1: alta R del oraculo del E2E (scripts/dev/e2e_f05_06_m1.py::estado).
+# Version: 0.32.0
 # ============================================================
 
 from __future__ import annotations
@@ -626,6 +641,24 @@ REGISTRO.update({
         "A_FRONTERA", "M3 -> OP-22", "sella categoria_id en el efecto GASTO; guardado por I4"),
 })
 
+REGISTRO.update({
+    ("backend/app/actividad/edicion.py", "_categoria_v3"): (
+        "R", "F05-06 M1 v1.1 lectura", "categoria actual del efecto de V3 para mostrarla; informativa"),
+    ("backend/app/api/dto_edicion.py", "CategoriaEdicion"): ("R", "DTO M1 v1.1", "respuesta de lectura"),
+    ("backend/app/api/dto_edicion.py", "IntencionCorregirCategoriaV3"): (
+        "R", "DTO M1 v1.1", "wire de la lista blanca; C-a + C07 en el adaptador"),
+    ("backend/app/api/ejecucion_categoria_v3.py", "<modulo>"): (
+        "GUARDA", "Q9 (a) lista blanca", "CAMPOS_V3_CORREGIBLES: unico campo de efecto que llega a OP-21"),
+    ("backend/app/api/ejecucion_categoria_v3.py", "_cambios"): (
+        "GUARDA", "Q9 (a) lista blanca", "solo categoria_id hacia OP-21; otro campo -> ENTRADA_INVALIDA"),
+    ("backend/app/api/ejecucion_categoria_v3.py", "_identidad"): (
+        "R", "identidad M1 v1.1", "compara la categoria auditada con la pedida (idempotencia)"),
+    ("scripts/dev/e2e_f05_06_m1.py", "estado"): (
+        "R", "E2E M1 v1.1 verificacion", "lee hecho_efectos.categoria_id del registro de V3 (oraculo de P5)"),
+    ("backend/app/api/ejecucion_categoria_v3.py", "corregir_categoria_v3.operacion"): (
+        "A_FRONTERA", "V3 -> OP-21 (lista blanca)", "sella categoria_id en el efecto unico tras C-a + C07 (I4-V3)"),
+})
+
 #: Servicios del motor que la frontera NO puede referenciar (I3): tienen
 #: caminos A_MOTOR, B o P con categoria. OP-22 es la unica puerta.
 SERVICIOS_VEDADOS_EN_FRONTERA = (
@@ -646,6 +679,8 @@ EXCEPCIONES_I3: dict[str, frozenset[str]] = {
     "backend/app/api/ejecucion_reparto.py": frozenset({"CorreccionesService"}),
     # F05-06 M5 (v0.29.0): OP-17 suelto, omitir y OP-10 + OP-17; I3-M5 limita los metodos.
     "backend/app/api/ejecucion_prevision.py": frozenset({"PrevisionesService"}),
+    # F05-06 M1 v1.1 (v0.32.0, Q9 opcion (a)): «Corregir categoria» de V3 = OP-21 con lista blanca {categoria_id}.
+    "backend/app/api/ejecucion_categoria_v3.py": frozenset({"CorreccionesService"}),
 }
 
 #: Construcciones con nombre de tabla dinamico (I6): (ruta, funcion) ->
@@ -686,6 +721,7 @@ EXCLUIDOS: dict[str, str] = {
     "scripts/dev/mutantes_f05_02.py": "arnes de mutacion F05-02 (D-181): los mutantes son texto",
     "scripts/dev/mutantes_f05_j2j3.py": "arnes de mutacion F05-03/F05-04 J2J3 (D-181): los mutantes son texto",
     "scripts/dev/mutantes_f05_05.py": "arnes de mutacion F05-05 K3 (D-181): los mutantes son texto",
+    "scripts/dev/mutantes_f05_06_m1_v3.py": "arnes de mutacion F05-06 M1 v1.1 (lista blanca V3): los mutantes son texto",
 }
 
 
@@ -1277,6 +1313,13 @@ MENCIONES_CLIENTE.update({
 MENCIONES_CLIENTE.update({
     "mobile/src/domain/repetir.ts": "«Repetir hoy»: sella {estado:'CATEGORIA', categoria_id, magnitudes:[]} con la categoria del "
                                     "registro repetido, por la ruta de registro del tipo (A_FRONTERA via OP-22, C-a en servidor; R)",
+})
+# F05-06 M1 v1.1 (alta aditiva; Q9 opcion (a)): «Corregir categoria» de V3.
+MENCIONES_CLIENTE.update({
+    "mobile/src/domain/edicion.ts": "«Corregir categoria» de V3: payload de la lista blanca {categoria_id} por "
+                                    "/v1/hechos/{id}/corregir-categoria (A_FRONTERA via OP-21; C-a y C07 en servidor)",
+    "mobile/src/screens/ActividadScreen.tsx": "«Corregir categoria» de V3: lee la categoria actual del efecto para marcarla en el "
+                                              "selector (R); el envio lo compone domain/edicion",
 })
 
 
@@ -2000,7 +2043,8 @@ def test_i3_m5_negativo_detecta_alias_indirecciones_y_privados(plantado):
 def test_i3_m5_ningun_otro_adaptador_gana_la_excepcion():
     assert set(EXCEPCIONES_I3) == {
         "backend/app/api/ejecucion_devolucion.py", "backend/app/api/ejecucion_correccion.py",
-        "backend/app/api/ejecucion_anulacion.py", "backend/app/api/ejecucion_reparto.py", EXCEPCION_M5}
+        "backend/app/api/ejecucion_anulacion.py", "backend/app/api/ejecucion_reparto.py", EXCEPCION_M5,
+        EXCEPCION_V3}
     assert [r for r, s in EXCEPCIONES_I3.items() if "PrevisionesService" in s] == [EXCEPCION_M5]
     assert EXCEPCIONES_I3[EXCEPCION_M5] == frozenset({"PrevisionesService"})
     assert "PrevisionesService" in SERVICIOS_VEDADOS_EN_FRONTERA
@@ -2018,3 +2062,135 @@ def test_i3_m5_sin_referencias_desde_otros_ficheros_de_la_frontera():
                 assert {a.name for a in n.names} <= PUBLICOS_M5, (ruta, [a.name for a in n.names])
             if isinstance(n, ast.Attribute) and n.attr in ({"_previsiones", "PrevisionesService"} | VEDADOS_M5):
                 raise AssertionError(f"{ruta} referencia {n.attr}")
+
+
+# ------------------------------------------------------------------ I3-V3 (F05-06 M1 v1.1, Q9 opcion (a))
+EXCEPCION_V3 = "backend/app/api/ejecucion_categoria_v3.py"
+#: Lo unico que la excepcion puede pasar a OP-21 (F05-D047 §61.3 limitado a la categoria).
+ARGUMENTOS_V3 = frozenset({"hecho_id", "row_version_esperada", "motivo", "efectos_a_actualizar"})
+CAMPOS_V3 = frozenset({"categoria_id"})
+#: Resto de la superficie de OP-21: campos de DatosCorreccion y del efecto que la excepcion no nombra.
+VEDADOS_V3 = frozenset({
+    "efectos_a_eliminar", "efectos_a_crear", "relaciones_a_eliminar", "atribuciones_a_actualizar",
+    "atribuciones_a_eliminar", "atribuciones_a_crear", "conciliaciones_a_eliminar", "toca_inversion",
+    "presupuestable", "terceros_a_crear", "terceros_a_eliminar", "entidades_a_crear", "entidades_a_eliminar",
+    "magnitudes_a_crear", "magnitudes_a_actualizar", "magnitudes_a_eliminar", "etiquetas_a_crear",
+    "etiquetas_a_eliminar", "importe_delta", "descripcion", "tipo_efecto", "estado_atribucion",
+})
+
+
+def violaciones_i3_v3(texto: str) -> list[str]:
+    """Violaciones del invariante I3-V3 en el fuente de ejecucion_categoria_v3.py."""
+    arbol = ast.parse(texto)
+    fallos: list[str] = []
+    servicios = {"CorreccionesService", "DatosCorreccion"}
+    for n in ast.walk(arbol):
+        if isinstance(n, ast.ImportFrom) and n.module == "app.services.correcciones_service":
+            for a in n.names:
+                if a.name not in servicios or a.asname is not None:
+                    fallos.append(f"import {a.name} as {a.asname}")
+        elif isinstance(n, ast.Import):
+            for a in n.names:
+                if a.name.startswith("app.services.correcciones_service"):
+                    fallos.append(f"import de modulo {a.name}")
+        elif isinstance(n, ast.ImportFrom) and n.module == "app.services":
+            if any(a.name == "correcciones_service" for a in n.names):
+                fallos.append("import de modulo app.services.correcciones_service")
+        elif isinstance(n, ast.Name) and n.id in INDIRECCIONES:
+            fallos.append(f"indireccion {n.id}")
+        elif isinstance(n, ast.Attribute) and n.attr in INDIRECCIONES:
+            fallos.append(f"indireccion {n.attr}")
+        elif isinstance(n, ast.Attribute) and n.attr in VEDADOS_V3:
+            fallos.append(f"atributo vedado {n.attr}")
+        elif isinstance(n, ast.keyword) and n.arg in VEDADOS_V3:
+            fallos.append(f"argumento vedado {n.arg}")
+        elif isinstance(n, ast.Constant) and isinstance(n.value, str) and n.value in VEDADOS_V3:
+            fallos.append(f"cadena con campo vedado {n.value!r}")
+        elif isinstance(n, ast.Assign) and isinstance(n.value, ast.Name) and n.value.id in servicios:
+            fallos.append("alias del servicio por asignacion")
+        elif isinstance(n, ast.Dict):
+            claves = {c.value for c in n.keys if isinstance(c, ast.Constant) and isinstance(c.value, str)}
+            if None in n.keys or not claves <= CAMPOS_V3 | {"motivo"}:
+                fallos.append(f"diccionario fuera de la lista blanca {sorted(claves)}")
+    for n in ast.walk(arbol):
+        if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Call):
+            f = n.value.func
+            if (f.id if isinstance(f, ast.Name) else getattr(f, "attr", None)) == "CorreccionesService" \
+                    and n.attr != "corregir":
+                fallos.append(f"metodo no autorizado {n.attr}")
+    datos = _llamadas(arbol, "DatosCorreccion")
+    if len(datos) != 1:
+        fallos.append(f"DatosCorreccion {len(datos)} veces")
+    for d in datos:
+        if d.args or any(k.arg is None for k in d.keywords):
+            fallos.append("DatosCorreccion con argumentos posicionales o **")
+        if not {k.arg for k in d.keywords} <= ARGUMENTOS_V3:
+            fallos.append(f"DatosCorreccion con {sorted(k.arg for k in d.keywords if k.arg)}")
+    lista = [n for n in ast.walk(arbol) if isinstance(n, ast.Assign)
+             and any(isinstance(t, ast.Name) and t.id == "CAMPOS_V3_CORREGIBLES" for t in n.targets)]
+    if len(lista) != 1 or ast.unparse(lista[0].value) != "frozenset({'categoria_id'})":
+        fallos.append("CAMPOS_V3_CORREGIBLES distinto de frozenset({'categoria_id'})")
+    return fallos
+
+
+def test_i3_v3_excepcion_acotada_a_la_categoria():
+    assert violaciones_i3_v3((RAIZ / EXCEPCION_V3).read_bytes().decode("utf-8")) == []
+    from app.api import ejecucion_categoria_v3
+
+    assert ejecucion_categoria_v3.CAMPOS_V3_CORREGIBLES == CAMPOS_V3
+    assert EXCEPCIONES_I3[EXCEPCION_V3] == frozenset({"CorreccionesService"})
+    assert [r for r, s in EXCEPCIONES_I3.items() if "CorreccionesService" in s] == [
+        "backend/app/api/ejecucion_reparto.py", EXCEPCION_V3]
+
+
+@pytest.mark.parametrize("plantado", [
+    "_x = lambda s: CorreccionesService(s)._actualizar_efectos",
+    "_x = lambda s: CorreccionesService(s).corregir_otra",
+    "from app.services.correcciones_service import CorreccionesService as C",
+    "from app.services.correcciones_service import CAMPOS_EFECTO_CORREGIBLES",
+    "import app.services.correcciones_service as cs",
+    "from app.services import correcciones_service",
+    "_x = getattr(CorreccionesService, 'corregir')",
+    "_Alias = CorreccionesService",
+    "_x = DatosCorreccion(hecho_id=1, row_version_esperada=1, motivo='m', efectos_a_actualizar={})",
+    "_x = {'importe_delta': 1}",
+    "_x = {'categoria_id': 1, 'descripcion': 'x'}",
+    "_x = 'tipo_efecto'",
+    "_x = dict(efectos_a_crear=())",
+    "CAMPOS_V3_CORREGIBLES = frozenset({'categoria_id', 'descripcion'})",
+])
+def test_i3_v3_negativo_detecta_campos_alias_e_indirecciones(plantado):
+    texto = (RAIZ / EXCEPCION_V3).read_bytes().decode("utf-8") + "\n" + plantado + "\n"
+    assert violaciones_i3_v3(texto), plantado
+
+
+def test_i3_v3_negativo_datos_correccion_con_otro_argumento():
+    texto = (RAIZ / EXCEPCION_V3).read_bytes().decode("utf-8").replace(
+        "motivo=intencion.motivo, efectos_a_actualizar=",
+        "motivo=intencion.motivo, presupuestable=None, efectos_a_actualizar=")
+    assert violaciones_i3_v3(texto)
+
+
+def test_i4_v3_identidad_guarda_y_despues_op21():
+    fn = _nodo(EXCEPCION_V3, "corregir_categoria_v3.operacion")
+    identidad, guarda = _llamadas(fn, "_identidad"), _llamadas(fn, "validar_categoria_y_magnitudes")
+    datos, corregir = _llamadas(fn, "DatosCorreccion"), _llamadas(fn, "corregir")
+    assert len(identidad) == len(guarda) == len(datos) == len(corregir) == 1
+    assert identidad[0].lineno < guarda[0].lineno < datos[0].lineno <= corregir[0].lineno
+
+
+def test_i3_v3_solo_app_llama_al_adaptador():
+    for p in _productivos_py():
+        ruta = _rel(p)
+        if ruta == EXCEPCION_V3:
+            continue
+        arbol = ast.parse(p.read_bytes().decode("utf-8"))
+        for n in ast.walk(arbol):
+            if isinstance(n, ast.ImportFrom) and n.module == "app.api.ejecucion_categoria_v3":
+                raise AssertionError(f"{ruta} importa nombres de la excepcion V3")
+            if isinstance(n, ast.ImportFrom) and n.module == "app.api" and any(
+                    a.name == "ejecucion_categoria_v3" for a in n.names):
+                assert ruta == "backend/app/api/app.py", ruta
+                usados = {m.attr for m in ast.walk(arbol) if isinstance(m, ast.Attribute)
+                          and isinstance(m.value, ast.Name) and m.value.id == "ejv3"}
+                assert usados == {"corregir_categoria_v3"}, usados

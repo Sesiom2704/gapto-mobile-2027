@@ -20,6 +20,8 @@
 // v0.16.0 (F05-06 M5-B; F04-D065, F05-D047): «Dar por cubierta» POST /v1/previsiones/{id}/dar-por-realizada y «Reabrir» POST …/reabrir (con `sucesor_row_version` cuando la lectura trae sucesor), ambas con la clasificación de escritura como «No hubo» (indeterminado = misma identidad; el reintento devuelve el estado actual). El detalle añade `pendiente` (esperado − registrado, con signo; derivado, nunca guardado), `recalculable`, `sucesor` y las acciones `dar_por_cubierta` y `reabrir`.
 // v0.17.0 (F05-06 M1; lámina EDIT-HECHO v0.1; F05 §61.2): GET /v1/hechos/{id}/edicion (elegibilidad visible, informativa: el servidor revalida) y las escrituras «Corregir» (POST /v1/hechos/{id}/corregir-pago, POST /v1/transferencias/{id}/corregir) y «Anular por duplicado» (POST /v1/hechos/{id}/anular-duplicado), con la clasificación de escritura (indeterminado = reintentar la MISMA intención: el motor la reconoce por su request_id y no corrige ni anula dos veces). Tipos propios en este fichero.
 // Versión: 0.17.0
+// v0.18.0 (F05-06 M1 v1.1; Q9 opción (a)): «Corregir categoría» de un registro de V3, POST /v1/hechos/{id}/corregir-categoria (lista blanca: versión, motivo y `categoria_id`), con la clasificación de escritura (indeterminado = reintentar la MISMA intención). La lectura /edicion trae `categoria` y `acciones.corregir_categoria`, ambos null fuera de V3.
+// Versión: 0.18.0
 // ============================================================
 
 import type { Ambito, CategoriaNodo } from '../domain/categoria';
@@ -739,7 +741,15 @@ export interface EdicionHecho {
   origen_v3: boolean;
   anulado: { fecha: string | null; motivo: string | null } | null;
   movimientos: MovimientoEdicion[];
-  acciones: { corregir: AccionEdicionWire; anular_duplicado: AccionEdicionWire };
+  /** Solo V3: el efecto único y su categoría actual. */
+  categoria?: { efecto_id: string; naturaleza: 'GASTO' | 'INGRESO'; categoria_id: string | null; nombre: string | null } | null;
+  acciones: { corregir: AccionEdicionWire; anular_duplicado: AccionEdicionWire; corregir_categoria?: AccionEdicionWire | null };
+}
+export interface PayloadCorregirCategoria {
+  intencion_id: string;
+  row_version: number;
+  motivo: string;
+  categoria_id: string;
 }
 export interface PayloadCorregirPago {
   intencion_id: string;
@@ -907,6 +917,7 @@ export interface ClienteApi {
   corregirPago(id: string, p: PayloadCorregirPago): Promise<Respuesta<ResultadoEdicion>>;
   corregirTransferencia(id: string, p: PayloadCorregirTransferencia): Promise<Respuesta<ResultadoEdicion>>;
   anularDuplicado(id: string, p: PayloadAnularDuplicado): Promise<Respuesta<ResultadoEdicion>>;
+  corregirCategoria(id: string, p: PayloadCorregirCategoria): Promise<Respuesta<ResultadoEdicion>>;
 }
 
 const CAT = '/v1/categorias';
@@ -1085,5 +1096,6 @@ export function crearCliente(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): C
     corregirPago: (id, payload) => llamar(`${HECHO(id)}/corregir-pago`, post(payload), true),
     corregirTransferencia: (id, payload) => llamar(`/v1/transferencias/${encodeURIComponent(id)}/corregir`, post(payload), true),
     anularDuplicado: (id, payload) => llamar(`${HECHO(id)}/anular-duplicado`, post(payload), true),
+    corregirCategoria: (id, payload) => llamar(`${HECHO(id)}/corregir-categoria`, post(payload), true),
   };
 }

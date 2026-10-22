@@ -4,16 +4,17 @@
 // Ruta: mobile/src/components/EdicionHecho.tsx
 // Descripción: Hojas de «Más» del detalle de un hecho (F05-06 M1; lámina EDIT-HECHO v0.1 D-EDIT-01, 06, 07; CONTRATO_M1 v0.1 §2). HojaMasHecho: «Corregir» y «Anular por duplicado»; lo que el servidor no admite aparece atenuado con su motivo (nunca se oculta en silencio) y no se puede pulsar. HojaAnularDuplicado (B1): qué hace y qué no (anular no borra; deja de contar en el saldo y en el Resultado; no se deshace; si hubo devolución, otra vía), declaración explícita de duplicado SIN marcar al entrar, motivo con opciones fijas más «Otro…» y «Anular registro» en rojo, que solo se habilita con la declaración y el motivo. Sin swipe (SWIPE-RULE: nunca anular ni corregir por gesto).
 // Versión: 0.1.0 (F05-06 M1)
+// Versión: 0.2.0 (F05-06 M1 v1.1; Q9 opción (a)): en un registro de V3, «Más» ofrece además «Corregir categoría» (solo si el servidor trae la acción; atenuada con su motivo si no se admite). HojaCorregirCategoria: lo que NO cambia (importe, fecha, cuenta y descripción), la categoría actual → la nueva (se elige con el selector del registro), motivo con opciones fijas más «Otro…» y «Guardar categoría», que solo se habilita con una categoría distinta y el motivo.
 // ============================================================
 
 import React from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type { AccionEdicionWire } from '../api/cliente';
-import { DECLARACION_DUPLICADO, MOTIVOS_ANULAR, TEXTO_ANULAR, TEXTO_ANULAR_DEVOLUCION } from '../domain/edicion';
+import { DECLARACION_DUPLICADO, MOTIVOS_ANULAR, MOTIVOS_CATEGORIA, TEXTO_ANULAR, TEXTO_ANULAR_DEVOLUCION, TEXTO_SOLO_CATEGORIA } from '../domain/edicion';
 import { useTema } from '../theme/tema';
 import { espacio, radio, TACTIL_MIN, tipo } from '../theme/tokens';
-import { BotonTexto, Chip } from './Basicos';
+import { BotonPrimario, BotonTexto, Chip } from './Basicos';
 import { Hoja } from './HojasCategoria';
 
 /** Acción de «Más»: atenuada con su motivo cuando el servidor no la admite. */
@@ -33,13 +34,18 @@ function AccionMas(p: { testID: string; titulo: string; accion: AccionEdicionWir
 }
 
 export function HojaMasHecho(p: {
-  acciones: { corregir: AccionEdicionWire; anular_duplicado: AccionEdicionWire };
+  acciones: { corregir: AccionEdicionWire; anular_duplicado: AccionEdicionWire; corregir_categoria?: AccionEdicionWire | null };
   onCorregir: () => void;
   onAnular: () => void;
+  onCorregirCategoria?: () => void;
   onCerrar: () => void;
 }) {
+  const categoria = p.acciones.corregir_categoria;
   return (
     <Hoja titulo="Más" testID="hoja-mas-hecho">
+      {categoria && p.onCorregirCategoria ? (
+        <AccionMas testID="mas-corregir-categoria" titulo="Corregir categoría" accion={categoria} onPress={p.onCorregirCategoria} />
+      ) : null}
       <AccionMas testID="mas-corregir" titulo="Corregir" accion={p.acciones.corregir} onPress={p.onCorregir} />
       <AccionMas testID="mas-anular" titulo="Anular por duplicado" accion={p.acciones.anular_duplicado} critico onPress={p.onAnular} />
       <BotonTexto testID="mas-hecho-cerrar" titulo="Cancelar" onPress={p.onCerrar} />
@@ -91,6 +97,48 @@ export function HojaAnularDuplicado(p: {
         <Text style={[tipo.bodyEmphasis, { color: c.onAccent }]}>{p.enviando ? 'Anulando…' : 'Anular registro'}</Text>
       </Pressable>
       <BotonTexto testID="anular-cancelar" titulo="Cancelar" onPress={p.onCerrar} />
+    </Hoja>
+  );
+}
+
+export function HojaCorregirCategoria(p: {
+  titulo: string;
+  actual: string | null;
+  nueva: string | null;
+  onElegir: () => void;
+  motivo: string;
+  motivoOtro: boolean;
+  onMotivo: (texto: string, otro: boolean) => void;
+  listo: boolean;
+  enviando: boolean;
+  error: string | null;
+  onGuardar: () => void;
+  onCerrar: () => void;
+}) {
+  const { c } = useTema();
+  const puede = p.listo && !p.enviando;
+  return (
+    <Hoja titulo={`Corregir categoría de «${p.titulo}»`} testID="hoja-corregir-categoria">
+      <Text testID="categoria-solo" style={[tipo.body, { color: c.textSecondary }]}>{TEXTO_SOLO_CATEGORIA}</Text>
+      <Text testID="categoria-actual" style={[tipo.footnote, { color: c.textSecondary }]}>{`Ahora: ${p.actual ?? 'Sin categoría'}`}</Text>
+      <Pressable testID="categoria-elegir" accessibilityRole="button" accessibilityLabel="Elegir categoría" onPress={p.onElegir}
+        style={[s.accion, { borderColor: c.borderStandard, backgroundColor: c.surfacePrimary }]}>
+        <Text style={[tipo.bodyEmphasis, { color: p.nueva ? c.textPrimary : c.accent }]}>{p.nueva ? `Nueva: ${p.nueva}` : 'Elegir categoría'}</Text>
+      </Pressable>
+      <Text style={[tipo.footnote, { color: c.textSecondary, fontWeight: '600' }]}>Motivo obligatorio</Text>
+      <View style={s.chips}>
+        {MOTIVOS_CATEGORIA.map((m, i) => (
+          <Chip key={m} testID={`categoria-motivo-${i}`} etiqueta={m} seleccionado={!p.motivoOtro && p.motivo === m} onPress={() => p.onMotivo(m, false)} />
+        ))}
+        <Chip testID="categoria-motivo-otro" etiqueta="Otro…" seleccionado={p.motivoOtro} onPress={() => p.onMotivo('', true)} />
+      </View>
+      {p.motivoOtro ? (
+        <TextInput testID="categoria-motivo-texto" accessibilityLabel="Motivo" value={p.motivo} onChangeText={(t) => p.onMotivo(t, true)} maxLength={200}
+          style={[tipo.body, s.input, { color: c.textPrimary, borderColor: c.borderStandard, backgroundColor: c.surfacePrimary }]} />
+      ) : null}
+      {p.error ? <Text testID="categoria-error" accessibilityRole="alert" style={[tipo.footnote, { color: c.critical }]}>{p.error}</Text> : null}
+      <BotonPrimario testID="categoria-guardar" titulo={p.enviando ? 'Guardando…' : 'Guardar categoría'} deshabilitado={!puede} onPress={() => { if (puede) p.onGuardar(); }} />
+      <BotonTexto testID="categoria-cancelar" titulo="Cancelar" onPress={p.onCerrar} />
     </Hoja>
   );
 }

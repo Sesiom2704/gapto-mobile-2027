@@ -4,9 +4,10 @@
 // Ruta: mobile/src/domain/edicion.ts
 // Descripción: «Corregir» y «Anular por duplicado» (F05-06 M1; lámina EDIT-HECHO v0.1, D-EDIT-01..08 y P-EDIT-01..05; F05 §61.2 F05-D047; CONTRATO_M1 v0.1 §2). Lógica pura: motivos fijos más «Otro…» (P-EDIT-05, no configurables), textos de la lámina (solo errores, INV-07; anular no borra), cambios antes → después de la corrección (importe, fecha y cuenta de un pago simple; importe, fecha y cuentas de una transferencia: P-EDIT-03, el importe va siempre con su movimiento), lo que falta para revisar y los payloads de OP-21P, OP-21T y OP-03P. La declaración de duplicado es explícita y sin valor por defecto. La elegibilidad viene del servidor, que además revalida cada envío: aquí nada decide si algo es corregible.
 // Versión: 0.1.0 (F05-06 M1)
+// Versión: 0.2.0 (F05-06 M1 v1.1; Q9 opción (a)): «Corregir categoría» de V3. Motivos fijos más «Otro…», el texto de lo que NO cambia (importe, fecha, cuenta y descripción) y el payload de la lista blanca (versión, motivo y `categoria_id`). La descripción o la nota de V3 no se corrige (DEU-M1-V3-NOTA, F06).
 // ============================================================
 
-import type { EdicionHecho, PayloadAnularDuplicado, PayloadCorregirPago, PayloadCorregirTransferencia } from '../api/cliente';
+import type { EdicionHecho, PayloadAnularDuplicado, PayloadCorregirCategoria, PayloadCorregirPago, PayloadCorregirTransferencia } from '../api/cliente';
 import { parsearImporte } from './importe';
 
 export const MOTIVOS_CORREGIR = ['Importe mal tecleado', 'Fecha equivocada', 'Otro dato mal elegido'] as const;
@@ -17,6 +18,19 @@ export const TEXTO_ANULAR = 'Úsalo solo si este registro está repetido. Queda 
 export const TEXTO_ANULAR_DEVOLUCION = 'Si el gasto ocurrió y luego te devolvieron el dinero, usa «Registrar devolución».';
 export const DECLARACION_DUPLICADO = 'Este registro está repetido; el cargo no ocurrió dos veces.';
 export const TEXTO_ANULADO = 'Registro anulado: ya no cuenta en tus cuentas ni en el Resultado.';
+export const MOTIVOS_CATEGORIA = ['Categoría mal asignada en V3', 'Prefiero otra categoría'] as const;
+export const TEXTO_SOLO_CATEGORIA = 'Registro migrado de la versión anterior (V3): solo se cambia su categoría. El importe, la fecha, la cuenta y la descripción no cambian.';
+export const TEXTO_CATEGORIA_CORREGIDA = 'Categoría corregida. Queda anotado quién, cuándo y por qué.';
+
+/** «Corregir categoría» de V3: solo la categoría (lista blanca del servidor). */
+export function componerCorreccionCategoria(e: EdicionHecho, categoriaId: string, motivo: string, intencionId: string): PayloadCorregirCategoria {
+  return { intencion_id: intencionId, row_version: e.row_version, motivo: motivo.trim(), categoria_id: categoriaId };
+}
+
+/** Se puede guardar: hay categoría nueva distinta de la actual y motivo. */
+export function categoriaLista(e: EdicionHecho, categoriaId: string | null, motivo: string): boolean {
+  return !!categoriaId && categoriaId !== (e.categoria?.categoria_id ?? null) && !!motivo.trim();
+}
 
 export interface FormularioEdicion {
   importe: string;

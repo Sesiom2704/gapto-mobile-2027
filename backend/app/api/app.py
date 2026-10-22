@@ -227,6 +227,14 @@
 #   intencion_id es el request_id (reintento idempotente). Rechazos con
 #   errores_http.rechazo_edicion; VERSION_DESFASADA 409 con la edicion releida.
 # Version: 0.27.0
+#   v0.28.0 (F05-06 M1 v1.1; Q9 opcion (a); F05-D047 §61.3 limitado a la
+#   categoria): POST /v1/hechos/{id}/corregir-categoria «Corregir categoria»
+#   de un registro de V3 (ejecucion_categoria_v3: OP-21 con lista blanca
+#   {categoria_id}, C-a y C07 en el servidor). Misma envoltura que M1
+#   (_escritura_edicion): request_id = intencion_id, rechazos del motor con
+#   rechazo_edicion y VERSION_DESFASADA 409 con la edicion releida. La
+#   lectura /edicion trae `acciones.corregir_categoria` solo en V3.
+# Version: 0.28.0
 # ============================================================
 
 from __future__ import annotations
@@ -376,9 +384,11 @@ from app.api import ejecucion_reparto as rep
 from app.api import ejecucion_prevision as ejp
 from app.api import ejecucion_anulacion as eja
 from app.api import ejecucion_correccion as ejc
+from app.api import ejecucion_categoria_v3 as ejv3
 from app.api.dto_edicion import (
     EdicionHecho,
     IntencionAnularDuplicado,
+    IntencionCorregirCategoriaV3,
     IntencionCorregirPago,
     IntencionCorregirTransferencia,
     ResultadoEdicion,
@@ -1228,7 +1238,8 @@ def create_app(
         d = unidad.ejecutar(contexto(), lambda s: lect_edi.edicion(s, hecho_id), nombre="F05-06 M1 edicion")
         if d is not None:
             for accion in d["acciones"].values():
-                accion["motivo"] = eh.MOTIVOS_EDICION.get(accion["codigo"]) if accion["codigo"] else None
+                if accion is not None:
+                    accion["motivo"] = eh.MOTIVOS_EDICION.get(accion["codigo"]) if accion["codigo"] else None
         return d
 
     def _escritura_edicion(hecho_id: uuid.UUID, intencion, ejecutar):
@@ -1273,6 +1284,12 @@ def create_app(
     def anular_duplicado_hecho(hecho_id: uuid.UUID, intencion: IntencionAnularDuplicado):
         return _escritura_edicion(hecho_id, intencion,
                                   lambda ctx: eja.anular_duplicado_http(unidad, ctx, hecho_id, intencion))
+
+    @app.post("/v1/hechos/{hecho_id}/corregir-categoria", response_model=ResultadoEdicion,
+              dependencies=[Depends(autorizar)])
+    def corregir_categoria_hecho(hecho_id: uuid.UUID, intencion: IntencionCorregirCategoriaV3):
+        return _escritura_edicion(hecho_id, intencion,
+                                  lambda ctx: ejv3.corregir_categoria_v3(unidad, ctx, hecho_id, intencion))
 
     # ------------------------------------------------------------ F05-06 M5 confirmacion de previsiones
     def _no_encontrada() -> JSONResponse:

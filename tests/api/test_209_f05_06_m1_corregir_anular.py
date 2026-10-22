@@ -24,6 +24,9 @@
 #       hecho en OP-21P/OP-21T; raiz sin cuentas en OP-03P.
 #   Reloj fijo 2026-10-10 12:00Z (Madrid).
 # Version: 0.1.0 (F05-06 M1)
+# Version: 0.2.0 (F05-06 M1 v1.1; Q9 opcion (a)): la lectura trae
+#   `acciones.corregir_categoria` (None fuera de V3, test_210); las aserciones
+#   de acciones lo tienen en cuenta. Nada mas cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -100,7 +103,8 @@ def test_edicion_pago_simple_elegible_con_versiones(t):
     e = _ed(cli, hid)
     assert (e["estado"], e["tipo"], e["importe"], e["origen_v3"], e["anulado"]) == ("ACTIVO", "GASTO", "48.72", False, None)
     assert e["acciones"] == {"corregir": {"disponible": True, "codigo": None, "motivo": None},
-                             "anular_duplicado": {"disponible": True, "codigo": None, "motivo": None}}
+                             "anular_duplicado": {"disponible": True, "codigo": None, "motivo": None},
+                             "corregir_categoria": None}
     [m] = e["movimientos"]
     assert (m["pata"], m["cuenta"]["id"], m["importe"]) == ("SALIDA", str(cta), "48.72")
     assert m["row_version"] == _uno(owner, "SELECT row_version FROM gapto.movimientos_tesoreria WHERE id = %s",
@@ -304,7 +308,8 @@ def test_anular_duplicado_con_declaracion(t):
     assert _saldo(owner, cta) == saldo
     e = _ed(cli, hid)  # el hecho no desaparece
     assert e["estado"] == "ANULADO" and e["anulado"]["motivo"] == "Lo registré dos veces"
-    assert all(a["codigo"] == "HECHO_ANULADO" and not a["disponible"] for a in e["acciones"].values())
+    assert e["acciones"]["corregir_categoria"] is None
+    assert all(a["codigo"] == "HECHO_ANULADO" and not a["disponible"] for a in e["acciones"].values() if a is not None)
 
 
 def test_anular_duplicado_sin_declaracion(t):
