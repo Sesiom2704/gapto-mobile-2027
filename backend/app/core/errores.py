@@ -15,6 +15,11 @@
 #   operacion y reintentar no la hara posible". Fusionarlos haria que la UX
 #   reintentase indefinidamente algo imposible, o que abandonase algo que solo
 #   necesitaba otro intento.
+# Version: 0.22.0
+#   0.22.0 (F04-D065, M5-B de F05-06; AJ-M5BM1-03): `PREVISION_SIN_REALIDAD_ACTIVA`.
+#   `dar_por_realizada` ("Dar por cubierta") rechaza una prevision ABIERTA sin
+#   ningun hecho ACTIVO vinculado bajo bloqueo: sin realidad no se cubre nada
+#   (para eso existe omitir). Ningun codigo existente cambia de significado.
 # Version: 0.21.0
 #   0.21.0 (F04-R1 G-R1-C; F04-D058): `PORCION_DE_REALIDAD_EXCEDIDA`. OP-17 y
 #   corregir_vinculo rechazan dejar la porcion acumulada de un hecho entre
@@ -352,6 +357,9 @@ class CodigoError(str, enum.Enum):
     PORCION_DE_REALIDAD_EXCEDIDA = "PORCION_DE_REALIDAD_EXCEDIDA"
     REALIZACION_SIN_HECHO_ACTIVO = "REALIZACION_SIN_HECHO_ACTIVO"
     ESTADO_PREVISION_INCOMPATIBLE = "ESTADO_PREVISION_INCOMPATIBLE"
+    # F04-D065. Dar por cubierta exige al menos un hecho ACTIVO vinculado,
+    # contado bajo bloqueo; sin realidad la via es omitir, nunca este comando.
+    PREVISION_SIN_REALIDAD_ACTIVA = "PREVISION_SIN_REALIDAD_ACTIVA"
 
     # --- F04-05 · importe y materializacion -------------------------------
     ASIGNACION_MULTIDIVISA_NO_DEMOSTRADA = "ASIGNACION_MULTIDIVISA_NO_DEMOSTRADA"

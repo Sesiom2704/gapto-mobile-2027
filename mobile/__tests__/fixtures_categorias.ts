@@ -14,6 +14,7 @@
 // Versión: 0.7.0 (F05-05 K3): el stub incluye los métodos de F05-05: señales, búsqueda de terceros, afinidades del tercero, Actividad (página vacía) e Inicio (nombre null y Resultado a cero) por defecto; alta y retirada de afinidad y detalle de la Actividad no esperados (lanzan).
 // Versión: 0.10.0 (F05-06 M3 §B2): el stub incluye reparto y posiciones: «Pendiente con» sin posiciones y un reparto no corregible (SIN_REPARTO) por defecto; gasto compartido, cobro, pago, perdón y corrección no esperados (lanzan).
 // Versión: 0.11.0 (F05-06 M5 §B2): el stub incluye las previsiones: Inicio y «Pendientes» vacíos por defecto (ni campana ni bloque), candidatos vacíos; detalle, vincular y omitir no esperados (lanzan).
+// Versión: 0.12.0 (F05-06 M5-B): el stub incluye «Dar por cubierta» y «Reabrir» (escrituras no esperadas: lanzan).
 // ============================================================
 
 import type { ClienteApi, ListaPreferencias, PropuestaRegistro, Respuesta } from '../src/api/cliente';
@@ -134,6 +135,8 @@ export function clienteCategoriasStub(
     candidatosPrevision: jest.fn(async () => ({ tipo: 'OK' as const, datos: { prevision_id: '', ampliado: false, ventana_dias: 15, mensaje: null, candidatos: [] } })),
     vincularPrevision: noEsperado('vincularPrevision'),
     omitirPrevision: noEsperado('omitirPrevision'),
+    darPorCubiertaPrevision: noEsperado('darPorCubiertaPrevision'),
+    reabrirPrevision: noEsperado('reabrirPrevision'),
   };
 }
 

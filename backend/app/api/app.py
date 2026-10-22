@@ -205,6 +205,15 @@
 #   crea, cancela, corrige, retira ni recalcula previsiones. Los errores de
 #   prevision de esas rutas usan errores_http.rechazo_prevision.
 # Version: 0.25.0
+#   v0.26.0 (F05-06 M5-B; F05-D047 §61.1; F04-D065): dos rutas nuevas en
+#   ejecucion_prevision.py, sin swipe:
+#     POST /v1/previsiones/{id}/dar-por-realizada «Dar por cubierta»
+#          (dar_por_realizada; PREVISION_SIN_REALIDAD_ACTIVA 409)
+#     POST /v1/previsiones/{id}/reabrir           «Reabrir» REALIZADA u OMITIDA
+#          (corregir_estado_terminal; CANCELADA rechazada en el adaptador;
+#          TRAMO_RODANTE_REQUIERE_REVISION 409 sin reintento automatico)
+#   Los 409 de estado o version devuelven el estado releido (como omitir).
+# Version: 0.26.0
 # ============================================================
 
 from __future__ import annotations
@@ -355,10 +364,13 @@ from app.api.dto_prevision import (
     CandidatosPrevision,
     DetallePrevision,
     InicioPrevisiones,
+    IntencionDarPorCubierta,
     IntencionOmitir,
+    IntencionReabrir,
     IntencionVincular,
     PendientesPrevisiones,
     ResultadoOmitir,
+    ResultadoTransicion,
     ResultadoVinculo,
 )
 from app.previsiones import lecturas as lect_prev
@@ -1258,6 +1270,33 @@ def create_app(
             return respuesta
         return {"intencion_id": intencion.intencion_id, "prevision_id": prevision_id, "estado": salida.estado,
                 "row_version": salida.row_version, "aviso": _AVISO_F05}
+
+    # ------------------------------------------------------------ F05-06 M5-B dar por cubierta y reabrir
+    def _transicion(prevision_id: uuid.UUID, intencion, ejecutar):
+        try:
+            salida = ejecutar()
+        except ErrorMotor as exc:
+            releer = exc.codigo in (CodigoError.ESTADO_PREVISION_INCOMPATIBLE, CodigoError.VERSION_DESFASADA)
+            respuesta = _rechazo_motor_prevision(exc, {"estado_actual": _estado_actual(prevision_id)} if releer else None)
+            if respuesta is None:
+                raise
+            return respuesta
+        if isinstance(salida, RechazoRegistro):
+            status, cuerpo = eh.rechazo_prevision(salida.codigo, {"estado_actual": _estado_actual(prevision_id)})
+            return JSONResponse(cuerpo, status_code=status)
+        return {"intencion_id": intencion.intencion_id, "prevision_id": prevision_id, "estado": salida.estado,
+                "row_version": salida.row_version, "aviso": _AVISO_F05}
+
+    @app.post("/v1/previsiones/{prevision_id}/dar-por-realizada", response_model=ResultadoTransicion,
+              dependencies=[Depends(autorizar)])
+    def dar_por_realizada_prevision(prevision_id: uuid.UUID, intencion: IntencionDarPorCubierta):
+        return _transicion(prevision_id, intencion,
+                           lambda: ejp.dar_por_cubierta(unidad, contexto(), prevision_id, intencion))
+
+    @app.post("/v1/previsiones/{prevision_id}/reabrir", response_model=ResultadoTransicion,
+              dependencies=[Depends(autorizar)])
+    def reabrir_prevision(prevision_id: uuid.UUID, intencion: IntencionReabrir):
+        return _transicion(prevision_id, intencion, lambda: ejp.reabrir(unidad, contexto(), prevision_id, intencion))
 
     # ------------------------------------------------------------ F05-05 K2 §1.2-§1.4
     def _lectura_con_fecha(nombre_op: str, fecha: dt.date, operacion) -> dict | JSONResponse:

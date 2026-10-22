@@ -8,6 +8,7 @@
 // Versión: 0.3.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2): acciones accesibles «derecha» (Pagado / Cobrado) e «izquierda» (No hubo); el importe desconocido y el pago parcial ya tienen gesto: la derecha abre el formulario rellenado y «No hubo» solo existe sin pagos enlazados (accion_rapida.test.tsx).
 // Versión: 0.4.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados invertidos — la acción principal se desliza a la IZQUIERDA y la alternativa a la DERECHA; acciones accesibles con el nombre de la dirección nueva.
 // Versión: 0.5.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
+// Versión: 0.6.0 (F05-06 M5-B; F04-D065, F05-D047): el parcial ya ofrece «Dar por cubierta» (antes se exigía su ausencia, DEU-M5-CERRAR-PARCIAL). Bloque M5-B: «Queda sin cubrir ±X €», dónde se ofrecen las dos acciones, hoja con motivo obligatorio (sugerencia + texto), PREVISION_SIN_REALIDAD_ACTIVA y TRAMO_RODANTE_REQUIERE_REVISION en la hoja sin reintento automático, 409 con el estado actual, misma identidad tras un fallo, «Reabrir» en «Más» (REALIZADA, sin realidad activa, OMITIDA; versión del sucesor) y CANCELADA atenuada.
 // ============================================================
 
 import './tiempos_rn';
@@ -26,9 +27,13 @@ import {
   faltaRegistro,
   importeFila,
   lineaFila,
+  ofreceDarPorCubierta,
+  ofreceMas,
+  quedaSinCubrirTexto,
   textoNaturaleza,
   textoSeVinculara,
 } from '../src/domain/prevision';
+import { FilaPrevisionVista } from '../src/components/Prevision';
 import { HomeScreen } from '../src/screens/HomeScreen';
 import { PendientesScreen } from '../src/screens/PendientesScreen';
 import { PrevisionDetalleScreen } from '../src/screens/PrevisionDetalleScreen';
@@ -43,6 +48,7 @@ const AHORA = () => new Date(2026, 9, 10, 10, 0, 0);
 const ACCIONES_OK = {
   registrar: { disponible: true, motivo: null }, ya_lo_registre: { disponible: true, motivo: null },
   omitir: { disponible: true, motivo: null }, swipe: { disponible: true, motivo: null },
+  dar_por_cubierta: { disponible: true, motivo: null }, reabrir: { disponible: false, motivo: 'Ya está pendiente.' },
 };
 
 function fila(o: Partial<FilaPrevision> = {}): FilaPrevision {
@@ -65,7 +71,7 @@ const TRASPASO = fila({ id: 'traspaso', tipo: 'TRANSFERENCIA', naturaleza: 'ENTR
 const ALQUILER = fila({ id: 'alquiler', concepto: 'Alquiler', fecha_desde: '2026-11-01', fecha_hasta: '2026-11-01', importe_esperado: '561.00', queda: '561.00', vencida: false });
 
 function detalle(f: FilaPrevision, o: Partial<DetallePrevision> = {}): DetallePrevision {
-  return { ...f, estado_derivado: null, vinculos: [], acciones: ACCIONES_OK, ...o };
+  return { ...f, estado_derivado: null, vinculos: [], acciones: ACCIONES_OK, pendiente: f.queda, recalculable: false, sucesor: null, ...o };
 }
 
 let n = 0;
@@ -322,7 +328,7 @@ describe('detalle', () => {
     expect(screen.getByTestId('detalle-queda')).toHaveTextContent('80,00 €');
     expect(screen.getByTestId('prevision-accion-omitir')).toBeDisabled();
     expect(screen.getByTestId('prevision-accion-omitir-motivo')).toHaveTextContent(motivo);
-    expect(plano()).not.toMatch(/Dar por cubierta/);
+    expect(screen.getByTestId('prevision-accion-dar-por-cubierta')).toBeEnabled(); // M5-B: el parcial ya puede darse por cubierta
   });
 
   test('B4/B6: «Desconocido» sin confirmación rápida y desviación visible', async () => {
@@ -336,7 +342,7 @@ describe('detalle', () => {
     const motivo = 'Esta previsión ya no está pendiente: aquí solo se consulta.';
     const no = { disponible: false, motivo };
     montarDetalle(conDetalle(detalle(fila({ estado: 'REALIZADA' }), { estado_derivado: 'REALIZADA_SIN_REALIDAD_ACTIVA',
-      acciones: { registrar: no, ya_lo_registre: no, omitir: no, swipe: no } })));
+      acciones: { registrar: no, ya_lo_registre: no, omitir: no, swipe: no, dar_por_cubierta: no, reabrir: no } })));
     expect(await screen.findByTestId('prevision-estado')).toHaveTextContent('Cubierta sin registro activo');
     for (const id of ['prevision-accion-registrar', 'prevision-accion-ya', 'prevision-accion-omitir']) expect(screen.getByTestId(id)).toBeDisabled();
   });
@@ -468,5 +474,151 @@ describe('detalle', () => {
     expect(await screen.findByText('No sabemos si se guardó')).toBeTruthy();
     expect(screen.getByTestId('aviso-estado-texto')).toHaveTextContent('No sabemos si se guardó tu acción anterior. Este es el estado actual.');
     expect(screen.getByTestId('aviso-estado-valor')).toHaveTextContent('Omitida');
+  });
+});
+
+// ==================================================================
+// M5-B · «Dar por cubierta» y «Reabrir» (F04-D065, F05-D047)
+// ==================================================================
+const NO = (motivo: string) => ({ disponible: false, motivo });
+const PARCIAL = detalle(SEGURO, { pendiente: '80.00', acciones: { ...ACCIONES_OK, reabrir: NO('Ya está pendiente.') } });
+const realizada = (o: Partial<DetallePrevision> = {}) => detalle(fila({ estado: 'REALIZADA', cubierto: '40.00', con_realidad: true, pagos: 1 }), {
+  acciones: { registrar: NO('x'), ya_lo_registre: NO('x'), omitir: NO('x'), swipe: NO('x'), dar_por_cubierta: NO('x'), reabrir: { disponible: true, motivo: null } }, ...o });
+
+describe('M5-B dominio', () => {
+  test('«Queda sin cubrir ±X €» con el pendiente derivado; desconocido nunca 0', () => {
+    expect(quedaSinCubrirTexto({ pendiente: '80.00' })).toBe('+80,00 €');
+    expect(quedaSinCubrirTexto({ pendiente: '-10.00' })).toBe('−10,00 €');
+    expect(quedaSinCubrirTexto({ pendiente: '0.00' })).toBe('0,00 €');
+    expect(quedaSinCubrirTexto({ pendiente: null })).toBe('Desconocido');
+  });
+
+  test('«Dar por cubierta» solo en una PARCIAL y «Más» solo en las terminales', () => {
+    expect(ofreceDarPorCubierta(PARCIAL)).toBe(true);
+    expect(ofreceDarPorCubierta(detalle(fila()))).toBe(false); // sin realidad: para eso está «No hubo»
+    expect(ofreceDarPorCubierta(realizada())).toBe(false);
+    expect(ofreceDarPorCubierta(detalle(SEGURO, { estado_derivado: 'REQUIERE_REVISION' }))).toBe(false);
+    expect(ofreceMas(PARCIAL)).toBe(false);
+    expect(['REALIZADA', 'OMITIDA', 'CANCELADA'].map((e) => ofreceMas({ estado: e }))).toEqual([true, true, true]);
+  });
+});
+
+describe('M5-B detalle', () => {
+  test('«Dar por cubierta»: hoja con Esperado / Registrado / Queda sin cubrir; sin motivo no se confirma; sugerencia + texto', async () => {
+    const dar = jest.fn(async (_id: string, pl: any) => ({ tipo: 'OK', datos: { ...pl, prevision_id: 'seguro', estado: 'REALIZADA', row_version: 2 } }) as any);
+    const onCerrar = montarDetalle(conDetalle(PARCIAL, { darPorCubiertaPrevision: dar }));
+    fireEvent.press(await screen.findByTestId('prevision-accion-dar-por-cubierta'));
+    expect(screen.getByTestId('hoja-dar-por-cubierta')).toBeTruthy();
+    expect(screen.getByTestId('dar-esperado')).toHaveTextContent('120,00 €');
+    expect(screen.getByTestId('dar-registrado')).toHaveTextContent('40,00 €');
+    expect(screen.getByTestId('dar-queda')).toHaveTextContent('+80,00 €');
+    expect(plano()).toMatch(/no se guarda/);
+    expect(screen.getByTestId('dar-confirmar')).toBeDisabled(); // motivo obligatorio, nada preseleccionado
+    fireEvent.press(screen.getByTestId('dar-sugerencia-0'));
+    expect(screen.getByTestId('dar-motivo').props.value).toBe('La factura definitiva fue menor');
+    fireEvent.changeText(screen.getByTestId('dar-motivo'), '  La factura definitiva fue menor (abono en noviembre) ');
+    await act(async () => fireEvent.press(screen.getByTestId('dar-confirmar')));
+    expect(dar.mock.calls[0]).toEqual(['seguro', { intencion_id: expect.any(String), row_version: 1, motivo: 'La factura definitiva fue menor (abono en noviembre)' }]);
+    expect(onCerrar).toHaveBeenCalledWith(true);
+  });
+
+  test('«Dar por cubierta» no se ofrece sin realidad, y atenuada con su motivo si el servidor no la admite', async () => {
+    montarDetalle(conDetalle(detalle(fila(), { acciones: { ...ACCIONES_OK, dar_por_cubierta: NO('sin realidad') } })));
+    await screen.findByTestId('prevision-accion-registrar');
+    expect(screen.queryByTestId('prevision-accion-dar-por-cubierta')).toBeNull();
+    expect(screen.queryByTestId('prevision-mas')).toBeNull();
+    screen.unmount();
+    const motivo = 'Solo se pueden confirmar previsiones en euros en esta versión.';
+    montarDetalle(conDetalle(detalle(SEGURO, { acciones: { ...ACCIONES_OK, dar_por_cubierta: NO(motivo) } })), 'dark');
+    expect(await screen.findByTestId('prevision-accion-dar-por-cubierta')).toBeDisabled();
+    expect(screen.getByTestId('prevision-accion-dar-por-cubierta-motivo')).toHaveTextContent(motivo);
+  });
+
+  test('PREVISION_SIN_REALIDAD_ACTIVA: se explica en la hoja (informa de «No hubo» sin ejecutarlo) y se relee', async () => {
+    const mensaje = 'Esta previsión no tiene nada registrado: no se puede dar por cubierta. Si este mes no hubo, existe «No hubo este mes». No se ha guardado nada.';
+    const leer = jest.fn().mockResolvedValueOnce({ tipo: 'OK', datos: PARCIAL })
+      .mockResolvedValue({ tipo: 'OK', datos: detalle(fila(), { acciones: { ...ACCIONES_OK, dar_por_cubierta: NO(mensaje) } }) });
+    const omitir = jest.fn();
+    const c = cliente({ detallePrevision: leer as any, omitirPrevision: omitir as any,
+      darPorCubiertaPrevision: jest.fn(async () => ({ tipo: 'RECHAZADO', codigo: 'PREVISION_SIN_REALIDAD_ACTIVA', mensaje }) as any) });
+    montarDetalle(c);
+    fireEvent.press(await screen.findByTestId('prevision-accion-dar-por-cubierta'));
+    fireEvent.press(screen.getByTestId('dar-sugerencia-1'));
+    await act(async () => fireEvent.press(screen.getByTestId('dar-confirmar')));
+    expect(await screen.findByTestId('dar-error')).toHaveTextContent(/«No hubo este mes»/);
+    await waitFor(() => expect(leer).toHaveBeenCalledTimes(2));
+    expect(omitir).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('aviso-estado-actual')).toBeNull();
+  });
+
+  test('«Dar por cubierta»: 409 de versión enseña el estado actual; fallo de conexión reintenta con la MISMA identidad', async () => {
+    const dar = jest.fn()
+      .mockResolvedValueOnce({ tipo: 'INDETERMINADO', mensaje: 'No se ha podido confirmar.' })
+      .mockResolvedValueOnce({ tipo: 'RECHAZADO', codigo: 'ESTADO_PREVISION_INCOMPATIBLE', mensaje: 'Esta previsión ya no está pendiente.',
+        detalle: { estado_actual: { estado: 'REALIZADA', estado_derivado: null, row_version: 2, con_realidad: true, cubierto: '40.00' } } });
+    montarDetalle(conDetalle(PARCIAL, { darPorCubiertaPrevision: dar as any }));
+    fireEvent.press(await screen.findByTestId('prevision-accion-dar-por-cubierta'));
+    fireEvent.changeText(screen.getByTestId('dar-motivo'), 'No habrá más');
+    await act(async () => fireEvent.press(screen.getByTestId('dar-confirmar')));
+    expect(await screen.findByTestId('dar-error')).toHaveTextContent(/Puedes reintentar/);
+    await act(async () => fireEvent.press(screen.getByTestId('dar-confirmar')));
+    expect(dar.mock.calls[1][1].intencion_id).toBe(dar.mock.calls[0][1].intencion_id);
+    expect(await screen.findByText('No sabemos si se guardó')).toBeTruthy();
+    expect(screen.getByTestId('aviso-estado-valor')).toHaveTextContent('Cubierta');
+  });
+
+  test('«Reabrir» en «Más» de una REALIZADA con motivo; envía la versión del sucesor', async () => {
+    const reabrir = jest.fn(async (_id: string, pl: any) => ({ tipo: 'OK', datos: { ...pl, prevision_id: 'luz', estado: 'ABIERTA', row_version: 3 } }) as any);
+    const onCerrar = montarDetalle(conDetalle(realizada({ sucesor: { id: 'luz-2', row_version: 4 } }), { reabrirPrevision: reabrir }));
+    fireEvent.press(await screen.findByTestId('prevision-mas'));
+    expect(screen.getByTestId('hoja-mas')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('mas-reabrir'));
+    expect(screen.getByTestId('hoja-reabrir')).toBeTruthy();
+    expect(screen.getByTestId('reabrir-estado')).toHaveTextContent('Cubierta');
+    expect(screen.getByTestId('reabrir-sucesor')).toBeTruthy();
+    expect(screen.getByTestId('reabrir-confirmar')).toBeDisabled();
+    fireEvent.press(screen.getByTestId('reabrir-sugerencia-0'));
+    await act(async () => fireEvent.press(screen.getByTestId('reabrir-confirmar')));
+    expect(reabrir.mock.calls[0]).toEqual(['luz', { intencion_id: expect.any(String), row_version: 1, motivo: 'La marqué por error', sucesor_row_version: 4 }]);
+    expect(onCerrar).toHaveBeenCalledWith(true);
+  });
+
+  test.each([
+    ['OMITIDA', null, 'Omitida'],
+    ['REALIZADA', 'REALIZADA_SIN_REALIDAD_ACTIVA', 'Cubierta sin registro activo'],
+  ] as const)('«Reabrir» también en %s (%s), sin sucesor', async (estado, derivado, legible) => {
+    const reabrir = jest.fn(async (_id: string, pl: any) => ({ tipo: 'OK', datos: { ...pl, prevision_id: 'luz', estado: 'ABIERTA', row_version: 3 } }) as any);
+    montarDetalle(conDetalle(realizada({ estado, estado_derivado: derivado }), { reabrirPrevision: reabrir }), 'dark');
+    fireEvent.press(await screen.findByTestId('prevision-mas'));
+    fireEvent.press(screen.getByTestId('mas-reabrir'));
+    expect(screen.getByTestId('reabrir-estado')).toHaveTextContent(legible);
+    expect(screen.queryByTestId('reabrir-sucesor')).toBeNull();
+    fireEvent.changeText(screen.getByTestId('reabrir-motivo'), 'Sí hubo');
+    await act(async () => fireEvent.press(screen.getByTestId('reabrir-confirmar')));
+    expect(reabrir.mock.calls[0][1]).toMatchObject({ motivo: 'Sí hubo', sucesor_row_version: null });
+  });
+
+  test('«Reabrir» atenuada con su motivo en una CANCELADA', async () => {
+    const motivo = 'Una previsión cancelada no se reabre desde la app.';
+    const reabrir = jest.fn();
+    montarDetalle(conDetalle(realizada({ estado: 'CANCELADA', acciones: { ...realizada().acciones, reabrir: NO(motivo) } }), { reabrirPrevision: reabrir as any }));
+    fireEvent.press(await screen.findByTestId('prevision-mas'));
+    expect(screen.getByTestId('mas-reabrir')).toBeDisabled();
+    expect(screen.getByTestId('mas-reabrir-motivo')).toHaveTextContent(motivo);
+    fireEvent.press(screen.getByTestId('mas-reabrir'));
+    expect(screen.queryByTestId('hoja-reabrir')).toBeNull();
+    expect(reabrir).not.toHaveBeenCalled();
+  });
+
+  test('TRAMO_RODANTE_REQUIERE_REVISION: mensaje claro en la hoja, sin reintento automático', async () => {
+    const mensaje = 'La siguiente previsión de esta serie ya tiene algo registrado o está cerrada: no se puede reabrir desde aquí. No se ha cambiado nada.';
+    const reabrir = jest.fn(async () => ({ tipo: 'RECHAZADO', codigo: 'TRAMO_RODANTE_REQUIERE_REVISION', mensaje }) as any);
+    montarDetalle(conDetalle(realizada({ sucesor: { id: 'luz-2', row_version: 2 } }), { reabrirPrevision: reabrir }));
+    fireEvent.press(await screen.findByTestId('prevision-mas'));
+    fireEvent.press(screen.getByTestId('mas-reabrir'));
+    fireEvent.press(screen.getByTestId('reabrir-sugerencia-0'));
+    await act(async () => fireEvent.press(screen.getByTestId('reabrir-confirmar')));
+    expect(await screen.findByTestId('reabrir-error')).toHaveTextContent(mensaje);
+    await waitFor(() => expect(reabrir).toHaveBeenCalledTimes(1));
   });
 });

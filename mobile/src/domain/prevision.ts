@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-06 M5 §B1)
 // Versión: 0.2.0 (F05-06 M5 SWIPE; regla de Moisés del 2026-10-22): `planRapidoPrevision` decide si el swipe es una acción rápida de un solo gesto (gasto o ingreso abierto, esperado conocido, EUR, una sola cuenta prevista que hoy tiene la capacidad, sin realidad previa): registra el esperado en esa cuenta con fecha de hoy y `marcar_realizada = true`, por la misma composición que la hoja. Si falta algo, null y el gesto abre la hoja. `textoAvisoRapido`: «<Nombre> pagada / cobrada».
 // Versión: 0.3.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2): el aviso lleva el importe («Nómina cobrada · 2.100,00 €»). Izquierda «No hubo este mes»: `admiteNoHubo` (abierta y sin pagos enlazados ni realidad) y su aviso. `importeFormulario`: el importe con el que el gesto abre el formulario cuando hay dudas (lo que queda, o el esperado; nada si es desconocido).
+// Versión: 0.4.0 (F05-06 M5-B; F04-D065, F05-D047): «Dar por cubierta» solo en una PARCIAL (`ofreceDarPorCubierta`), «Queda sin cubrir ±X €» con el pendiente derivado (`quedaSinCubrirTexto`; nunca se guarda), «Más» en las terminales (`ofreceMas`, para «Reabrir») y las sugerencias de motivo de las dos hojas.
 // ============================================================
 
 import type { BloquePrevisionWire, CuentaElegible, CuentaPago, DetallePrevision, FilaPrevision, ImportePorNaturaleza } from '../api/cliente';
@@ -20,6 +21,11 @@ export const TEXTO_FALLO_PENDIENTES = 'No se pudieron cargar los pendientes';
 export const TEXTO_FALLO_PENDIENTES_DETALLE = 'El resto de Inicio sí se ha cargado. Puede que tengas algo pendiente.';
 export const TEXTO_SOLO_ENLAZA = 'Solo se enlazan. El registro elegido no cambia. Si ha cambiado mientras tanto, te lo mostramos de nuevo antes de enlazar.';
 export const TEXTO_SIN_DOBLE = 'La previsión no mueve dinero; el pago sí. En el mes cuentan los importes reales, no la previsión.';
+/** M5-B «Dar por cubierta» y «Reabrir»: sugerencias rápidas del motivo (el texto sigue siendo editable). */
+export const MOTIVOS_DAR_POR_CUBIERTA = ['La factura definitiva fue menor', 'Se pagó el resto por otra vía', 'El importe era una estimación'] as const;
+export const MOTIVOS_REABRIR = ['La marqué por error', 'Sí hubo este mes', 'Falta registrar una parte'] as const;
+export const TEXTO_DAR_POR_CUBIERTA = 'Deja de estar pendiente con lo ya registrado. No se registra nada nuevo ni se mueve dinero: la diferencia solo se muestra, no se guarda.';
+export const TEXTO_REABRIR = 'Vuelve a estar pendiente. Lo ya registrado sigue enlazado; no se borra nada ni se mueve dinero.';
 export const TEXTO_TRANSFERENCIA_NEUTRA = 'Es dinero que pasa entre tus cuentas: no es gasto ni ingreso y no cambia el Resultado del mes.';
 
 /** «1.234,50» sin símbolo (texto de cobertura). */
@@ -206,6 +212,25 @@ export function planRapidoPrevision(f: FilaPrevision, cap: CapacidadesHoy | null
 }
 
 /** Texto del aviso de la acción rápida: «Nómina cobrada · 2.100,00 €», «Electricidad pagada · 74,00 €». */
+/** «Queda sin cubrir ±X €» (M5-B): el pendiente derivado con su signo; negativo = registrado de más. */
+export function quedaSinCubrirTexto(d: Pick<DetallePrevision, 'pendiente'>): string {
+  if (d.pendiente === null) return TEXTO_DESCONOCIDO;
+  const n = Number(d.pendiente);
+  if (n === 0) return formatearEur('0.00');
+  const abs = d.pendiente.replace(/^[-+]/, '');
+  return `${n < 0 ? '−' : '+'}${formatearEur(abs)}`;
+}
+
+/** «Dar por cubierta» solo en una PARCIAL: abierta, sin estado derivado y con realidad (contrato M5-B §5). */
+export function ofreceDarPorCubierta(d: Pick<DetallePrevision, 'estado' | 'estado_derivado' | 'con_realidad'>): boolean {
+  return d.estado === 'ABIERTA' && d.estado_derivado === null && d.con_realidad;
+}
+
+/** «Más» del detalle (Reabrir): en las terminales, con la acción atenuada y su motivo cuando no se puede. */
+export function ofreceMas(d: Pick<DetallePrevision, 'estado'>): boolean {
+  return d.estado !== 'ABIERTA';
+}
+
 export function textoAvisoRapido(f: Pick<FilaPrevision, 'concepto' | 'tipo' | 'importe_esperado'>): string {
   const base = `${f.concepto} ${f.tipo === 'INGRESO' ? 'cobrada' : 'pagada'}`;
   return f.importe_esperado === null ? base : `${base} · ${formatearEur(f.importe_esperado)}`;

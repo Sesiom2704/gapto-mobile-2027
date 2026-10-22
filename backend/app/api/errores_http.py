@@ -142,11 +142,22 @@
 #   VERSION_DESFASADA (M3) no cambia. Rechazo de integracion nuevo:
 #   PREVISION_TIPO_DISTINTO (409, sin escritura).
 # Version: 0.22.0
+#   0.23.0 (F05-06 M5-B; F04-D065; AJ-M5BM1-03): codigo nuevo
+#   PREVISION_SIN_REALIDAD_ACTIVA (409; informa de «No hubo este mes» sin
+#   ofrecerlo) en _MAPA y en las rutas de prevision; en estas ultimas, ademas,
+#   TRAMO_RODANTE_REQUIERE_REVISION (409, sin reintento automatico),
+#   MOTIVO_AUSENTE (422) y ENTRADA_INVALIDA (409, la cadena cambio). Ningun
+#   codigo existente cambia de texto ni de estado.
+# Version: 0.23.0
 # ============================================================
 
 from __future__ import annotations
 
 from app.core.errores import CodigoError
+
+#: F05-06 M5-B (F04-D065): dar por cubierta sin realidad; informa de «No hubo» sin ofrecerlo.
+MENSAJE_SIN_REALIDAD = ("Esta previsión no tiene nada registrado: no se puede dar por cubierta. Si este mes no "
+                        "hubo, existe «No hubo este mes». No se ha guardado nada.")
 
 # (status HTTP, mensaje de usuario, reintentable)
 _MAPA: dict[CodigoError, tuple[int, str, bool]] = {
@@ -219,6 +230,8 @@ _MAPA: dict[CodigoError, tuple[int, str, bool]] = {
         409, "Esta previsión ya no está pendiente. No se ha guardado nada.", False),
     CodigoError.PREVISION_YA_MATERIALIZADA_POR_ESTA_REALIDAD: (
         409, "Ese registro ya está enlazado a esta previsión. No se ha guardado nada.", False),
+    # F05-06 M5-B (F04-D065).
+    CodigoError.PREVISION_SIN_REALIDAD_ACTIVA: (409, MENSAJE_SIN_REALIDAD, False),
     CodigoError.TENANT_AUSENTE: (500, "Error interno de configuración.", False),
     CodigoError.ACTOR_DESCONOCIDO: (500, "Error interno de configuración.", False),
 }
@@ -341,6 +354,13 @@ _RECHAZOS_PREVISION: dict[str, tuple[int, str]] = {
     "PREVISION_TIPO_DISTINTO": (
         409, "Ese registro no es del mismo tipo que la previsión. No se ha guardado nada."),
     "AGREGADO_NO_ENCONTRADO": (404, "No encontrado."),
+    # F05-06 M5-B (dar por cubierta y reabrir).
+    "PREVISION_SIN_REALIDAD_ACTIVA": (409, MENSAJE_SIN_REALIDAD),
+    "TRAMO_RODANTE_REQUIERE_REVISION": (
+        409, "La siguiente previsión de esta serie ya tiene algo registrado o está cerrada: no se puede reabrir "
+             "desde aquí. No se ha cambiado nada."),
+    "MOTIVO_AUSENTE": (422, "Escribe el motivo. No se ha guardado nada."),
+    "ENTRADA_INVALIDA": (409, "La serie de esta previsión ha cambiado: vuelve a abrirla. No se ha cambiado nada."),
 }
 _PORCION_NO_DETERMINABLE = ("El importe de ese registro no se puede comparar con lo ya enlazado: "
                             "no se puede enlazar así. No se ha guardado nada.")

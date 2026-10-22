@@ -345,6 +345,14 @@
 #     categoria del registro original, igual que intencion.ts y prevision.ts; la categoria
 #     sigue validandose en el servidor (C-a, C07). No escribe categorias_financieras.
 # Version: 0.29.1
+# Version 0.30.0 (F05-06 M5-B; F05-D047 §61.3; AJ-M5BM1-04): la excepcion I3
+#     NOMINAL de ejecucion_prevision.py se amplia con `dar_por_realizada` (F04-D065)
+#     y `corregir_estado_terminal` (Reabrir, sin cambios de motor), ademas de
+#     `vincular_realidad` y `omitir`. Mismo fichero, misma clase y el mismo AST:
+#     sin alias, sin indirecciones, sin privados y sin otros metodos; los demas
+#     (corregir_vinculo, retirar_vinculo, cancelar, crear_manual, recalcular_
+#     futuras, generar_*) siguen vedados. Ningun otro adaptador gana la excepcion.
+# Version: 0.30.0
 # ============================================================
 
 from __future__ import annotations
@@ -1897,13 +1905,15 @@ def test_i3_m3_excepcion_acotada_a_la_whitelist_de_importes():
 
 # ------------------------------------------------------------------ I3-M5 (F05-06 M5, AJ-M5-DEC-07)
 EXCEPCION_M5 = "backend/app/api/ejecucion_prevision.py"
-METODOS_M5 = frozenset({"vincular_realidad", "omitir"})
-VEDADOS_M5 = frozenset({"corregir_vinculo", "retirar_vinculo", "cancelar", "corregir_estado_terminal",
+# F05-D047 §61.3: M5-B anade dar_por_realizada (F04-D065) y corregir_estado_terminal (Reabrir).
+METODOS_M5 = frozenset({"vincular_realidad", "omitir", "dar_por_realizada", "corregir_estado_terminal"})
+VEDADOS_M5 = frozenset({"corregir_vinculo", "retirar_vinculo", "cancelar",
                         "crear_manual", "recalcular_futuras", "generar_calendario", "generar_rodante"})
 INDIRECCIONES = frozenset({"getattr", "setattr", "delattr", "vars", "attrgetter", "methodcaller",
                            "__getattribute__", "__dict__"})
 PUBLICOS_M5 = frozenset({"vincular", "omitir", "registrar_transferencia_prevista", "Vinculado", "Omitida",
-                         "CODIGO_PORCION_CAMBIADA", "CODIGO_PORCION_EXCEDIDA"})
+                         "CODIGO_PORCION_CAMBIADA", "CODIGO_PORCION_EXCEDIDA",
+                         "dar_por_cubierta", "reabrir", "Transicion", "CODIGO_ESTADO_INCOMPATIBLE"})
 
 
 def _metodos_del_servicio() -> tuple[set[str], set[str]]:
@@ -1952,11 +1962,11 @@ def violaciones_i3_m5(texto: str) -> list[str]:
     return fallos
 
 
-def test_i3_m5_excepcion_limitada_a_vincular_realidad_y_omitir():
+def test_i3_m5_excepcion_limitada_a_los_metodos_autorizados():
     assert violaciones_i3_m5((RAIZ / EXCEPCION_M5).read_bytes().decode("utf-8")) == []
     arbol = ast.parse((RAIZ / EXCEPCION_M5).read_bytes().decode("utf-8"))
     usados = {n.attr for n in ast.walk(arbol) if isinstance(n, ast.Attribute)} & (METODOS_M5 | VEDADOS_M5)
-    assert usados == METODOS_M5  # los dos, y solo los dos
+    assert usados == METODOS_M5  # los cuatro autorizados (M5 y M5-B), y solo esos
 
 
 @pytest.mark.parametrize("plantado", [
@@ -1972,6 +1982,8 @@ def test_i3_m5_excepcion_limitada_a_vincular_realidad_y_omitir():
     "_x = lambda s: PrevisionesService(s).estado_de",
     "_Alias = PrevisionesService",
     "_x = lambda s: _previsiones(s).cancelar",
+    "_x = lambda s: _previsiones(s).retirar_vinculo",
+    "_x = lambda s: _previsiones(s).recalcular_futuras",
 ])
 def test_i3_m5_negativo_detecta_alias_indirecciones_y_privados(plantado):
     texto = (RAIZ / EXCEPCION_M5).read_bytes().decode("utf-8") + "\n" + plantado + "\n"

@@ -17,7 +17,8 @@
 // v0.13.0 (F05-06 M2-B §B1; lámina DEV v0.1): devolución contextual. Lectura GET /v1/hechos/{origen}/devoluciones (contexto del formulario), POST /v1/hechos/{origen}/devoluciones (devolución con el abono «Todavía no» o «Ya cobrado») y POST /v1/hechos/{devolución}/abono («Registrar abono»), ambos con la clasificación de escritura (indeterminado = reintentar el MISMO UUID). La fila y el detalle de la Actividad traen `devolucion_de` y `abono`, y el detalle `devoluciones` (tipos aditivos, opcionales).
 // v0.14.0 (F05-06 M3 §B1; lámina REP v0.2): reparto, pagador real y posiciones. POST /v1/intenciones/gasto-compartido (OP-22 de una sola llamada), POST /v1/posiciones/{id}/cobro | pago | perdon, con la clasificación de escritura (indeterminado = reintentar el MISMO UUID); lecturas GET /v1/terceros/{id}/pendiente («Pendiente con», OP-20) y GET /v1/hechos/{id}/reparto; «Corregir reparto» POST /v1/hechos/{id}/reparto con `row_version` (clasificación 'CAMBIO'). Tipos en domain/reparto (único import nuevo).
 // v0.15.0 (F05-06 M5 §B1; láminas PREV v0.2 y HOME-01 v0.4): confirmación de previsiones. Lecturas GET /v1/inicio/previsiones, /v1/previsiones/pendientes, /v1/previsiones/{id} y …/candidatos (?ampliado); escrituras POST …/vincular («Ya lo registré», OP-17) y …/omitir («No hubo este mes»), ambas con la clasificación de escritura (indeterminado = reintentar el MISMO UUID). El bloque opcional `prevision` viaja en ingreso, transferencia y, por tipo estructural, en el gasto. Tipos propios en este fichero: sin imports nuevos.
-// Versión: 0.15.0
+// v0.16.0 (F05-06 M5-B; F04-D065, F05-D047): «Dar por cubierta» POST /v1/previsiones/{id}/dar-por-realizada y «Reabrir» POST …/reabrir (con `sucesor_row_version` cuando la lectura trae sucesor), ambas con la clasificación de escritura como «No hubo» (indeterminado = misma identidad; el reintento devuelve el estado actual). El detalle añade `pendiente` (esperado − registrado, con signo; derivado, nunca guardado), `recalculable`, `sucesor` y las acciones `dar_por_cubierta` y `reabrir`.
+// Versión: 0.16.0
 // ============================================================
 
 import type { Ambito, CategoriaNodo } from '../domain/categoria';
@@ -635,7 +636,19 @@ export interface AccionPrevision {
 export interface DetallePrevision extends FilaPrevision {
   estado_derivado: 'REALIZADA_SIN_REALIDAD_ACTIVA' | 'REQUIERE_REVISION' | null;
   vinculos: { vinculo_id: string; hecho_id: string; importe_asignado: string; fecha_hecho: string; concepto: string | null; importe_total: string | null }[];
-  acciones: { registrar: AccionPrevision; ya_lo_registre: AccionPrevision; omitir: AccionPrevision; swipe: AccionPrevision };
+  acciones: {
+    registrar: AccionPrevision;
+    ya_lo_registre: AccionPrevision;
+    omitir: AccionPrevision;
+    swipe: AccionPrevision;
+    dar_por_cubierta: AccionPrevision;
+    reabrir: AccionPrevision;
+  };
+  /** M5-B: esperado − registrado con signo (negativo = registrado de más); null si el esperado es desconocido. Derivado: nunca se guarda. */
+  pendiente: string | null;
+  recalculable: boolean;
+  /** Siguiente previsión ABIERTA de la serie (RODANTE): «Reabrir» exige su versión. */
+  sucesor: { id: string; row_version: number } | null;
 }
 export interface CandidatoPrevision {
   hecho_id: string;
@@ -677,6 +690,23 @@ export interface PayloadOmitir {
   motivo: string | null;
 }
 export interface ResultadoOmitir {
+  intencion_id: string;
+  prevision_id: string;
+  estado: string;
+  row_version: number;
+}
+export interface PayloadDarPorCubierta {
+  intencion_id: string;
+  row_version: number;
+  motivo: string;
+}
+export interface PayloadReabrir {
+  intencion_id: string;
+  row_version: number;
+  motivo: string;
+  sucesor_row_version: number | null;
+}
+export interface ResultadoTransicion {
   intencion_id: string;
   prevision_id: string;
   estado: string;
@@ -805,6 +835,9 @@ export interface ClienteApi {
   candidatosPrevision(id: string, ampliado: boolean): Promise<Respuesta<CandidatosPrevision>>;
   vincularPrevision(id: string, p: PayloadVincular): Promise<Respuesta<ResultadoVinculo>>;
   omitirPrevision(id: string, p: PayloadOmitir): Promise<Respuesta<ResultadoOmitir>>;
+  // F05-06 M5-B
+  darPorCubiertaPrevision(id: string, p: PayloadDarPorCubierta): Promise<Respuesta<ResultadoTransicion>>;
+  reabrirPrevision(id: string, p: PayloadReabrir): Promise<Respuesta<ResultadoTransicion>>;
 }
 
 const CAT = '/v1/categorias';
@@ -977,5 +1010,7 @@ export function crearCliente(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): C
     candidatosPrevision: (id, ampliado) => llamar(`${PREV(id)}/candidatos?ampliado=${ampliado ? 'true' : 'false'}`, { method: 'GET' }, false),
     vincularPrevision: (id, payload) => llamar(`${PREV(id)}/vincular`, post(payload), true),
     omitirPrevision: (id, payload) => llamar(`${PREV(id)}/omitir`, post(payload), true),
+    darPorCubiertaPrevision: (id, payload) => llamar(`${PREV(id)}/dar-por-realizada`, post(payload), true),
+    reabrirPrevision: (id, payload) => llamar(`${PREV(id)}/reabrir`, post(payload), true),
   };
 }

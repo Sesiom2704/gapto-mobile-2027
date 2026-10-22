@@ -41,6 +41,15 @@
 #   son una HEURISTICA UX REVISABLE (P-PREV-07), no un invariante: vincular no
 #   aplica la ventana y la autoridad final es OP-17 bajo locks.
 # Version: 0.1.0 (F05-06 M5 §A2)
+# Version: 0.2.0 (F05-06 M5-B; F05-D047 §61.1; AJ-M5BM1-05): el detalle anade
+#   `pendiente` (esperado - cubierto ACTIVO, con signo; derivado y nunca
+#   persistido; None si el esperado es desconocido), `recalculable` (el valor
+#   persistido de recalculo_automatico; Q4/DEU-M5B-RECALC-OMITIDA: la UI no lo
+#   ofrece), `sucesor` (cabeza RODANTE ABIERTA posterior de la misma regla, con
+#   su row_version, para reabrir) y las acciones «Dar por cubierta» (ABIERTA con
+#   realidad ACTIVA, EUR y tipo confirmable; sin realidad, el motivo informa de
+#   «No hubo este mes» sin ofrecerlo) y «Reabrir» (REALIZADA, incluida la
+#   derivada sin realidad, y OMITIDA; CANCELADA nunca).
 # ============================================================
 
 from __future__ import annotations
@@ -199,8 +208,39 @@ def _accion(disponible: bool, motivo: str | None = None) -> dict[str, Any]:
     return {"disponible": disponible, "motivo": None if disponible else motivo}
 
 
+MOTIVO_SIN_REALIDAD = ("Solo se puede dar por cubierta cuando ya hay algo registrado y enlazado. "
+                       "Si este mes no hubo, existe «No hubo este mes».")
+
+
+def _acciones_m5b(fila: dict[str, Any], estado_derivado: str | None) -> dict[str, dict[str, Any]]:
+    """F05-06 M5-B: «Dar por cubierta» y «Reabrir» (sin swipe en ninguna)."""
+    if fila["moneda"] != MONEDA_V1:
+        motivo = "Solo se pueden confirmar previsiones en euros en esta versión."
+        return {"dar_por_cubierta": _accion(False, motivo), "reabrir": _accion(False, motivo)}
+    if estado_derivado == "REQUIERE_REVISION":  # DEU-M5-PREV-REVISION: fuera de M5-B
+        motivo = "Esta previsión necesita revisión: aquí solo se consulta."
+        return {"dar_por_cubierta": _accion(False, motivo), "reabrir": _accion(False, motivo)}
+    if fila["estado"] == "ABIERTA" and estado_derivado is None:
+        if fila["tipo"] not in TIPOS_CONFIRMABLES:
+            dar = _accion(False, "Esta previsión no se confirma desde aquí.")
+        else:
+            dar = _accion(fila["con_realidad"], MOTIVO_SIN_REALIDAD)
+        reabrir = _accion(False, "Ya está pendiente.")
+    elif fila["estado"] in ("REALIZADA", "OMITIDA"):
+        dar = _accion(False, "Esta previsión ya no está pendiente.")
+        reabrir = _accion(True)
+    else:
+        dar = _accion(False, "Esta previsión ya no está pendiente.")
+        reabrir = _accion(False, "Una previsión cancelada no se reabre desde la app.")
+    return {"dar_por_cubierta": dar, "reabrir": reabrir}
+
+
 def acciones(fila: dict[str, Any], estado_derivado: str | None) -> dict[str, dict[str, Any]]:
     """Acciones de la prevision con su motivo en lenguaje llano."""
+    return {**_acciones_m5(fila, estado_derivado), **_acciones_m5b(fila, estado_derivado)}
+
+
+def _acciones_m5(fila: dict[str, Any], estado_derivado: str | None) -> dict[str, dict[str, Any]]:
     if fila["estado"] != "ABIERTA" or estado_derivado is not None:
         motivo = "Esta previsión ya no está pendiente: aquí solo se consulta."
         return {k: _accion(False, motivo) for k in ("registrar", "ya_lo_registre", "omitir", "swipe")}
@@ -244,8 +284,26 @@ def detalle(sesion: SesionMotor, prevision_id: uuid.UUID, hoy: dt.date) -> dict[
             "WHERE pv.prevision_id = %s AND h.estado = 'ACTIVO' ORDER BY h.fecha_hecho, pv.id", (prevision_id,))
         vinculos = [{"vinculo_id": v[0], "hecho_id": v[1], "importe_asignado": _texto(v[2]), "fecha_hecho": v[3],
                      "concepto": v[4], "importe_total": _texto(v[5])} for v in cur.fetchall()]
+    pendiente = None if fila["_esperado"] is None else fila["_esperado"] - fila["_cubierto"]
+    extra = sesion.uno("SELECT p.recalculo_automatico, p.fecha_objetivo_regla, v.regla_id FROM gapto.previsiones p "
+                       "LEFT JOIN gapto.regla_versiones v ON v.id = p.regla_version_id WHERE p.id = %s", (prevision_id,))
+    recalculable, objetivo, regla_id = extra
+    sucesor = None
+    if regla_id is not None and objetivo is not None:
+        s = sesion.uno("SELECT p.id, p.row_version FROM gapto.previsiones p JOIN gapto.regla_versiones v "
+                       "ON v.id = p.regla_version_id WHERE v.regla_id = %s AND p.estado = 'ABIERTA' "
+                       "AND p.fecha_objetivo_regla > %s ORDER BY p.fecha_objetivo_regla, p.id LIMIT 1",
+                       (regla_id, objetivo))
+        if s is not None:
+            sucesor = {"id": s[0], "row_version": s[1]}
     return {**_publica(fila), "estado_derivado": derivado, "vinculos": vinculos,
-            "acciones": acciones(fila, derivado)}
+            "acciones": acciones(fila, derivado), "pendiente": _texto_con_signo(pendiente),
+            "recalculable": bool(recalculable), "sucesor": sucesor}
+
+
+def _texto_con_signo(valor: decimal.Decimal | None) -> str | None:
+    """Pendiente derivado con su signo (negativo = se registró más de lo esperado)."""
+    return None if valor is None else str(decimal.Decimal(valor).quantize(_CENT))
 
 
 # ------------------------------------------------------------------ candidatos

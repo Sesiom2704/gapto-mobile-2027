@@ -6,13 +6,14 @@
 #   F05-06 M5 (F05 §59 F05-D044 decisiones 1-5 y 14; AJ-M5-DEC-01, 02, 03, 05,
 #   06). API DE INTEGRACION F05, PENDIENTE DE CONSOLIDACION F10.
 #
-#   EXCEPCION I3 NOMINAL (decision 1; test_154 v0.29.0): este es el UNICO
-#   fichero de la frontera que puede referenciar PrevisionesService, y solo
-#   sus metodos `vincular_realidad` y `omitir`, siempre adscrito a la
-#   transaccion del adaptador (UnidadDeTrabajoAdscrita). Nada de corregir,
-#   retirar, cancelar, corregir_estado_terminal, crear_manual, generar_* ni
-#   recalcular_futuras: ninguna ruta crea, cancela, corrige, retira ni
-#   recalcula previsiones.
+#   EXCEPCION I3 NOMINAL (decision 1; test_154 v0.29.0; ampliada por F05-D047
+#   §61.3 en v0.30.0): este es el UNICO fichero de la frontera que puede
+#   referenciar PrevisionesService, y solo sus metodos `vincular_realidad`,
+#   `omitir`, `dar_por_realizada` y `corregir_estado_terminal`, siempre adscrito
+#   a la transaccion del adaptador (UnidadDeTrabajoAdscrita). Nada de corregir
+#   vinculos, retirar, cancelar, crear_manual, generar_* ni recalcular_futuras:
+#   ninguna ruta crea, cancela, corrige vinculos, retira ni recalcula
+#   previsiones.
 #
 #   «Ya lo registre» (OP-17 suelto, `vincular`):
 #     vinculo_id = intencion_id; importe_asignado = importe_a_vincular (el que
@@ -43,6 +44,15 @@
 #     misma prevision e importe (y REALIZADA si se declaro); si no ->
 #     IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION sin escritura.
 # Version: 0.1.0 (F05-06 M5 §A0/§A4)
+# Version: 0.2.0 (F05-06 M5-B; F05-D047 §61.1 y §61.3; F04-D065):
+#   «Dar por cubierta» (`dar_por_cubierta` -> dar_por_realizada): row_version,
+#   motivo obligatorio (lo exige el motor) y uuid_sucesor = uuid5(intencion,
+#   "sucesor"); sin replay de exito, como omitir. Locks: los del motor
+#   ([regla FU ->] prevision FU), sin nada propio.
+#   «Reabrir» (`reabrir` -> corregir_estado_terminal, sin cambios): solo
+#   REALIZADA y OMITIDA; una CANCELADA se rechaza AQUI con
+#   ESTADO_PREVISION_INCOMPATIBLE antes de llamar al motor (F05-D047: CANCELADA
+#   fuera de la UI). Motivo y version del sucesor RODANTE (la lectura la da).
 # ============================================================
 
 from __future__ import annotations
@@ -51,7 +61,7 @@ import decimal
 import uuid
 from dataclasses import dataclass
 
-from app.api.dto_prevision import IntencionOmitir, IntencionVincular
+from app.api.dto_prevision import IntencionDarPorCubierta, IntencionOmitir, IntencionReabrir, IntencionVincular
 from app.api.dto_registro import IntencionTransferencia
 from app.api.ejecucion_registro import (
     CODIGO_PREVISION_TIPO_DISTINTO,
@@ -83,6 +93,13 @@ class Vinculado:
     estado: str
     row_version: int
     idempotente: bool
+
+
+@dataclass(frozen=True, slots=True)
+class Transicion:
+    prevision_id: uuid.UUID
+    estado: str
+    row_version: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,6 +173,37 @@ def omitir(unidad: UnidadDeTrabajo, contexto: ContextoOperacion, prevision_id: u
         return Omitida(prevision_id=prevision_id, estado=r.estado, row_version=r.row_version)
 
     return unidad.ejecutar(contexto, operacion, nombre="F05-06 M5 omitir")
+
+
+# ------------------------------------------------------------------ «Dar por cubierta» (M5-B)
+def dar_por_cubierta(unidad: UnidadDeTrabajo, contexto: ContextoOperacion, prevision_id: uuid.UUID,
+                     intencion: IntencionDarPorCubierta) -> Transicion:
+    def operacion(sesion: SesionMotor) -> Transicion:
+        r = _previsiones(sesion).dar_por_realizada(
+            contexto, prevision_id=prevision_id, row_version_esperada=intencion.row_version,
+            motivo=intencion.motivo,
+            uuid_sucesor=uuid_sucesor(intencion.intencion_id))
+        return Transicion(prevision_id=prevision_id, estado=r.estado, row_version=r.row_version)
+
+    return unidad.ejecutar(contexto, operacion, nombre="F05-06 M5-B dar por cubierta")
+
+
+# ------------------------------------------------------------------ «Reabrir» (M5-B)
+CODIGO_ESTADO_INCOMPATIBLE = "ESTADO_PREVISION_INCOMPATIBLE"
+
+
+def reabrir(unidad: UnidadDeTrabajo, contexto: ContextoOperacion, prevision_id: uuid.UUID,
+            intencion: IntencionReabrir) -> Transicion | RechazoRegistro:
+    def operacion(sesion: SesionMotor) -> Transicion | RechazoRegistro:
+        # F05-D047: una CANCELADA no se reabre desde la app (el motor si la admite, F04-D024.3).
+        if lect_prev.estado_persistido(sesion, prevision_id) == "CANCELADA":
+            return RechazoRegistro(CODIGO_ESTADO_INCOMPATIBLE)
+        r = _previsiones(sesion).corregir_estado_terminal(
+            contexto, prevision_id=prevision_id, row_version_esperada=intencion.row_version,
+            motivo=intencion.motivo, sucesor_row_version_esperada=intencion.sucesor_row_version)
+        return Transicion(prevision_id=prevision_id, estado=r.estado, row_version=r.row_version)
+
+    return unidad.ejecutar(contexto, operacion, nombre="F05-06 M5-B reabrir")
 
 
 # ------------------------------------------------------------------ transferencia desde la prevision

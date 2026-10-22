@@ -31,6 +31,17 @@
 #   sigue siendo ABIERTA: no hay estado PARCIAL persistido. Y el primer hecho
 #   ACTIVO congela la expectativa poniendo `recalculo_automatico=false`, de
 #   modo que una version posterior de la regla ya no reescribe ese importe.
+# Version: 0.10.0
+#   0.10.0 (F04-D065, reapertura nominal parcial de F04; M5-B de F05-06;
+#   AJ-M5BM1-01/02/11): comando nuevo `dar_por_realizada` («Dar por cubierta»).
+#   ABIERTA con al menos un hecho ACTIVO vinculado -> REALIZADA sin realidad
+#   nueva. Orden: [regla FU ->] prevision FU (el sufijo de OP-17, F04-D058; sin
+#   aristas nuevas), relectura, estado, version y recuento de realidad ACTIVA
+#   BAJO esos bloqueos. Motivo obligatorio y auditado; RODANTE exige
+#   uuid_sucesor y crea el sucesor en la misma transaccion. No crea ni toca
+#   hechos, vinculos, efectos ni tesoreria; el importe esperado se conserva y
+#   la desviacion es derivada (no se persiste). corregir_estado_terminal,
+#   _revalidar y vincular_realidad no cambian.
 # Version: 0.9.0
 #   0.9.0 (MANT DEU-F04-VINCULO-ANULADO, R-R2C-01; dictamen 2026-10-18 Q8):
 #   `corregir_vinculo` no corrige el importe de un vinculo que sigue en un hecho
@@ -990,6 +1001,107 @@ class PrevisionesService:
             )
 
         return self._ejecutar(contexto, operacion, "OP-17 vincular_realidad")
+
+    # ==================================================================
+    # F04-D065 · «Dar por cubierta» (M5-B de F05-06)
+    # ==================================================================
+    def dar_por_realizada(
+        self,
+        contexto: ContextoOperacion,
+        *,
+        prevision_id: uuid.UUID,
+        row_version_esperada: int,
+        motivo: str | None,
+        uuid_sucesor: uuid.UUID | None = None,
+    ) -> ResultadoPrevision:
+        """ABIERTA con realidad ACTIVA -> REALIZADA, sin realidad nueva.
+
+        Cierra una expectativa ya satisfecha en parte cuando el usuario declara
+        que no habra mas (p. ej. la factura definitiva fue menor). Exige al
+        menos un hecho ACTIVO vinculado, contado BAJO el bloqueo de la
+        previsión: sin realidad no se cubre nada (para eso existe `omitir`).
+
+        No crea ni modifica hechos, vinculos, efectos, atribuciones, deudas ni
+        tesoreria. El importe esperado se conserva: la diferencia con lo
+        registrado es derivada y nunca se persiste.
+
+        Garantia C1 (AJ-M5BM1-11): nunca confirma sin realidad ACTIVA en su
+        propia ejecucion. Si despues se retira el ultimo vinculo, la previsión
+        queda expuesta como REALIZADA_SIN_REALIDAD_ACTIVA (AMB-009).
+        """
+        if not (motivo or "").strip():
+            raise ErrorMotor(
+                CodigoError.MOTIVO_AUSENTE,
+                "Dar por cubierta una previsión exige motivo explicito.",
+            )
+
+        def operacion(sesion: SesionMotor) -> ResultadoPrevision:
+            repo_hechos.exigir_contexto(sesion)
+            # F04-D058: [regla FU ->] previsión FU, el sufijo del orden de OP-17.
+            previa = self._exigir_prevision(sesion, prevision_id)
+            regla_id = previa["regla_id"]
+            if regla_id is not None:
+                repo_reglas.bloquear_regla(sesion, regla_id)
+            repo_prev.bloquear_prevision(sesion, prevision_id)
+            prevision = self._exigir_prevision(sesion, prevision_id)
+            if prevision["regla_id"] != regla_id:  # pragma: no cover - la version es inmutable
+                raise ConjuntoCambiado()
+
+            if prevision["estado"] != ABIERTA:
+                raise ErrorMotor(
+                    CodigoError.ESTADO_PREVISION_INCOMPATIBLE,
+                    "Solo una previsión ABIERTA puede darse por cubierta.",
+                )
+            if row_version_esperada != prevision["row_version"]:
+                raise ErrorMotor(
+                    CodigoError.VERSION_DESFASADA,
+                    "La previsión ha cambiado desde la version que conoce el "
+                    "llamante.",
+                )
+            # Recuento de realidad ACTIVA bajo el bloqueo de la previsión: un
+            # retirar_vinculo concurrente espera a este o falla por version.
+            realidad = repo_prev.resumen_realidad(sesion, prevision_id)
+            if realidad["hechos_activos"] < 1:
+                raise ErrorMotor(
+                    CodigoError.PREVISION_SIN_REALIDAD_ACTIVA,
+                    "La previsión no tiene realidad ACTIVA vinculada: no hay nada "
+                    "que dar por cubierto.",
+                )
+            if regla_id is not None and uuid_sucesor is None:
+                versiones = repo_reglas.listar_versiones(sesion, regla_id)
+                if any(
+                    s["cadencia"].anclaje == RODANTE
+                    for s in self._segmentos(versiones, self._resolver_ancla(sesion))
+                ):
+                    raise ErrorMotor(
+                        CodigoError.ENTRADA_INVALIDA,
+                        "La previsión es RODANTE: exige el identificador del "
+                        "sucesor para no romper la cadena.",
+                    )
+
+            nueva_version = self._tocar(sesion, prevision_id, row_version_esperada)
+            actualizada = repo_prev.actualizar_prevision(
+                sesion,
+                prevision_id,
+                {"estado": REALIZADA, "recalculo_automatico": False},
+            )
+            assert actualizada is not None
+            auditoria.registrar(
+                sesion,
+                tabla=repo_prev.TABLA_PREVISIONES,
+                registro_id=prevision_id,
+                accion=auditoria.ACCION_ACTUALIZAR,
+                datos_antes_json=actualizada[0],
+                datos_despues_json=actualizada[1],
+                motivo=f"realizacion sin realidad nueva: {motivo}",
+            )
+            if regla_id is not None:
+                self._crear_sucesor_si_rodante(sesion, regla_id, uuid_sucesor)
+            return self._resultado_actual(
+                sesion, prevision_id, row_version=nueva_version
+            )
+
+        return self._ejecutar(contexto, operacion, "dar_por_realizada")
 
     # ==================================================================
     # Correccion de vinculos (F04-D021)

@@ -18,6 +18,13 @@
 #   - IntencionOmitir («No hubo este mes»): motivo opcional.
 #   Estos tres no dependen de dto_registro ni de dto_vs01 (que los importan).
 # Version: 0.1.0 (F05-06 M5 §A3-§A5)
+# Version: 0.2.0 (F05-06 M5-B; F05-D047 §61.1; F04-D065): IntencionDarPorCubierta y
+#   IntencionReabrir (motivo obligatorio en el motor; reabrir con la version
+#   del sucesor RODANTE cuando la lectura lo devuelve) y ResultadoTransicion.
+#   El detalle anade `pendiente` (esperado - registrado ACTIVO, con signo;
+#   derivado, nunca persistido), `recalculable` (Q4, informativo: la UI no lo
+#   ofrece), `sucesor` (id y row_version del sucesor RODANTE ABIERTO) y las
+#   acciones `dar_por_cubierta` y `reabrir`.
 # ============================================================
 
 from __future__ import annotations
@@ -50,6 +57,33 @@ class IntencionVincular(_Estricto):
     hecho_id: uuid.UUID
     importe_a_vincular: decimal.Decimal = Field(gt=0, max_digits=18, decimal_places=4)
     marcar_realizada: StrictBool
+
+
+class IntencionDarPorCubierta(_Estricto):
+    intencion_id: uuid.UUID  # solo para el uuid del sucesor RODANTE (sin replay de exito, como omitir)
+    row_version: int = Field(ge=1)
+    motivo: str | None = Field(default=None, max_length=LONGITUD_MOTIVO)  # obligatorio: lo exige el motor
+
+    @field_validator("motivo", mode="before")
+    @classmethod
+    def _motivo(cls, valor):
+        if isinstance(valor, str):
+            return valor.strip() or None
+        return valor
+
+
+class IntencionReabrir(_Estricto):
+    intencion_id: uuid.UUID
+    row_version: int = Field(ge=1)
+    motivo: str | None = Field(default=None, max_length=LONGITUD_MOTIVO)  # obligatorio: lo exige el motor
+    sucesor_row_version: int | None = Field(default=None, ge=1)
+
+    @field_validator("motivo", mode="before")
+    @classmethod
+    def _motivo(cls, valor):
+        if isinstance(valor, str):
+            return valor.strip() or None
+        return valor
 
 
 class IntencionOmitir(_Estricto):
@@ -149,6 +183,13 @@ class Acciones(_Estricto):
     ya_lo_registre: Accion
     omitir: Accion
     swipe: Accion
+    dar_por_cubierta: Accion
+    reabrir: Accion
+
+
+class Sucesor(_Estricto):
+    id: uuid.UUID
+    row_version: int
 
 
 class VinculoActivo(_Estricto):
@@ -164,6 +205,9 @@ class DetallePrevision(FilaPrevision):
     estado_derivado: Literal["REALIZADA_SIN_REALIDAD_ACTIVA", "REQUIERE_REVISION"] | None
     vinculos: list[VinculoActivo]
     acciones: Acciones
+    pendiente: str | None
+    recalculable: bool
+    sucesor: Sucesor | None
     aviso: str
 
 
@@ -196,6 +240,14 @@ class ResultadoVinculo(_Estricto):
     estado: str
     row_version: int
     idempotente: bool
+    aviso: str
+
+
+class ResultadoTransicion(_Estricto):
+    intencion_id: uuid.UUID
+    prevision_id: uuid.UUID
+    estado: str
+    row_version: int
     aviso: str
 
 

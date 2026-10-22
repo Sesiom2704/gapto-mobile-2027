@@ -7,6 +7,7 @@
 // Versión: 0.2.0 (F05-06 M5 SWIPE; regla de Moisés del 2026-10-22): la fila usa el gesto común FilaDeslizable (sigue al dedo y deja ver «Pagado» / «Cobrado» detrás); lo que hace el gesto lo decide la pantalla (acción rápida con «Deshacer» o la hoja). La acción accesible hace lo mismo que el gesto.
 // Versión: 0.4.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): los lados son `principal` (confirma) y `alternativa` («No hubo»); hacia dónde se desliza cada uno lo decide el componente común.
 // Versión: 0.3.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2): la fila recibe los dos lados (`derecha` / `izquierda`) y va en tarjeta; las acciones accesibles «derecha» / «izquierda» llevan la etiqueta de cada lado. «Próximos» sigue siendo una lista de solo lectura, sin tarjeta ni gesto.
+// Versión: 0.5.0 (F05-06 M5-B; F04-D065, F05-D047; contrato M5-B §5): HojaDarPorCubierta (Esperado / Registrado / Queda sin cubrir ±X €, motivo con sugerencias y texto, confirmación explícita), HojaMas («Reabrir», atenuada con su motivo) y HojaReabrir (motivo obligatorio; avisa de que se retira el sucesor sin realidad). Ninguna tiene swipe. AvisoEstadoActual ya no dice que deshacer una omisión no exista: remite a «Reabrir» en «Más».
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -14,8 +15,22 @@ import React, { useRef } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import type { FilaPrevision } from '../api/cliente';
-import { importeFila, intervaloTexto, lineaFila, TEXTO_NO_SABEMOS, estadoLegible, consecuencia } from '../domain/prevision';
+import type { AccionPrevision as AccionPrevisionWire, DetallePrevision, FilaPrevision } from '../api/cliente';
+import { formatearEur } from '../domain/importe';
+import {
+  consecuencia,
+  estadoLegible,
+  importeFila,
+  intervaloTexto,
+  lineaFila,
+  MOTIVOS_DAR_POR_CUBIERTA,
+  MOTIVOS_REABRIR,
+  quedaSinCubrirTexto,
+  TEXTO_DAR_POR_CUBIERTA,
+  TEXTO_DESCONOCIDO,
+  TEXTO_NO_SABEMOS,
+  TEXTO_REABRIR,
+} from '../domain/prevision';
 import { useTema } from '../theme/tema';
 import { espacio, importe as estiloImporte, radio, TACTIL_MIN, tipo } from '../theme/tokens';
 import { accesibilidadLados, FilaDeslizable, type LadoSwipe } from './AccionRapida';
@@ -207,8 +222,100 @@ export function AvisoEstadoActual(p: {
       <Text accessibilityRole="header" style={[tipo.titleSmall, { color: c.textPrimary }]}>{p.incierto ? 'No sabemos si se guardó' : 'Ha cambiado; revisa'}</Text>
       <Text testID="aviso-estado-texto" style={[tipo.body, { color: c.textSecondary }]}>{p.incierto ? TEXTO_NO_SABEMOS : p.mensaje}</Text>
       <Dato etiqueta={`${p.concepto} · ${p.intervalo}`} valor={estadoLegible(p.estado, p.derivado)} testID="aviso-estado-valor" />
-      <Text style={[tipo.footnote, { color: c.textSecondary }]}>Este segundo intento no ha guardado nada. Deshacer una omisión no está disponible en esta versión.</Text>
+      <Text style={[tipo.footnote, { color: c.textSecondary }]}>Este segundo intento no ha guardado nada. Si algo se cerró por error, puedes reabrirlo desde «Más».</Text>
       <BotonPrimario testID="aviso-entendido" titulo="Entendido" onPress={p.onEntendido} />
+    </HojaBase>
+  );
+}
+
+/** Motivo obligatorio con sugerencias rápidas: tocar una la copia al texto, que sigue siendo editable. */
+function MotivoConSugerencias(p: { testIDBase: string; sugerencias: readonly string[]; motivo: string; onMotivo: (t: string) => void }) {
+  const { c } = useTema();
+  return (
+    <View style={{ gap: espacio.s }}>
+      <Text style={[tipo.footnote, { color: c.textSecondary, fontWeight: '600' }]}>Motivo</Text>
+      <View style={s.chips}>
+        {p.sugerencias.map((m, i) => (
+          <Chip key={m} testID={`${p.testIDBase}-sugerencia-${i}`} etiqueta={m} seleccionado={p.motivo.trim() === m} onPress={() => p.onMotivo(m)} />
+        ))}
+      </View>
+      <TextInput
+        testID={`${p.testIDBase}-motivo`}
+        accessibilityLabel="Motivo"
+        placeholder="Escribe el motivo"
+        placeholderTextColor={c.textSecondary}
+        value={p.motivo}
+        onChangeText={p.onMotivo}
+        maxLength={200}
+        style={[tipo.body, s.input, { color: c.textPrimary, borderColor: c.borderStandard, backgroundColor: c.surfacePrimary }]}
+      />
+    </View>
+  );
+}
+
+/** M5-B · «Dar por cubierta» (PARCIAL): Esperado / Registrado / Queda sin cubrir ±X €, motivo y confirmación explícita. Sin swipe. */
+export function HojaDarPorCubierta(p: {
+  detalle: DetallePrevision;
+  motivo: string;
+  onMotivo: (t: string) => void;
+  enviando: boolean;
+  error: string | null;
+  onConfirmar: () => void;
+  onCerrar: () => void;
+}) {
+  const { c } = useTema();
+  const d = p.detalle;
+  return (
+    <HojaBase testID="hoja-dar-por-cubierta" onCerrar={p.onCerrar}>
+      <Text accessibilityRole="header" style={[tipo.titleSmall, { color: c.textPrimary }]}>{`¿Dar por cubierta ${d.concepto}?`}</Text>
+      <Dato etiqueta="Esperado" valor={d.importe_esperado === null ? TEXTO_DESCONOCIDO : formatearEur(d.importe_esperado)} testID="dar-esperado" />
+      <Dato etiqueta="Registrado" valor={formatearEur(d.cubierto)} testID="dar-registrado" />
+      <Dato etiqueta="Queda sin cubrir" valor={quedaSinCubrirTexto(d)} testID="dar-queda" />
+      <Text style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_DAR_POR_CUBIERTA}</Text>
+      <MotivoConSugerencias testIDBase="dar" sugerencias={MOTIVOS_DAR_POR_CUBIERTA} motivo={p.motivo} onMotivo={p.onMotivo} />
+      {p.error ? <Text testID="dar-error" accessibilityRole="alert" style={[tipo.footnote, { color: c.critical }]}>{p.error}</Text> : null}
+      <BotonPrimario testID="dar-confirmar" titulo="Dar por cubierta" onPress={p.onConfirmar} cargando={p.enviando} deshabilitado={!p.motivo.trim()} />
+      <BotonTexto testID="dar-cancelar" titulo="Cancelar" onPress={p.onCerrar} />
+    </HojaBase>
+  );
+}
+
+/** M5-B · «Más» del detalle de una terminal: «Reabrir» (atenuada con su motivo si no se puede). */
+export function HojaMas(p: { reabrir: AccionPrevisionWire; onReabrir: () => void; onCerrar: () => void }) {
+  const { c } = useTema();
+  return (
+    <HojaBase testID="hoja-mas" onCerrar={p.onCerrar}>
+      <Text accessibilityRole="header" style={[tipo.titleSmall, { color: c.textPrimary }]}>Más</Text>
+      <AccionPrevision testID="mas-reabrir" titulo="Reabrir" disponible={p.reabrir.disponible} motivo={p.reabrir.motivo} onPress={p.onReabrir} />
+      <BotonTexto testID="mas-cancelar" titulo="Cancelar" onPress={p.onCerrar} />
+    </HojaBase>
+  );
+}
+
+/** M5-B · «Reabrir» REALIZADA u OMITIDA: vuelve a pendiente; motivo obligatorio. No es el «Deshacer» de 5 s. */
+export function HojaReabrir(p: {
+  detalle: DetallePrevision;
+  motivo: string;
+  onMotivo: (t: string) => void;
+  enviando: boolean;
+  error: string | null;
+  onConfirmar: () => void;
+  onCerrar: () => void;
+}) {
+  const { c } = useTema();
+  const d = p.detalle;
+  return (
+    <HojaBase testID="hoja-reabrir" onCerrar={p.onCerrar}>
+      <Text accessibilityRole="header" style={[tipo.titleSmall, { color: c.textPrimary }]}>{`¿Reabrir ${d.concepto}?`}</Text>
+      <Dato etiqueta="Ahora" valor={estadoLegible(d.estado, d.estado_derivado)} testID="reabrir-estado" />
+      <Text style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_REABRIR}</Text>
+      {d.sucesor ? (
+        <Text testID="reabrir-sucesor" style={[tipo.footnote, { color: c.textSecondary }]}>La siguiente previsión de la serie, aún sin nada registrado, se retira para que no haya dos pendientes.</Text>
+      ) : null}
+      <MotivoConSugerencias testIDBase="reabrir" sugerencias={MOTIVOS_REABRIR} motivo={p.motivo} onMotivo={p.onMotivo} />
+      {p.error ? <Text testID="reabrir-error" accessibilityRole="alert" style={[tipo.footnote, { color: c.critical }]}>{p.error}</Text> : null}
+      <BotonPrimario testID="reabrir-confirmar" titulo="Reabrir" onPress={p.onConfirmar} cargando={p.enviando} deshabilitado={!p.motivo.trim()} />
+      <BotonTexto testID="reabrir-cancelar" titulo="Cancelar" onPress={p.onCerrar} />
     </HojaBase>
   );
 }

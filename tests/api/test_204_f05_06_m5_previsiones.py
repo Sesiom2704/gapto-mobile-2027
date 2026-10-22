@@ -22,6 +22,10 @@
 #     - vencida con hoy_owner (no UTC).
 #   Reloj fijo 2026-10-10 12:00Z (Madrid) salvo donde se indica.
 # Version: 0.1.0 (F05-06 M5 §A6)
+# Version: 0.2.0 (F05-06 M5-B; F05-D047 §61.1): el detalle de una REALIZADA (incluida la
+#   derivada sin realidad) y de una OMITIDA ofrece «Reabrir»; todas las demas acciones
+#   siguen no disponibles con su motivo. REQUIERE_REVISION y la moneda distinta de EUR
+#   siguen sin ninguna accion.
 # ============================================================
 
 from __future__ import annotations
@@ -665,8 +669,10 @@ def test_estados_excluidos_visibles_en_detalle_y_fuera_de_listas(t):
     m.omitir(cli, owner, omitida)
     d = m.detalle(cli, luz)
     assert (d["estado"], d["estado_derivado"]) == ("REALIZADA", "REALIZADA_SIN_REALIDAD_ACTIVA")
-    assert all(not a["disponible"] and a["motivo"] for a in d["acciones"].values())
-    assert m.detalle(cli, omitida)["estado"] == "OMITIDA"
+    assert all(not a["disponible"] and a["motivo"] for k, a in d["acciones"].items() if k != "reabrir")
+    assert d["acciones"]["reabrir"] == {"disponible": True, "motivo": None}  # M5-B
+    do = m.detalle(cli, omitida)
+    assert do["estado"] == "OMITIDA" and do["acciones"]["reabrir"]["disponible"] is True
     # REQUIERE_REVISION (OMITIDA con realidad ACTIVA): solo por fixture como gapto_owner (ninguna ruta lo produce).
     revision = _luz(owner, cta, iber)
     m.omitir(cli, owner, revision)

@@ -4,6 +4,7 @@
 // Ruta: mobile/src/screens/PrevisionDetalleScreen.tsx
 // Descripción: Detalle de una previsión y sus tres salidas (F05-06 M5 §B1; lámina PREV v0.2 A2, B2–B7; D-PREV-02/06/07/09/11/13/14). Lee GET /v1/previsiones/{id} en CUALQUIER estado: las terminales y las que necesitan revisión se ven solo en lectura y sin acciones. Muestra importe esperado («Desconocido», nunca 0), cuándo, cuenta, categoría, origen, cobertura («Pagado 40,00 € · 1 pago», «Queda 80,00 €») o desviación («10,00 € más de lo previsto») y «Es una previsión: no ha movido dinero.». Acciones: «Registrar pago/cobro» (PrevisionRegistroScreen), «Ya lo registré» (candidatos SIN preselección, «Buscar en más fechas», «Se vinculará X €» con toda la porción libre, «¿Queda cubierta?» sin respuesta y «Enlazar»; un cambio concurrente relee y lo vuelve a mostrar) y «No hubo este mes» (motivo opcional). Lo no disponible va atenuado con su motivo. Tras un 409 o un fallo de conexión se enseña el estado actual y nunca «hecho»; un reintento usa la MISMA identidad. En parciales: «Para cubrirla, registra o enlaza el resto.» (sin darla por cubierta, DEU-M5-CERRAR-PARCIAL).
 // Versión: 0.1.0 (F05-06 M5 §B1)
+// Versión: 0.2.0 (F05-06 M5-B; F04-D065, F05-D047; contrato M5-B §5): «Dar por cubierta» en una PARCIAL (hoja con Esperado / Registrado / Queda sin cubrir ±X €, motivo con sugerencias y confirmación explícita) y «Más» › «Reabrir» en REALIZADA, REALIZADA_SIN_REALIDAD_ACTIVA y OMITIDA (motivo obligatorio; envía la versión del sucesor cuando la lectura lo trae). Sin swipe. PREVISION_SIN_REALIDAD_ACTIVA y TRAMO_RODANTE_REQUIERE_REVISION se explican en la hoja con el texto del servidor (el primero informa de «No hubo este mes» sin ejecutarlo) y se relee el detalle; 409 de estado o versión y el reintento incierto acaban en el estado actual, como «No hubo». Un reintento tras un fallo de conexión usa la MISMA identidad.
 // ============================================================
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -12,7 +13,18 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { CandidatoPrevision, CandidatosPrevision, ClienteApi, DetallePrevision } from '../api/cliente';
 import { BotonPrimario, BotonTexto, CabeceraNavegacion, EstadoDato } from '../components/Basicos';
 import { estilosFormulario } from '../components/Formulario';
-import { AccionPrevision, AvisoEstadoActual, HojaOmitir, QuedaCubierta, usarIntencion } from '../components/Prevision';
+import { Ionicons } from '@expo/vector-icons';
+
+import {
+  AccionPrevision,
+  AvisoEstadoActual,
+  HojaDarPorCubierta,
+  HojaMas,
+  HojaOmitir,
+  HojaReabrir,
+  QuedaCubierta,
+  usarIntencion,
+} from '../components/Prevision';
 import { diaMesIso } from '../domain/fechas';
 import { formatearEur } from '../domain/importe';
 import {
@@ -21,6 +33,8 @@ import {
   estadoLegible,
   importeFila,
   intervaloTexto,
+  ofreceDarPorCubierta,
+  ofreceMas,
   TEXTO_CUBRIR_RESTO,
   TEXTO_DESCONOCIDO,
   TEXTO_NO_MUEVE,
@@ -33,6 +47,9 @@ import { PrevisionRegistroScreen } from './PrevisionRegistroScreen';
 
 type Carga = { fase: 'CARGANDO' } | { fase: 'OK'; d: DetallePrevision } | { fase: 'ERROR' };
 type Aviso = { estado: string; derivado: string | null; incierto: boolean; mensaje: string } | null;
+type Transicion = { tipo: 'CUBIERTA' | 'REABRIR'; motivo: string; enviando: boolean; error: string | null } | null;
+/** Rechazos que se explican en la propia hoja y obligan a releer (sin reintento automático). */
+const RECHAZOS_EN_HOJA = new Set(['PREVISION_SIN_REALIDAD_ACTIVA', 'TRAMO_RODANTE_REQUIERE_REVISION', 'ENTRADA_INVALIDA', 'MOTIVO_AUSENTE']);
 
 const ORIGEN = { MANUAL: 'Previsión manual', REGLA: 'Regla recurrente', V3: 'De la versión anterior (V3)' } as const;
 
@@ -53,6 +70,9 @@ export function PrevisionDetalleScreen(p: {
   const [aviso, setAviso] = useState<Aviso>(null);
   const [cambios, setCambios] = useState(false);
   const intencionOmitir = usarIntencion(p.nuevoId);
+  const [transicion, setTransicion] = useState<Transicion>(null);
+  const [mas, setMas] = useState(false);
+  const intencionTransicion = usarIntencion(p.nuevoId);
   const [fueIncierto, setFueIncierto] = useState(false);
 
   const cargar = useCallback(async () => {
@@ -138,6 +158,41 @@ export function PrevisionDetalleScreen(p: {
     }
   };
 
+  const confirmarTransicion = async () => {
+    if (!transicion || !transicion.motivo.trim()) return;
+    const t = transicion;
+    setTransicion({ ...t, enviando: true, error: null });
+    const base = { intencion_id: intencionTransicion.actual(), row_version: d.row_version, motivo: t.motivo.trim() };
+    const r = t.tipo === 'CUBIERTA'
+      ? await p.cliente.darPorCubiertaPrevision(d.id, base)
+      : await p.cliente.reabrirPrevision(d.id, { ...base, sucesor_row_version: d.sucesor?.row_version ?? null });
+    if (r.tipo === 'OK') {
+      intencionTransicion.liberar();
+      setTransicion(null);
+      setCambios(true);
+      return p.onCerrar(true);
+    }
+    if (r.tipo === 'INDETERMINADO') {
+      setFueIncierto(true);
+      return setTransicion({ ...t, enviando: false, error: `${r.mensaje} Puedes reintentar.` });
+    }
+    intencionTransicion.liberar();
+    if (RECHAZOS_EN_HOJA.has(r.codigo)) {
+      // Se explica en la hoja y se relee: el botón vuelve a enviar con los datos nuevos, nunca solo.
+      setTransicion({ ...t, enviando: false, error: r.mensaje });
+      setCambios(true);
+      void p.cliente.detallePrevision(d.id).then((x) => { if (x.tipo === 'OK') setCarga({ fase: 'OK', d: x.datos }); });
+      return;
+    }
+    const actual = (r.detalle?.estado_actual ?? null) as { estado: string; estado_derivado: string | null } | null;
+    setTransicion(null);
+    if (actual && (r.codigo === 'ESTADO_PREVISION_INCOMPATIBLE' || r.codigo === 'VERSION_DESFASADA')) {
+      setAviso({ estado: actual.estado, derivado: actual.estado_derivado, incierto: fueIncierto, mensaje: r.mensaje });
+    } else {
+      setAviso({ estado: d.estado, derivado: d.estado_derivado, incierto: false, mensaje: r.mensaje });
+    }
+  };
+
   const cobertura = coberturaTexto(d);
   const desviacion = desviacionTexto(d);
   const terminal = d.estado !== 'ABIERTA' || d.estado_derivado !== null;
@@ -145,7 +200,12 @@ export function PrevisionDetalleScreen(p: {
   const fecha = d.fecha_hasta ?? d.fecha_desde;
   return (
     <View testID="prevision-detalle" style={[s.raiz, { backgroundColor: c.background }]}>
-      <CabeceraNavegacion titulo="Previsión" atras={{ etiqueta: p.etiquetaAtras ?? 'Inicio', onPress: cerrar }} testIDAtras="prevision-detalle-atras" />
+      <CabeceraNavegacion titulo="Previsión" atras={{ etiqueta: p.etiquetaAtras ?? 'Inicio', onPress: cerrar }} testIDAtras="prevision-detalle-atras"
+        derecha={ofreceMas(d) ? (
+          <Pressable testID="prevision-mas" accessibilityRole="button" accessibilityLabel="Más" hitSlop={8} onPress={() => setMas(true)} style={s.mas}>
+            <Ionicons name="ellipsis-horizontal" size={22} color={c.accent} />
+          </Pressable>
+        ) : null} />
       <ScrollView contentContainerStyle={estilosFormulario.cuerpo}>
         <View style={{ gap: espacio.xs }}>
           <View style={s.titulo}>
@@ -183,7 +243,23 @@ export function PrevisionDetalleScreen(p: {
           motivo={d.acciones.ya_lo_registre.motivo} onPress={() => setVista('YA')} />
         <AccionPrevision testID="prevision-accion-omitir" titulo="No hubo este mes" disponible={d.acciones.omitir.disponible}
           motivo={d.acciones.omitir.motivo} onPress={() => setOmitir({ motivo: '', enviando: false, error: null })} />
+        {ofreceDarPorCubierta(d) ? (
+          <AccionPrevision testID="prevision-accion-dar-por-cubierta" titulo="Dar por cubierta" disponible={d.acciones.dar_por_cubierta.disponible}
+            motivo={d.acciones.dar_por_cubierta.motivo} onPress={() => setTransicion({ tipo: 'CUBIERTA', motivo: '', enviando: false, error: null })} />
+        ) : null}
       </ScrollView>
+      {mas ? (
+        <HojaMas reabrir={d.acciones.reabrir} onCerrar={() => setMas(false)}
+          onReabrir={() => { setMas(false); setTransicion({ tipo: 'REABRIR', motivo: '', enviando: false, error: null }); }} />
+      ) : null}
+      {transicion?.tipo === 'CUBIERTA' ? (
+        <HojaDarPorCubierta detalle={d} motivo={transicion.motivo} onMotivo={(t) => setTransicion({ ...transicion, motivo: t })} enviando={transicion.enviando}
+          error={transicion.error} onConfirmar={confirmarTransicion} onCerrar={() => setTransicion(null)} />
+      ) : null}
+      {transicion?.tipo === 'REABRIR' ? (
+        <HojaReabrir detalle={d} motivo={transicion.motivo} onMotivo={(t) => setTransicion({ ...transicion, motivo: t })} enviando={transicion.enviando}
+          error={transicion.error} onConfirmar={confirmarTransicion} onCerrar={() => setTransicion(null)} />
+      ) : null}
       {omitir ? (
         <HojaOmitir fila={d} motivo={omitir.motivo} onMotivo={(t) => setOmitir({ ...omitir, motivo: t })} enviando={omitir.enviando}
           error={omitir.error} onConfirmar={confirmarOmitir} onCerrar={() => setOmitir(null)} />
@@ -299,6 +375,7 @@ function YaLoRegistre(p: { cliente: ClienteApi; nuevoId: () => string; detalle: 
 
 const s = StyleSheet.create({
   raiz: { flex: 1 },
+  mas: { minWidth: TACTIL_MIN, minHeight: TACTIL_MIN, alignItems: 'center', justifyContent: 'center' },
   titulo: { flexDirection: 'row', alignItems: 'center', gap: espacio.s, flexWrap: 'wrap' },
   etiqueta: { borderRadius: radio.pill, paddingHorizontal: espacio.s, paddingVertical: 2 },
   bloque: { borderWidth: 1, borderRadius: radio.m, padding: espacio.m, gap: espacio.s },
