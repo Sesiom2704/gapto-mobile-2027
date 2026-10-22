@@ -4,9 +4,10 @@
 // Ruta: mobile/src/domain/prevision.ts
 // Descripción: Confirmación de previsiones (F05-06 M5; F05 §59 F05-D044; láminas PREV v0.2 y HOME-01 v0.4). Lógica pura: importes de fila por naturaleza («~74,00 €» por pagar, «+2.100,00 €» cobro previsto en color neutro, transferencias sin signo), «Desconocido» y nunca 0 (D-PREV-08), línea de la fila (vencida, pago parcial, próximo, «Entre cuentas»), cobertura («Pagado 40,00 de 120,00 · queda 80,00») y desviación («10,00 € más de lo previsto», nunca un «queda» negativo, D-PREV-13), «Por pagar» / «Por cobrar» por separado (D-PREV-10), contador de la campana (número, nada o «!» si la lectura falla; HOME-01 I03/I05), «Se vinculará X €» (D-PREV-11), consecuencia del swipe (D-PREV-12) y el bloque `prevision` del registro, que exige una respuesta explícita a «¿Queda cubierta?» (D-PREV-04, P-PREV-02). Sin estado ni red.
 // Versión: 0.1.0 (F05-06 M5 §B1)
+// Versión: 0.2.0 (F05-06 M5 SWIPE; regla de Moisés del 2026-10-22): `planRapidoPrevision` decide si el swipe es una acción rápida de un solo gesto (gasto o ingreso abierto, esperado conocido, EUR, una sola cuenta prevista que hoy tiene la capacidad, sin realidad previa): registra el esperado en esa cuenta con fecha de hoy y `marcar_realizada = true`, por la misma composición que la hoja. Si falta algo, null y el gesto abre la hoja. `textoAvisoRapido`: «<Nombre> pagada / cobrada».
 // ============================================================
 
-import type { BloquePrevisionWire, DetallePrevision, FilaPrevision, ImportePorNaturaleza } from '../api/cliente';
+import type { BloquePrevisionWire, CuentaElegible, CuentaPago, DetallePrevision, FilaPrevision, ImportePorNaturaleza } from '../api/cliente';
 import { diaMesAnioIso, diaMesIso } from './fechas';
 import { formatearEur } from './importe';
 
@@ -178,4 +179,32 @@ export function admiteSwipe(f: FilaPrevision): boolean {
   if (f.tipo === 'GASTO') return f.cuenta_salida !== null;
   if (f.tipo === 'INGRESO') return f.cuenta_entrada !== null;
   return false;
+}
+
+/** Cuentas que hoy tienen la capacidad: pagar (gasto) y recibir dinero (ingreso). null = no se sabe (no se pudo leer). */
+export interface CapacidadesHoy {
+  pago: CuentaPago[] | null;
+  ingreso: CuentaElegible[] | null;
+}
+
+/** Swipe como acción rápida (regla del 2026-10-22): solo si la acción es inequívoca; si falta algo, null (abre la hoja).
+ *  Comprueba cada condición por sí misma, sin apoyarse en `admiteSwipe`. */
+export function planRapidoPrevision(f: FilaPrevision, cap: CapacidadesHoy | null, hoy: string): FormularioDesdePrevision | null {
+  if (!cap || f.estado !== 'ABIERTA' || f.moneda !== 'EUR' || f.con_realidad || f.pagos > 0) return null;
+  if (f.importe_esperado === null) return null;
+  if (f.tipo !== 'GASTO' && f.tipo !== 'INGRESO') return null;
+  const cuenta = f.tipo === 'GASTO' ? f.cuenta_salida : f.cuenta_entrada;
+  if (!cuenta) return null;
+  const lista: { cuenta_id: string }[] | null = f.tipo === 'GASTO' ? cap.pago : cap.ingreso;
+  if (!lista || !lista.some((x) => x.cuenta_id === cuenta.id)) return null;
+  const self100 = f.tipo === 'GASTO' && !!cap.pago?.some((x) => x.cuenta_id === cuenta.id && x.propuesta_financiacion === 'SELF_100');
+  return {
+    importe: f.importe_esperado, fecha: hoy, cuentaId: cuenta.id, cuentaDestinoId: null, presupuestable: f.presupuestable,
+    conCategoria: !!f.categoria, propuestaSelf100: self100, marcar: true,
+  };
+}
+
+/** Texto del aviso de la acción rápida: «Nómina cobrada», «Electricidad pagada». */
+export function textoAvisoRapido(f: Pick<FilaPrevision, 'concepto' | 'tipo'>): string {
+  return `${f.concepto} ${f.tipo === 'INGRESO' ? 'cobrada' : 'pagada'}`;
 }

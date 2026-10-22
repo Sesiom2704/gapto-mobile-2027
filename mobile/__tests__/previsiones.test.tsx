@@ -4,6 +4,7 @@
 // Ruta: mobile/__tests__/previsiones.test.tsx
 // Descripción: Confirmación de previsiones (F05-06 M5 §B2; láminas PREV v0.2 y HOME-01 v0.4; F05 §59). Dominio puro (importes por naturaleza, «Desconocido» nunca 0, cobertura y desviación, línea de la fila, «Por pagar» / «Por cobrar» separados, campana, «Se vinculará X €», bloque `prevision` solo con respuesta explícita, payloads por tipo y regla del swipe) y pantallas por estado, en claro y oscuro: Inicio (campana con 0, 2 y 3; bloque como mucho dos; sin importes sumados; estado de fallo con «Reintentar» y «!»; próximos de solo lectura), «Pendientes», detalle (acciones atenuadas con motivo, parcial, desconocido, terminal en solo lectura), registro desde la previsión («¿Queda cubierta?» sin respuesta, revisión que separa realidad y previsión, reintento con la MISMA identidad), swipe (consecuencia antes de «Confirmar pago y cubrir»), «Ya lo registré» (sin preselección, «Buscar en más fechas», toda la porción libre, PORCION_CAMBIADA relee) y omitir (409 con el estado actual; tras un fallo, «No sabemos si se guardó»).
 // Versión: 0.1.0 (F05-06 M5 §B2)
+// Versión: 0.2.0 (F05-06 M5 SWIPE; regla del 2026-10-22): el swipe de B1 abre la hoja solo cuando la acción rápida no es inequívoca (aquí, sin poder leer la capacidad de hoy); la acción rápida con «Deshacer» se prueba en accion_rapida.test.tsx.
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
@@ -237,8 +238,10 @@ describe('Inicio', () => {
     expect(screen.queryByText('Presupuesto de gasto')).toBeNull();
   });
 
-  test('B1: el swipe solo abre la hoja; «Confirmar pago y cubrir» registra con marcar_realizada = true', async () => {
+  test('B1: sin la capacidad de hoy el swipe abre la hoja; «Confirmar pago y cubrir» registra con marcar_realizada = true', async () => {
     const c = cliente({ inicioPrevisiones: inicio(1, [fila()]) });
+    (c.cuentasPago as jest.Mock).mockResolvedValueOnce({ tipo: 'INDETERMINADO', mensaje: 'sin red' }); // la lectura previa al gesto falla
+    await act(async () => undefined);
     montarHome(c);
     const filaLuz = await screen.findByTestId('atencion-luz');
     expect(filaLuz.props.accessibilityActions).toEqual([{ name: 'activate' }, { name: 'swipe', label: 'Pagado' }]);

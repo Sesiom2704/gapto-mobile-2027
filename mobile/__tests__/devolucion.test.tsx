@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-06 M2-B §B2)
 // Versión: 0.2.0 (F05-06 M2-C; acta M2 iPhone O-1): pista visual del swipe «Cobrado» (la fila se desplaza con tope, franja «Confirmar abono» tenue y de acento pasado el umbral, vuelta al soltar; sin franja ni desplazamiento en una compra).
 // Versión: 0.3.0 (F05-06 M2-D §2-§3): cuenta del abono (opción b): «Sí, en <original>» y la propuesta de B2 aunque la original no esté en la lista de RECIBIR_INGRESO; sin cuenta original no hay propuesta; las listas piden la operación INGRESO; CUENTA_SIN_CAPACIDAD con el mensaje del servidor (capacidad del detalle) y sin «ingreso».
+// Versión: 0.4.0 (F05-06 M5 SWIPE; regla del 2026-10-22): con la cuenta original demostrable el swipe «Cobrado» es una acción rápida con «Deshacer» (accion_rapida.test.tsx); estos tests de la Actividad prueban la reserva sin cuenta original (abre la hoja), el gesto común y la franja, que ahora dice «Cobrado».
 // ============================================================
 
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
@@ -424,8 +425,9 @@ describe('Actividad', () => {
     expect(onRegistrarDevolucion).toHaveBeenCalledWith('compra');
   });
 
-  test('P-DEV-04: swipe «Cobrado» abre la confirmación de cuenta y fecha (nunca registra solo)', async () => {
-    const c = clienteActividad({ registrarAbono: jest.fn() as any });
+  const SIN_ORIGINAL = { contextoDevolucion: jest.fn(async () => ({ tipo: 'OK', datos: { ...CTX, cuenta_compra: null } }) as any) };
+  test('P-DEV-04: sin cuenta original, el swipe «Cobrado» abre la confirmación de cuenta y fecha (nunca registra solo)', async () => {
+    const c = clienteActividad({ registrarAbono: jest.fn() as any, ...SIN_ORIGINAL });
     envolver(<ActividadScreen cliente={c} ahora={AHORA} nuevoId={nuevoId} onRegistrarDevolucion={jest.fn()} />);
     const f = await screen.findByTestId('fila-dev');
     expect(f.props.accessibilityActions).toEqual([{ name: 'cobrado', label: 'Cobrado' }]);
@@ -436,7 +438,7 @@ describe('Actividad', () => {
   });
 
   test('P-DEV-04: el gesto real (contenedor que captura el movimiento horizontal) abre la hoja solo pasado el umbral', async () => {
-    const c = clienteActividad({ registrarAbono: jest.fn() as any });
+    const c = clienteActividad({ registrarAbono: jest.fn() as any, ...SIN_ORIGINAL });
     envolver(<ActividadScreen cliente={c} ahora={AHORA} nuevoId={nuevoId} onRegistrarDevolucion={jest.fn()} />);
     await screen.findByTestId('fila-dev');
     expect(screen.queryByTestId('fila-swipe-compra')).toBeNull();
@@ -466,8 +468,8 @@ describe('Actividad', () => {
     expect(c.registrarAbono).not.toHaveBeenCalled();
   });
 
-  test('O-1: al arrastrar, la fila se desplaza y deja ver «Confirmar abono»; se intensifica pasado el umbral y vuelve al soltar', async () => {
-    const c = clienteActividad({ registrarAbono: jest.fn() as any });
+  test('O-1: al arrastrar, la fila se desplaza y deja ver «Cobrado»; se intensifica pasado el umbral y vuelve al soltar', async () => {
+    const c = clienteActividad({ registrarAbono: jest.fn() as any, ...SIN_ORIGINAL });
     envolver(<ActividadScreen cliente={c} ahora={AHORA} nuevoId={nuevoId} onRegistrarDevolucion={jest.fn()} />);
     await screen.findByTestId('fila-dev');
     const z = screen.getByTestId('fila-swipe-dev');

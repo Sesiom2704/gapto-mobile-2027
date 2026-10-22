@@ -9,15 +9,17 @@
 // Versión: 0.4.0 (F05-06 M2-B §B1; lámina DEV A3, A4, B1, B2; D-DEV-01, 06, 07; P-DEV-03, 04): devolución contextual. El detalle de un gasto que no es devolución ofrece «Registrar devolución» (abre la tarea de devolución, `onRegistrarDevolucion`); el de una compra con devoluciones las lista (tocar abre la devolución) con lo devuelto y el neto derivado; el de una devolución muestra «Devolución de: <compra> ›» (vuelve a la compra), el abono (recibido en <cuenta> o pendiente) y, si está pendiente, «Registrar abono» (hoja B2). La fila de una devolución con el abono pendiente admite el swipe «Cobrado» (en un contenedor que captura el movimiento horizontal, para que el Pressable de la fila no se quede el gesto) y la acción de accesibilidad «Cobrado»; los dos abren la misma hoja con confirmación de cuenta y fecha. `abrir` abre el detalle de un hecho desde fuera (ida y vuelta tras registrar). Tras un abono se recargan la lista y el detalle.
 // Versión: 0.5.0 (F05-06 M2-C; acta M2 iPhone O-1; P-DEV-04): pista visual del swipe «Cobrado». Al arrastrar a la izquierda la fila sigue al dedo (con tope `TOPE_SWIPE`) y deja ver detrás la franja «Confirmar abono»; al superar `UMBRAL_SWIPE` la franja pasa al color de acento. Al soltar, la fila vuelve con animación; por encima del umbral se abre la misma hoja de siempre. La franja es decorativa (oculta a VoiceOver); el toque, el scroll vertical, la acción accesible «Cobrado» y las demás filas no cambian.
 // Versión: 0.6.0 (F05-06 M3 §B1; lámina REP v0.2 E5/E6, P-REP-03/04): el detalle de un gasto que no es devolución lee su reparto (GET /v1/hechos/{id}/reparto, solo si la raíz pasa `onCorregirReparto`) y ofrece «Pendiente con <persona>» por cada parte con deuda y «Corregir reparto» cuando el servidor lo considera corregible; si no lo es, no se ofrece nada que el motor no admita. Ambos se abren fuera de la pantalla (tareas inmersivas de la raíz).
+// Versión: 0.7.0 (F05-06 M5 SWIPE; regla de Moisés del 2026-10-22, sustituye a DAY-RULE-03 en lo que contradiga): el swipe «Cobrado» de una devolución con el abono pendiente es una acción rápida cuando es inequívoca: importe de la devolución, cuenta ORIGINAL demostrable de la compra (P-DEV-02 con M2-D; el servidor la admite sin capacidad) y fecha de hoy. La fila sale, el aviso «Devolución de <compra> cobrada · Deshacer» dura 5 s y después se registra el abono (useAccionRapida). La cuenta original se lee con la lista, nunca en el gesto. Sin cuenta original (o sin poder leerla) el gesto abre la hoja de siempre. El gesto y la franja son los comunes (FilaDeslizable); la franja dice «Cobrado». «Registrar abono» del detalle sigue abriendo la hoja.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, PanResponder, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ClienteApi, DetalleActividad, FilaActividad, TipoActividad } from '../api/cliente';
 import { AbonoHoja } from '../components/AbonoHoja';
+import { FilaDeslizable, useAccionRapida } from '../components/AccionRapida';
 import { BotonPrimario, BotonTexto, Chip } from '../components/Basicos';
 import { Hoja } from '../components/HojasCategoria';
 import { BotonSecundario, CargaArbol, IconoCategoriaVista, SelectorCategorias } from '../components/SelectorCategorias';
@@ -246,6 +248,33 @@ export function ActividadScreen(p: {
     if (!ofreceRegistrarAbono(f) || !f.devolucion_de) return;
     setHoja({ h: 'ABONO', volverA, dev: { id: f.id, titulo: textoDevolucionDe(f.devolucion_de), importe: f.importe_total ?? '0', origenId: f.devolucion_de.hecho_id } });
   };
+  // Acción rápida (regla del 2026-10-22): la cuenta original demostrable de cada devolución pendiente se lee con la
+  // lista (undefined = sin leer o fallo; null = no hay original), para que ni el gesto ni «Deshacer» toquen el servidor.
+  const [compras, setCompras] = useState<Record<string, { cuenta_id: string; nombre: string } | null>>({});
+  const origenesPendientes = carga.fase === 'OK' && p.nuevoId
+    ? [...new Set(carga.filas.filter(ofreceRegistrarAbono).map((f) => f.devolucion_de!.hecho_id))].sort().join('|') : '';
+  useEffect(() => {
+    let vigente = true;
+    for (const id of origenesPendientes ? origenesPendientes.split('|') : []) {
+      void p.cliente.contextoDevolucion(id).then(
+        (r) => { if (vigente && r.tipo === 'OK') setCompras((m) => ({ ...m, [id]: r.datos.cuenta_compra })); },
+        () => undefined,
+      );
+    }
+    return () => {
+      vigente = false;
+    };
+  }, [origenesPendientes, p.cliente]);
+  const rapida = useAccionRapida({ nuevoId: p.nuevoId ?? (() => ''), onHecha: () => cargar() });
+  const deslizarAbono = (f: FilaActividad) => {
+    const cuenta = f.devolucion_de ? compras[f.devolucion_de.hecho_id] : undefined;
+    if (!ofreceRegistrarAbono(f) || !f.devolucion_de || !f.importe_total || !cuenta) return abrirAbono(f, null);
+    rapida.lanzar({
+      clave: f.id,
+      texto: `Devolución de ${nombreCorto(f.devolucion_de)} cobrada`,
+      enviar: (id) => p.cliente.registrarAbono(f.id, { intencion_id: id, cuenta_id: cuenta.cuenta_id, fecha: hoyIso }),
+    });
+  };
   const cerrarAbono = (registrado: boolean, volverA: string | null) => {
     if (registrado) void cargar();
     if (volverA) void abrirDetalle(volverA);
@@ -254,7 +283,7 @@ export function ActividadScreen(p: {
 
   const nGrupos = gruposActivos(filtros) - (p.tercero ? 1 : 0);
   const etiquetas = etiquetasFiltros(filtros);
-  const grupos = carga.fase === 'OK' ? agrupar(carga.filas, buscando ? 'MES' : 'DIA', hoyIso, ayerIso) : [];
+  const grupos = carga.fase === 'OK' ? agrupar(carga.filas.filter((f) => !rapida.oculta(f.id)), buscando ? 'MES' : 'DIA', hoyIso, ayerIso) : [];
 
   return (
     <View testID="pantalla-actividad" style={{ flex: 1, backgroundColor: c.background }}>
@@ -380,7 +409,7 @@ export function ActividadScreen(p: {
             <View style={[s.tarjeta, { backgroundColor: c.surfacePrimary }]}>
               {g.filas.map((f, i) => (
                 <FilaVista key={f.id} f={f} conFecha={buscando || !!p.tercero} ultima={i === g.filas.length - 1} onPress={() => void abrirDetalle(f.id)}
-                  onCobrado={ofreceRegistrarAbono(f) && p.nuevoId ? () => abrirAbono(f, null) : undefined} />
+                  onCobrado={ofreceRegistrarAbono(f) && p.nuevoId ? () => deslizarAbono(f) : undefined} />
               ))}
             </View>
           </View>
@@ -536,6 +565,7 @@ export function ActividadScreen(p: {
         </Hoja>
       ) : null}
 
+      {rapida.avisos}
       {hoja?.h === 'ABONO' && p.nuevoId ? (
         <AbonoHoja cliente={p.cliente} nuevoId={p.nuevoId} ahora={p.ahora} devolucion={hoja.dev} onCerrar={(r) => cerrarAbono(r, hoja.volverA)} />
       ) : null}
@@ -543,14 +573,10 @@ export function ActividadScreen(p: {
   );
 }
 
-/** Distancia horizontal (px) a la izquierda que dispara el swipe «Cobrado» (P-DEV-04). */
-export const UMBRAL_SWIPE = 72;
-/** Desplazamiento máximo (px) de la fila durante el swipe «Cobrado» (O-1): deja ver la franja entera sin vaciar la fila. */
-export const TOPE_SWIPE = 160;
+/** Umbral y tope del swipe «Cobrado»: los comunes de la acción rápida (P-DEV-04, O-1). */
+export { TOPE_SWIPE, UMBRAL_SWIPE } from '../components/AccionRapida';
 /** Texto de la franja que aparece detrás de la fila al deslizar (O-1, patrón iOS). */
-export const TEXTO_FRANJA_COBRADO = 'Confirmar abono';
-
-type FaseSwipe = 'reposo' | 'arrastrando' | 'superado';
+export const TEXTO_FRANJA_COBRADO = 'Cobrado';
 
 function FilaVista(p: { f: FilaActividad; conFecha: boolean; ultima: boolean; onPress: () => void; onCobrado?: () => void }) {
   const { c } = useTema();
@@ -558,37 +584,6 @@ function FilaVista(p: { f: FilaActividad; conFecha: boolean; ultima: boolean; on
   const titulo = tituloTransferencia(f) ?? tituloFila(f);
   const secundaria = textoCoincidencia(f) ?? secundariaFila(f);
   const marca = marcaReparto(f);
-  const onCobrado = useRef(p.onCobrado);
-  onCobrado.current = p.onCobrado;
-  // O-1: la fila sigue al dedo (solo a la izquierda, con tope) y deja ver detrás la franja «Confirmar abono», que se
-  // intensifica al superar el umbral. Al soltar la fila vuelve a su sitio con animación.
-  const desplazamiento = useRef(new Animated.Value(0)).current;
-  const [fase, setFase] = useState<FaseSwipe>('reposo');
-  // Swipe «Cobrado» (DAY-RULE-03): solo en una devolución con el abono pendiente; abre la confirmación, nunca registra solo.
-  // Va en un contenedor que CAPTURA el movimiento horizontal: el Pressable de la fila es responder desde el toque y sus
-  // manejadores pisarían los del gesto (en web y en nativo); al capturar, el Pressable se cancela y no hay toque.
-  const gesto = useMemo(() => {
-    const horizontal = (g: { dx: number; dy: number }) => !!onCobrado.current && Math.abs(g.dx) > 12 && Math.abs(g.dx) > Math.abs(g.dy);
-    const volver = () => {
-      setFase('reposo');
-      Animated.timing(desplazamiento, { toValue: 0, duration: 180, useNativeDriver: false }).start(); // el arrastre ya va por JS (setValue)
-    };
-    return PanResponder.create({
-      onMoveShouldSetPanResponder: (_, g) => horizontal(g),
-      onMoveShouldSetPanResponderCapture: (_, g) => horizontal(g),
-      onPanResponderTerminationRequest: () => false,
-      onPanResponderGrant: () => setFase('arrastrando'),
-      onPanResponderMove: (_, g) => {
-        desplazamiento.setValue(Math.max(-TOPE_SWIPE, Math.min(0, g.dx)));
-        setFase(g.dx <= -UMBRAL_SWIPE ? 'superado' : 'arrastrando');
-      },
-      onPanResponderRelease: (_, g) => {
-        volver();
-        if (onCobrado.current && g.dx <= -UMBRAL_SWIPE) onCobrado.current();
-      },
-      onPanResponderTerminate: volver,
-    });
-  }, [desplazamiento]);
   const fila = (
     <Pressable
       testID={`fila-${f.id}`}
@@ -613,22 +608,11 @@ function FilaVista(p: { f: FilaActividad; conFecha: boolean; ultima: boolean; on
       </View>
     </Pressable>
   );
-  if (!p.onCobrado) return fila;
-  const superado = fase === 'superado';
+  // Swipe «Cobrado»: solo en una devolución con el abono pendiente (gesto y franja comunes de la acción rápida).
   return (
-    <View testID={`fila-swipe-${f.id}`} style={s.swipe} {...gesto.panHandlers}>
-      {fase !== 'reposo' ? (
-        // Decorativa: la acción accesible sigue siendo «Cobrado» en la fila (S1); VoiceOver no ve la franja.
-        <View testID={`franja-cobrado-${f.id}`} accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
-          style={[s.franja, { backgroundColor: superado ? c.accent : c.accentSurface }]}>
-          <Ionicons name="checkmark" size={18} color={superado ? c.onAccent : c.accent} />
-          <Text style={[tipo.body, { color: superado ? c.onAccent : c.accent, fontWeight: '600' }]}>{TEXTO_FRANJA_COBRADO}</Text>
-        </View>
-      ) : null}
-      <Animated.View testID={`fila-desplazable-${f.id}`} style={{ backgroundColor: c.surfacePrimary, transform: [{ translateX: desplazamiento }] }}>
-        {fila}
-      </Animated.View>
-    </View>
+    <FilaDeslizable id={f.id} franjaId="cobrado" franja={TEXTO_FRANJA_COBRADO} onDeslizar={p.onCobrado}>
+      {fila}
+    </FilaDeslizable>
   );
 }
 
@@ -771,8 +755,6 @@ const s = StyleSheet.create({
   tarjetaError: { borderRadius: radio.m, padding: espacio.l, gap: espacio.s },
   vacio: { alignItems: 'center', gap: espacio.s, paddingVertical: espacio.xxl },
   tarjeta: { borderRadius: radio.m, overflow: 'hidden' },
-  swipe: { overflow: 'hidden' },
-  franja: { ...StyleSheet.absoluteFill, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: espacio.s, paddingHorizontal: espacio.m },
   fila: { flexDirection: 'row', alignItems: 'center', gap: espacio.m, paddingHorizontal: espacio.m, paddingVertical: espacio.s, minHeight: TACTIL_MIN + 12 },
   icono: { width: 32, height: 32, borderRadius: radio.s, alignItems: 'center', justifyContent: 'center' },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: espacio.s },

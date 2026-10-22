@@ -4,27 +4,27 @@
 // Ruta: mobile/src/components/Prevision.tsx
 // Descripción: Piezas de la confirmación de previsiones (F05-06 M5 §B1; láminas PREV v0.2 y HOME-01 v0.4). FilaPrevisionVista: concepto, línea (vencida, pago parcial, «Entre cuentas») e importe por naturaleza («~», «+» en color neutro, «Desconocido»); el deslizamiento a la izquierda solo ABRE la confirmación del swipe («Pagado» / «Cobrado», DAY-RULE-03), y también como acción accesible. Campana con contador junto al perfil (I01; «!» si falla, nada sin pendientes). HojaSwipe (B1, D-PREV-12): previsión, esperado, consecuencia, importe real propuesto («Revisa»), cuenta y fecha antes de «Confirmar pago y cubrir». HojaOmitir (B3): motivo opcional y «No hubo este mes». AvisoEstadoActual (B7): tras un 409 la app no dice «hecho» y enseña el estado real.
 // Versión: 0.1.0 (F05-06 M5 §B1)
+// Versión: 0.2.0 (F05-06 M5 SWIPE; regla de Moisés del 2026-10-22): la fila usa el gesto común FilaDeslizable (sigue al dedo y deja ver «Pagado» / «Cobrado» detrás); lo que hace el gesto lo decide la pantalla (acción rápida con «Deshacer» o la hoja). La acción accesible hace lo mismo que el gesto.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
-import React, { useMemo, useRef } from 'react';
-import { PanResponder, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useRef } from 'react';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { FilaPrevision } from '../api/cliente';
 import { importeFila, intervaloTexto, lineaFila, TEXTO_NO_SABEMOS, verboSwipe, estadoLegible, consecuencia } from '../domain/prevision';
 import { useTema } from '../theme/tema';
 import { espacio, importe as estiloImporte, radio, TACTIL_MIN, tipo } from '../theme/tokens';
+import { FilaDeslizable } from './AccionRapida';
 import { BotonPrimario, BotonTexto, Chip, Velo } from './Basicos';
-
-const UMBRAL_SWIPE = 60;
 
 /** Fila de una previsión (Inicio, «Pendientes», «Próximos»). */
 export function FilaPrevisionVista(p: {
   fila: FilaPrevision;
   testID: string;
   onPress?: () => void;
-  /** Solo si la previsión admite el swipe (gasto o ingreso, esperado conocido, cuenta y sin pagos). */
+  /** Solo si la previsión admite el swipe (gasto o ingreso, esperado conocido, cuenta y sin pagos): acción rápida u hoja. */
   onSwipe?: () => void;
   enProximos?: boolean;
   usarQueda?: boolean;
@@ -33,21 +33,9 @@ export function FilaPrevisionVista(p: {
   const { c } = useTema();
   const f = p.fila;
   const onSwipe = p.onSwipe;
-  const responder = useMemo(() => {
-    // Gesto horizontal claro: la fila lo toma aunque el Pressable interior tenga el toque (fase de captura).
-    const horizontal = (_: unknown, g: { dx: number; dy: number }) => !!onSwipe && Math.abs(g.dx) > 12 && Math.abs(g.dx) > Math.abs(g.dy);
-    return PanResponder.create({
-      onMoveShouldSetPanResponder: horizontal,
-      onMoveShouldSetPanResponderCapture: horizontal,
-      onPanResponderTerminationRequest: () => false,
-      onPanResponderRelease: (_, g) => {
-        if (onSwipe && g.dx < -UMBRAL_SWIPE) onSwipe();
-      },
-    });
-  }, [onSwipe]);
   const verbo = verboSwipe(f.tipo);
   return (
-    <View {...responder.panHandlers}>
+    <FilaDeslizable id={p.testID} franjaId="prevision" franja={verbo} onDeslizar={onSwipe} fondo="background">
       <Pressable
         testID={p.testID}
         accessibilityRole={p.onPress ? 'button' : 'text'}
@@ -69,7 +57,7 @@ export function FilaPrevisionVista(p: {
           {importeFila(f, p.usarQueda)}
         </Text>
       </Pressable>
-    </View>
+    </FilaDeslizable>
   );
 }
 

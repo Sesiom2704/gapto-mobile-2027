@@ -4,6 +4,7 @@
 // Ruta: mobile/src/screens/PendientesScreen.tsx
 // Descripción: Lista «Pendientes» (F05-06 M5 §B1; HOME-01 v0.4 I04; lámina PREV v0.2 B; D-PREV-10). Se abre desde la campana o «Ver todos». Arriba «Por pagar» y «Por cobrar» POR SEPARADO (nunca un total único; las transferencias no suman; «Desconocido» si solo hay importes desconocidos). Secciones «Vencidas», «Con pago parcial» y «Sin fecha» (vacía con el head físico vigente). Cada fila se toca para ver el detalle o se desliza para «Pagado» / «Cobrado» cuando lo admite. Carga y fallo con su estado; nunca «sin pendientes» si la lectura falla.
 // Versión: 0.1.0 (F05-06 M5 §B1)
+// Versión: 0.2.0 (F05-06 M5 SWIPE; regla de Moisés del 2026-10-22): deslizar una fila es una acción rápida con «Deshacer» cuando es inequívoca (useSwipePrevision › useAccionRapida); la fila sale mientras espera. Si falta algo, abre la hoja.
 // ============================================================
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -39,22 +40,25 @@ export function PendientesScreen(p: {
   useEffect(() => {
     void cargar();
   }, [cargar, p.refresco]);
+  const filas = carga.fase === 'OK' ? [...carga.datos.secciones.vencidas, ...carga.datos.secciones.con_pago_parcial, ...carga.datos.secciones.sin_fecha] : [];
   const swipe = useSwipePrevision({
-    cliente: p.cliente, nuevoId: p.nuevoId, ahora: p.ahora,
-    onRegistrado: () => { p.onCambios(); void cargar(); },
+    cliente: p.cliente, nuevoId: p.nuevoId, ahora: p.ahora, filas,
+    onRegistrado: () => { p.onCambios(); return cargar(); },
     onFormularioCompleto: p.onFormularioCompleto,
   });
 
-  const seccion = (titulo: string, filas: FilaPrevision[], clave: string) =>
-    filas.length === 0 ? null : (
+  const seccion = (titulo: string, todas: FilaPrevision[], clave: string) => {
+    const filas = todas.filter((f) => !swipe.oculta(f.id));
+    return filas.length === 0 ? null : (
       <View testID={`pendientes-${clave}`} style={{ gap: espacio.xs }}>
         <Text accessibilityRole="header" style={[tipo.footnote, { color: c.textSecondary, fontWeight: '600' }]}>{titulo}</Text>
         {filas.map((f, i) => (
           <FilaPrevisionVista key={f.id} testID={`pendiente-${f.id}`} fila={f} usarQueda ultima={i === filas.length - 1}
-            onPress={() => p.onDetalle(f)} onSwipe={admiteSwipe(f) ? () => swipe.abrir(f) : undefined} />
+            onPress={() => p.onDetalle(f)} onSwipe={admiteSwipe(f) ? () => swipe.deslizar(f) : undefined} />
         ))}
       </View>
     );
+  };
 
   return (
     <View testID="pendientes" style={[s.raiz, { backgroundColor: c.background }]}>
@@ -89,6 +93,7 @@ export function PendientesScreen(p: {
         ) : null}
       </ScrollView>
       {swipe.hoja}
+      {swipe.avisos}
     </View>
   );
 }

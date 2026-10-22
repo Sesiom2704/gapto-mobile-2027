@@ -8,7 +8,8 @@
 // v0.4.0 (F05-03/F05-04 J3 §2.1; lámina HOME-01 v0.3; AJUSTE A1 «Marca en Inicio», AJ-MARCA-04 cerrado): cabecera con el símbolo (34 × 34 pt) y el nombre (132,25 × 24 pt, contain) de la entrega F09-MARCA-AJ04_R0, a 8 pt, como UN solo elemento accesible «GaptoMobile» con rol de cabecera; sin «2027» ni lema. Ilustración de Liquidez (112 × 112 pt, a 8 pt del borde derecho, centrada en vertical), decorativa y oculta a VoiceOver. Claro/oscuro por el esquema del sistema (MARK-RULE-01), nunca por el acento; se retira FUENTE_MARCA del nombre. «Acciones rápidas»: «Registrar» (abre la hoja de tipos, sin preselección) y hasta 3 accesos de plantillas (nombre corto e icono, o el de la categoría, o la reserva); sin accesos, «Añadir acceso» y el texto H03; «Editar» lleva a Ajustes › Plantillas. «Resultado» se presentará en verde / rojo con signo (neutro en 0) cuando exista su lectura: los bloques PENDIENTE_READ_MODEL no cambian (siguen «No disponible»).
 // v0.5.0 (F05-05 K3 §2.7; F05 §49.4 A9, D13, M5-06; lámina SRCH-ACT-AFI E1; HOME-01 v0.3, D-HOME-02/03): «Hola, <nombre>» en la cabecera (GET /v1/yo; sin nombre, no se muestra). «Este mes» con Ingresos, Gastos y Resultado reales (GET /v1/inicio/resultado-mes con la fecha del dispositivo): cifras tabulares, color SOLO en Resultado (verde, rojo o neutro con signo, `resultadoDelMes`), y debajo la línea «Solo lo que es tuyo. Sin indicar: …» con número e importe. Carga y error con su estado; nunca 0 € inventado. El presupuesto y el resto de Inicio no cambian.
 // v0.6.0 (F05-06 M5 §B1; lámina HOME-01 v0.4, D-HOME-07; F09 §4.2, §4.5, §4.6): campana con contador junto al perfil (solo con pendientes; «!» si la lectura falla) que abre «Pendientes»; bloque «Requiere atención» con datos reales (GET /v1/inicio/previsiones): como mucho dos asuntos (vencidos por fecha y después los pagados en parte), recuento junto al título y «Ver todos ›», SIN importes sumados; con la lectura fallida, «No se pudieron cargar los pendientes · Reintentar» (nunca desaparece como si no hubiera nada); sin asuntos, ni campana ni bloque. «Próximos movimientos» con las tres siguientes previsiones (solo lectura, P-PREV-04). Cobros previstos con «+» neutro y «Cobro previsto»; pagos con «~». La línea de presupuesto no se pinta mientras F08 no la alimente. Lo previsto no suma a Liquidez ni al Resultado. Con la campana, el saludo de la cabecera se acorta con puntos suspensivos (una línea) y nunca invade la marca.
-// Versión: 0.6.0
+// v0.7.0 (F05-06 M5 SWIPE; regla de Moisés del 2026-10-22): el swipe de «Requiere atención» es una acción rápida con «Deshacer» cuando es inequívoca (useSwipePrevision › useAccionRapida); la fila sale mientras espera y el aviso va sobre la pantalla, fuera del scroll (hermano del ScrollView). Si falta algo, abre la hoja.
+// Versión: 0.7.0
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -87,7 +88,8 @@ export function HomeScreen(p: {
   }, [p.cliente]);
   const swipe = useSwipePrevision({
     cliente: p.cliente, nuevoId: p.nuevoId ?? (() => ''), ahora: p.ahora,
-    onRegistrado: () => void cargarPrevisiones(),
+    filas: previsiones.fase === 'OK' && p.nuevoId ? previsiones.datos.requiere_atencion.primeras : [],
+    onRegistrado: () => cargarPrevisiones(),
     onFormularioCompleto: (f, imp) => p.onFormularioCompleto?.(f, imp),
   });
 
@@ -123,7 +125,10 @@ export function HomeScreen(p: {
   const contador = contadorCampana(previsiones.fase === 'OK' ? { fase: 'OK', n: previsiones.datos.requiere_atencion.n } : previsiones);
   const atencion = previsiones.fase === 'OK' ? previsiones.datos.requiere_atencion : null;
 
+  const primeras = atencion ? atencion.primeras.filter((f) => !swipe.oculta(f.id)) : [];
+
   return (
+    <>
     <ScrollView
       testID="home"
       style={{ backgroundColor: c.background }}
@@ -261,9 +266,9 @@ export function HomeScreen(p: {
             </View>
           }
         >
-          {atencion.primeras.map((f, i) => (
-            <FilaPrevisionVista key={f.id} testID={`atencion-${f.id}`} fila={f} ultima={i === atencion.primeras.length - 1}
-              onPress={() => p.onPrevision?.(f)} onSwipe={admiteSwipe(f) && p.nuevoId ? () => swipe.abrir(f) : undefined} />
+          {primeras.map((f, i) => (
+            <FilaPrevisionVista key={f.id} testID={`atencion-${f.id}`} fila={f} ultima={i === primeras.length - 1}
+              onPress={() => p.onPrevision?.(f)} onSwipe={admiteSwipe(f) && p.nuevoId ? () => swipe.deslizar(f) : undefined} />
           ))}
         </Seccion>
       ) : null}
@@ -289,6 +294,8 @@ export function HomeScreen(p: {
       </Seccion>
       {swipe.hoja}
     </ScrollView>
+    {swipe.avisos}
+    </>
   );
 }
 
