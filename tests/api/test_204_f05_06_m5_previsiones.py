@@ -26,6 +26,8 @@
 #   derivada sin realidad) y de una OMITIDA ofrece «Reabrir»; todas las demas acciones
 #   siguen no disponibles con su motivo. REQUIERE_REVISION y la moneda distinta de EUR
 #   siguen sin ninguna accion.
+# Version: 0.3.0 (F05-06 M5-B v1.1): la lista «Pendientes» anade `resueltas_mes` (test_211);
+#   la asercion de claves lo incluye. Nada mas cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -304,7 +306,7 @@ def test_naturalezas_separadas_recuento_comun(t):
     assert p["n"] == 3
     assert p["por_pagar"] == {"importe": "74.00", "n": 1, "desconocidos": 0}
     assert p["por_cobrar"] == {"importe": "2100.00", "n": 1, "desconocidos": 0}
-    assert "total" not in p and set(p) == {"hoy", "n", "por_pagar", "por_cobrar", "secciones", "aviso"}
+    assert "total" not in p and set(p) == {"hoy", "n", "por_pagar", "por_cobrar", "secciones", "resueltas_mes", "aviso"}
     naturalezas = {f["id"]: f["naturaleza"] for f in p["secciones"]["vencidas"]}
     assert naturalezas == {str(luz): "POR_PAGAR", str(nomina): "POR_COBRAR", str(traspaso): "ENTRE_CUENTAS"}
 

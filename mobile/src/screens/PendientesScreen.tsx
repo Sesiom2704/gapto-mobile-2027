@@ -7,17 +7,20 @@
 // Versión: 0.2.0 (F05-06 M5 SWIPE; regla de Moisés del 2026-10-22): deslizar una fila es una acción rápida con «Deshacer» cuando es inequívoca (useSwipePrevision › useAccionRapida); la fila sale mientras espera. Si falta algo, abre la hoja.
 // Versión: 0.3.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2): filas en tarjeta con los dos lados (derecha «Pagado» / «Cobrado», izquierda «No hubo» sin pagos enlazados).
 // Versión: 0.4.0 (swipe (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados `principal` / `alternativa` del componente común (principal a la izquierda); la raíz y el scroll cierran la fila abierta a medias (`propsZonaSwipe`, `propsScrollSwipe`).)
+// Versión: 0.5.0 (F05-06 M5-B v1.1; HANDOFF_M5BM1 §6): al final, «Resueltas este mes» con su recuento, plegado por defecto. Cada fila dice cómo se resolvió («Pagada», «Cobrada», «Cubierta», «No hubo») y cuándo, y al tocarla abre el detalle (desde ahí, «Más › Reabrir»). Sin swipe en estas filas. No suma a «Por pagar» ni a «Por cobrar».
 // ============================================================
 
+import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import type { ClienteApi, FilaPrevision, PendientesPrevisiones } from '../api/cliente';
+import type { ClienteApi, FilaPrevision, FilaResuelta, PendientesPrevisiones } from '../api/cliente';
 import { CabeceraNavegacion, EstadoDato } from '../components/Basicos';
 import { FilaPrevisionVista } from '../components/Prevision';
 import { propsScrollSwipe, propsZonaSwipe } from '../components/AccionRapida';
 import { useSwipePrevision } from '../components/SwipePrevision';
-import { admiteSwipe, textoNaturaleza } from '../domain/prevision';
+import { admiteSwipe, lineaResuelta, textoNaturaleza } from '../domain/prevision';
+import { formatearEur } from '../domain/importe';
 import { useTema } from '../theme/tema';
 import { espacio, importe as estiloImporte, TACTIL_MIN, tipo } from '../theme/tokens';
 
@@ -35,6 +38,7 @@ export function PendientesScreen(p: {
 }) {
   const { c } = useTema();
   const [carga, setCarga] = useState<Carga>({ fase: 'CARGANDO' });
+  const [resueltasAbiertas, setResueltasAbiertas] = useState(false);
   const cargar = useCallback(async () => {
     setCarga({ fase: 'CARGANDO' });
     const r = await p.cliente.pendientesPrevisiones();
@@ -59,6 +63,35 @@ export function PendientesScreen(p: {
           <FilaPrevisionVista key={f.id} testID={`pendiente-${f.id}`} fila={f} usarQueda ultima={i === filas.length - 1}
             onPress={() => p.onDetalle(f)} {...swipe.lados(f)} />
         ))}
+      </View>
+    );
+  };
+
+  const resuelta = (f: FilaResuelta, ultima: boolean) => (
+    <Pressable key={f.id} testID={`resuelta-${f.id}`} accessibilityRole="button" accessibilityLabel={`${f.concepto}. ${lineaResuelta(f)}`}
+      onPress={() => p.onDetalle(f)}
+      style={({ pressed }) => [s.resuelta, !ultima && { borderBottomColor: c.borderDefault, borderBottomWidth: StyleSheet.hairlineWidth }, { opacity: pressed ? 0.7 : 1 }]}>
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text numberOfLines={1} style={[tipo.body, { color: c.textPrimary }]}>{f.concepto}</Text>
+        <Text testID={`resuelta-${f.id}-linea`} style={[tipo.caption, { color: c.textSecondary }]}>{lineaResuelta(f)}</Text>
+      </View>
+      {f.importe_esperado !== null ? (
+        <Text style={[tipo.caption, { color: c.textSecondary, fontVariant: ['tabular-nums'] }]}>{formatearEur(f.importe_esperado)}</Text>
+      ) : null}
+    </Pressable>
+  );
+  const resueltas = (datos: PendientesPrevisiones) => {
+    const r = datos.resueltas_mes;
+    if (!r || r.n === 0) return null;
+    return (
+      <View testID="pendientes-resueltas" style={{ gap: espacio.s }}>
+        <Pressable testID="resueltas-cabecera" accessibilityRole="button" accessibilityState={{ expanded: resueltasAbiertas }}
+          accessibilityLabel={`Resueltas este mes, ${r.n}`} onPress={() => setResueltasAbiertas(!resueltasAbiertas)} style={s.cabecera}>
+          <Text accessibilityRole="header" style={[tipo.footnote, { color: c.textSecondary, fontWeight: '600', flex: 1 }]}>Resueltas este mes</Text>
+          <Text testID="resueltas-recuento" style={[tipo.footnote, { color: c.textSecondary, fontVariant: ['tabular-nums'] }]}>{r.n}</Text>
+          <Ionicons name={resueltasAbiertas ? 'chevron-up' : 'chevron-down'} size={16} color={c.textSecondary} />
+        </Pressable>
+        {resueltasAbiertas ? r.filas.map((f, i) => resuelta(f, i === r.filas.length - 1)) : null}
       </View>
     );
   };
@@ -92,6 +125,7 @@ export function PendientesScreen(p: {
             {seccion('Con pago parcial', carga.datos.secciones.con_pago_parcial, 'parciales')}
             {seccion('Sin fecha', carga.datos.secciones.sin_fecha, 'sin-fecha')}
             <Text style={[tipo.footnote, { color: c.textSecondary }]}>Desliza a la izquierda para «Pagado» o «Cobrado» y a la derecha para «No hubo»; o toca la fila para ver sus opciones.</Text>
+            {resueltas(carga.datos)}
           </>
         ) : null}
       </ScrollView>
@@ -106,4 +140,6 @@ const s = StyleSheet.create({
   cuerpo: { padding: espacio.l, gap: espacio.l },
   naturalezas: { flexDirection: 'row', gap: espacio.l },
   naturaleza: { flex: 1, gap: espacio.xs },
+  cabecera: { flexDirection: 'row', alignItems: 'center', gap: espacio.s, minHeight: TACTIL_MIN },
+  resuelta: { flexDirection: 'row', alignItems: 'center', gap: espacio.m, minHeight: TACTIL_MIN, paddingVertical: espacio.xs },
 });

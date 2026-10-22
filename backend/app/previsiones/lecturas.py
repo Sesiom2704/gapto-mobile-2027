@@ -50,6 +50,19 @@
 #   realidad ACTIVA, EUR y tipo confirmable; sin realidad, el motivo informa de
 #   «No hubo este mes» sin ofrecerlo) y «Reabrir» (REALIZADA, incluida la
 #   derivada sin realidad, y OMITIDA; CANCELADA nunca).
+# Version: 0.3.0 (F05-06 M5-B v1.1; HANDOFF_M5BM1 §6): «Resueltas este mes».
+#   `resueltas_mes` (SOLO SELECT, sin locks): previsiones REALIZADA (incluida la
+#   derivada REALIZADA_SIN_REALIDAD_ACTIVA) y OMITIDA de tipo confirmable cuya
+#   transicion terminal es del mes natural de `hoy` (hoy_owner). CANCELADA no
+#   aparece. Fecha de la transicion (FECHAS_RESOLUCION, por orden):
+#     1. AUDITORIA: la ultima fila de gapto.auditoria de la prevision
+#        (ACTUALIZAR) cuyo datos_despues.estado es el estado vigente y cuyo
+#        datos_antes.estado es otro, en la zona del owner;
+#     2. OBJETIVO: si no hay esa fila (p. ej. datos cargados sin auditoria), la
+#        fecha objetivo de la prevision (fecha_esperada_hasta, o desde), y se
+#        dice en `resuelta_por`.
+#   No calcula nada financiero nuevo ni suma a ningun total: «Por pagar», «Por
+#   cobrar» y `n` de pendientes no la incluyen. Orden: mas recientes primero.
 # ============================================================
 
 from __future__ import annotations
@@ -59,6 +72,7 @@ import decimal
 import uuid
 from typing import Any
 
+from app.comun.fecha_funcional import limites_mes, zona_owner
 from app.comun.rutas_categoria import catalogo, ruta_texto
 from app.core.unidad_trabajo import SesionMotor
 
@@ -69,6 +83,9 @@ VENTANA_CANDIDATOS_AMPLIADA_DIAS = 60
 MAX_REQUIERE_ATENCION_INICIO = 2
 MAX_PROXIMOS = 3
 MONEDA_V1 = "EUR"
+#: «Resueltas este mes»: estados terminales que se listan (CANCELADA nunca) y origen de su fecha.
+ESTADOS_RESUELTAS = ("REALIZADA", "OMITIDA")
+FECHAS_RESOLUCION = ("AUDITORIA", "OBJETIVO")
 
 NATURALEZA = {"GASTO": "POR_PAGAR", "INGRESO": "POR_COBRAR", "TRANSFERENCIA": "ENTRE_CUENTAS"}
 TIPOS_CONFIRMABLES = ("GASTO", "INGRESO", "TRANSFERENCIA")
@@ -187,7 +204,8 @@ def _por_naturaleza(filas: list[dict[str, Any]], tipo: str) -> dict[str, Any]:
 
 def pendientes(sesion: SesionMotor, hoy: dt.date) -> dict[str, Any]:
     """Lista «Pendientes» (HOME-01 I04, PREV B): vencidas, con pago parcial y
-    sin fecha, con «Por pagar» y «Por cobrar» separados."""
+    sin fecha, con «Por pagar» y «Por cobrar» separados; al final, aparte y sin
+    sumar, «Resueltas este mes» (v0.3.0)."""
     filas = _abiertas(sesion, hoy)
     atencion = _requiere_atencion(filas)
     return {
@@ -200,7 +218,48 @@ def pendientes(sesion: SesionMotor, hoy: dt.date) -> dict[str, Any]:
             "con_pago_parcial": [_publica(f) for f in atencion if not f["vencida"]],
             "sin_fecha": [_publica(f) for f in filas if f["_ref"] is None],
         },
+        "resueltas_mes": resueltas_mes(sesion, hoy),
     }
+
+
+def _derivado(fila: dict[str, Any]) -> str | None:
+    if fila["estado"] == "REALIZADA" and not fila["con_realidad"]:
+        return "REALIZADA_SIN_REALIDAD_ACTIVA"
+    if fila["estado"] in ("OMITIDA", "CANCELADA") and fila["con_realidad"]:
+        return "REQUIERE_REVISION"
+    return None
+
+
+def resueltas_mes(sesion: SesionMotor, hoy: dt.date) -> dict[str, Any]:
+    """«Resueltas este mes»: REALIZADA y OMITIDA cuya transicion terminal cae en
+    el mes de `hoy` (auditoria; si no la hay, fecha objetivo). Sin totales."""
+    nodos = catalogo(sesion)
+    zona = zona_owner(sesion)
+    inicio, fin = limites_mes(hoy)
+    with sesion.conexion.cursor() as cur:
+        cur.execute(
+            _COLUMNAS.replace("FROM gapto.previsiones p ", ", (SELECT max(a.created_at) FROM gapto.auditoria a "
+                              "WHERE a.tabla = 'previsiones' AND a.registro_id = p.id AND a.accion = 'ACTUALIZAR' "
+                              "AND a.datos_despues ->> 'estado' = p.estado "
+                              "AND a.datos_antes ->> 'estado' IS DISTINCT FROM p.estado) "
+                              "FROM gapto.previsiones p ", 1)
+            + "WHERE p.estado = ANY(%s) AND th.codigo = ANY(%s)", (list(ESTADOS_RESUELTAS), list(TIPOS_CONFIRMABLES)))
+        filas = []
+        for f in cur.fetchall():
+            fila = _fila(f[:-1], nodos, hoy)
+            instante = f[-1]
+            if instante is not None:
+                fecha, origen = instante.astimezone(zona).date(), FECHAS_RESOLUCION[0]
+            else:
+                fecha, origen = fila["_ref"], FECHAS_RESOLUCION[1]
+            if fecha is None or not inicio <= fecha < fin:
+                continue
+            filas.append(({**_publica(fila), "estado_derivado": _derivado(fila), "resuelta_el": fecha,
+                           "resuelta_por": origen}, instante))
+    # Mas recientes primero: por fecha y, dentro del dia, por el instante de la transicion.
+    filas.sort(key=lambda x: (x[0]["resuelta_el"], x[1] or dt.datetime.min.replace(tzinfo=dt.timezone.utc),
+                              str(x[0]["id"])), reverse=True)
+    return {"desde": inicio, "hasta": fin - dt.timedelta(days=1), "n": len(filas), "filas": [f for f, _ in filas]}
 
 
 # ------------------------------------------------------------------ detalle
@@ -272,11 +331,7 @@ def detalle(sesion: SesionMotor, prevision_id: uuid.UUID, hoy: dt.date) -> dict[
     if f is None:
         return None
     fila = _fila(f, nodos, hoy)
-    derivado = None
-    if fila["estado"] == "REALIZADA" and not fila["con_realidad"]:
-        derivado = "REALIZADA_SIN_REALIDAD_ACTIVA"
-    elif fila["estado"] in ("OMITIDA", "CANCELADA") and fila["con_realidad"]:
-        derivado = "REQUIERE_REVISION"
+    derivado = _derivado(fila)
     with sesion.conexion.cursor() as cur:
         cur.execute(
             "SELECT pv.id, pv.hecho_id, pv.importe_asignado, h.fecha_hecho, h.concepto, h.importe_total "

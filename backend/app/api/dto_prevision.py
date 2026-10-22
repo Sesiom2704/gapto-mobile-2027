@@ -25,6 +25,10 @@
 #   derivado, nunca persistido), `recalculable` (Q4, informativo: la UI no lo
 #   ofrece), `sucesor` (id y row_version del sucesor RODANTE ABIERTO) y las
 #   acciones `dar_por_cubierta` y `reabrir`.
+# Version: 0.3.0 (F05-06 M5-B v1.1): PendientesPrevisiones anade
+#   `resueltas_mes` (ResueltasMes: desde, hasta, n y FilaResuelta con su
+#   estado derivado, `resuelta_el` y `resuelta_por` AUDITORIA u OBJETIVO).
+#   Campo aparte: no suma a `n` ni a «Por pagar» / «Por cobrar».
 # ============================================================
 
 from __future__ import annotations
@@ -164,12 +168,26 @@ class Secciones(_Estricto):
     sin_fecha: list[FilaPrevision]
 
 
+class FilaResuelta(FilaPrevision):
+    estado_derivado: str | None
+    resuelta_el: dt.date
+    resuelta_por: Literal["AUDITORIA", "OBJETIVO"]  # fecha de la transicion o, sin auditoria, la objetivo
+
+
+class ResueltasMes(_Estricto):
+    desde: dt.date
+    hasta: dt.date
+    n: int
+    filas: list[FilaResuelta]
+
+
 class PendientesPrevisiones(_Estricto):
     hoy: dt.date
     n: int
     por_pagar: ImportePorNaturaleza
     por_cobrar: ImportePorNaturaleza
     secciones: Secciones
+    resueltas_mes: ResueltasMes  # aparte: no suma a n ni a «Por pagar» / «Por cobrar»
     aviso: str
 
 

@@ -10,6 +10,7 @@
 // Versión: 0.5.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // Versión: 0.6.0 (F05-06 M5-B; F04-D065, F05-D047): el parcial ya ofrece «Dar por cubierta» (antes se exigía su ausencia, DEU-M5-CERRAR-PARCIAL). Bloque M5-B: «Queda sin cubrir ±X €», dónde se ofrecen las dos acciones, hoja con motivo obligatorio (sugerencia + texto), PREVISION_SIN_REALIDAD_ACTIVA y TRAMO_RODANTE_REQUIERE_REVISION en la hoja sin reintento automático, 409 con el estado actual, misma identidad tras un fallo, «Reabrir» en «Más» (REALIZADA, sin realidad activa, OMITIDA; versión del sucesor) y CANCELADA atenuada.
 // Versión: 0.7.0 (F05-06 M1, ajuste de M5-B): tras «Dar por cubierta», «Reabrir» o «No hubo» el detalle sigue abierto con el estado nuevo; «Atrás» cierra con cambios.
+// Versión: 0.8.0 (F05-06 M5-B v1.1): «Resueltas este mes»: etiquetas («Pagada», «Cobrada», «Cubierta», «No hubo»), apartado plegado con su recuento, filas sin swipe que abren el detalle y, desde él, «Más › Reabrir»; no suma a «Por pagar».
 // ============================================================
 
 import './tiempos_rn';
@@ -17,7 +18,8 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import type { ClienteApi, DetallePrevision, FilaPrevision } from '../src/api/cliente';
+import type { ClienteApi, DetallePrevision, FilaPrevision, FilaResuelta } from '../src/api/cliente';
+import { etiquetaResuelta, lineaResuelta } from '../src/domain/prevision';
 import {
   admiteSwipe,
   bloquePrevision,
@@ -643,5 +645,73 @@ describe('M5-B detalle', () => {
     expect(screen.getByTestId('mas-reabrir')).toBeEnabled();
     fireEvent.press(screen.getByTestId('prevision-detalle-atras'));
     expect(onCerrar).toHaveBeenCalledWith(true);
+  });
+});
+
+// ==================================================================
+// «Resueltas este mes» (M5-B v1.1)
+// ==================================================================
+const resuelta = (o: Partial<FilaResuelta> = {}): FilaResuelta =>
+  ({ ...fila({ estado: 'OMITIDA', vencida: false }), estado_derivado: null, resuelta_el: '2026-10-09', resuelta_por: 'AUDITORIA', ...o }) as FilaResuelta;
+const NO_HUBO = resuelta({ id: 'luz', concepto: 'Electricidad' });
+const PAGADA = resuelta({ id: 'agua', concepto: 'Agua', estado: 'REALIZADA', importe_esperado: '30.00', cubierto: '30.00', resuelta_el: '2026-10-08' });
+
+function montarPendientes(resueltas: FilaResuelta[], onDetalle = jest.fn(), forzar?: 'dark') {
+  const c = cliente({ pendientesPrevisiones: jest.fn(async () => ({ tipo: 'OK', datos: { hoy: '2026-10-10', n: 1,
+    por_pagar: { importe: '80.00', n: 1, desconocidos: 0 }, por_cobrar: { importe: null, n: 0, desconocidos: 0 },
+    secciones: { vencidas: [], con_pago_parcial: [SEGURO], sin_fecha: [] },
+    resueltas_mes: { desde: '2026-10-01', hasta: '2026-10-31', n: resueltas.length, filas: resueltas } } }) as any) });
+  envolver(<PendientesScreen cliente={c} nuevoId={nuevoId} ahora={AHORA} refresco={0} onAtras={jest.fn()} onDetalle={onDetalle} onFormularioCompleto={jest.fn()} onCambios={jest.fn()} />, forzar);
+  return onDetalle;
+}
+
+describe('«Resueltas este mes»', () => {
+  test('etiquetas: No hubo, Pagada, Cobrada y Cubierta (dada por cubierta, sin registro activo o transferencia)', () => {
+    expect(etiquetaResuelta(NO_HUBO)).toBe('No hubo');
+    expect(etiquetaResuelta(PAGADA)).toBe('Pagada');
+    expect(etiquetaResuelta({ ...PAGADA, tipo: 'INGRESO' })).toBe('Cobrada');
+    expect(etiquetaResuelta({ ...PAGADA, cubierto: '20.00' })).toBe('Cubierta');
+    expect(etiquetaResuelta({ ...PAGADA, estado_derivado: 'REALIZADA_SIN_REALIDAD_ACTIVA' })).toBe('Cubierta');
+    expect(etiquetaResuelta({ ...PAGADA, tipo: 'TRANSFERENCIA' })).toBe('Cubierta');
+    expect(etiquetaResuelta({ ...PAGADA, importe_esperado: null })).toBe('Cubierta');
+    expect(lineaResuelta(NO_HUBO)).toBe('No hubo · 9 oct');
+  });
+
+  test('al final, plegado por defecto con su recuento; desplegado, cada fila dice cómo y cuándo (oscuro)', async () => {
+    montarPendientes([NO_HUBO, PAGADA], jest.fn(), 'dark');
+    expect(await screen.findByTestId('resueltas-recuento')).toHaveTextContent('2');
+    expect(screen.getByTestId('resueltas-cabecera').props.accessibilityState).toEqual({ expanded: false });
+    expect(screen.queryByTestId('resuelta-luz')).toBeNull();
+    expect(screen.getByTestId('por-pagar')).toHaveTextContent('~80,00 €'); // no suma
+    fireEvent.press(screen.getByTestId('resueltas-cabecera'));
+    expect(screen.getByTestId('resuelta-luz-linea')).toHaveTextContent('No hubo · 9 oct');
+    expect(screen.getByTestId('resuelta-agua-linea')).toHaveTextContent('Pagada · 8 oct');
+    fireEvent.press(screen.getByTestId('resueltas-cabecera'));
+    expect(screen.queryByTestId('resuelta-luz')).toBeNull();
+  });
+
+  test('sin swipe: tocar la fila abre el detalle; no hay acciones de deslizar', async () => {
+    const onDetalle = montarPendientes([NO_HUBO]);
+    fireEvent.press(await screen.findByTestId('resueltas-cabecera'));
+    expect(screen.getByTestId('resuelta-luz').props.accessibilityActions).toBeUndefined();
+    fireEvent.press(screen.getByTestId('resuelta-luz'));
+    expect(onDetalle).toHaveBeenCalledWith(expect.objectContaining({ id: 'luz', estado: 'OMITIDA' }));
+  });
+
+  test('sin resueltas no hay apartado', async () => {
+    montarPendientes([]);
+    expect(await screen.findByTestId('pendientes-parciales')).toBeTruthy();
+    expect(screen.queryByTestId('pendientes-resueltas')).toBeNull();
+  });
+
+  test('desde el detalle de una «No hubo» se llega a «Más › Reabrir»', async () => {
+    const reabrir = jest.fn(async (_id: string, pl: any) => ({ tipo: 'OK', datos: { ...pl, prevision_id: 'luz', estado: 'ABIERTA', row_version: 3 } }) as any);
+    montarDetalle(conDetalle(realizada({ estado: 'OMITIDA' }), { reabrirPrevision: reabrir }));
+    fireEvent.press(await screen.findByTestId('prevision-mas'));
+    fireEvent.press(screen.getByTestId('mas-reabrir'));
+    expect(screen.getByTestId('reabrir-estado')).toHaveTextContent('Omitida');
+    fireEvent.press(screen.getByTestId('reabrir-sugerencia-0'));
+    await act(async () => fireEvent.press(screen.getByTestId('reabrir-confirmar')));
+    expect(reabrir).toHaveBeenCalledTimes(1);
   });
 });

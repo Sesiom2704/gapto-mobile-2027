@@ -7,9 +7,10 @@
 // Versión: 0.2.0 (F05-06 M5 SWIPE; regla de Moisés del 2026-10-22): `planRapidoPrevision` decide si el swipe es una acción rápida de un solo gesto (gasto o ingreso abierto, esperado conocido, EUR, una sola cuenta prevista que hoy tiene la capacidad, sin realidad previa): registra el esperado en esa cuenta con fecha de hoy y `marcar_realizada = true`, por la misma composición que la hoja. Si falta algo, null y el gesto abre la hoja. `textoAvisoRapido`: «<Nombre> pagada / cobrada».
 // Versión: 0.3.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2): el aviso lleva el importe («Nómina cobrada · 2.100,00 €»). Izquierda «No hubo este mes»: `admiteNoHubo` (abierta y sin pagos enlazados ni realidad) y su aviso. `importeFormulario`: el importe con el que el gesto abre el formulario cuando hay dudas (lo que queda, o el esperado; nada si es desconocido).
 // Versión: 0.4.0 (F05-06 M5-B; F04-D065, F05-D047): «Dar por cubierta» solo en una PARCIAL (`ofreceDarPorCubierta`), «Queda sin cubrir ±X €» con el pendiente derivado (`quedaSinCubrirTexto`; nunca se guarda), «Más» en las terminales (`ofreceMas`, para «Reabrir») y las sugerencias de motivo de las dos hojas.
+// Versión: 0.5.0 (F05-06 M5-B v1.1): «Resueltas este mes». `etiquetaResuelta` («No hubo» en una OMITIDA; «Pagada» / «Cobrada» en una REALIZADA cubierta del todo; «Cubierta» en el resto: dada por cubierta, transferencia o sin registro activo) y `lineaResuelta` («Pagada · 22 oct»).
 // ============================================================
 
-import type { BloquePrevisionWire, CuentaElegible, CuentaPago, DetallePrevision, FilaPrevision, ImportePorNaturaleza } from '../api/cliente';
+import type { BloquePrevisionWire, CuentaElegible, CuentaPago, DetallePrevision, FilaPrevision, FilaResuelta, ImportePorNaturaleza } from '../api/cliente';
 import { diaMesAnioIso, diaMesIso } from './fechas';
 import { formatearEur } from './importe';
 
@@ -120,6 +121,20 @@ export function bloquePrevision(p: Pick<DetallePrevision, 'id' | 'row_version'>,
 /** Texto del swipe según el tipo. */
 export function verboSwipe(tipo: string): string {
   return tipo === 'INGRESO' ? 'Cobrado' : 'Pagado';
+}
+
+/** «Resueltas este mes»: cómo se resolvió (nunca un estado técnico). */
+export function etiquetaResuelta(f: Pick<FilaResuelta, 'estado' | 'estado_derivado' | 'tipo' | 'importe_esperado' | 'cubierto'>): string {
+  if (f.estado === 'OMITIDA') return 'No hubo';
+  const completa = f.estado_derivado === null && f.importe_esperado !== null && Number(f.cubierto) >= Number(f.importe_esperado);
+  if (completa && f.tipo === 'GASTO') return 'Pagada';
+  if (completa && f.tipo === 'INGRESO') return 'Cobrada';
+  return 'Cubierta';
+}
+
+/** Línea de una resuelta: «No hubo · 22 oct». */
+export function lineaResuelta(f: FilaResuelta): string {
+  return `${etiquetaResuelta(f)} · ${diaMesIso(f.resuelta_el)}`;
 }
 
 /** Título de la pantalla del estado actual tras un rechazo de omitir (D-PREV-14). */

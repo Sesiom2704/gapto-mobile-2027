@@ -22,6 +22,8 @@
 // Versión: 0.17.0
 // v0.18.0 (F05-06 M1 v1.1; Q9 opción (a)): «Corregir categoría» de un registro de V3, POST /v1/hechos/{id}/corregir-categoria (lista blanca: versión, motivo y `categoria_id`), con la clasificación de escritura (indeterminado = reintentar la MISMA intención). La lectura /edicion trae `categoria` y `acciones.corregir_categoria`, ambos null fuera de V3.
 // Versión: 0.18.0
+// v0.19.0 (F05-06 M5-B v1.1): «Pendientes» trae `resueltas_mes` (REALIZADA y OMITIDA cuya transición es del mes en curso, con `resuelta_el` y `resuelta_por`); aparte, no suma a nada.
+// Versión: 0.19.0
 // ============================================================
 
 import type { Ambito, CategoriaNodo } from '../domain/categoria';
@@ -631,6 +633,20 @@ export interface PendientesPrevisiones {
   por_pagar: ImportePorNaturaleza;
   por_cobrar: ImportePorNaturaleza;
   secciones: { vencidas: FilaPrevision[]; con_pago_parcial: FilaPrevision[]; sin_fecha: FilaPrevision[] };
+  /** «Resueltas este mes»: aparte, nunca suma a `n` ni a «Por pagar» / «Por cobrar». */
+  resueltas_mes?: ResueltasMes;
+}
+export interface FilaResuelta extends FilaPrevision {
+  estado_derivado: 'REALIZADA_SIN_REALIDAD_ACTIVA' | 'REQUIERE_REVISION' | null;
+  resuelta_el: string;
+  /** AUDITORIA = fecha de la transición; OBJETIVO = sin auditoría, la fecha objetivo. */
+  resuelta_por: 'AUDITORIA' | 'OBJETIVO';
+}
+export interface ResueltasMes {
+  desde: string;
+  hasta: string;
+  n: number;
+  filas: FilaResuelta[];
 }
 export interface AccionPrevision {
   disponible: boolean;
