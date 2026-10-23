@@ -39,6 +39,13 @@
 # Version: 0.7.0 (F05-03/F05-04 J3 §2.7 y §3: CC01..CC04 corte de Concepto en el
 #   servidor y UI01..UI15 guardas del cliente J3 (Jest). `correr` admite tests
 #   del cliente (`mobile/__tests__/...`), que se ejecutan con jest desde mobile/)
+# Version: 0.7.1 (F05-06 cierre, MANT-MUTANTES-HEREDADOS; F05 §62.5): textos
+#   protegidos de RG07, RG08 y RG09, rotos en main desde F05-06 M5 §A (8a1ccec),
+#   que movio el prologo de la transferencia a `transferir_bajo_locks` (sangria
+#   de 8) y amplio la guarda de replay con `replay_extra`. Misma semantica:
+#   RG07/RG08 quitan la capacidad de origen/destino; RG09 quita la guarda de
+#   replay propia y conserva `replay_extra`. Mismos discriminantes; censo sin
+#   cambios.
 # ============================================================
 
 from __future__ import annotations
@@ -280,13 +287,14 @@ MUTANTES = [
        'validar_categoria_y_magnitudes(sesion, intencion.categoria_id, "GASTO",')],
      [f"{T180}::test_caso3_ingreso_composicion_c14"]),
     ("RG07", "transferencia sin capacidad de origen",
-     [(REGI, '            rechazo_cuenta(sesion, intencion.cuenta_origen_id, "TRANSFERENCIA_ORIGEN", intencion.fecha_hecho)\n', "")],
+     [(REGI, '        rechazo_cuenta(sesion, intencion.cuenta_origen_id, "TRANSFERENCIA_ORIGEN", intencion.fecha_hecho)\n', "")],
      [f"{T180}::test_caso8_liquidacion_de_la_tarjeta_y_capacidades"]),
     ("RG08", "transferencia sin capacidad de destino",
-     [(REGI, '            rechazo_cuenta(sesion, intencion.cuenta_destino_id, "TRANSFERENCIA_DESTINO", intencion.fecha_hecho)\n', "")],
+     [(REGI, '        rechazo_cuenta(sesion, intencion.cuenta_destino_id, "TRANSFERENCIA_DESTINO", intencion.fecha_hecho)\n', "")],
      [f"{T180}::test_caso8_liquidacion_de_la_tarjeta_y_capacidades"]),
     ("RG09", "transferencia sin la guarda de replay propia",
-     [(REGI, "            if not _replay_transferencia(sesion, intencion):", "            if False:")],
+     [(REGI, "        if not (_replay_transferencia(sesion, intencion) and replay_extra(sesion)):",
+       "        if not replay_extra(sesion):")],
      [f"{T180}::test_guarda_de_replay_propia_de_op10"]),
     ("RG10", "guarda de replay que ignora la nota",
      [(REGI, "        and fila[2] == intencion.nota and fila[3] == intencion.moneda",

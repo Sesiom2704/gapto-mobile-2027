@@ -120,7 +120,13 @@
 #   (CeldaGastos) nunca se presenta en «Este mes». El mutante la pone en la
 #   columna «Gastos» de ese bloque; lo mata vs01.test.tsx («la cifra real va
 #   en tarjeta PARCIAL separada, nunca en «Este mes»»). Censo sin cambios: 67.
-# Version: 0.16.0
+#   v0.16.1 (F05-06 cierre, MANT-MUTANTES-HEREDADOS; F05 §62.5): texto
+#   protegido de M05, ambiguo (2 ocurrencias) en main desde F05-06 M2-B
+#   (d236775), que anadio en App.tsx una segunda linea
+#   `if (registrado) setRefresco(...)` (cierre de la devolucion). Se reancla
+#   con la misma semantica sobre `cerrarTarea` (la tarea de registro cierra
+#   sin refrescar Inicio). Mismo discriminante; censo sin cambios: 67.
+# Version: 0.16.1
 # ============================================================
 
 from __future__ import annotations
@@ -170,7 +176,8 @@ MUTANTES = [
     ("M02", "mobile/src/state/useEnvioGasto.ts", "      if (selladaRef.current) {\n        // Intención", "      if (false) {\n        // Intención", "js"),
     ("M03", "mobile/src/domain/intencion.ts", "presupuestable: null,\n    soloMio", "presupuestable: true,\n    soloMio", "js"),
     ("M04", "mobile/src/domain/intencion.ts", "soloMio: false,", "soloMio: true,", "js"),
-    ("M05", "mobile/App.tsx", "if (registrado) setRefresco((n) => n + 1);", "if (false) setRefresco((n) => n + 1);", "js"),
+    ("M05", "mobile/App.tsx", "setDestino('INICIO'); // Atrás vuelve al origen real (Home)\n    if (registrado) setRefresco((n) => n + 1);",
+     "setDestino('INICIO'); // Atrás vuelve al origen real (Home)\n    if (false) setRefresco((n) => n + 1);", "js"),
     ("M06", "mobile/src/state/useEnvioGasto.ts", "} else if (r.tipo === 'RECHAZADO') {", "} else if (false) {", "js"),
     ("M07", "mobile/src/api/cliente.ts", "      return { tipo: 'INDETERMINADO', mensaje: msgIndeterminado };\n    } catch {", "      return { tipo: 'RECHAZADO', codigo: 'X', mensaje: '' } as any;\n    } catch {", "js"),
     ("M08", "mobile/src/domain/importe.ts", "if (dec.length > 2) return { ok: false, motivo: 'DECIMALES' };", "", "js"),
