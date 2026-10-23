@@ -13,7 +13,8 @@
 // v0.9.0 (F05-06 M3 §B1; lámina REP v0.2): «Repartir» u «Otra persona» en el registro de un gasto abren el gasto compartido (GastoCompartidoScreen) ENCIMA del registro, que sigue montado y conserva lo común («Cambiar» vuelve a él). «Pendiente con <persona>» (PendienteConScreen) se abre desde el éxito del gasto compartido, el detalle de un gasto en la Actividad y la ficha del tercero; «Corregir reparto» (CorregirRepartoScreen), desde el detalle. Todas son tareas inmersivas (ocultan la barra inferior); al terminar con cambios, Día a día e Inicio vuelven a leer.
 // v0.10.0 (F05-06 M5 §B1; láminas PREV v0.2 y HOME-01 v0.4): la campana y «Ver todos ›» de Inicio abren «Pendientes» (PendientesScreen) y una fila de Inicio o de la lista abre el detalle de la previsión (PrevisionDetalleScreen), que contiene sus salidas («Registrar pago/cobro», «Ya lo registré», «No hubo este mes»); el swipe «Abrir el formulario completo» abre el detalle directamente en el registro con el importe escrito. Son tareas superpuestas (ocultan la barra inferior); al terminar con cambios, Inicio, «Pendientes» y Día a día vuelven a leer.
 // v0.11.0 (F05-06 M1; lámina EDIT-HECHO v0.1): «Corregir» desde «Más» del detalle de un hecho en Día a día abre la tarea inmersiva CorregirHechoScreen; al terminar con cambios, Día a día e Inicio vuelven a leer y el detalle se reabre (rastro visible). «Anular por duplicado» vive en la propia Actividad.
-// Versión: 0.11.0
+// v0.12.0 (F05-07 G1, F05-D050 §64.1): «Registrar» y los accesos de plantilla de Inicio abren el ensayo G1 (`dev/g1`, solo `__DEV__`); sin cambios de navegación.
+// Versión: 0.12.0
 // ============================================================
 
 import * as Crypto from 'expo-crypto';
@@ -24,6 +25,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { ClienteApi, crearCliente } from './src/api/cliente';
 import { configApi } from './src/api/config';
+import { g1Abrir } from './src/dev/g1';
 import { BarraInferior, Destino } from './src/components/BarraInferior';
 import { HojaTipos } from './src/components/HojaTipos';
 import type { TipoRegistro } from './src/domain/registro';
@@ -106,8 +108,14 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
             cliente={p.cliente}
             ahora={p.ahora}
             refresco={refresco}
-            onRegistrar={() => setHojaTipos(true)}
-            onAcceso={(pl) => setTarea({ tipo: pl.tipo ?? 'GASTO', plantilla: { id: pl.id, nombre: pl.nombre }, clave: Date.now() })}
+            onRegistrar={() => {
+              g1Abrir('inicio:registrar');
+              setHojaTipos(true);
+            }}
+            onAcceso={(pl) => {
+              g1Abrir('inicio:plantilla');
+              setTarea({ tipo: pl.tipo ?? 'GASTO', plantilla: { id: pl.id, nombre: pl.nombre }, clave: Date.now() });
+            }}
             onEditarAccesos={() => {
               setPantallaMas('PLANTILLAS');
               setDestino('MAS');
