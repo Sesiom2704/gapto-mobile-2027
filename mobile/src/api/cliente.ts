@@ -24,7 +24,7 @@
 // Versión: 0.18.0
 // v0.19.0 (F05-06 M5-B v1.1): «Pendientes» trae `resueltas_mes` (REALIZADA y OMITIDA cuya transición es del mes en curso, con `resuelta_el` y `resuelta_por`); aparte, no suma a nada.
 // Versión: 0.19.0
-// v0.20.0 (F05-07 G1, F05-D050 §64.1): las confirmaciones POST /v1/intenciones/* cierran el ensayo G1 abierto (`dev/g1`, solo `__DEV__`) con su estado HTTP y su `intencion_id`; sin cambios de rutas, cuerpos ni clasificación.
+// v0.20.0 (F05-07 G1, F05-D050 §64.1): las confirmaciones POST /v1/intenciones/* cierran el ensayo G1 abierto (`dev/g1`, solo `__DEV__`) con su estado HTTP, su `intencion_id` y el `hecho_id` de la respuesta; sin cambios de rutas, cuerpos ni clasificación.
 // Versión: 0.20.0
 // ============================================================
 
@@ -984,7 +984,7 @@ export function crearCliente(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): C
       } catch {
         cuerpo = null;
       }
-      if (esIntencion(ruta, init)) g1Cerrar(ruta, r.status, intencionDe(init));
+      if (esIntencion(ruta, init)) g1Cerrar(ruta, r.status, intencionDe(init), typeof cuerpo?.hecho_id === 'string' ? cuerpo.hecho_id : null);
       if (r.ok) return { tipo: 'OK', datos: cuerpo as T };
       if (r.status >= 400 && r.status < 500 && cuerpo && typeof cuerpo.codigo === 'string') {
         const rechazo: Respuesta<T> = { tipo: 'RECHAZADO', codigo: cuerpo.codigo, mensaje: String(cuerpo.mensaje ?? '') };

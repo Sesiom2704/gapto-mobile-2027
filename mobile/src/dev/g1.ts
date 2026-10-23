@@ -2,8 +2,9 @@
 // GAPTO MOBILE 2027
 // Fichero: g1.ts
 // Ruta: mobile/src/dev/g1.ts
-// Descripción: Instrumentación de la medición G1 de F05-07 (F05-D050 §64.1), SOLO en desarrollo (`__DEV__`). Un ensayo empieza con el toque que abre el flujo en Inicio («Registrar» o un acceso de plantilla) y termina con la respuesta de la confirmación (POST /v1/intenciones/*). Reloj monotónico (`performance.now()`). Cada ensayo se escribe en Metro como UNA línea `[G1] {json}` con su secuencia, el origen, la ruta, el estado HTTP y el `intencion_id`, que es el `request_id` del servidor (correlación con la auditoría y, por ella, con el owner). Los ensayos con error también se registran (`ok: false`); un flujo abandonado se registra al abrir el siguiente. Fuera de `__DEV__` no hace nada: ni estado, ni reloj, ni log.
+// Descripción: Instrumentación de la medición G1 de F05-07 (F05-D050 §64.1), SOLO en desarrollo (`__DEV__`). Un ensayo empieza con el toque que abre el flujo en Inicio («Registrar» o un acceso de plantilla) y termina con la respuesta de la confirmación (POST /v1/intenciones/*). Reloj monotónico (`performance.now()`). Cada ensayo se escribe en Metro como UNA línea `[G1] {json}` con su secuencia, el origen, la ruta, el estado HTTP, el `intencion_id` del cuerpo y el `hecho_id` de la respuesta; la correlación con el servidor va por `hecho_id` → auditoría `CREAR` (su `request_id`, su owner y su hora). Los ensayos con error también se registran (`ok: false`); un flujo abandonado se registra al abrir el siguiente. Fuera de `__DEV__` no hace nada: ni estado, ni reloj, ni log.
 // Versión: 0.1.0 (F05-07 G1, preparación de la medición; tirada nocturna, paso 3)
+// Versión: 0.2.0 (ídem): la línea lleva también `hecho_id` (el `request_id` de estas rutas lo genera el servidor y no es el `intencion_id`).
 // ============================================================
 
 type Log = (linea: string) => void;
@@ -40,13 +41,14 @@ export function g1Cerrar(
   ruta: string,
   status: number | null,
   intencionId: string | null,
+  hechoId: string | null = null,
   dev: boolean = __DEV__,
   log: Log = console.log,
 ): void {
   if (!dev || !abierto) return;
   const ms = round(reloj() - abierto.t0);
   const ok = status !== null && status >= 200 && status < 300;
-  escribir(log, { seq: abierto.seq, origen: abierto.origen, ruta, status, ok, intencion_id: intencionId, resultado: ok ? 'CONFIRMADO' : 'ERROR', ms });
+  escribir(log, { seq: abierto.seq, origen: abierto.origen, ruta, status, ok, intencion_id: intencionId, hecho_id: hechoId, resultado: ok ? 'CONFIRMADO' : 'ERROR', ms });
   abierto = null;
 }
 
