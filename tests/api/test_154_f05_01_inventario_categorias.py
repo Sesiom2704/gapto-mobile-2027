@@ -374,7 +374,9 @@
 #     (payload de la lista blanca) y de ActividadScreen.tsx (lee la categoria actual del efecto).
 #     EXCLUIDOS: alta del arnes scripts/dev/mutantes_f05_06_m1_v3.py (sus mutantes son texto).
 #     I1: alta R del oraculo del E2E (scripts/dev/e2e_f05_06_m1.py::estado).
-# Version: 0.32.0
+# Version: 0.33.0 (F05-GATE, tirada nocturna G2/G5): I1: altas R de los oraculos de los E2E
+#     nuevos (scripts/dev/e2e_f05_gate_g2.py::categoria_de_efectos y
+#     scripts/dev/e2e_f05_gate_g5.py::main, solo lecturas SQL de verificacion).
 # ============================================================
 
 from __future__ import annotations
@@ -657,6 +659,10 @@ REGISTRO.update({
         "R", "E2E M1 v1.1 verificacion", "lee hecho_efectos.categoria_id del registro de V3 (oraculo de P5)"),
     ("backend/app/api/ejecucion_categoria_v3.py", "corregir_categoria_v3.operacion"): (
         "A_FRONTERA", "V3 -> OP-21 (lista blanca)", "sella categoria_id en el efecto unico tras C-a + C07 (I4-V3)"),
+    ("scripts/dev/e2e_f05_gate_g2.py", "categoria_de_efectos"): (
+        "R", "E2E F05-GATE G2 verificacion", "lee la categoria de los efectos del hecho (oraculo fisico)"),
+    ("scripts/dev/e2e_f05_gate_g5.py", "main"): (
+        "R", "E2E F05-GATE G5 verificacion", "lee categoria_magnitudes por categoria_id (oraculo de MAG)"),
 })
 
 #: Servicios del motor que la frontera NO puede referenciar (I3): tienen
