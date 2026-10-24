@@ -5,10 +5,11 @@
 // Descripción: F05-07 G1 (F05-D050 §64.1). La instrumentación de la medición (src/dev/g1.ts) no tiene efecto fuera de `__DEV__` (ni log ni estado, también a través del cliente HTTP) y en desarrollo escribe UNA línea `[G1] {json}` por ensayo: confirmado (2xx), error (no 2xx o sin respuesta) y abandonado; el `intencion_id` del cuerpo y el `hecho_id` de la respuesta viajan en la línea (correlación con la auditoría del servidor). Solo las confirmaciones POST /v1/intenciones/* cierran un ensayo.
 // Versión: 0.1.0 (F05-07 G1, preparación de la medición; tirada nocturna, paso 3)
 // Versión: 0.2.0 (ídem): la línea transporta el `hecho_id` de la respuesta.
+// Versión: 0.3.0 (ídem): el cierre se prueba a través de `g1Fetch` (el cliente HTTP no cambia).
 // ============================================================
 
 import { crearCliente } from '../src/api/cliente';
-import { g1Abrir, g1Cerrar, g1Estado, g1Reiniciar } from '../src/dev/g1';
+import { g1Abrir, g1Cerrar, g1Estado, g1Fetch, g1Reiniciar } from '../src/dev/g1';
 
 const ID = '11111111-1111-4111-8111-111111111111';
 const HECHO = '22222222-2222-4222-8222-222222222222';
@@ -21,7 +22,8 @@ function lineas(log: jest.Mock): Record<string, unknown>[] {
 }
 
 function fetchFalso(status: number, cuerpo: unknown): typeof fetch {
-  return jest.fn(async () => ({ ok: status >= 200 && status < 300, status, json: async () => cuerpo })) as unknown as typeof fetch;
+  const r = { ok: status >= 200 && status < 300, status, json: async () => cuerpo, clone: () => r };
+  return jest.fn(async () => r) as unknown as typeof fetch;
 }
 
 beforeEach(() => g1Reiniciar());
@@ -42,7 +44,9 @@ describe('fuera de __DEV__ (producción)', () => {
     try {
       global_.__DEV__ = false;
       g1Abrir('inicio:registrar');
-      const cli = crearCliente({ baseUrl: 'http://x', token: 't', timeoutMs: 1000 }, fetchFalso(200, { hecho_id: ID }));
+      const base = fetchFalso(200, { hecho_id: ID });
+      expect(g1Fetch(base)).toBe(base); // fuera de __DEV__, el fetch sin envolver
+      const cli = crearCliente({ baseUrl: 'http://x', token: 't', timeoutMs: 1000 }, g1Fetch(base));
       await cli.registrarGastoPagado({ intencion_id: ID } as never);
       expect(log).not.toHaveBeenCalled();
       expect(g1Estado()).toEqual({ secuencia: 0, abierto: false });
@@ -90,11 +94,11 @@ describe('en __DEV__', () => {
     ]);
   });
 
-  it('el cliente cierra el ensayo solo con POST /v1/intenciones/* y transporta su intencion_id', async () => {
+  it('el cliente (con g1Fetch) cierra el ensayo solo con POST /v1/intenciones/* y transporta intencion_id y hecho_id', async () => {
     const log = jest.spyOn(console, 'log').mockImplementation(() => undefined);
     try {
       g1Abrir('inicio:registrar');
-      const cli = crearCliente({ baseUrl: 'http://x', token: 't', timeoutMs: 1000 }, fetchFalso(200, { hecho_id: HECHO }));
+      const cli = crearCliente({ baseUrl: 'http://x', token: 't', timeoutMs: 1000 }, g1Fetch(fetchFalso(200, { hecho_id: HECHO })));
       await cli.arbolCategorias();
       expect(log).not.toHaveBeenCalled();
       await cli.registrarIngresoCobrado({ intencion_id: ID } as never);

@@ -24,8 +24,6 @@
 // Versión: 0.18.0
 // v0.19.0 (F05-06 M5-B v1.1): «Pendientes» trae `resueltas_mes` (REALIZADA y OMITIDA cuya transición es del mes en curso, con `resuelta_el` y `resuelta_por`); aparte, no suma a nada.
 // Versión: 0.19.0
-// v0.20.0 (F05-07 G1, F05-D050 §64.1): las confirmaciones POST /v1/intenciones/* cierran el ensayo G1 abierto (`dev/g1`, solo `__DEV__`) con su estado HTTP, su `intencion_id` y el `hecho_id` de la respuesta; sin cambios de rutas, cuerpos ni clasificación.
-// Versión: 0.20.0
 // ============================================================
 
 import type { Ambito, CategoriaNodo } from '../domain/categoria';
@@ -43,7 +41,6 @@ import type {
   ResultadoPosicion,
 } from '../domain/reparto';
 import type { SenalesCategorias, SenalesTerceros } from '../domain/senales';
-import { g1Cerrar } from '../dev/g1';
 
 export interface ConfigApi {
   baseUrl: string;
@@ -953,20 +950,6 @@ const PREV = (id: string) => `/v1/previsiones/${encodeURIComponent(id)}`;
 const asoc = (cat: string, a?: string) => `${CAT}/${encodeURIComponent(cat)}/magnitudes${a ? `/${encodeURIComponent(a)}` : ''}`;
 const post = (cuerpo: unknown): RequestInit => ({ method: 'POST', body: JSON.stringify(cuerpo) });
 
-/** F05-07 G1: confirmación de un registro (cierra el ensayo G1 en `__DEV__`). */
-function esIntencion(ruta: string, init: RequestInit): boolean {
-  return init.method === 'POST' && ruta.startsWith('/v1/intenciones/');
-}
-
-function intencionDe(init: RequestInit): string | null {
-  try {
-    const id = JSON.parse(String(init.body ?? 'null'))?.intencion_id;
-    return typeof id === 'string' ? id : null;
-  } catch {
-    return null;
-  }
-}
-
 export function crearCliente(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): ClienteApi {
   async function llamar<T>(ruta: string, init: RequestInit, esEscritura: boolean | 'CAMBIO'): Promise<Respuesta<T>> {
     const msgIndeterminado = esEscritura === 'CAMBIO' ? MSG_INDETERMINADO_CAMBIO : esEscritura ? MSG_INDETERMINADO : MSG_SIN_CONEXION;
@@ -984,7 +967,6 @@ export function crearCliente(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): C
       } catch {
         cuerpo = null;
       }
-      if (esIntencion(ruta, init)) g1Cerrar(ruta, r.status, intencionDe(init), typeof cuerpo?.hecho_id === 'string' ? cuerpo.hecho_id : null);
       if (r.ok) return { tipo: 'OK', datos: cuerpo as T };
       if (r.status >= 400 && r.status < 500 && cuerpo && typeof cuerpo.codigo === 'string') {
         const rechazo: Respuesta<T> = { tipo: 'RECHAZADO', codigo: cuerpo.codigo, mensaje: String(cuerpo.mensaje ?? '') };
@@ -993,7 +975,6 @@ export function crearCliente(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): C
       }
       return { tipo: 'INDETERMINADO', mensaje: msgIndeterminado };
     } catch {
-      if (esIntencion(ruta, init)) g1Cerrar(ruta, null, intencionDe(init));
       return { tipo: 'INDETERMINADO', mensaje: msgIndeterminado };
     } finally {
       clearTimeout(t);
