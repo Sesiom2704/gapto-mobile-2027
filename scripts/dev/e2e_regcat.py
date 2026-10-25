@@ -67,6 +67,13 @@
 #   el de e2e_vs01 (DESBORDES_JS: excluye los textos recortados con elipsis y
 #   exige que el documento no tenga scroll horizontal); los truncados se
 #   registran en el manifest (truncados_elipsis). Ver e2e_vs01 0.7.1.
+# Version: 0.4.2 (F05-D051 paso 3; F05 §65.3, AJ-F0507G2-05): (a) usa el
+#   detector acotado de e2e_vs01 0.8.0 (vs01.evaluar_layout): solo el saludo
+#   «hola» puede recortarse con elipsis; cualquier otro truncado, el scroll
+#   horizontal del documento, un desbordamiento, un texto o control fuera del
+#   viewport o recortado por un ancestro fallan. El inventario por momento se
+#   exporta en REGCAT_<run>_inventario_layout.json y en el manifest
+#   (layout_inventario; sustituye a truncados_elipsis).
 # ============================================================
 
 from __future__ import annotations
@@ -267,11 +274,12 @@ def main() -> None:
                 page.screenshot(path=str(f))
                 capturas.append(f.name)
 
-            truncados: list = []
+            # F05 §65.3: inventario de layout por momento (se reescribe tras cada medida).
+            inventario_layout: list = []
+            fichero_layout = salida / f"REGCAT_{run}_inventario_layout.json"
 
-            def desbordes() -> list:
-                truncados.append(page.evaluate(vs01.TRUNCADOS_JS))
-                return page.evaluate(vs01.DESBORDES_JS)
+            def desbordes(momento: str) -> list:
+                return vs01.evaluar_layout(page, momento, inventario_layout, fichero_layout)
 
             recargas = {"n": 0}
 
@@ -333,8 +341,8 @@ def main() -> None:
                 shot(f"{sufijo}04_magnitudes_vacia")
                 page.get_by_test_id(f"magnitud-{kwh}").fill("12,5")
                 comprobar(page.get_by_test_id("registrar").get_attribute("aria-disabled") != "true", "(a) botón sigue desactivado con todo completo")
-                d = desbordes()
-                comprobar(not d, f"(a) desbordamiento horizontal: {d}")
+                d = desbordes(f"{sufijo}05_magnitudes_informada")
+                comprobar(not d, f"(a) layout (F05 §65.3): {d}")
                 shot(f"{sufijo}05_magnitudes_informada")
                 page.get_by_test_id("registrar").click()
                 page.get_by_test_id("registro-exito").wait_for(timeout=15000)
@@ -500,7 +508,7 @@ def main() -> None:
                     "web": a.web, "resultado": resultado, "fallos": fallos,
                     "recargas_por_descarga_cortada": recargas["n"], "rechazo_esperado": rechazos_esperados,
                     "errores_consola": errores_consola, "errores_consola_no_esperados": no_esperados,
-                    "truncados_elipsis": truncados, "capturas": capturas}
+                    "layout_inventario": inventario_layout, "capturas": capturas}
         (salida / f"REGCAT_{run}_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
         print(json.dumps({"etiqueta": ETIQUETA, "run_id": run, "fallos": fallos, "capturas": len(capturas),
                           "errores_consola": len(errores_consola), "rechazos_esperados": len(rechazos_esperados),

@@ -40,7 +40,7 @@
 #   (Resultado del mes), que sustituye en ESE bloque el «sin cifras» de
 #   F05-D003 §16.6. Se conserva la propiedad de VS-01: la cifra PARCIAL de
 #   gasto-mes va en su tarjeta y nunca aparece en «Este mes».
-# Version: 0.7.1 (F05-07/GATE adenda 2, MANT-PRE-GATE C/e2e; DEF-E2E-VS01-LAYOUT):
+#   v0.7.1 (F05-07/GATE adenda 2, MANT-PRE-GATE C/e2e; DEF-E2E-VS01-LAYOUT):
 #   el detector de desbordamiento horizontal (DESBORDES_JS) excluye los textos
 #   recortados con elipsis (`text-overflow: ellipsis`, lo que react-native-web
 #   genera para numberOfLines={1}): ese recorte es deliberado y no desborda (la
@@ -50,6 +50,22 @@
 #   «Usuario sintetico VS-01», se recorta («Hola, Usuario si…»). Ademas exige
 #   que el documento no tenga scroll horizontal y registra en el manifest los
 #   textos truncados (truncados_elipsis_formulario).
+# Version: 0.8.0 (F05-D051 paso 3; F05 §65.3, AJ-F0507G2-05/12): detector de
+#   layout ACOTADO (evaluar_layout / LAYOUT_JS), que sustituye a DESBORDES_JS y
+#   TRUNCADOS_JS: (1) la excepcion de elipsis deja de ser generica: solo los
+#   data-testid de la lista blanca EXPLICITA ELIPSIS_AUTORIZADA (el saludo
+#   «hola») pueden recortarse; cualquier otro texto truncado (elipsis horizontal
+#   o line-clamp vertical) hace FALLAR; (2) inventario de truncados por momento
+#   (autorizado o no, critico o no) exportado en VS01_<run>_inventario_layout.json
+#   (se reescribe tras cada medida, tambien si la ejecucion falla) y en el
+#   manifest; (3) falla ante scroll horizontal del documento, desbordamiento de
+#   un contenedor, texto o control visible que cruza el borde del viewport y
+#   texto o control recortado horizontalmente por un ancestro (perdida de
+#   informacion necesaria para actuar: importes, botones, etiquetas de accion).
+#   Se mide en los siete momentos del recorrido (Inicio, formulario vacio y
+#   completo, exito, Inicio refrescado, Inicio y formulario en oscuro), no solo
+#   en el formulario; los fallos de layout se reunen y fallan al final, con el
+#   manifest ya escrito.
 # ============================================================
 
 from __future__ import annotations
@@ -70,17 +86,95 @@ import uuid
 import psycopg
 from playwright.sync_api import sync_playwright
 
-#: Elementos con contenido mas ancho que su caja y overflow-x no visible, salvo los textos recortados
-#: con elipsis (numberOfLines={1} en react-native-web); incluye el propio documento si tiene scroll horizontal.
-DESBORDES_JS = ("[...document.querySelectorAll('*')].filter(e => e.scrollLeft > 0 || e.scrollWidth > e.clientWidth + 1"
-                " && getComputedStyle(e).overflowX !== 'visible' && getComputedStyle(e).textOverflow !== 'ellipsis')"
-                ".map(e => e.getAttribute('data-testid') || e.tagName)"
-                ".concat(document.documentElement.scrollWidth > document.documentElement.clientWidth + 1 ? ['DOCUMENTO'] : [])")
-#: Textos recortados con elipsis (no fallan; se registran como evidencia).
-TRUNCADOS_JS = ("[...document.querySelectorAll('*')].filter(e => e.scrollWidth > e.clientWidth + 1"
-                " && getComputedStyle(e).textOverflow === 'ellipsis')"
-                ".map(e => ({testid: e.getAttribute('data-testid') || e.tagName, texto: e.innerText,"
-                " ancho_contenido: e.scrollWidth, ancho_caja: e.clientWidth}))")
+#: F05 §65.3 (AJ-F0507G2-05): lista blanca EXPLICITA de los elementos (data-testid exacto) cuyo recorte
+#: con elipsis esta autorizado. Solo el saludo «Hola, <nombre>» de la cabecera de Inicio (HomeScreen,
+#: numberOfLines={1}): con un nombre largo se recorta a proposito. Cualquier otro truncado hace fallar.
+ELIPSIS_AUTORIZADA = ("hola",)
+
+#: Medida de layout (un objeto por momento). Para cada elemento visible del body:
+#:   truncados      texto recortado con elipsis (horizontal) o line-clamp (vertical), con su contexto;
+#:   desbordes      contenedor con contenido mas ancho que su caja y overflow-x no visible, o desplazado;
+#:   fuera_viewport texto o control visible que cruza el borde izquierdo o derecho del viewport;
+#:   recortes       texto o control recortado horizontalmente por un ancestro con overflow-x no visible.
+#: Lo que queda entero fuera del viewport o entero oculto por un ancestro no se ve: no cuenta.
+#: «critico»: dentro de un control (boton, enlace, campo...) o bajo un data-testid de importe.
+LAYOUT_JS = r"""(autorizados) => {
+  const de = document.documentElement, vw = de.clientWidth;
+  const CONTROL = '[role=button],[role=link],[role=tab],[role=switch],[role=checkbox],[role=radio],[role=menuitem],button,a[href],input,select,textarea';
+  const CRIT = /(valor|importe|resultado|saldo|total|^mes-)/;
+  const ident = (e) => { const t = e.getAttribute('data-testid'); if (t) return t;
+    const a = e.parentElement && e.parentElement.closest('[data-testid]');
+    return (a ? a.getAttribute('data-testid') + '>' : '') + e.tagName; };
+  const texto = (e) => ((e.innerText !== undefined ? e.innerText : '') || e.value || e.getAttribute('aria-label') || '').trim().slice(0, 80);
+  const critico = (e) => { if (e.closest(CONTROL)) return true; const a = e.closest('[data-testid]');
+    return !!a && CRIT.test(a.getAttribute('data-testid')); };
+  const conTexto = (e) => [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()) || e.matches(CONTROL);
+  const r2 = (x) => Math.round(x * 10) / 10;
+  const res = { viewport: vw, documento: { ancho_contenido: de.scrollWidth, ancho_visible: de.clientWidth },
+    truncados: [], desbordes: [], fuera_viewport: [], recortes: [] };
+  for (const e of document.body.querySelectorAll('*')) {
+    const cs = getComputedStyle(e);
+    if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+    const r = e.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) continue;
+    const elipsis = cs.textOverflow === 'ellipsis' && e.scrollWidth > e.clientWidth + 1;
+    const clamp = !!cs.webkitLineClamp && cs.webkitLineClamp !== 'none' && e.scrollHeight > e.clientHeight + 1;
+    if (elipsis || clamp) {
+      const testid = e.getAttribute('data-testid');
+      res.truncados.push({ id: ident(e), texto: texto(e), eje: elipsis ? 'horizontal' : 'vertical',
+        contenido: elipsis ? e.scrollWidth : e.scrollHeight, caja: elipsis ? e.clientWidth : e.clientHeight,
+        critico: critico(e), autorizado: !!testid && autorizados.includes(testid) });
+      continue;
+    }
+    if (e.scrollLeft > 0 || (e.scrollWidth > e.clientWidth + 1 && cs.overflowX !== 'visible'))
+      res.desbordes.push({ id: ident(e), texto: texto(e), contenido: e.scrollWidth, caja: e.clientWidth, critico: critico(e) });
+    if (!conTexto(e)) continue;
+    let izq = r.left, der = r.right;
+    for (let a = e.parentElement; a && a !== de; a = a.parentElement) {
+      if (getComputedStyle(a).overflowX === 'visible') continue;
+      const ra = a.getBoundingClientRect();
+      izq = Math.max(izq, ra.left); der = Math.min(der, ra.right);
+    }
+    if (der - izq <= 0.5 || der <= 0 || izq >= vw) continue;
+    const item = { id: ident(e), texto: texto(e), izquierda: r2(r.left), derecha: r2(r.right),
+      visible_izquierda: r2(izq), visible_derecha: r2(der), critico: critico(e) };
+    if (izq < -1 || der > vw + 1) res.fuera_viewport.push(item);
+    else if (izq > r.left + 1 || der < r.right - 1) res.recortes.push(item);
+  }
+  return res;
+}"""
+
+
+def fallos_layout(medida: dict) -> list[str]:
+    """Fallos de una medida de LAYOUT_JS (F05 §65.3). Los truncados de la lista blanca no fallan."""
+    fallos = []
+    doc = medida["documento"]
+    if doc["ancho_contenido"] > doc["ancho_visible"] + 1:
+        fallos.append(f"DOCUMENTO con scroll horizontal ({doc['ancho_contenido']} > {doc['ancho_visible']})")
+    fallos += [f"truncado no autorizado ({t['eje']}{', critico' if t['critico'] else ''}): {t['id']} «{t['texto']}»"
+               for t in medida["truncados"] if not t["autorizado"]]
+    fallos += [f"desbordamiento horizontal: {d['id']} ({d['contenido']} > {d['caja']})" for d in medida["desbordes"]]
+    fallos += [f"fuera del viewport{' (critico)' if x['critico'] else ''}: {x['id']} «{x['texto']}» "
+               f"[{x['izquierda']}, {x['derecha']}]" for x in medida["fuera_viewport"]]
+    fallos += [f"recortado por un ancestro{' (critico)' if x['critico'] else ''}: {x['id']} «{x['texto']}» "
+               f"[{x['izquierda']}, {x['derecha']}] visible [{x['visible_izquierda']}, {x['visible_derecha']}]"
+               for x in medida["recortes"]]
+    return fallos
+
+
+def evaluar_layout(page, momento: str, inventario: list, fichero: pathlib.Path | None = None) -> list[str]:
+    """Mide el layout en `momento`, lo anade al inventario (y lo reescribe en `fichero` si se da) y
+    devuelve sus fallos. No lanza: el llamador decide cuando fallar."""
+    medida = page.evaluate(LAYOUT_JS, list(ELIPSIS_AUTORIZADA))
+    medida = {"momento": momento, **medida}
+    medida["fallos"] = fallos_layout(medida)
+    inventario.append(medida)
+    if fichero is not None:
+        fichero.write_text(json.dumps({"etiqueta": ETIQUETA, "elipsis_autorizada": list(ELIPSIS_AUTORIZADA),
+                                       "medidas": inventario}, ensure_ascii=False, indent=2), encoding="utf-8")
+    return medida["fallos"]
+
+
 ETIQUETA = "EVIDENCIA WEB/VIEWPORT — NO EVIDENCIA iOS"
 
 
@@ -155,10 +249,17 @@ def main() -> None:
         run = f"{dt.datetime.now(dt.timezone.utc):%Y%m%dT%H%M%SZ}_{uuid.uuid4().hex[:6]}"
         metricas: dict = {"taps": 0, "campos_escritos": 0, "decisiones_explicitas": 0}
         capturas = []
+        # F05 §65.3: inventario de layout por momento (se reescribe tras cada medida) y fallos reunidos.
+        inventario: list = []
+        fichero_inventario = salida / f"VS01_{run}_inventario_layout.json"
+        fallos_de_layout: list[str] = []
 
         def shot(page, nombre):
             f = salida / f"VS01_{run}_{nombre}_WEB-VIEWPORT-393x852.png"
             page.screenshot(path=str(f)); capturas.append(f.name)
+
+        def layout(page, momento):
+            fallos_de_layout.extend(f"[{momento}] {x}" for x in evaluar_layout(page, momento, inventario, fichero_inventario))
 
         with sync_playwright() as pw:
             nav = pw.chromium.launch()
@@ -173,8 +274,10 @@ def main() -> None:
             g = page.get_by_test_id("gastos-valor")
             g.wait_for(timeout=30000)
             antes = g.inner_text()
+            page.get_by_test_id("hola").wait_for(timeout=15000)
             page.wait_for_timeout(500)
             shot(page, "01_home_antes")
+            layout(page, "01_home_antes")
 
             t0 = time.monotonic()
             # F05-04 §2.2: «Registrar» abre la hoja de tipos (sin preselección) y luego «Gasto».
@@ -185,12 +288,7 @@ def main() -> None:
             page.get_by_test_id("financiacion").wait_for()
             financiacion_visible = page.get_by_test_id("financiacion-texto").inner_text()
             page.wait_for_timeout(500)
-            desbordes = page.evaluate(DESBORDES_JS)
-            metricas["desbordes_horizontales_formulario"] = desbordes
-            # Truncados con elipsis (numberOfLines={1}): recorte deliberado, no desbordamiento; se registran.
-            metricas["truncados_elipsis_formulario"] = page.evaluate(TRUNCADOS_JS)
-            if desbordes:
-                raise SystemExit(f"FALLO LAYOUT: desbordamiento horizontal en {desbordes}")
+            layout(page, "02a_formulario_vacio")
             # SPEC-08: desactivado al abrir, con indicacion visible; pulsarlo no escribe.
             boton = page.get_by_test_id("registrar")
             spec08 = {"disabled_al_abrir": boton.get_attribute("aria-disabled"),
@@ -219,11 +317,13 @@ def main() -> None:
             if spec08["disabled_completo"] == "true" or spec08["faltan_completo"]:
                 raise SystemExit("FALLO SPEC-08: el boton sigue desactivado con el formulario completo")
             shot(page, "02_formulario")
+            layout(page, "02_formulario_completo")
             page.get_by_test_id("registrar").click(); metricas["taps"] += 1
             page.get_by_test_id("registro-exito").wait_for(timeout=15000)
             metricas["taps_hasta_confirmacion"] = metricas["taps"]
             metricas["segundos_automatizados_hasta_confirmacion"] = round(time.monotonic() - t0, 2)
             shot(page, "03_exito")
+            layout(page, "03_exito")
             page.get_by_test_id("volver-inicio").click(); metricas["taps"] += 1
             page.wait_for_function("(a) => { const e=document.querySelector('[data-testid=gastos-valor]'); return e && e.innerText !== a; }", arg=antes, timeout=15000)
             despues = page.get_by_test_id("gastos-valor").inner_text()
@@ -234,15 +334,18 @@ def main() -> None:
                 raise SystemExit("FALLO F05-D003 §16.6: el bloque «Este mes» muestra la cifra parcial de gasto-mes")
             page.wait_for_timeout(300)
             shot(page, "04_home_refrescada")
+            layout(page, "04_home_refrescada")
             # Esquema oscuro (mismos tokens DS-01 Dark): solo capturas de revision visual.
             page.emulate_media(color_scheme="dark")
             page.wait_for_timeout(500)
             shot(page, "05_home_dark")
+            layout(page, "05_home_dark")
             page.get_by_test_id("accion-registrar").click()
             page.get_by_test_id("tipo-GASTO").click()
             page.get_by_test_id("financiacion").wait_for()
             page.wait_for_timeout(500)
             shot(page, "06_formulario_dark")
+            layout(page, "06_formulario_dark")
             nav.close()
 
         if len(intenciones) != 1:
@@ -251,9 +354,14 @@ def main() -> None:
         manifest = {"etiqueta": ETIQUETA, "run_id": run, "categoria_elegida": "SIN_CATEGORIA (decision explicita)",
                     "gastos_home_antes": antes, "gastos_home_despues": despues,
                     "financiacion_visible": financiacion_visible, "parcial_en_bloque_mes": parcial_en_mes, "spec08": spec08,
-                    "bd": bd, "metricas": metricas, "errores_consola": len(consola), "capturas": capturas}
+                    "bd": bd, "metricas": metricas, "errores_consola": len(consola), "capturas": capturas,
+                    "layout": {"elipsis_autorizada": list(ELIPSIS_AUTORIZADA), "fallos": fallos_de_layout,
+                               "truncados": [{"momento": m["momento"], **x} for m in inventario for x in m["truncados"]],
+                               "inventario": fichero_inventario.name}}
         (salida / f"VS01_{run}_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
         print(json.dumps(manifest, ensure_ascii=False, indent=2))
+        if fallos_de_layout:
+            raise SystemExit("FALLO LAYOUT (F05 §65.3): " + " | ".join(fallos_de_layout))
 
 
 if __name__ == "__main__":
