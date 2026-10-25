@@ -6,7 +6,7 @@
 #   del gasto compartido, cada «Pendiente con <persona>» sale del `tercero_id`
 #   que el servidor devuelve en cada posicion, nunca del importe. Procede del
 #   arnes historico C:/DEV/evidencia_f0506_m3/corr01/mutante_corr01.py
-#   (HUECO-05), que tenia cableadas la raiz del worktree (C:\DEV\wt_f05_06_m3)
+#   (HUECO-05), que tenia cableadas la raiz del worktree (worktree wt_f05_06_m3)
 #   y la ruta del journal en la evidencia. Mismo motor que
 #   mutantes_f05_06_m2.py (D-181, D-192, D-193, WM 12C.2): sustitucion de texto
 #   exacto (UNA ocurrencia), journal durable antes del primer byte (si al
@@ -26,6 +26,8 @@
 #   tenia) y Jest va en serie (`--runInBand`). El texto protegido sigue anclando
 #   en 5e39673 (GastoCompartidoScreen.tsx no cambia desde c9c2932): sin
 #   reanclaje.
+# Version: 0.2.1 (F05-07/GATE adenda 2, integracion MANT-PRE-GATE: la cabecera nombra el
+#   worktree historico sin ruta absoluta (test_rv3_000, ruta_absoluta_windows))
 # ============================================================
 
 from __future__ import annotations
