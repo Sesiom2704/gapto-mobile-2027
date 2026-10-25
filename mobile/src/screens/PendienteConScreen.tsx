@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-06 M3 §B1)
 // Versión: 0.2.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2 S6; SWIPE-RULE): cada posición va en tarjeta con los dos lados. Derecha «Cobrado» / «Pagado» del saldo ENTERO: acción rápida (aviso «Cobrado de <persona> · <importe> · Deshacer» y, a los 5 s, la misma ruta de cobro o pago que el formulario, con fecha de hoy) solo con saldo conocido y UNA sola cuenta posible hoy (leída con la lista); si no, abre el formulario con el saldo escrito. Izquierda «Más»: abre las acciones de la posición. «Perdonar» nunca va en un swipe.
 // Versión: 0.3.0 (swipe (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados `principal` / `alternativa` del componente común (principal a la izquierda); la raíz y el scroll cierran la fila abierta a medias (`propsZonaSwipe`, `propsScrollSwipe`).)
+// Versión: 0.4.0 (F05-D051 paso 8; lámina B D-F0507L-03): el texto de cada posición sale de `textoPosicion`. Tras cobrar, pagar o perdonar, una CERRADA dice «0,00 € · Saldado. Ya no queda nada pendiente.» y, si su importe inicial no se conoció, debajo «Importe inicial desconocido» (etiqueta accesible con el mismo texto); nunca «Sin determinar». La lista solo trae ACTIVAS: la pendiente con saldo desconocido sigue en «Sin determinar».
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -35,7 +36,9 @@ import {
   TEXTO_PERDONAR,
   TEXTO_SIN_TERCERO_PAGA,
   textoDe,
+  etiquetaPosicion,
   textoNeto,
+  textoPosicion,
   textoSaldo,
 } from '../domain/reparto';
 import { useTema } from '../theme/tema';
@@ -210,9 +213,17 @@ export function PendienteConScreen(p: {
               {accion === 'PERDON' ? 'Perdonado' : esCobro ? 'Cobro registrado' : 'Pago registrado'}
             </Text>
             <Text style={[importe.primary, { color: c.textPrimary }]}>{formatearEur(r.importe)}</Text>
-            <Text testID="posicion-exito-saldo" style={[tipo.body, { color: c.textSecondary }]}>
-              {r.estado === 'CERRADA' ? 'Ya no queda nada pendiente.' : `Sigue pendiente: ${textoSaldo(r.saldo)}`}
-            </Text>
+            {(() => {
+              // Lámina B (D-F0507L-03): una CERRADA es «0,00 € · Saldado», nunca «Sin determinar».
+              const tp = textoPosicion(r);
+              const linea = r.estado === 'CERRADA' ? `${tp.saldo}. Ya no queda nada pendiente.` : `Sigue pendiente: ${tp.saldo}`;
+              return (
+                <View testID="posicion-exito-estado" accessible accessibilityLabel={etiquetaPosicion(linea, tp.inicial)} style={{ alignItems: 'center' }}>
+                  <Text testID="posicion-exito-saldo" style={[tipo.body, { color: c.textSecondary }]}>{linea}</Text>
+                  {tp.inicial ? <Text testID="posicion-exito-inicial" style={[tipo.footnote, { color: c.textSecondary }]}>{tp.inicial}</Text> : null}
+                </View>
+              );
+            })()}
           </View>
           <BotonPrimario testID="posicion-exito-volver" titulo={`Volver a Pendiente con ${nombre}`} onPress={cerrarAccion} />
         </View>
@@ -319,12 +330,14 @@ export function PendienteConScreen(p: {
               <View style={{ flex: 1 }}>
                 <Text style={[tipo.body, { color: c.textPrimary }]}>{origenPosicion(x)}</Text>
                 <Text style={[tipo.footnote, { color: c.textSecondary }]}>
-                  {x.saldo === null
+                  {textoPosicion(x).inicial
+                    ? textoPosicion(x).inicial
+                    : x.saldo === null && x.estado !== 'CERRADA'
                     ? 'Saldo inicial desconocido'
                     : [x.origen_concepto && x.origen_tercero ? x.origen_tercero : null, x.origen_fecha ? diaMesIso(x.origen_fecha) : null].filter(Boolean).join(' · ')}
                 </Text>
               </View>
-              <Text style={[tipo.bodyEmphasis, { color: c.textPrimary }]}>{textoSaldo(x.saldo)}</Text>
+              <Text testID={`posicion-saldo-${x.entidad_id}`} style={[tipo.bodyEmphasis, { color: c.textPrimary }]}>{textoPosicion(x).saldo}</Text>
               <Text style={[tipo.body, { color: c.textSecondary }]}>›</Text>
             </Pressable>
             </FilaDeslizable>

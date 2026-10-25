@@ -7,6 +7,7 @@
 // v0.1.1 (F05-06 M3 CORR-01, R-M3-05): dos personas con la misma parte; cada «Pendiente con» señala a su persona por el `tercero_id` del servidor, también con las posiciones en otro orden.
 // Versión: 0.2.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // Versión: 0.3.0 (F05-D051 paso 2; F05 §65.4 contrato HTTP Q4/Q4-H2): fixtures wire con `apertura_indeterminada` (y `estado` en PosicionDeParte); sin cambios de aserciones.
+// Versión: 0.4.0 (F05-D051 paso 8; lámina B D-F0507L-03): bloque «Lámina B» con los tres estados de una posición (pendiente con saldo desconocido, CERRADA con importe inicial conocido y CERRADA con importe inicial desconocido) en «Corregir reparto» y en «Pendiente con» (lista y éxito), en claro y oscuro, con su etiqueta accesible; el éxito de una CERRADA pasa a «0,00 € · Saldado. Ya no queda nada pendiente.».
 // ============================================================
 
 import './tiempos_rn';
@@ -28,10 +29,12 @@ import {
   PendienteConPersona,
   RepartoDeHecho,
   resumenReparto,
+  TEXTO_IMPORTE_INICIAL_DESCONOCIDO,
   TEXTO_NETO_SIN_DETERMINAR,
   TEXTO_SIN_TERCERO_PAGA,
   TEXTO_SOLO_PERSONAS,
   textoNeto,
+  textoPosicion,
 } from '../src/domain/reparto';
 import { ActividadScreen } from '../src/screens/ActividadScreen';
 import { CorregirRepartoScreen } from '../src/screens/CorregirRepartoScreen';
@@ -469,7 +472,7 @@ describe('C · Pendiente con', () => {
     fireEvent.press(screen.getByTestId('accion-enviar'));
     await screen.findByTestId('posicion-exito');
     expect(pagar.mock.calls[1][1].intencion_id).toBe(pagar.mock.calls[0][1].intencion_id);
-    expect(screen.getByTestId('posicion-exito-saldo').props.children).toBe('Ya no queda nada pendiente.');
+    expect(screen.getByTestId('posicion-exito-saldo').props.children).toBe('0,00 € · Saldado. Ya no queda nada pendiente.');
   });
 
   test('perdonar no pide cuenta ni mueve dinero', async () => {
@@ -635,5 +638,103 @@ describe('integración', () => {
     await waitFor(() => expect(screen.queryByTestId('solo-mio')).toBeTruthy());
     expect(screen.queryByTestId('repartir')).toBeNull();
     expect(screen.queryByTestId('otra-persona')).toBeNull();
+  });
+});
+
+// ================================================================== lámina B · posiciones saldadas (D-F0507L-03)
+describe('Lámina B · saldada frente a desconocida (D-F0507L-03)', () => {
+  const ACTIVA_DESCONOCIDA = { saldo: null, estado: 'ACTIVA' as const, apertura_indeterminada: false };
+  const CERRADA_CONOCIDA = { saldo: '0.00', estado: 'CERRADA' as const, apertura_indeterminada: false };
+  const CERRADA_DESCONOCIDA = { saldo: '0.00', estado: 'CERRADA' as const, apertura_indeterminada: true };
+
+  test('dominio: los tres estados; ninguna CERRADA dice «Sin determinar» y no hay valores por defecto', () => {
+    expect(textoPosicion(ACTIVA_DESCONOCIDA)).toEqual({ saldo: 'Sin determinar', inicial: null });
+    expect(textoPosicion({ ...ACTIVA_DESCONOCIDA, saldo: '15.00' })).toEqual({ saldo: '15,00 €', inicial: null });
+    expect(textoPosicion(CERRADA_CONOCIDA)).toEqual({ saldo: '0,00 € · Saldado', inicial: null });
+    expect(textoPosicion(CERRADA_DESCONOCIDA)).toEqual({ saldo: '0,00 € · Saldado', inicial: TEXTO_IMPORTE_INICIAL_DESCONOCIDO });
+    expect(TEXTO_IMPORTE_INICIAL_DESCONOCIDO).toBe('Importe inicial desconocido');
+    // Una CERRADA sin saldo (fuera de contrato) tampoco se vuelve «Sin determinar» ni inventa un importe.
+    expect(textoPosicion({ ...CERRADA_DESCONOCIDA, saldo: null })).toEqual({ saldo: 'Saldado', inicial: TEXTO_IMPORTE_INICIAL_DESCONOCIDO });
+  });
+
+  const TRES: RepartoDeHecho = {
+    hecho_id: 'cena', row_version: 2, importe: '120.00', estado_atribucion: 'COMPLETA', corregible: true, motivo: null, partes: [
+      { atribucion_id: 'a-yo', es_yo: true, tercero_id: null, nombre: 'Tú', importe: '30.00', posicion: null },
+      { atribucion_id: 'a-simon', es_yo: false, tercero_id: 'simon', nombre: 'Simón', importe: '30.00', posicion: { entidad_id: 'ps', tipo: 'DERECHO_COBRO', ...ACTIVA_DESCONOCIDA } },
+      { atribucion_id: 'a-tania', es_yo: false, tercero_id: 'tania', nombre: 'Tania', importe: '30.00', posicion: { entidad_id: 'pt', tipo: 'DERECHO_COBRO', ...CERRADA_CONOCIDA } },
+      { atribucion_id: 'a-marta', es_yo: false, tercero_id: 'marta', nombre: 'Marta', importe: '30.00', posicion: { entidad_id: 'pm', tipo: 'DERECHO_COBRO', ...CERRADA_DESCONOCIDA } },
+    ],
+  };
+
+  test.each(['light', 'dark'] as const)('Corregir reparto (%s): pendiente «Sin determinar»; saldadas «0,00 € · Saldado»; Marta además «Importe inicial desconocido»', async (modo) => {
+    envolver(<CorregirRepartoScreen cliente={cliente({ repartoDeHecho: jest.fn(async () => ({ tipo: 'OK', datos: TRES }) as any) })} hechoId="cena" onCerrar={jest.fn()} />, modo);
+    await screen.findByTestId('corregir-form');
+    const linea = (id: string) => screen.getByTestId(`corregir-posicion-saldo-${id}`).props.children;
+    expect(linea('a-simon')).toBe('Te debe · pendiente Sin determinar');
+    expect(linea('a-tania')).toBe('Te debe · 0,00 € · Saldado');
+    expect(linea('a-marta')).toBe('Te debe · 0,00 € · Saldado');
+    expect(screen.queryByTestId('corregir-posicion-inicial-a-simon')).toBeNull();
+    expect(screen.queryByTestId('corregir-posicion-inicial-a-tania')).toBeNull();
+    expect(screen.getByTestId('corregir-posicion-inicial-a-marta').props.children).toBe('Importe inicial desconocido');
+    // Accesibilidad: la etiqueta dice lo mismo que se ve.
+    expect(screen.getByTestId('corregir-posicion-a-simon').props.accessibilityLabel).toBe('Te debe · pendiente Sin determinar');
+    expect(screen.getByTestId('corregir-posicion-a-tania').props.accessibilityLabel).toBe('Te debe · 0,00 € · Saldado');
+    expect(screen.getByTestId('corregir-posicion-a-marta').props.accessibilityLabel).toBe('Te debe · 0,00 € · Saldado. Importe inicial desconocido');
+    // Ninguna CERRADA dice «Sin determinar».
+    for (const id of ['a-tania', 'a-marta']) expect(within(screen.getByTestId(`corregir-posicion-${id}`)).queryByText(/Sin determinar/)).toBeNull();
+    expect(plano()).toContain(colores[modo].background);
+  });
+
+  test('Corregir reparto: una obligación saldada es «Le debes · 0,00 € · Saldado»', async () => {
+    const r: RepartoDeHecho = { ...TRES, partes: [
+      { atribucion_id: 'a-yo', es_yo: true, tercero_id: null, nombre: 'Tú', importe: '15.00', posicion: { entidad_id: 'po', tipo: 'OBLIGACION_PAGO', ...CERRADA_DESCONOCIDA } },
+      { atribucion_id: 'a-tania', es_yo: false, tercero_id: 'tania', nombre: 'Tania', importe: '0.00', posicion: null },
+    ] };
+    envolver(<CorregirRepartoScreen cliente={cliente({ repartoDeHecho: jest.fn(async () => ({ tipo: 'OK', datos: r }) as any) })} hechoId="cena" onCerrar={jest.fn()} />);
+    await screen.findByTestId('corregir-form');
+    expect(screen.getByTestId('corregir-posicion-saldo-a-yo').props.children).toBe('Le debes · 0,00 € · Saldado');
+    expect(screen.getByTestId('corregir-posicion-inicial-a-yo').props.children).toBe('Importe inicial desconocido');
+  });
+
+  test('Pendiente con: la pendiente con saldo desconocido sigue en «Sin determinar»', async () => {
+    const p: PendienteConPersona = { ...PEND, nombre: 'Simón', tercero_id: 'simon', te_debe: null, le_debes: null, neto: null, neto_estado: 'INDETERMINADO',
+      posiciones: [{ ...PEND.posiciones[0], ...ACTIVA_DESCONOCIDA }] };
+    montarPendiente(cliente({ pendienteCon: jest.fn(async () => ({ tipo: 'OK', datos: p }) as any) }));
+    expect((await screen.findByTestId('posicion-saldo-d1')).props.children).toBe('Sin determinar');
+    expect(screen.queryByText('Importe inicial desconocido')).toBeNull();
+  });
+
+  const cobrarHasta = async (respuesta: object, modo?: 'dark') => {
+    const cobrar = jest.fn(async (_: string, pl: any) => ({ tipo: 'OK', datos: { intencion_id: pl.intencion_id, hecho_id: 'hx', entidad_id: 'd1', idempotente: false, importe: pl.importe, aviso: '', ...respuesta } }) as any);
+    montarPendiente(cliente({ pendienteCon: jest.fn(async () => ({ tipo: 'OK', datos: PEND }) as any), cobrarPosicion: cobrar as any }), modo);
+    fireEvent.press(await screen.findByTestId('posicion-d1'));
+    fireEvent.press(screen.getByTestId('posicion-cobrar'));
+    await screen.findByTestId('accion-cobro');
+    fireEvent.press(await screen.findByTestId('accion-cuenta-efectivo'));
+    fireEvent.press(screen.getByTestId('accion-enviar'));
+    await screen.findByTestId('posicion-exito');
+  };
+
+  test('Pendiente con · éxito: CERRADA con importe inicial conocido → «0,00 € · Saldado», sin línea de importe inicial', async () => {
+    await cobrarHasta(CERRADA_CONOCIDA);
+    expect(screen.getByTestId('posicion-exito-saldo').props.children).toBe('0,00 € · Saldado. Ya no queda nada pendiente.');
+    expect(screen.queryByTestId('posicion-exito-inicial')).toBeNull();
+    expect(screen.getByTestId('posicion-exito-estado').props.accessibilityLabel).toBe('0,00 € · Saldado. Ya no queda nada pendiente.');
+    expect(plano()).not.toMatch(/Sin determinar/);
+  });
+
+  test('Pendiente con · éxito: CERRADA con importe inicial desconocido → además «Importe inicial desconocido» (oscuro)', async () => {
+    await cobrarHasta(CERRADA_DESCONOCIDA, 'dark');
+    expect(screen.getByTestId('posicion-exito-saldo').props.children).toBe('0,00 € · Saldado. Ya no queda nada pendiente.');
+    expect(screen.getByTestId('posicion-exito-inicial').props.children).toBe('Importe inicial desconocido');
+    expect(screen.getByTestId('posicion-exito-estado').props.accessibilityLabel).toBe('0,00 € · Saldado. Ya no queda nada pendiente. Importe inicial desconocido');
+    expect(plano()).not.toMatch(/Sin determinar/);
+    expect(plano()).toContain(colores.dark.background);
+  });
+
+  test('Pendiente con · éxito: ACTIVA que sigue sin saldo conocido → «Sigue pendiente: Sin determinar»', async () => {
+    await cobrarHasta(ACTIVA_DESCONOCIDA);
+    expect(screen.getByTestId('posicion-exito-saldo').props.children).toBe('Sigue pendiente: Sin determinar');
+    expect(screen.queryByTestId('posicion-exito-inicial')).toBeNull();
   });
 });
