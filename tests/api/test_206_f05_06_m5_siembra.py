@@ -13,6 +13,14 @@
 #   dia da 0 altas; otro dia crea un juego nuevo de 7 previsiones (con su pago
 #   parcial) sin tocar el anterior (estado y row_version iguales) y sin duplicar
 #   terceros; identidades distintas por dia.
+# Version: 0.3.0 (F05-07/GATE adenda 2, MANT-PRE-GATE test_206; F05-D050 §64.3,
+#   DEU-T206-LOOPBACK, AJ-06): `skipif` contextual en los dos tests que siembran
+#   sobre la base de la ejecucion: si el destino efectivo (host/hostaddr del DSN
+#   de GAPTO_TEST_DATABASE_URL, o PGHOST si el DSN no trae host) no es loopback,
+#   se omiten con razon visible ANTES de conectar (la siembra solo admite
+#   loopback). SKIP != PASS. `test_destino_no_permitido_aborta_antes_de_conectar`
+#   y `test_envdev_y_e2e_permitidos` se ejecutan siempre. `exigir_destino`,
+#   LOOPBACK y PERMITIDOS del script no cambian. Nuevo test de la decision.
 # ============================================================
 
 from __future__ import annotations
@@ -20,9 +28,11 @@ from __future__ import annotations
 import datetime as dt
 import importlib.util
 import json
+import os
 import pathlib
 import uuid
 
+import psycopg
 import pytest
 from psycopg import conninfo
 
@@ -30,6 +40,40 @@ import f05_06_m5_helpers as m
 import vs01_api_helpers as h
 
 RUTA = pathlib.Path(__file__).resolve().parents[2] / "scripts" / "dev" / "siembra_previsiones_m5.py"
+
+
+def _cargar_script():
+    spec = importlib.util.spec_from_file_location("siembra_previsiones_m5", RUTA)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def motivo_destino_no_loopback(dsn: str | None) -> str | None:
+    """DEU-T206-LOOPBACK (AJ-06). Decide SIN conectar si el destino efectivo de la
+    ejecucion queda fuera de LOOPBACK del script (el mismo criterio de host que
+    `exigir_destino`, mas `hostaddr`, que libpq usa en lugar de resolver `host`).
+    Devuelve la razon del SKIP o None. Sin DSN o con DSN ilegible no se omite: el
+    test falla con su error de siempre (SKIP != PASS no puede ocultar un entorno
+    roto)."""
+    if not dsn:
+        return None
+    try:
+        partes = conninfo.conninfo_to_dict(dsn)
+    except psycopg.ProgrammingError:
+        return None
+    loopback = _cargar_script().LOOPBACK
+    host = partes.get("host") or os.getenv("PGHOST", "")
+    hostaddr = partes.get("hostaddr") or ""
+    if host in loopback and (not hostaddr or hostaddr in loopback):
+        return None
+    return (f"destino de la ejecucion no loopback (host={host or '?'}"
+            f"{', hostaddr=' + hostaddr if hostaddr else ''}): la siembra solo admite loopback "
+            "(exigir_destino); se omite antes de conectar (DEU-T206-LOOPBACK). SKIP != PASS")
+
+
+_MOTIVO = motivo_destino_no_loopback(os.getenv("GAPTO_TEST_DATABASE_URL"))
+solo_loopback = pytest.mark.skipif(_MOTIVO is not None, reason=_MOTIVO or "destino loopback")
 
 
 @pytest.fixture()
@@ -50,9 +94,7 @@ def siembra(monkeypatch):
     "postgresql://u@10.0.0.5:5434/gapto2027_dev",
 ])
 def test_destino_no_permitido_aborta_antes_de_conectar(dsn, monkeypatch):
-    spec = importlib.util.spec_from_file_location("siembra_previsiones_m5", RUTA)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    mod = _cargar_script()
     monkeypatch.setattr(mod.psycopg, "connect", lambda *a, **k: (_ for _ in ()).throw(AssertionError("conecto")))
     with pytest.raises(SystemExit) as e:
         mod.sembrar(dsn, uuid.uuid4())
@@ -65,6 +107,29 @@ def test_envdev_y_e2e_permitidos(siembra):
     assert siembra.exigir_destino("postgresql://postgres@127.0.0.1:5463/gapto2027_dev")["port"] == 5463
 
 
+@pytest.mark.parametrize(("dsn", "omite"), [
+    ("postgresql://postgres@127.0.0.1:5463/ct_x", False),
+    ("host=localhost port=5463 dbname=ct_x user=postgres", False),
+    ("host=::1 port=5463 dbname=ct_x", False),
+    ("postgresql://u@db.neon.example:5432/gapto2027_cleanroom", True),
+    ("host=10.0.0.5 port=5463 dbname=ct_x", True),
+    ("host=localhost hostaddr=10.0.0.5 port=5463 dbname=ct_x", True),
+    ("host=127.0.0.1,db.neon.example port=5463 dbname=ct_x", True),
+    (None, False),
+])
+def test_skip_contextual_decide_por_el_destino_sin_conectar(dsn, omite, monkeypatch):
+    """La decision del skipif contextual: sin conectar (psycopg.connect prohibido),
+    loopback -> se ejecuta; cualquier otro destino -> SKIP con razon visible y sin
+    credenciales."""
+    monkeypatch.delenv("PGHOST", raising=False)
+    monkeypatch.setattr(psycopg, "connect", lambda *a, **k: (_ for _ in ()).throw(AssertionError("conecto")))
+    motivo = motivo_destino_no_loopback(dsn)
+    assert (motivo is not None) == omite, motivo
+    if motivo:
+        assert "no loopback" in motivo and "SKIP != PASS" in motivo and "password" not in motivo
+
+
+@solo_loopback
 def test_siembra_idempotente_y_manifiesto(siembra, tmp_path):
     owner, actor, cli, cta, ahorro = m.entorno()
     hoy = dt.date(2026, 10, 10)
@@ -93,6 +158,7 @@ def test_siembra_idempotente_y_manifiesto(siembra, tmp_path):
     assert ini["requiere_atencion"]["n"] == 3
 
 
+@solo_loopback
 def test_siembra_entre_dias_juego_nuevo_sin_tocar_el_anterior(siembra):
     owner, actor, cli, cta, ahorro = m.entorno()
     d1, d2 = dt.date(2026, 10, 21), dt.date(2026, 10, 22)
