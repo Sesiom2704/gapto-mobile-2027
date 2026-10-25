@@ -34,6 +34,7 @@
 #   (Q01), y la realizacion de una prevision solo si `marcar_realizada=True`.
 #
 #   LOCKS (pronunciamiento R3-02, contrastado con los servicios reales):
+#     0. advisory POR RAIZ de OP-22 (F04-R3 il1b), siempre y el primero;
 #     1. advisory INVERSIONES si la invocacion va a escribir hecho_entidades
 #        (contexto o vinculo GENERADO_POR de OP-12);
 #     2. raiz hechos_financieros (creada aqui o bloqueada por los servicios);
@@ -58,6 +59,19 @@
 #   posicion declara importe inicial; antes el reintento identico de una
 #   posicion sin importe se rechazaba como conflicto.
 # Version: 0.2.0
+#   v0.3.0 (F04-R3 il1b; F05-D050 §64.4.3): advisory POR RAIZ
+#   (`pg_advisory_xact_lock(hashtext('gapto:OP22'), hashtext(<raiz>))`) como
+#   PRIMER recurso de OP-22, antes del advisory D-080 y de leer la identidad.
+#   Sin entidades ni posiciones no habia ningun lock antes de la identidad:
+#   dos invocaciones solapadas de la misma raiz la leian ausente y componian
+#   las dos (doble `idempotente=False`, IL1B-2, o 23505 del indice no arbitro
+#   uq_hechos_financieros__owner_anchor -> VIOLACION_INVARIANTE_FISICA). Con
+#   el advisory la segunda espera al COMMIT de la primera y responde
+#   idempotente o IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION. Los adaptadores
+#   que componen OP-22 en su transaccion lo toman tambien como su primer
+#   recurso (reentrante): quien espera este advisory no retiene nada, asi que
+#   no crea ciclos (NOTA_ORDEN_LOCKS_IL1B, evidencia F05-07/GATE D).
+# Version: 0.3.0 (F04-R3)
 # ============================================================
 
 from __future__ import annotations
@@ -107,6 +121,11 @@ class HechosCompuestosService:
 
         def operacion(sesion: SesionMotor) -> ResultadoHechoCompuesto:
             owner = repo_hechos.exigir_contexto(sesion)
+
+            # 0. F04-R3 il1b: advisory POR RAIZ, primer recurso y ANTES de leer
+            #    la identidad. Con dos invocaciones de la misma raiz, la
+            #    segunda espera el COMMIT de la primera y ve la raiz confirmada.
+            repo_comp.tomar_advisory_raiz(sesion, raiz)
 
             # 1. Advisory D-080 antes de cualquier row lock (R3-02). No es una
             #    validacion de estado: tomarlo antes de leer la identidad hace

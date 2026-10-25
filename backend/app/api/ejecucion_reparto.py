@@ -42,6 +42,12 @@
 #   compartido SOLO transporta el bloque opcional `prevision` a la misma OP-22
 #   (vinculo por importe_total, sucesor si marcar_realizada; prevision de tipo
 #   GASTO para una intencion nueva). Sin el bloque, nada cambia.
+# Version: 0.3.0 (F04-R3 il1b; F05-D050 §64.4.3): el gasto compartido toma el
+#   advisory POR RAIZ de OP-22 (compuesto_repository.tomar_advisory_raiz) como
+#   PRIMER recurso de su transaccion, antes de INVERSIONES, de la cuenta, del
+#   writer de actor y de leer la identidad (OP-22 lo vuelve a pedir,
+#   reentrante). Cobro, pago, perdon y «Corregir reparto» no componen OP-22 y
+#   no cambian.
 # ============================================================
 
 from __future__ import annotations
@@ -97,6 +103,7 @@ from app.core.modelos_posicion import (
 from app.core.modelos_tesoreria import DatosAportacion, DatosConciliacion, DatosMovimiento
 from app.core.unidad_adscrita import UnidadDeTrabajoAdscrita
 from app.core.unidad_trabajo import SesionMotor, UnidadDeTrabajo
+from app.repositories import compuesto_repository as repo_comp
 from app.repositories import hechos_repository as repo_hechos
 from app.services import integridad_posicion
 from app.services.compuesto_service import HechosCompuestosService
@@ -277,6 +284,8 @@ def registrar_gasto_compartido(
     personas = _personas(intencion)
 
     def operacion(sesion: SesionMotor) -> GastoCompartidoRegistrado | RechazoRegistro:
+        # F04-R3 il1b: advisory por raiz, primer recurso de la transaccion.
+        repo_comp.tomar_advisory_raiz(sesion, intencion.intencion_id)
         # 0. Advisory INVERSIONES ANTES de la cuenta si habra posiciones
         #    (hecho_entidades GENERADO_POR): R-M3PRE2-01.
         if declaradas:

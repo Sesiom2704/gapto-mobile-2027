@@ -111,6 +111,12 @@
 #   (PREVISION_TIPO_DISTINTO, sin escritura). El replay compuesto lo decide
 #   OP-22 por igualdad exacta del agregado (prevision_hechos incluida).
 # Version: 0.10.0
+#   v0.11.0 (F04-R3 il1b; F05-D050 §64.4.3): el advisory POR RAIZ de OP-22
+#   (compuesto_repository.tomar_advisory_raiz) es el PRIMER recurso de esta
+#   transaccion, antes de INVERSIONES, de la cuenta y de leer la identidad.
+#   OP-22 lo vuelve a pedir (reentrante). Quien lo espera no retiene ningun
+#   otro lock: no crea aristas de espera nuevas (NOTA_ORDEN_LOCKS_IL1B).
+# Version: 0.11.0 (F04-R3)
 # ============================================================
 
 from __future__ import annotations
@@ -139,6 +145,7 @@ from app.core.errores import CodigoError, ErrorMotor
 from app.core.modelos_compuesto import DatosHechoCompuesto, ResultadoHechoCompuesto
 from app.core.unidad_adscrita import UnidadDeTrabajoAdscrita
 from app.core.unidad_trabajo import SesionMotor, UnidadDeTrabajo
+from app.repositories import compuesto_repository as repo_comp
 from app.repositories import hechos_repository as repo_hechos
 from app.services.compuesto_service import HechosCompuestosService
 from app.services.previsiones_service import impacto_correccion_ancla
@@ -189,6 +196,8 @@ def registrar_gasto_pagado(
     reloj: Reloj = reloj_sistema,
 ) -> Registrado | RechazoIntegracion:
     def operacion(sesion: SesionMotor) -> Registrado | RechazoIntegracion:
+        # F04-R3 il1b: advisory por raiz, primer recurso de la transaccion.
+        repo_comp.tomar_advisory_raiz(sesion, intencion.intencion_id)
         # 0. INVERSIONES antes que la cuenta, solo con contexto (D-080).
         if intencion.contexto_id is not None:
             tomar_inversiones(sesion)

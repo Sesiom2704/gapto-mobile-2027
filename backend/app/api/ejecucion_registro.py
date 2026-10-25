@@ -60,6 +60,11 @@
 #   gancho `replay_extra` amplia la guarda de replay propia. La transferencia
 #   sin bloque rechaza ahora el replay de una intencion que se materializo
 #   CON prevision (su vinculo compuesto existe): nunca un exito parcial.
+# Version: 0.5.0 (F04-R3 il1b; F05-D050 §64.4.3): el ingreso cobrado toma el
+#   advisory POR RAIZ de OP-22 (compuesto_repository.tomar_advisory_raiz) como
+#   PRIMER recurso de su transaccion, antes de INVERSIONES, de la cuenta y de
+#   leer la identidad (OP-22 lo vuelve a pedir, reentrante). La transferencia
+#   no compone OP-22 y no cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -81,6 +86,7 @@ from app.core.errores import CodigoError, ErrorMotor
 from app.core.unidad_adscrita import UnidadDeTrabajoAdscrita
 from app.core.unidad_trabajo import SesionMotor, UnidadDeTrabajo
 from app.previsiones import lecturas as lect_prev
+from app.repositories import compuesto_repository as repo_comp
 from app.repositories import hechos_repository as repo_hechos
 from app.services.compuesto_service import HechosCompuestosService
 from app.services.previsiones_service import impacto_correccion_ancla
@@ -210,6 +216,8 @@ def registrar_ingreso_cobrado(unidad: UnidadDeTrabajo, contexto: ContextoOperaci
                               intencion: IntencionIngresoCobrado,
                               reloj: Reloj = reloj_sistema) -> Registrado | RechazoRegistro:
     def operacion(sesion: SesionMotor) -> Registrado | RechazoRegistro:
+        # F04-R3 il1b: advisory por raiz, primer recurso de la transaccion.
+        repo_comp.tomar_advisory_raiz(sesion, intencion.intencion_id)
         if intencion.contexto_id is not None:
             tomar_inversiones(sesion)
         bloquear_cuentas(sesion, intencion.cuenta_id)

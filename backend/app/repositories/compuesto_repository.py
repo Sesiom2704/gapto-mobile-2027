@@ -16,6 +16,12 @@
 #   las identidades PERSISTIDAS que pertenecen al agregado de una raiz, para
 #   que OP-22 exija igualdad exacta (no inclusion) al reconocer un reintento.
 # Version: 0.2.0
+#   v0.3.0 (F04-R3 il1b; F05-D050 §64.4.3): `tomar_advisory_raiz`, advisory
+#   transaccional POR RAIZ de OP-22 (`hashtext('gapto:OP22')`,
+#   `hashtext(<raiz>)`). No es una escritura: serializa dos invocaciones con
+#   la misma raiz para que la segunda lea la identidad ya confirmada. Se toma
+#   como PRIMER recurso de la transaccion, antes de leer la identidad.
+# Version: 0.3.0 (F04-R3)
 # ============================================================
 
 from __future__ import annotations
@@ -43,6 +49,23 @@ TABLAS_IDENTIDAD: dict[str, str] = {
     "prevision_hechos": "id",
     "previsiones": "id",
 }
+
+
+def tomar_advisory_raiz(sesion: SesionMotor, raiz: uuid.UUID) -> None:
+    """F04-R3 il1b: advisory POR RAIZ de OP-22, PRIMER recurso de la transaccion.
+
+    Antes de leer la identidad: con dos invocaciones de la misma raiz
+    solapadas, la segunda espera al COMMIT de la primera y despues ve la raiz
+    confirmada (idempotente o IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION), en
+    vez de componer en paralelo (doble «creado» o 23505 del indice
+    uq_hechos_financieros__owner_anchor). Ningun otro comando lo toma y quien
+    lo toma no retiene ningun otro lock: no crea aristas de espera nuevas.
+    Reentrante dentro de la misma transaccion (adaptador + OP-22).
+    """
+    sesion.uno(
+        "SELECT pg_advisory_xact_lock(hashtext('gapto:OP22'), hashtext(%s::uuid::text))",
+        (raiz,),
+    )
 
 
 def leer(sesion: SesionMotor, tabla: str, registro_id: uuid.UUID) -> dict[str, Any] | None:

@@ -40,6 +40,12 @@
 #   --web (o --dist), GAPTO_DATABASE_URL (base LOCAL), GAPTO_DEV_OWNER_USER_ID y
 #   GAPTO_DEV_TOKEN (nunca se imprime).
 # Version: 0.1.0 (F05-05 K3 §2.11)
+# Version: 0.1.1 (F05-07/GATE adenda 2, MANT-PRE-GATE C/e2e; DEF-E2E-F0505-SELECTOR):
+#   las filas de Actividad se cuentan por su testID exacto `fila-<uuid>`
+#   (FILA_ACTIVIDAD). El prefijo `[data-testid^=fila-]` capturaba tambien las
+#   envolturas `fila-swipe-<id>`, `fila-desplazable-<id>` y `fila-tarjeta-<id>`
+#   de AccionRapida.tsx (F05-06 M5-swipe): 3 nodos por fila (30 en vez de 10).
+#   Sin cambios de producto.
 # ============================================================
 
 from __future__ import annotations
@@ -49,6 +55,7 @@ import datetime as dt
 import json
 import os
 import pathlib
+import re
 import sys
 import urllib.parse
 import uuid
@@ -61,6 +68,9 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from e2e_j2j3 import _exigir_local, _sql, api, comprobar, crear_cuenta, exigir_base_recreada, servidor_web  # noqa: E402
 
 ETIQUETA = "EVIDENCIA WEB/VIEWPORT — NO EVIDENCIA iOS"
+#: testID exacto de una fila de Actividad (ActividadScreen: `fila-<hecho_id>`). No casa con las
+#: envolturas de swipe de AccionRapida (`fila-swipe-`, `fila-desplazable-`, `fila-tarjeta-`).
+FILA_ACTIVIDAD = re.compile(r"^fila-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 
 def eur(v: str | Decimal, signo: bool = False) -> str:
@@ -292,7 +302,7 @@ def main() -> None:
         # ------------------------------------------------------------ A Actividad
         t("tab-DIA").click()
         t("actividad-lista").wait_for(timeout=15000)
-        filas = page.locator("[data-testid^=fila-]:visible")
+        filas = page.get_by_test_id(FILA_ACTIVIDAD).filter(visible=True)
         filas.first.wait_for(timeout=15000)
         res["A_filas"] = filas.count()
         comprobar(res["A_filas"] == 10, f"A: filas del mes: {res['A_filas']}")
@@ -307,7 +317,7 @@ def main() -> None:
         t("actividad-alcance").wait_for(timeout=15000)
         page.wait_for_timeout(700)
         res["A_alcance"] = t("actividad-alcance").inner_text()
-        comprobar(page.locator("[data-testid^=fila-]:visible").count() == 1, "A: búsqueda por importe")
+        comprobar(page.get_by_test_id(FILA_ACTIVIDAD).filter(visible=True).count() == 1, "A: búsqueda por importe")
         shot("A03_busqueda_importe")
         t("actividad-cancelar-busqueda").click()
         page.wait_for_timeout(700)
@@ -316,7 +326,7 @@ def main() -> None:
         t("filtros-ver").click()
         t("actividad-linea-filtros").wait_for(timeout=15000)
         page.wait_for_timeout(700)
-        res["A_filtro_gasto"] = page.locator("[data-testid^=fila-]:visible").count()
+        res["A_filtro_gasto"] = page.get_by_test_id(FILA_ACTIVIDAD).filter(visible=True).count()
         comprobar(res["A_filtro_gasto"] == 9, f"A: filtro Gasto: {res['A_filtro_gasto']}")
         shot("A04_filtro_gasto")
         t("actividad-limpiar").click()

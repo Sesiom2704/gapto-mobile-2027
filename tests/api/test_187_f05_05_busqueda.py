@@ -25,6 +25,15 @@
 #   (plataforma, server_version, lc_collate), numero de muestras y todas las
 #   muestras; en 9b una diferencia negativa es MUESTRA INCOHERENTE: se repite una
 #   vez y, si persiste, el test falla. 9a sigue siendo la asercion principal.
+# Version: 0.4.0 (F05-07/GATE adenda 2, MANT-PRE-GATE test_187; F05-D050 §64.3,
+#   DEU-T187-LATENCIA, AJ-05): oraculo fijado del caso 9. 9a afirma < 50 ms sobre
+#   servidor (EXPLAIN ANALYZE, plan + ejecucion, de cada sentencia capturada de la
+#   busqueda REAL de GET /v1/terceros bajo gapto_runtime y RLS) + aplicacion
+#   (pared de lecturas.buscar sin la espera de E/S de BD), informadas por
+#   separado. Guarda nueva del numero de sentencias (SENTENCIAS_BUSQUEDA, N+1).
+#   9b pasa a diagnostica (apertura, red, total; solo coherencia) y deja de
+#   restar la apertura de conexion. Sin resta por RTT de SELECT 1. Arnes:
+#   scripts/dev/mutantes_mant_pre_gate_t187.py.
 # ============================================================
 
 from __future__ import annotations
@@ -44,9 +53,6 @@ import pytest
 import f05_05_helpers as x
 import vs01_api_helpers as h
 import app.api.app as adaptador
-from app.api.app import _proveedor_por_defecto
-from app.core.contexto import ContextoOperacion
-from app.core.unidad_trabajo import UnidadDeTrabajo
 from app.terceros import lecturas as lect_ter
 
 URL = "/v1/terceros"
@@ -142,23 +148,45 @@ def test_limite_50_en_orden_normalizado(e):
     assert len(filas) == 50 and [t["nombre"] for t in filas] == [f"Comercio {i:04d}" for i in range(50)]
 
 
-# ------------------------------------------------------------------ caso 9 (K-5)
-# El contrato del caso 9 es la BUSQUEDA (50 ms con 3.000 terceros). La peticion
-# HTTP completa abre una conexion PostgreSQL nueva por unidad de trabajo, y ese
-# coste es del entorno (≈ 47 ms en local el 2026-10-12, ≈ 277 ms en Neon), no
-# de la busqueda. 9a mide la busqueda; 9b mide la peticion HTTP y descuenta la
-# apertura de conexion medida por la MISMA via que usa el adaptador.
-# 9a es la ASERCION PRINCIPAL del caso 9; 9b es una guarda diagnostica adicional
-# (dictamen MANT-K5, P1).
+# ------------------------------------------------------------------ caso 9 (K-5; F05-D050 §64.3, AJ-05)
+# El contrato del caso 9 es la BUSQUEDA (50 ms con 3.000 terceros). Oraculo
+# FIJADO por F05-D050 §64.3 (no se reinterpreta aqui):
 #
-# REGLA (AJ-MK5-02): 9b descuenta la apertura de conexion medida por
-# `app.api.app._proveedor_por_defecto` SOLO porque el endpoint abre su conexion
-# por esa via y por ninguna otra. `test_caso9b_guarda_via_de_conexion` lo
-# comprueba. Si el adaptador cambia de via (pooling, otra fabrica, proveedor
-# inyectado), esa guarda falla y 9b ha de revisarse ANTES de reutilizar su
-# certificacion.
+# 9a (ASERCION PRINCIPAL). Magnitud por muestra = SERVIDOR + APLICACION, mediana
+#   < 50 ms (umbral sin cambios):
+#   - SERVIDOR: suma de `Planning Time` + `Execution Time` de EXPLAIN (ANALYZE,
+#     FORMAT JSON) de CADA sentencia capturada de la busqueda real. La captura
+#     se hace sobre la peticion HTTP real `GET /v1/terceros?q=merca`: la
+#     conexion del adaptador (abierta por su via, `_proveedor_por_defecto`)
+#     recibe un cursor instrumentado; las sentencias de la busqueda son las que
+#     ejecuta `lecturas.buscar` (la operacion del endpoint) dentro de la
+#     UnidadDeTrabajo real, ya con SET LOCAL ROLE gapto_runtime, la GUC del
+#     owner y RLS. El EXPLAIN (ANALYZE) se lanza en la MISMA transaccion y el
+#     MISMO backend, justo ANTES de la ejecucion real (conservador: lleva el
+#     primer contacto del backend con el catalogo), con los mismos parametros,
+#     y comprueba current_user = gapto_runtime y row_security = on.
+#   - APLICACION: tiempo de pared de `lecturas.buscar` MENOS la espera de E/S de
+#     base de datos (las llamadas `execute` de sus sentencias) y menos la propia
+#     instrumentacion (el EXPLAIN). Queda la logica de la busqueda en Python:
+#     patron, conversion de filas, filtrado de inactivos, orden normalizado y
+#     limite.
+#   Las dos componentes se informan por separado (mensaje del assert y JSON de
+#   evidencia si GAPTO_K5_EVIDENCIA apunta a una carpeta).
+#   PROHIBIDO (F05-D050): descontar el RTT de un `SELECT 1` como oraculo.
+# Guarda del numero de sentencias (independiente de 9a): la busqueda ejecuta
+#   exactamente SENTENCIAS_BUSQUEDA sentencias, tanto con 1 fila como con 50
+#   (discriminante N+1).
+# 9b (DIAGNOSTICA). Peticion HTTP extremo a extremo: registra apertura de
+#   conexion, red (espera de E/S de las sentencias de la peticion: ida y vuelta,
+#   servidor incluido) y total; SOLO afirma coherencia (componentes >= 0 y
+#   apertura + red <= total). No afirma rendimiento del motor.
+# Guarda de via (AJ-MK5-02): `test_caso9b_guarda_via_de_conexion` comprueba que
+#   el endpoint abre su conexion por `_proveedor_por_defecto` y por ninguna
+#   otra via; si cambia (pooling, otra fabrica), la apertura que registra 9b
+#   deja de ser la del endpoint y el caso 9 ha de revisarse.
 REPETICIONES = 7
 UMBRAL_MS = 50
+SENTENCIAS_BUSQUEDA = 1
 INCOHERENTE = "muestra incoherente: revisar el entorno o la via de conexion"
 
 
@@ -167,14 +195,71 @@ def _preparar_caso9(owner, cli):
     x.tercero(cli, "Mercadona")
 
 
-def _mediana_ms(fn, n=REPETICIONES):
-    fn()  # calentamiento
-    tiempos, ultimo = [], None
-    for _ in range(n):
+class _Medicion:
+    """Estado de la instrumentacion de UNA peticion (se reinicia por muestra)."""
+
+    def __init__(self, explicar: bool):
+        self.explicar = explicar
+        self.reiniciar()
+
+    def reiniciar(self):
+        self.sentencias = []
+        self.aperturas_ms = []
+        self.en_busqueda = False
+        self.aplicacion_ms = None
+
+    def busqueda(self):
+        return [s for s in self.sentencias if s["fase"] == "busqueda"]
+
+
+def _instrumentar(monkeypatch, explicar: bool) -> _Medicion:
+    """Instala la instrumentacion SIN sustituir comportamiento: `psycopg.connect`
+    mide la apertura y asigna un cursor que registra cada sentencia (y, si
+    `explicar`, su EXPLAIN (ANALYZE) previo); `lecturas.buscar` marca la fase de
+    la busqueda y mide su tiempo de pared. El endpoint y su SQL son los reales."""
+    med = _Medicion(explicar)
+    connect_original, buscar_original = psycopg.connect, lect_ter.buscar
+
+    class CursorMedido(psycopg.Cursor):
+        def execute(self, query, params=None, **kw):
+            fase = "busqueda" if med.en_busqueda else "contexto"
+            texto = query if isinstance(query, str) else query.as_string(self.connection)
+            fila = {"fase": fase, "sql": texto}
+            t0 = time.perf_counter()
+            if med.explicar and fase == "busqueda":
+                with psycopg.Cursor(self.connection) as ex:
+                    plan = ex.execute("EXPLAIN (ANALYZE, FORMAT JSON) " + texto, params).fetchone()[0][0]
+                    rol, rls = ex.execute("SELECT current_user, current_setting('row_security')").fetchone()
+                fila.update(plan_ms=plan["Planning Time"], ejecucion_ms=plan["Execution Time"], rol=rol, row_security=rls)
+            t1 = time.perf_counter()
+            try:
+                return super().execute(query, params, **kw)
+            finally:
+                fila.update(instrumentacion_ms=(t1 - t0) * 1000, espera_ms=(time.perf_counter() - t1) * 1000)
+                med.sentencias.append(fila)
+
+    def connect_medido(*a, **k):
         t0 = time.perf_counter()
-        ultimo = fn()
-        tiempos.append((time.perf_counter() - t0) * 1000)
-    return statistics.median(tiempos), tiempos, ultimo
+        conexion = connect_original(*a, **k)
+        med.aperturas_ms.append((time.perf_counter() - t0) * 1000)
+        conexion.cursor_factory = CursorMedido
+        return conexion
+
+    def buscar_medido(sesion, texto, incluir_inactivos):
+        previas = len(med.sentencias)
+        med.en_busqueda = True
+        t0 = time.perf_counter()
+        try:
+            return buscar_original(sesion, texto, incluir_inactivos)
+        finally:
+            pared = (time.perf_counter() - t0) * 1000
+            med.en_busqueda = False
+            excluido = sum(s["espera_ms"] + s["instrumentacion_ms"] for s in med.sentencias[previas:])
+            med.aplicacion_ms = pared - excluido
+
+    monkeypatch.setattr(psycopg, "connect", connect_medido)
+    monkeypatch.setattr(lect_ter, "buscar", buscar_medido)
+    return med
 
 
 def _entorno_medida() -> dict:
@@ -193,66 +278,103 @@ def _evidencia(nombre, datos):
         (destino / f"{nombre}.json").write_text(json.dumps(datos, indent=1, ensure_ascii=False), encoding="utf-8")
 
 
-def test_caso9a_busqueda_con_tres_mil_terceros_por_debajo_de_50_ms(e):
-    """Tiempo de pared de la busqueda REAL del endpoint (`lecturas.buscar`, el SQL y el
-    orden del modulo de terceros, sin copiar nada) ejecutada por la UnidadDeTrabajo real
-    (SET LOCAL ROLE gapto_runtime, GUC del owner, RLS) sobre UNA conexion ya abierta y
-    reutilizada. Se elige el tiempo de pared y no EXPLAIN ANALYZE porque incluye lo mismo
-    que el endpoint ejecuta despues de abrir la conexion (consulta, filtrado y orden en
-    Python), sin la apertura."""
-    owner, cli, _ = e
-    _preparar_caso9(owner, cli)
-    with psycopg.connect(h.dsn()) as abierta:
-        @contextmanager
-        def reutilizada():
-            yield abierta
+def _r(v):
+    return round(v, 3)
 
-        unidad = UnidadDeTrabajo(reutilizada, rol_runtime="gapto_runtime")
-        contexto = ContextoOperacion.de_usuario(owner)
-        mediana, tiempos, filas = _mediana_ms(
-            lambda: unidad.ejecutar(contexto, lambda s: lect_ter.buscar(s, "merca", False), nombre="K-5 caso 9a"))
-    datos = {"caso": "9a", "entorno": _entorno_medida(), "muestras": len(tiempos),
-             "consulta_mediana_ms": round(mediana, 2), "consulta_ms": [round(t, 2) for t in tiempos]}
+
+def test_caso9a_busqueda_con_tres_mil_terceros_por_debajo_de_50_ms(e, monkeypatch):
+    """Oraculo F05-D050 §64.3: mediana de (servidor + aplicacion) < 50 ms, ambas
+    componentes informadas por separado. Ver el bloque de comentarios del caso 9."""
+    owner, cli, _ = e
+    entorno = _entorno_medida()
+    _preparar_caso9(owner, cli)
+    med = _instrumentar(monkeypatch, explicar=True)
+    muestras = []
+    for i in range(REPETICIONES + 1):  # la primera es calentamiento y no cuenta
+        med.reiniciar()
+        filas = buscar(cli, "merca")
+        assert [t["nombre"] for t in filas] == ["Mercadona"]
+        sent = med.busqueda()
+        assert sent and med.aplicacion_ms is not None, ("sin sentencias de busqueda capturadas", med.sentencias)
+        assert all((s["rol"], s["row_security"]) == ("gapto_runtime", "on") for s in sent), sent
+        servidor = sum(s["plan_ms"] + s["ejecucion_ms"] for s in sent)
+        if i:
+            muestras.append({"servidor_ms": _r(servidor), "aplicacion_ms": _r(med.aplicacion_ms),
+                             "total_ms": _r(servidor + med.aplicacion_ms),
+                             "plan_ms": [_r(s["plan_ms"]) for s in sent],
+                             "ejecucion_ms": [_r(s["ejecucion_ms"]) for s in sent]})
+    mediana = statistics.median(m["total_ms"] for m in muestras)
+    datos = {"caso": "9a", "oraculo": "F05-D050 §64.3: servidor (EXPLAIN ANALYZE plan+ejecucion) + aplicacion",
+             "entorno": entorno, "muestras": len(muestras), "umbral_ms": UMBRAL_MS,
+             "mediana_ms": _r(mediana),
+             "servidor_mediana_ms": _r(statistics.median(m["servidor_ms"] for m in muestras)),
+             "aplicacion_mediana_ms": _r(statistics.median(m["aplicacion_ms"] for m in muestras)),
+             "sentencias_busqueda": [s["sql"] for s in med.busqueda()],
+             "sentencias_contexto": len([s for s in med.sentencias if s["fase"] == "contexto"]),
+             "detalle": muestras}
     _evidencia("caso9a", datos)
-    assert [t["nombre"] for t in filas] == ["Mercadona"]
     assert mediana < UMBRAL_MS, datos
 
 
-def test_caso9b_peticion_http_descontando_la_apertura_de_conexion(e):
-    """(i) Peticion HTTP completa como el caso 9 original; (ii) apertura de una conexion
-    vacia por la MISMA via que la unidad de trabajo del adaptador (`_proveedor_por_defecto`:
-    abrir + SELECT 1 + cerrar). La peticion no se omite: lo que excede a la conexion
-    debe quedar por debajo del umbral de la busqueda. Una diferencia negativa es
-    incoherente (la peticion incluye una conexion): se repite UNA vez y, si persiste,
-    el test falla; nunca se da por buena."""
+def test_caso9a_guarda_numero_de_sentencias(e, monkeypatch):
+    """Guarda independiente de 9a: la busqueda real ejecuta exactamente
+    SENTENCIAS_BUSQUEDA sentencias con 1 fila («merca») y con 50 filas
+    («comercio», limite): una consulta por fila (N+1) o una sentencia adicional
+    la rompen aunque el tiempo siga por debajo del umbral."""
     owner, cli, _ = e
     _preparar_caso9(owner, cli)
-    abrir = _proveedor_por_defecto(h.dsn())
+    med = _instrumentar(monkeypatch, explicar=False)
+    cuentas = {}
+    for q, n in (("merca", 1), ("comercio", 50)):
+        med.reiniciar()
+        assert len(buscar(cli, q)) == n
+        cuentas[q] = [s["sql"] for s in med.busqueda()]
+    _evidencia("caso9a_guarda_sentencias", {"caso": "9a-guarda", "constante": SENTENCIAS_BUSQUEDA, "sentencias": cuentas})
+    assert {q: len(s) for q, s in cuentas.items()} == {"merca": SENTENCIAS_BUSQUEDA, "comercio": SENTENCIAS_BUSQUEDA}, cuentas
 
-    def conexion_vacia():
-        with abrir() as c:
-            c.execute("SELECT 1").fetchone()
 
+def test_caso9b_peticion_http_diagnostica(e, monkeypatch):
+    """Diagnostico HTTP extremo a extremo (no afirma rendimiento del motor). Por
+    muestra: apertura de conexion (psycopg.connect del adaptador), red (espera de
+    E/S de las sentencias de la peticion: ida y vuelta, servidor incluido), total
+    y resto = total - apertura - red (BEGIN/COMMIT, aplicacion y HTTP en proceso).
+    Solo afirma coherencia: al menos una apertura, componentes >= 0 y
+    apertura + red <= total. Una ronda incoherente se repite UNA vez; si persiste,
+    falla."""
+    owner, cli, _ = e
+    entorno = _entorno_medida()
+    _preparar_caso9(owner, cli)
+    med = _instrumentar(monkeypatch, explicar=False)
     rondas = []
     for _ in range(2):
-        http, t_http, filas = _mediana_ms(lambda: buscar(cli, "merca"))
-        conexion, t_con, _ = _mediana_ms(conexion_vacia)
-        rondas.append({"http_mediana_ms": round(http, 2), "conexion_mediana_ms": round(conexion, 2),
-                       "http_menos_conexion_ms": round(http - conexion, 2),
-                       "http_ms": [round(t, 2) for t in t_http], "conexion_ms": [round(t, 2) for t in t_con]})
-        if http - conexion >= 0:
+        muestras = []
+        for i in range(REPETICIONES + 1):
+            med.reiniciar()
+            t0 = time.perf_counter()
+            filas = buscar(cli, "merca")
+            total = (time.perf_counter() - t0) * 1000
+            assert [t["nombre"] for t in filas] == ["Mercadona"]
+            apertura, red = sum(med.aperturas_ms), sum(s["espera_ms"] for s in med.sentencias)
+            if i:
+                muestras.append({"aperturas": len(med.aperturas_ms), "apertura_conexion_ms": _r(apertura),
+                                 "red_ms": _r(red), "total_ms": _r(total), "resto_ms": _r(total - apertura - red)})
+        incoherentes = [m for m in muestras
+                        if m["aperturas"] < 1 or m["apertura_conexion_ms"] < 0 or m["red_ms"] < 0 or m["resto_ms"] < 0]
+        rondas.append({"muestras": muestras, "incoherentes": len(incoherentes)})
+        if not incoherentes:
             break
-    incoherente = http - conexion < 0
-    datos = {"caso": "9b", "entorno": _entorno_medida(), "muestras": len(t_http),
-             "repeticiones": len(rondas), "muestra_incoherente": incoherente, **rondas[-1], "rondas": rondas}
+    ultima = rondas[-1]["muestras"]
+    datos = {"caso": "9b", "diagnostico": True, "entorno": entorno, "muestras": len(ultima),
+             "repeticiones": len(rondas), "muestra_incoherente": rondas[-1]["incoherentes"] > 0,
+             **{f"{k}_mediana": _r(statistics.median(m[k] for m in ultima))
+                for k in ("apertura_conexion_ms", "red_ms", "total_ms", "resto_ms")},
+             "rondas": rondas}
     _evidencia("caso9b", datos)
-    assert [t["nombre"] for t in filas] == ["Mercadona"]
-    assert not incoherente, (INCOHERENTE, datos)
-    assert http - conexion < UMBRAL_MS, datos
+    assert not datos["muestra_incoherente"], (INCOHERENTE, datos)
 
 
 def test_caso9b_guarda_via_de_conexion(e, monkeypatch):
-    """AJ-MK5-02. El cliente se construye como el de 9b (configuracion por defecto, sin
+    """AJ-MK5-02. El cliente se construye como el de 9a/9b (configuracion por defecto, sin
     `proveedor_conexion` inyectado) DESPUES de instalar dos espias: uno sobre
     `app.api.app._proveedor_por_defecto` y otro sobre `psycopg.connect`. Durante
     `GET /v1/terceros?q=merca` toda conexion abierta debe pasar por el proveedor por
@@ -277,13 +399,13 @@ def test_caso9b_guarda_via_de_conexion(e, monkeypatch):
 
     monkeypatch.setattr(adaptador, "_proveedor_por_defecto", proveedor_espia)
     monkeypatch.setattr(psycopg, "connect", connect_espia)
-    cli = h.cliente(owner, reloj=x.reloj())  # misma construccion que el cliente de 9b (x.entorno)
+    cli = h.cliente(owner, reloj=x.reloj())  # misma construccion que el cliente de 9a/9b (x.entorno)
     x.tercero(cli, "Mercadona")
     aperturas.update(proveedor=0, connect=0)
     filas = buscar(cli, "merca")
     assert [t["nombre"] for t in filas] == ["Mercadona"]
     assert aperturas["proveedor"] >= 1 and aperturas["connect"] == aperturas["proveedor"], (
-        "El endpoint ya no abre su conexion (solo) por app.api.app._proveedor_por_defecto: 9b ha de "
+        "El endpoint ya no abre su conexion (solo) por app.api.app._proveedor_por_defecto: el caso 9 ha de "
         f"revisarse antes de reutilizar su certificacion (AJ-MK5-02). Aperturas: {aperturas}")
 
 
