@@ -3,10 +3,11 @@
 # Fichero: test_214_f04_r3_c2_reabrir_serial.py
 # Ruta: tests/api/test_214_f04_r3_c2_reabrir_serial.py
 # Descripcion: F04-R3 (F05-D050 §64.4; adenda 2 §D). Bateria SERIAL y
-#   determinista, FUERA de la suite general: solo con
+#   determinista de las carreras C2, FUERA de la suite general: solo con
 #   GAPTO_F04R3_CONCURRENCIA=1 (evidencia JSON si GAPTO_F04R3_EVIDENCIA apunta
 #   a una carpeta). COMMIT real sobre base desechable. Nunca en paralelo.
-#   Solo rutas EXPUESTAS, por las funciones del adaptador HTTP.
+#   Solo rutas EXPUESTAS, por las funciones del adaptador HTTP. Las pruebas
+#   C2-H1 sin carrera (seccion 3) son ORDINARIAS y van en la suite general.
 #
 #   C2 (INFORME_DIAG_F04-R3 §3.2): «Reabrir» frente a las rutas expuestas
 #      que comparten sus locks, en los dos ordenes, con el arnes de test_205
@@ -27,12 +28,19 @@
 #      en C2b A-primero el perdedor recibe VERSION_DESFASADA (espero la regla
 #      con la prevision ya leida) y en serie ESTADO_PREVISION_INCOMPATIBLE;
 #      ambos rechazos sin efectos.
-#   Hallazgo C2-H1 (serial, NO corregido; reproduccion xfail estricta): con
-#      el sucesor S1 ya REALIZADO por OP-22 y su nueva cabeza S1' ABIERTA,
-#      «Reabrir» P1 se admite y cancela S1': la cadena queda ABIERTA (P1),
-#      REALIZADA (S1), CANCELADA (S1'). La docstring de
-#      corregir_estado_terminal (F04-D024.9) pide TRAMO_RODANTE_REQUIERE_REVISION
-#      cuando la cadena ya avanzo a un terminal posterior.
+#   C2-H1 (F05-D051 §65.4, AJ-F0507G2-07; CORREGIDO): con el sucesor S1 ya
+#      REALIZADO (u OMITIDO) y su nueva cabeza S1' ABIERTA, «Reabrir» P1 se
+#      rechaza con TRAMO_RODANTE_REQUIERE_REVISION antes de cualquier
+#      escritura: el terminal INTERMEDIO S1 cuenta aunque exista una cabeza
+#      abierta posterior. El rechazo conserva previsiones, vinculos, hechos y
+#      tesoreria (comparacion fila a fila antes/despues). Solo se cancela el
+#      sucesor abierto sin realidad cuando no existe ese avance terminal (el
+#      ultimo terminal de la cadena SI se reabre). C2b B-primero pasa a ese
+#      rechazo; C2b se repite GAPTO_F04R3_VUELTAS_C2 veces por orden (y C2d,
+#      «Reabrir» P1 x «Omitir» S1, igual) para la serie de concurrencia.
+# Version: 0.2.0 (F05-D051 paso 1: C2-H1 corregido; xfail -> prueba ordinaria;
+#   casos de conservacion, terminal intermedio + cabeza abierta, cadena de
+#   tres terminales, rechazo por HTTP y serie C2b/C2d en los dos ordenes)
 # Version: 0.1.0 (F04-R3 il1b y C2)
 # Version: 0.1.0 (F04-R3 C2)
 # ============================================================
@@ -53,7 +61,7 @@ import f05_06_m5_helpers as m
 import vs01_api_helpers as h
 from app.api import ejecucion_prevision as ejp
 from app.api.dto_edicion import IntencionCorregirPago
-from app.api.dto_prevision import IntencionReabrir
+from app.api.dto_prevision import IntencionOmitir, IntencionReabrir
 from app.api.dto_vs01 import IntencionGastoPagado
 from app.api.ejecucion_correccion import corregir_pago_http
 from app.api.ejecucion_gasto_pagado import registrar_gasto_pagado
@@ -61,8 +69,10 @@ from app.repositories import correccion_tesoreria_repository as repo_ct
 from app.repositories import previsiones_repository as repo_prev
 from test_205_f05_06_m5_concurrencia_serial import OK, ORDENES, PT_OP17, Paso, correr, ctx  # arnes comun
 
-pytestmark = pytest.mark.skipif(os.getenv("GAPTO_F04R3_CONCURRENCIA") != "1",
-                                reason="bateria serial fuera de la suite general (GAPTO_F04R3_CONCURRENCIA=1)")
+# Solo las carreras quedan fuera de la suite general; las pruebas C2-H1 sin carrera son ordinarias.
+concurrencia = pytest.mark.skipif(os.getenv("GAPTO_F04R3_CONCURRENCIA") != "1",
+                                  reason="bateria serial fuera de la suite general (GAPTO_F04R3_CONCURRENCIA=1)")
+VUELTAS_C2 = int(os.getenv("GAPTO_F04R3_VUELTAS_C2", "1"))
 
 PT_REABRIR = (repo_prev, "tocar_prevision")         # reabrir: regla FU -> UPDATE de la prevision
 PT_OP21P = (repo_ct, "bloquear_movimientos")         # OP-21P: ... -> reglas -> previsiones -> movimientos
@@ -191,6 +201,7 @@ def c2(monkeypatch, caplog, nombre: str, orden: str, construir) -> dict:
     return tr
 
 
+@concurrencia
 @pytest.mark.parametrize("orden", ORDENES)
 def test_c2a_reabrir_frente_a_reabrir_dos_reglas_del_mismo_hecho(monkeypatch, caplog, orden):
     def construir(e):
@@ -204,22 +215,54 @@ def test_c2a_reabrir_frente_a_reabrir_dos_reglas_del_mismo_hecho(monkeypatch, ca
     assert tr["huella"]["vinculos_h"] == ["40.0000", "60.0000"], tr  # los vinculos se conservan
 
 
+def _vuelta(i: int) -> str:
+    return f"v{i:03d}"
+
+
+@concurrencia
+@pytest.mark.parametrize("vuelta", [_vuelta(i) for i in range(VUELTAS_C2)])
 @pytest.mark.parametrize("orden", ORDENES)
-def test_c2b_reabrir_frente_a_op22_realizando_el_sucesor(monkeypatch, caplog, orden):
+def test_c2b_reabrir_frente_a_op22_realizando_el_sucesor(monkeypatch, caplog, orden, vuelta):
     def construir(e):
         return (("A", reabrir(e, "p1", "s1"), PT_REABRIR), ("B", op22_realizando_s1(e), PT_OP17))
 
-    tr = c2(monkeypatch, caplog, "C2b", orden, construir)
+    tr = c2(monkeypatch, caplog, f"C2b_{vuelta}", orden, construir)
     if orden == "A-primero":  # reabrir cancela S1; OP-22 espera la regla y la ve desfasada: nada se escribe
         assert (tr["A"], tr["B"]) == (OK, "VERSION_DESFASADA"), tr
         assert [est for est, _ in tr["huella"]["cadena_r1"]] == ["ABIERTA", "CANCELADA"], tr
         assert tr["huella"]["op22_hecho"] == 0, tr
-    else:  # OP-22 realiza S1 (nace S1'); «Reabrir» espera la regla y despues entra: C2-H1 (igual que en serie)
-        assert (tr["B"], tr["A"]) == (OK, OK), tr
-        assert [est for est, _ in tr["huella"]["cadena_r1"]] == ["ABIERTA", "REALIZADA", "CANCELADA"], tr
+    else:  # OP-22 realiza S1 (nace S1'); «Reabrir» espera la regla y ve el terminal intermedio S1: C2-H1 rechaza
+        assert (tr["B"], tr["A"]) == (OK, "TRAMO_RODANTE_REQUIERE_REVISION"), tr
+        assert [est for est, _ in tr["huella"]["cadena_r1"]] == ["REALIZADA", "REALIZADA", "ABIERTA"], tr
         assert tr["huella"]["op22_hecho"] == 1, tr
+    assert tr["huella"]["vinculos_h"] == ["40.0000", "60.0000"], tr
 
 
+def omitir_s1(e):
+    owner = e["owner"]
+    v, pid = m.version(owner, e["s1"]), e["s1"]
+    return lambda: ejp.omitir(fh.unidad(), ctx(owner), pid, IntencionOmitir(intencion_id=uuid.uuid4(), row_version=v))
+
+
+@concurrencia
+@pytest.mark.parametrize("vuelta", [_vuelta(i) for i in range(VUELTAS_C2)])
+@pytest.mark.parametrize("orden", ORDENES)
+def test_c2d_reabrir_frente_a_omitir_el_sucesor(monkeypatch, caplog, orden, vuelta):
+    """C2-H1 con el tramo siguiente TERMINADO por «Omitir» (OMITIDA es terminal; nace S1')."""
+    def construir(e):
+        return (("A", reabrir(e, "p1", "s1"), PT_REABRIR), ("B", omitir_s1(e), PT_REABRIR))
+
+    tr = c2(monkeypatch, caplog, f"C2d_{vuelta}", orden, construir)
+    if orden == "A-primero":  # reabrir cancela S1; «Omitir» espera y la encuentra cambiada: rechazo sin efectos
+        assert tr["A"] == OK and tr["B"] != OK, tr
+        assert [est for est, _ in tr["huella"]["cadena_r1"]] == ["ABIERTA", "CANCELADA"], tr
+    else:  # S1 OMITIDA (nace S1'); «Reabrir» ve el terminal intermedio: rechazo sin efectos
+        assert (tr["B"], tr["A"]) == (OK, "TRAMO_RODANTE_REQUIERE_REVISION"), tr
+        assert [est for est, _ in tr["huella"]["cadena_r1"]] == ["REALIZADA", "OMITIDA", "ABIERTA"], tr
+    assert tr["huella"]["vinculos_h"] == ["40.0000", "60.0000"], tr
+
+
+@concurrencia
 @pytest.mark.parametrize("orden", ORDENES)
 def test_c2c_reabrir_frente_a_op21p_sobre_el_hecho(monkeypatch, caplog, orden):
     def construir(e):
@@ -235,16 +278,99 @@ def test_c2c_reabrir_frente_a_op21p_sobre_el_hecho(monkeypatch, caplog, orden):
         assert [est for est, _ in tr["huella"]["cadena_r1"]] == ["REALIZADA", "ABIERTA"], tr
 
 
-# ================================================================== 3. hallazgo C2-H1 (serial)
-@pytest.mark.xfail(strict=True, reason="C2-H1 (F04-R3, documentado sin corregir): «Reabrir» P1 se admite con el "
-                                       "tramo posterior S1 ya REALIZADO; F04-D024.9 pide TRAMO_RODANTE_REQUIERE_REVISION")
+# ================================================================== 3. C2-H1 (serial, prueba ORDINARIA)
+TABLAS_CONSERVADAS = ("previsiones", "prevision_hechos", "hechos_financieros", "hecho_efectos",
+                      "efecto_atribuciones", "movimientos_tesoreria", "hecho_movimientos_tesoreria",
+                      "transferencias", "reglas_financieras", "regla_versiones", "regla_excepciones", "auditoria")
+
+
+def foto(owner) -> dict:
+    """Todas las filas del owner (to_jsonb) de previsiones, vinculos, hechos, tesoreria, reglas y auditoria."""
+    return {t: [f[0] for f in m.leer(owner, f"SELECT to_jsonb(x)::text FROM gapto.{t} x ORDER BY 1")]
+            for t in TABLAS_CONSERVADAS}
+
+
+def cabeza_abierta(e) -> uuid.UUID:
+    abiertas = [p for p, est, _ in m.previsiones_de_regla(e["owner"], e["r1"]) if est == "ABIERTA"]
+    assert len(abiertas) == 1, abiertas
+    return abiertas[0]
+
+
+def reabrir_como_la_app(e, pid) -> str:
+    """Lo que enviaria la app: version de la prevision y de la cabeza abierta de la cadena."""
+    owner = e["owner"]
+    v = m.version(owner, pid)
+    sv = m.version(owner, cabeza_abierta(e))
+    return _codigo(lambda: ejp.reabrir(fh.unidad(), ctx(owner), pid, IntencionReabrir(
+        intencion_id=uuid.uuid4(), row_version=v, motivo="la marqué por error", sucesor_row_version=sv)))
+
+
+def rechazo_sin_efectos(e, pid) -> None:
+    antes = foto(e["owner"])
+    codigo = reabrir_como_la_app(e, pid)
+    assert codigo == "TRAMO_RODANTE_REQUIERE_REVISION", huella(e)
+    despues = foto(e["owner"])
+    for t in TABLAS_CONSERVADAS:  # previsiones, vinculos, hechos y tesoreria intactos, fila a fila
+        assert despues[t] == antes[t], t
+
+
 def test_c2_h1_reabrir_con_un_tramo_posterior_realizado():
+    """Terminal INTERMEDIO REALIZADO (S1) + cabeza ABIERTA posterior (S1'): rechazo atomico sin efectos."""
     e = _escenario()
     owner = e["owner"]
     assert _codigo(op22_realizando_s1(e)) == OK  # S1 REALIZADA; nace su sucesor S1' ABIERTA
-    cabeza = [p for p, est, _ in m.previsiones_de_regla(owner, e["r1"]) if est == "ABIERTA"][0]
-    pid, v, sv = e["p1"], m.version(owner, e["p1"]), m.version(owner, cabeza)  # lo que daria la lectura
-    codigo = _codigo(lambda: ejp.reabrir(fh.unidad(), ctx(owner), pid, IntencionReabrir(
-        intencion_id=uuid.uuid4(), row_version=v, motivo="la marqué por error", sucesor_row_version=sv)))
-    evidencia("C2-H1_serial", {"codigo": codigo, "huella": huella(e)})
-    assert codigo == "TRAMO_RODANTE_REQUIERE_REVISION", huella(e)
+    assert [est for _, est, _ in m.previsiones_de_regla(owner, e["r1"])] == ["REALIZADA", "REALIZADA", "ABIERTA"]
+    rechazo_sin_efectos(e, e["p1"])
+    evidencia("C2-H1_serial", {"huella": huella(e)})
+    assert [est for _, est, _ in m.previsiones_de_regla(owner, e["r1"])] == ["REALIZADA", "REALIZADA", "ABIERTA"]
+    assert huella(e)["vinculos_h"] == ["40.0000", "60.0000"]
+
+
+def test_c2_h1_reabrir_con_un_tramo_posterior_omitido():
+    """Terminal INTERMEDIO OMITIDO (S1) + cabeza ABIERTA posterior: el mismo rechazo sin efectos."""
+    e = _escenario()
+    owner = e["owner"]
+    assert _codigo(omitir_s1(e)) == OK
+    assert [est for _, est, _ in m.previsiones_de_regla(owner, e["r1"])] == ["REALIZADA", "OMITIDA", "ABIERTA"]
+    rechazo_sin_efectos(e, e["p1"])
+
+
+def _prevision_hechos(owner) -> list[str]:
+    return sorted(map(str, m.leer(owner, "SELECT id, prevision_id, hecho_id, importe_asignado "
+                                         "FROM gapto.prevision_hechos")))
+
+
+def test_c2_h1_cadena_de_tres_terminales_solo_reabre_el_ultimo():
+    """P1, S1 y S1' REALIZADAS y S1'' ABIERTA. P1 y S1 tienen terminales posteriores: rechazo. S1' es el
+    ultimo terminal: se reabre y cancela S1'' (sin realidad), como antes de C2-H1."""
+    e = _escenario()
+    owner = e["owner"]
+    assert _codigo(op22_realizando_s1(e)) == OK
+    s1p = cabeza_abierta(e)
+    cuerpo = h.intencion(e["cta"], importe="40.00", fecha_hecho="2026-10-09")
+    cuerpo["prevision"] = {"prevision_id": str(s1p), "row_version": m.version(owner, s1p), "marcar_realizada": True}
+    i = IntencionGastoPagado(**cuerpo)
+    assert _codigo(lambda: registrar_gasto_pagado(fh.unidad(), ctx(owner), i, m.x.reloj())) == OK
+    assert [est for _, est, _ in m.previsiones_de_regla(owner, e["r1"])] == ["REALIZADA"] * 3 + ["ABIERTA"]
+    rechazo_sin_efectos(e, e["p1"])
+    rechazo_sin_efectos(e, e["s1"])
+    s1pp = cabeza_abierta(e)
+    vinculos_antes = _prevision_hechos(owner)
+    assert reabrir_como_la_app(e, s1p) == OK
+    cadena = {p: est for p, est, _ in m.previsiones_de_regla(owner, e["r1"])}
+    assert (cadena[e["p1"]], cadena[e["s1"]], cadena[s1p], cadena[s1pp]) == (
+        "REALIZADA", "REALIZADA", "ABIERTA", "CANCELADA")
+    assert _prevision_hechos(owner) == vinculos_antes
+
+
+def test_c2_h1_por_http_409_sin_cambios():
+    """La ruta HTTP devuelve el rechazo con su codigo (409, ya mapeado; sin cambio de contrato)."""
+    e = _escenario()
+    owner, cli = e["owner"], e["cli"]
+    assert _codigo(op22_realizando_s1(e)) == OK
+    antes = foto(owner)
+    c = {"intencion_id": str(uuid.uuid4()), "row_version": m.version(owner, e["p1"]), "motivo": "la marqué por error",
+         "sucesor_row_version": m.version(owner, cabeza_abierta(e))}
+    r = cli.post(f"/v1/previsiones/{e['p1']}/reabrir", json=c, headers=h.AUTH)
+    assert r.status_code == 409 and r.json().get("codigo") == "TRAMO_RODANTE_REQUIERE_REVISION", r.text
+    assert foto(owner) == antes

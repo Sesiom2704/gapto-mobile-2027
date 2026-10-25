@@ -39,6 +39,11 @@
 #   python scripts/mutantes/f0405.py            # los 32
 #   python scripts/mutantes/f0405.py M1 M2 E7   # un lote
 #
+# Version: 0.1.2
+#   0.1.2 (F05-D051 paso 1, C2-H1): el texto de E3 se reancla a la nueva
+#   sangria de la guarda del terminal posterior en `_sucesor_reabrible` (la
+#   busqueda ya no esta anidada bajo «sin cabeza abierta posterior»). Mismo
+#   mutante y mismo discriminante.
 # Version: 0.1.1
 #   0.1.1 (R-08): el discriminante de M20 pasa a ser determinista
 #   (test_version_desfasada_en_lifecycle). La carrera C4 se conserva como
@@ -241,8 +246,8 @@ ADICIONALES: list[Mutante] = [
     ),
     Mutante(
         "E3", "un terminal posterior no bloquea la reapertura", SRV,
-        '            if posterior is not None:\n                raise ErrorMotor(\n                    CodigoError.TRAMO_RODANTE_REQUIERE_REVISION,',
-        '            if False:\n                raise ErrorMotor(\n                    CodigoError.TRAMO_RODANTE_REQUIERE_REVISION,',
+        '        if posterior is not None:\n            raise ErrorMotor(\n                CodigoError.TRAMO_RODANTE_REQUIERE_REVISION,',
+        '        if False:\n            raise ErrorMotor(\n                CodigoError.TRAMO_RODANTE_REQUIERE_REVISION,',
         "test_d024_sucesor_terminal_posterior_tambien_rechaza",
     ),
     Mutante(

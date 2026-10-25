@@ -48,6 +48,13 @@
 #   writer de actor y de leer la identidad (OP-22 lo vuelve a pedir,
 #   reentrante). Cobro, pago, perdon y «Corregir reparto» no componen OP-22 y
 #   no cambian.
+# Version: 0.4.0 (F05-D051 paso 2; F05 §65.4 contrato HTTP Q4/Q4-H2, ampliacion
+#   aditiva): PosicionAplicada transporta `apertura_indeterminada` del
+#   ResultadoPosicion del motor; «Pendiente con» lo transporta (False: OP-20
+#   solo lista ACTIVAS); reparto_de_hecho lee cada posicion vinculada con
+#   PosicionesService.saldo (estado autoritativo ACTIVA o CERRADA, sin tocarlo
+#   ni recalcular aperturas) en lugar del neto OP-20, que solo lee ACTIVAS y
+#   presentaba una CERRADA como «Sin determinar».
 # ============================================================
 
 from __future__ import annotations
@@ -358,6 +365,7 @@ class PosicionAplicada:
     idempotente: bool
     saldo: decimal.Decimal | None
     estado: str
+    apertura_indeterminada: bool
 
 
 def leer_posicion(sesion: SesionMotor, entidad_id: uuid.UUID) -> dict[str, Any] | None:
@@ -443,7 +451,8 @@ def _aplicar_reduccion(
             r = servicio.condonar_obligacion(contexto, entidad_id=entidad_id, entidad_row_version_esperada=version,
                                              datos=DatosCondonacionObligacion(delta=delta))
         return PosicionAplicada(hecho_id=hecho_id, entidad_id=entidad_id, idempotente=r.idempotente,
-                                saldo=r.saldo.importe if r.saldo.conocido else None, estado=r.estado)
+                                saldo=r.saldo.importe if r.saldo.conocido else None, estado=r.estado,
+                                apertura_indeterminada=r.apertura_indeterminada)
 
     return unidad.ejecutar(contexto, con_rechazo_capacidad(operacion, RechazoRegistro), nombre=nombre)
 
@@ -498,6 +507,7 @@ def pendiente_con(sesion: SesionMotor, contexto: ContextoOperacion, tercero_id: 
         posiciones.append({
             "entidad_id": detalle.entidad_id, "entidad_row_version": info["row_version"], "tipo": detalle.tipo,
             "nombre": detalle.nombre, "saldo": None if saldo is None else _texto(saldo), "estado": info["estado"],
+            "apertura_indeterminada": False,  # OP-20 solo lista ACTIVAS (F04-D055 A4)
             "origen_hecho_id": info["origen"], "origen_fecha": None if origen is None else origen[0],
             "origen_concepto": None if origen is None else origen[1],
             "origen_tercero": None if origen is None else origen[2],  # el comercio del gasto (C1)
@@ -668,13 +678,14 @@ def reparto_de_hecho(sesion: SesionMotor, contexto: ContextoOperacion, hecho_id:
         # Deudor de cada posicion: la contraparte en un derecho; yo en una obligacion.
         posicion_de = {(contraparte if tipo == TIPO_DERECHO else actor_self): (tipo, entidad)
                        for _, tipo, contraparte, entidad in estado["vinculos"]}
-        saldos: dict[uuid.UUID, str | None] = {}
-        neto = NetoService(UnidadDeTrabajoAdscrita(sesion))
-        for _, _, contraparte, entidad in estado["vinculos"]:
-            segmento = neto.posicion_neta(contexto, contraparte_actor_id=contraparte).segmento(contraparte, MONEDA)
-            for detalle in (segmento.posiciones if segmento is not None else ()):
-                if detalle.entidad_id == entidad:
-                    saldos[entidad] = _texto(detalle.saldo.importe) if detalle.saldo.conocido else None
+        # Q4-H2: estado autoritativo de cada posicion (ACTIVA o CERRADA), no el
+        # neto OP-20 (solo ACTIVAS: una CERRADA salia «Sin determinar»).
+        lecturas: dict[uuid.UUID, dict[str, Any]] = {}
+        servicio_pos = PosicionesService(UnidadDeTrabajoAdscrita(sesion))
+        for _, _, _, entidad in estado["vinculos"]:
+            r = servicio_pos.saldo(contexto, entidad)
+            lecturas[entidad] = {"saldo": _texto(r.saldo.importe) if r.saldo.conocido else None,
+                                 "estado": r.estado, "apertura_indeterminada": r.apertura_indeterminada}
         propias = [a for a in estado["atribuciones"] if a[1] == efecto_id]
         for aid, _, actor, importe, _ in sorted(propias, key=lambda a: (a[2] != actor_self, str(a[2]))):
             tercero = None if actor == actor_self else sesion.uno(
@@ -686,8 +697,7 @@ def reparto_de_hecho(sesion: SesionMotor, contexto: ContextoOperacion, hecho_id:
                 "tercero_id": None if tercero is None else tercero[0],
                 "nombre": "Tú" if actor == actor_self else (tercero[1] if tercero else "Sin nombre"),
                 "importe": _texto(importe),
-                "posicion": None if pos is None else {"entidad_id": pos[1], "tipo": pos[0],
-                                                      "saldo": saldos.get(pos[1])},
+                "posicion": None if pos is None else {"entidad_id": pos[1], "tipo": pos[0], **lecturas[pos[1]]},
             })
     if motivo is None and (estado_atr == "NO_DISPONIBLE" or len(partes) < 2):
         motivo = "SIN_REPARTO"

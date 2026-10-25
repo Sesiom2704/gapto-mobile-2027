@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-06 M5 SWIPE2)
 // Versión: 0.2.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados invertidos — la acción principal se desliza a la IZQUIERDA y la alternativa a la DERECHA; acciones accesibles con el nombre de la dirección nueva.
 // Versión: 0.3.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
+// Versión: 0.4.0 (F05-D051 paso 2; F05 §65.4 contrato HTTP Q4/Q4-H2): fixtures wire con `apertura_indeterminada` (y `estado` en PosicionDeParte); sin cambios de aserciones.
 // ============================================================
 
 import './tiempos_rn';
@@ -83,8 +84,8 @@ test('tonos del swipe: confirmar verde, neutro gris y aviso naranja; nunca el ro
 const PEND: PendienteConPersona = {
   tercero_id: 'tania', nombre: 'Tania', te_debe: '15.00', le_debes: '12.50', neto: '2.50', neto_estado: 'DETERMINADO',
   posiciones: [
-    { entidad_id: 'd1', entidad_row_version: 1, tipo: 'DERECHO_COBRO', nombre: 'Gasto compartido', saldo: '15.00', estado: 'ACTIVA', origen_hecho_id: 'cena', origen_fecha: '2026-10-09', origen_concepto: 'Cena con amigos' },
-    { entidad_id: 'o1', entidad_row_version: 1, tipo: 'OBLIGACION_PAGO', nombre: 'Gasto compartido', saldo: '12.50', estado: 'ACTIVA', origen_hecho_id: 'pelu', origen_fecha: '2026-10-03', origen_concepto: 'Peluquería' },
+    { entidad_id: 'd1', entidad_row_version: 1, tipo: 'DERECHO_COBRO', nombre: 'Gasto compartido', saldo: '15.00', estado: 'ACTIVA', apertura_indeterminada: false, origen_hecho_id: 'cena', origen_fecha: '2026-10-09', origen_concepto: 'Cena con amigos' },
+    { entidad_id: 'o1', entidad_row_version: 1, tipo: 'OBLIGACION_PAGO', nombre: 'Gasto compartido', saldo: '12.50', estado: 'ACTIVA', apertura_indeterminada: false, origen_hecho_id: 'pelu', origen_fecha: '2026-10-03', origen_concepto: 'Peluquería' },
   ],
 };
 const UNA = [{ cuenta_id: 'nomina', nombre: 'Cuenta nómina', moneda: 'EUR' }];

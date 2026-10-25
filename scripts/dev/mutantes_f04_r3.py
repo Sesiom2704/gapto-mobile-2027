@@ -19,9 +19,16 @@
 #   leer la identidad) y el mismo advisory como primer recurso de cada
 #   adaptador que compone OP-22 (M3 gasto pagado, M4 ingreso cobrado, M5 gasto
 #   compartido).
+#   C2-H1 (F05-D051 paso 1, §65.4; AJ-F0507G2-07): la guarda del terminal
+#   posterior de «Reabrir» (`_sucesor_reabrible`): M6 omite la busqueda del
+#   terminal INTERMEDIO cuando hay cabeza abierta posterior (comportamiento
+#   anterior a C2-H1); M7 desactiva el rechazo por terminal posterior. Sus
+#   discriminantes son las pruebas ordinarias C2-H1 de test_214, la serie C2b
+#   B-primero (vuelta v000) y test_113 (terminal posterior sin cabeza).
 #   Uso: GAPTO_TEST_DATABASE_URL=<base desechable> GAPTO_F04R3_CONCURRENCIA=1
 #        python scripts/dev/mutantes_f04_r3.py [--solo ID,ID] [--salida fichero]
 #   No ejecutar en paralelo con otro arnes ni con la suite sobre el mismo arbol.
+# Version: 0.2.0 (F05-D051 paso 1: mutantes M6 y M7 de la guarda C2-H1)
 # Version: 0.1.0 (F04-R3 il1b)
 # ============================================================
 
@@ -44,6 +51,11 @@ T14K = "tests/backend/test_14k_f04_r3_il1b_advisory_serial.py::test_il1b_advisor
 T213 = "tests/api/test_213_f04_r3_il1b_adaptadores_serial.py::test_il1b_advisory_por_raiz_es_el_primer_recurso_del_adaptador"
 LOCK_OP22 = "            repo_comp.tomar_advisory_raiz(sesion, raiz)\n"
 LOCK_ADAPTADOR = "        repo_comp.tomar_advisory_raiz(sesion, intencion.intencion_id)\n"
+PRV = "backend/app/services/previsiones_service.py"
+T214 = "tests/api/test_214_f04_r3_c2_reabrir_serial.py::"
+T113 = "tests/backend/test_113_rodante_y_materializacion.py::"
+BUSCA_TERMINAL = "        posterior = repo_prev.terminal_posterior(sesion, regla_id, fecha_objetivo)\n"
+RECHAZA_TERMINAL = "        if posterior is not None:\n            raise ErrorMotor(\n"
 
 #: (id, descripcion, [(fichero, texto, sustituto)], discriminantes, equivalencia o None)
 MUTANTES = [
@@ -66,6 +78,19 @@ MUTANTES = [
     ("M5", "gasto compartido: el advisory por raiz deja de ser su primer recurso (solo el de OP-22)",
      [(REP, LOCK_ADAPTADOR, "")],
      [T213 + "[gasto_compartido]"], None),
+    ("M6", "C2-H1: «Reabrir» omite la busqueda del terminal INTERMEDIO cuando hay cabeza abierta posterior",
+     [(PRV, BUSCA_TERMINAL,
+       "        posterior = None if hay_cabeza_posterior else repo_prev.terminal_posterior(\n"
+       "            sesion, regla_id, fecha_objetivo)\n")],
+     [T214 + "test_c2_h1_reabrir_con_un_tramo_posterior_realizado",
+      T214 + "test_c2_h1_reabrir_con_un_tramo_posterior_omitido",
+      T214 + "test_c2_h1_cadena_de_tres_terminales_solo_reabre_el_ultimo",
+      T214 + "test_c2_h1_por_http_409_sin_cambios",
+      T214 + "test_c2b_reabrir_frente_a_op22_realizando_el_sucesor[B-primero-v000]"], None),
+    ("M7", "C2-H1: el terminal posterior encontrado no rechaza «Reabrir»",
+     [(PRV, RECHAZA_TERMINAL, "        if False:\n            raise ErrorMotor(\n")],
+     [T214 + "test_c2_h1_reabrir_con_un_tramo_posterior_realizado",
+      T113 + "test_d024_sucesor_terminal_posterior_tambien_rechaza"], None),
 ]
 
 

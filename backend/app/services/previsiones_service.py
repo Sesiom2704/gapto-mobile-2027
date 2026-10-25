@@ -31,6 +31,13 @@
 #   sigue siendo ABIERTA: no hay estado PARCIAL persistido. Y el primer hecho
 #   ACTIVO congela la expectativa poniendo `recalculo_automatico=false`, de
 #   modo que una version posterior de la regla ya no reescribe ese importe.
+# Version: 0.10.1
+#   0.10.1 (F05-D051 paso 1, §65.4 C2-H1; AJ-F0507G2-07): `_sucesor_reabrible`
+#   busca SIEMPRE el terminal posterior de la cadena, tambien el INTERMEDIO
+#   que queda por debajo de una cabeza ABIERTA posterior, y rechaza la
+#   correccion con TRAMO_RODANTE_REQUIERE_REVISION antes de cualquier
+#   escritura. Solo se cancela el sucesor abierto sin realidad ACTIVA cuando no
+#   existe ese avance terminal. Sin DDL ni cambio de contrato HTTP.
 # Version: 0.10.0
 #   0.10.0 (F04-D065, reapertura nominal parcial de F04; M5-B de F05-06;
 #   AJ-M5BM1-01/02/11): comando nuevo `dar_por_realizada` («Dar por cubierta»).
@@ -1687,22 +1694,32 @@ class PrevisionesService:
         Devuelve None cuando no hay sucesor. Si existe pero ya es terminal o
         tiene realidad ACTIVA, NO se devuelve: se rechaza la correccion, porque
         cancelar un sucesor con realidad destruiria algo verdadero.
+
+        C2-H1 (F05-D051 §65.4): el terminal posterior se busca SIEMPRE, haya o
+        no cabeza ABIERTA posterior. Con S1 ya REALIZADA y su sucesor S1'
+        ABIERTA, la cabeza es S1' y el avance terminal es el tramo INTERMEDIO
+        S1: si solo se mirase la cabeza, «Reabrir» cancelaria S1' y dejaria una
+        ABIERTA anterior a un tramo terminal. Se rechaza antes de cualquier
+        escritura; el sucesor abierto solo se cancela cuando no existe ese
+        avance terminal.
         """
         if regla_id is None or fecha_objetivo is None:
             return None
         cabeza = repo_prev.cabeza_rodante(sesion, regla_id)
-        if cabeza is None or cabeza["fecha_objetivo"] <= fecha_objetivo:
-            # Sin cabeza abierta posterior: o no hay sucesor, o ya es terminal.
-            posterior = repo_prev.terminal_posterior(
-                sesion, regla_id, fecha_objetivo
+        hay_cabeza_posterior = (
+            cabeza is not None and cabeza["fecha_objetivo"] > fecha_objetivo
+        )
+        # Terminal posterior, intermedio incluido (por debajo de la cabeza).
+        posterior = repo_prev.terminal_posterior(sesion, regla_id, fecha_objetivo)
+        if posterior is not None:
+            raise ErrorMotor(
+                CodigoError.TRAMO_RODANTE_REQUIERE_REVISION,
+                "La cadena ya avanzo a un estado terminal posterior: la "
+                "correccion previsional se rechaza atomicamente.",
             )
-            if posterior is not None:
-                raise ErrorMotor(
-                    CodigoError.TRAMO_RODANTE_REQUIERE_REVISION,
-                    "La cadena ya avanzo a un estado terminal posterior: la "
-                    "correccion previsional se rechaza atomicamente.",
-                )
+        if not hay_cabeza_posterior:
             return None
+        assert cabeza is not None
         realidad = repo_prev.resumen_realidad(sesion, cabeza["id"])
         if realidad["hechos_activos"] > 0:
             raise ErrorMotor(

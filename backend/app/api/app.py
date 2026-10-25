@@ -235,6 +235,10 @@
 #   rechazo_edicion y VERSION_DESFASADA 409 con la edicion releida. La
 #   lectura /edicion trae `acciones.corregir_categoria` solo en V3.
 # Version: 0.28.0
+#   v0.29.0 (F05-D051 paso 2; F05 §65.4 contrato HTTP Q4/Q4-H2, ampliacion
+#   aditiva): la respuesta de cobro, pago y perdon (_posicion_http) transporta
+#   `apertura_indeterminada` del motor (F04-D055 A4).
+# Version: 0.29.0
 # ============================================================
 
 from __future__ import annotations
@@ -1138,7 +1142,8 @@ def create_app(
                 "entidad_id": salida.entidad_id, "idempotente": salida.idempotente,
                 "importe": str(intencion.importe.quantize(_CENT)),
                 "saldo": None if salida.saldo is None else str(salida.saldo.quantize(_CENT)),
-                "estado": salida.estado, "aviso": _AVISO_F05}
+                "estado": salida.estado, "apertura_indeterminada": salida.apertura_indeterminada,
+                "aviso": _AVISO_F05}
 
     def _posiciones_http(posiciones):
         return [{"entidad_id": p.entidad_id, "tipo": p.tipo, "tercero_id": p.tercero_id,

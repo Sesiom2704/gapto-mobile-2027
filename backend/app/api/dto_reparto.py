@@ -18,6 +18,9 @@
 # Version: 0.1.0 (F05-06 M3 §A2, §A4, §A5)
 # Version: 0.2.0 (F05-06 M5 D-M5-11): bloque OPCIONAL `prevision` en el gasto
 #   compartido (registro desde la prevision con reparto, una sola OP-22).
+# Version: 0.3.0 (F05-D051 paso 2; F05 §65.4 contrato HTTP Q4/Q4-H2, ampliacion
+#   aditiva): `apertura_indeterminada` en las tres exposiciones de posiciones
+#   (AJ-D055-B1-09, contrato F04-D055 A4) y `estado` en PosicionDeParteHttp.
 # ============================================================
 
 from __future__ import annotations
@@ -184,6 +187,7 @@ class ResultadoPosicionHttp(_Estricto):
     importe: str
     saldo: str | None  # None = «Sin determinar» (D-REP-09)
     estado: Literal["ACTIVA", "CERRADA"]
+    apertura_indeterminada: bool  # F04-D055 A4: True solo si CERRADA con saldo_apertura NULL
     aviso: str
 
 
@@ -195,6 +199,7 @@ class PosicionPendiente(_Estricto):
     nombre: str | None
     saldo: str | None  # None = «Sin determinar»
     estado: Literal["ACTIVA", "CERRADA"]
+    apertura_indeterminada: bool  # F04-D055 A4 (aqui solo ACTIVAS: siempre False)
     origen_hecho_id: uuid.UUID | None
     origen_fecha: dt.date | None
     origen_concepto: str | None
@@ -251,6 +256,8 @@ class PosicionDeParteHttp(_Estricto):
     entidad_id: uuid.UUID
     tipo: Literal["DERECHO_COBRO", "OBLIGACION_PAGO"]
     saldo: str | None  # None = «Sin determinar»
+    estado: Literal["ACTIVA", "CERRADA"]  # Q4-H2: una CERRADA tiene saldo conocido 0
+    apertura_indeterminada: bool  # F04-D055 A4
 
 
 class ParteDeHechoHttp(_Estricto):

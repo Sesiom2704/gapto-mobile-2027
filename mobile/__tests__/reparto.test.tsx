@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-06 M3 §B2)
 // v0.1.1 (F05-06 M3 CORR-01, R-M3-05): dos personas con la misma parte; cada «Pendiente con» señala a su persona por el `tercero_id` del servidor, también con las posiciones en otro orden.
 // Versión: 0.2.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
+// Versión: 0.3.0 (F05-D051 paso 2; F05 §65.4 contrato HTTP Q4/Q4-H2): fixtures wire con `apertura_indeterminada` (y `estado` en PosicionDeParte); sin cambios de aserciones.
 // ============================================================
 
 import './tiempos_rn';
@@ -166,7 +167,7 @@ describe('dominio', () => {
   test('corrección: solo importes de quien ya está, misma suma, nunca 0, motivo obligatorio', () => {
     const r: RepartoDeHecho = { hecho_id: 'h', row_version: 3, importe: '44.50', estado_atribucion: 'COMPLETA', corregible: true, motivo: null, partes: [
       { atribucion_id: 'a-yo', es_yo: true, tercero_id: null, nombre: 'Tú', importe: '14.50', posicion: null },
-      { atribucion_id: 'a-tania', es_yo: false, tercero_id: 'tania', nombre: 'Tania', importe: '15.00', posicion: { entidad_id: 'p', tipo: 'DERECHO_COBRO', saldo: '15.00' } },
+      { atribucion_id: 'a-tania', es_yo: false, tercero_id: 'tania', nombre: 'Tania', importe: '15.00', posicion: { entidad_id: 'p', tipo: 'DERECHO_COBRO', saldo: '15.00', estado: 'ACTIVA', apertura_indeterminada: false } },
       { atribucion_id: 'a-carlos', es_yo: false, tercero_id: 'carlos', nombre: 'Carlos', importe: '15.00', posicion: null },
     ] };
     expect(faltaCorreccion(r, { 'a-yo': '9,50' }, 'x')).toEqual(['que las partes sumen lo mismo que antes (44,50 €)']);
@@ -390,8 +391,8 @@ describe('B · cena repartida', () => {
 const PEND: PendienteConPersona = {
   tercero_id: 'tania', nombre: 'Tania', te_debe: '15.00', le_debes: '15.00', neto: '0.00', neto_estado: 'DETERMINADO',
   posiciones: [
-    { entidad_id: 'd1', entidad_row_version: 1, tipo: 'DERECHO_COBRO', nombre: 'Gasto compartido', saldo: '15.00', estado: 'ACTIVA', origen_hecho_id: 'cena', origen_fecha: '2026-10-09', origen_concepto: 'Cena con amigos' },
-    { entidad_id: 'o1', entidad_row_version: 1, tipo: 'OBLIGACION_PAGO', nombre: 'Gasto compartido', saldo: '15.00', estado: 'ACTIVA', origen_hecho_id: 'pelu', origen_fecha: '2026-10-03', origen_concepto: 'Peluquería', origen_tercero: 'Peluquería Lola' },
+    { entidad_id: 'd1', entidad_row_version: 1, tipo: 'DERECHO_COBRO', nombre: 'Gasto compartido', saldo: '15.00', estado: 'ACTIVA', apertura_indeterminada: false, origen_hecho_id: 'cena', origen_fecha: '2026-10-09', origen_concepto: 'Cena con amigos' },
+    { entidad_id: 'o1', entidad_row_version: 1, tipo: 'OBLIGACION_PAGO', nombre: 'Gasto compartido', saldo: '15.00', estado: 'ACTIVA', apertura_indeterminada: false, origen_hecho_id: 'pelu', origen_fecha: '2026-10-03', origen_concepto: 'Peluquería', origen_tercero: 'Peluquería Lola' },
   ],
 };
 const resultadoPos = (pl: any, saldo: string | null = '5.00') =>
@@ -496,7 +497,7 @@ describe('C · Pendiente con', () => {
 const REPARTO: RepartoDeHecho = {
   hecho_id: 'cena', row_version: 4, importe: '44.50', estado_atribucion: 'COMPLETA', corregible: true, motivo: null, partes: [
     { atribucion_id: 'a-yo', es_yo: true, tercero_id: null, nombre: 'Tú', importe: '14.50', posicion: null },
-    { atribucion_id: 'a-tania', es_yo: false, tercero_id: 'tania', nombre: 'Tania', importe: '15.00', posicion: { entidad_id: 'd1', tipo: 'DERECHO_COBRO', saldo: '15.00' } },
+    { atribucion_id: 'a-tania', es_yo: false, tercero_id: 'tania', nombre: 'Tania', importe: '15.00', posicion: { entidad_id: 'd1', tipo: 'DERECHO_COBRO', saldo: '15.00', estado: 'ACTIVA', apertura_indeterminada: false } },
     { atribucion_id: 'a-carlos', es_yo: false, tercero_id: 'carlos', nombre: 'Carlos', importe: '15.00', posicion: null },
   ],
 };

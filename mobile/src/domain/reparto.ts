@@ -4,6 +4,7 @@
 // Ruta: mobile/src/domain/reparto.ts
 // Descripción: Lógica pura del reparto, el pagador real y las posiciones (F05-06 M3; F05 §51.2 M3, §57 F05-D043; lámina REP v0.2 D-REP-01..09, P-REP-01..06). «Otra persona» pagó: no sale dinero de tus cuentas y la deuda solo nace con «Sí» (D-REP-01/02, INV-04; «No lo sé» no la crea, P-REP-01). «Repartir» conserva siempre el total y deja ver lo que falta, que se puede dejar sin indicar (PARCIAL, G3) y nunca se completa solo (D-REP-03). «A partes iguales» es un botón y el céntimo sobrante va a la última fila (D-REP-04). «¿Te deben su parte?» persona a persona (D-REP-05). Revisión en cuatro bloques (D-REP-06). «Pendiente con» separa lo que te debe y lo que le debes; el neto es una lectura que no salda nada y, con algún saldo desconocido, es «Sin determinar», nunca 0,00 € (D-REP-07/09, OP-20). Cobro y pago con cuenta Gapto; perdonar no mueve dinero (D-REP-08). «Corregir reparto» solo cambia importes de quien ya está (§57.1.1): altas, bajas, invitado → deudor y «Le debo esto» (E1) se ven atenuados con su motivo.
 // Versión: 0.1.0 (F05-06 M3 §B1)
+// Versión: 0.2.0 (F05-D051 paso 2; F05 §65.4 contrato HTTP Q4/Q4-H2): tipos wire con `apertura_indeterminada` (F04-D055 A4) y `estado` en PosicionDeParte. Sin copy de UI (pendiente de la lámina REP).
 // ============================================================
 
 import type { Borrador, CategoriaWire } from './intencion';
@@ -68,6 +69,8 @@ export interface PosicionPendiente {
   nombre: string | null;
   saldo: string | null; // null = «Sin determinar»
   estado: 'ACTIVA' | 'CERRADA';
+  /** F04-D055 A4: aquí solo hay ACTIVAS, así que siempre false. */
+  apertura_indeterminada: boolean;
   origen_hecho_id: string | null;
   origen_fecha: string | null;
   origen_concepto: string | null;
@@ -106,6 +109,8 @@ export interface ResultadoPosicion {
   importe: string;
   saldo: string | null;
   estado: 'ACTIVA' | 'CERRADA';
+  /** F04-D055 A4: true solo si CERRADA con saldo de apertura desconocido. */
+  apertura_indeterminada: boolean;
   aviso: string;
 }
 
@@ -113,6 +118,8 @@ export interface PosicionDeParte {
   entidad_id: string;
   tipo: TipoPosicion;
   saldo: string | null;
+  estado: 'ACTIVA' | 'CERRADA';
+  apertura_indeterminada: boolean;
 }
 
 export interface ParteDeHecho {
