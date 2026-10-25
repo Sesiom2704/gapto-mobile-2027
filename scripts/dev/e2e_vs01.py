@@ -40,7 +40,16 @@
 #   (Resultado del mes), que sustituye en ESE bloque el «sin cifras» de
 #   F05-D003 §16.6. Se conserva la propiedad de VS-01: la cifra PARCIAL de
 #   gasto-mes va en su tarjeta y nunca aparece en «Este mes».
-# Version: 0.7.0
+# Version: 0.7.1 (F05-07/GATE adenda 2, MANT-PRE-GATE C/e2e; DEF-E2E-VS01-LAYOUT):
+#   el detector de desbordamiento horizontal (DESBORDES_JS) excluye los textos
+#   recortados con elipsis (`text-overflow: ellipsis`, lo que react-native-web
+#   genera para numberOfLines={1}): ese recorte es deliberado y no desborda (la
+#   pagina no tiene scroll horizontal). Daba un falso positivo con «Hola,
+#   <nombre>» de la cabecera de Inicio (HomeScreen.tsx, F05-05 K3 §2.7), que
+#   sigue en el DOM bajo el formulario superpuesto y, con el nombre sintetico
+#   «Usuario sintetico VS-01», se recorta («Hola, Usuario si…»). Ademas exige
+#   que el documento no tenga scroll horizontal y registra en el manifest los
+#   textos truncados (truncados_elipsis_formulario).
 # ============================================================
 
 from __future__ import annotations
@@ -61,6 +70,17 @@ import uuid
 import psycopg
 from playwright.sync_api import sync_playwright
 
+#: Elementos con contenido mas ancho que su caja y overflow-x no visible, salvo los textos recortados
+#: con elipsis (numberOfLines={1} en react-native-web); incluye el propio documento si tiene scroll horizontal.
+DESBORDES_JS = ("[...document.querySelectorAll('*')].filter(e => e.scrollLeft > 0 || e.scrollWidth > e.clientWidth + 1"
+                " && getComputedStyle(e).overflowX !== 'visible' && getComputedStyle(e).textOverflow !== 'ellipsis')"
+                ".map(e => e.getAttribute('data-testid') || e.tagName)"
+                ".concat(document.documentElement.scrollWidth > document.documentElement.clientWidth + 1 ? ['DOCUMENTO'] : [])")
+#: Textos recortados con elipsis (no fallan; se registran como evidencia).
+TRUNCADOS_JS = ("[...document.querySelectorAll('*')].filter(e => e.scrollWidth > e.clientWidth + 1"
+                " && getComputedStyle(e).textOverflow === 'ellipsis')"
+                ".map(e => ({testid: e.getAttribute('data-testid') || e.tagName, texto: e.innerText,"
+                " ancho_contenido: e.scrollWidth, ancho_caja: e.clientWidth}))")
 ETIQUETA = "EVIDENCIA WEB/VIEWPORT — NO EVIDENCIA iOS"
 
 
@@ -165,8 +185,10 @@ def main() -> None:
             page.get_by_test_id("financiacion").wait_for()
             financiacion_visible = page.get_by_test_id("financiacion-texto").inner_text()
             page.wait_for_timeout(500)
-            desbordes = page.evaluate("[...document.querySelectorAll('*')].filter(e => e.scrollLeft > 0 || e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflowX !== 'visible').map(e => e.getAttribute('data-testid') || e.tagName)")
+            desbordes = page.evaluate(DESBORDES_JS)
             metricas["desbordes_horizontales_formulario"] = desbordes
+            # Truncados con elipsis (numberOfLines={1}): recorte deliberado, no desbordamiento; se registran.
+            metricas["truncados_elipsis_formulario"] = page.evaluate(TRUNCADOS_JS)
             if desbordes:
                 raise SystemExit(f"FALLO LAYOUT: desbordamiento horizontal en {desbordes}")
             # SPEC-08: desactivado al abrir, con indicacion visible; pulsarlo no escribe.

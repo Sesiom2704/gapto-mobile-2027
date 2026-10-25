@@ -60,6 +60,13 @@
 #   escribe en «Más detalles» (campo-nota) y CADA hecho se localiza en la BD por
 #   su UUID (intencion_id del POST capturado; en VS-01 hecho_id = intencion_id),
 #   nunca por su concepto.
+# Version: 0.4.1 (F05-07/GATE adenda 2, MANT-PRE-GATE C/e2e; DEF-E2E-REGCAT): (1)
+#   precondicion explicita del catalogo del seed (Hogar y Luz por su UUID
+#   determinista) con FALLO PRECONDICION legible; sin el seed, (a) moria en un
+#   timeout de 30 s esperando cat-<hogar>. (2) El detector de desbordamiento es
+#   el de e2e_vs01 (DESBORDES_JS: excluye los textos recortados con elipsis y
+#   exige que el documento no tenga scroll horizontal); los truncados se
+#   registran en el manifest (truncados_elipsis). Ver e2e_vs01 0.7.1.
 # ============================================================
 
 from __future__ import annotations
@@ -112,6 +119,9 @@ def servidor_web(dist: str | None, web: str):
     finally:
         proc.terminate()
         proc.wait(timeout=10)
+_spec_vs01 = importlib.util.spec_from_file_location("e2e_vs01", pathlib.Path(__file__).with_name("e2e_vs01.py"))
+vs01 = importlib.util.module_from_spec(_spec_vs01)
+_spec_vs01.loader.exec_module(vs01)
 _spec = importlib.util.spec_from_file_location("bootstrap_dev_db", pathlib.Path(__file__).with_name("bootstrap_dev_db.py"))
 seed = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(seed)
@@ -221,6 +231,12 @@ def main() -> None:
         resultado: dict = {}
         hogar, luz = str(seed.id_categoria("hogar")), str(seed.id_categoria("luz"))
         kwh = str(seed.id_magnitud("consumo_electrico"))
+        # Precondicion: catalogo del seed (bootstrap_dev_db.py --seed-categorias). Sin el, (a) moria
+        # en un timeout opaco esperando cat-<hogar> (DEF-E2E-REGCAT).
+        sembradas = {x["id"] for x in api(a.api, "GET", "/v1/categorias")["categorias"]}
+        if not {hogar, luz} <= sembradas:
+            raise SystemExit("FALLO PRECONDICION: falta el catalogo sintetico del seed; ejecuta antes "
+                             "bootstrap_dev_db.py --seed-categorias contra esta base y esta API")
         p7 = preparar_p7(a.api, a.run_p7)
         pref = f"P7-{a.run_p7}"
         respuestas_d: list[dict] = []
@@ -251,8 +267,11 @@ def main() -> None:
                 page.screenshot(path=str(f))
                 capturas.append(f.name)
 
+            truncados: list = []
+
             def desbordes() -> list:
-                return page.evaluate("[...document.querySelectorAll('*')].filter(e => e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflowX !== 'visible').map(e => e.getAttribute('data-testid') || e.tagName)")
+                truncados.append(page.evaluate(vs01.TRUNCADOS_JS))
+                return page.evaluate(vs01.DESBORDES_JS)
 
             recargas = {"n": 0}
 
@@ -480,7 +499,8 @@ def main() -> None:
         manifest = {"etiqueta": ETIQUETA, "run_id": run, "run_p7": a.run_p7, "fixture_p7": p7, "respuestas_d": respuestas_d,
                     "web": a.web, "resultado": resultado, "fallos": fallos,
                     "recargas_por_descarga_cortada": recargas["n"], "rechazo_esperado": rechazos_esperados,
-                    "errores_consola": errores_consola, "errores_consola_no_esperados": no_esperados, "capturas": capturas}
+                    "errores_consola": errores_consola, "errores_consola_no_esperados": no_esperados,
+                    "truncados_elipsis": truncados, "capturas": capturas}
         (salida / f"REGCAT_{run}_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
         print(json.dumps({"etiqueta": ETIQUETA, "run_id": run, "fallos": fallos, "capturas": len(capturas),
                           "errores_consola": len(errores_consola), "rechazos_esperados": len(rechazos_esperados),
