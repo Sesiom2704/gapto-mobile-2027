@@ -8,6 +8,7 @@
 // Versión: 0.3.0 (F05-01 P7 · N3, Moisés D-P7-05, microcopy AJ-S6WIREUI-09): solo las ramas con usables = false. Aviso de nivel «… Sus subcategorías tampoco se pueden elegir ahora. Elige otra categoría o registra sin categoría.» (motivo «Desactivada» y resto de motivos) y subtítulo de fila «sus subcategorías tampoco se pueden usar». Ramas usables = true y lógica `usables` sin cambios.
 // Versión: 0.4.0 (F05-03/F05-04 J2 §2.3/§2.5): prop opcional `naturaleza` (GASTO por defecto: el comportamiento anterior) para el registro y los ajustes de ingresos; `usables` la usa en lugar de GASTO fijo. Sin imports nuevos.
 // Versión: 0.5.0 (F05-05 K3 §2.1; F05 §49.4 A1/A2/A3, D-SRCH-01..03; lámina SRCH-ACT-AFI A1, A2, A6, C2): sección «Sugeridas» (prop opcional `sugeridas`, hasta 3, con ruta y motivo) encima del árbol en la raíz; tocar una sugerida invoca el MISMO `onElegir` que el árbol (R1: misma intención) y solo se muestra si el nodo existe y es seleccionable (nada preseleccionado, C01). Búsqueda opcional (`buscar`) sobre todo el árbol con la normalización C06 (`normalizarNombre`: sin mayúsculas ni acentos): resultados con ruta en el orden del árbol (sin reordenar, I13c); lo no seleccionable se ve atenuado con su motivo y no se puede elegir. Imports nuevos declarados en I13a: TextInput, normalizarNombre y el tipo SugeridaCategoria.
+// Versión: 0.6.0 (F05-D051 paso 9.1 · G1 v2): prop opcional `traza` (solo la pasa el registro, y solo en `__DEV__`): `selector_nivel` {n: profundidad} al entrar en un nivel, `selector_miga` al volver por las migas, `selector_busqueda` al empezar a escribir, `selector_cerrado` y `categoria_elegida` {via: arbol | sugerida | busqueda | sin_categoria, n: niveles}. Sin la prop no se llama a nada; ningún import nuevo y la navegación, la elegibilidad y el orden no cambian.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -67,6 +68,8 @@ export function SelectorCategorias(p: {
   /** F05-05 A2/A3: campo de búsqueda sobre todo el árbol (C06). */
   buscar?: boolean;
   testID?: string;
+  /** F05-D051 9.1 (G1 v2): hitos del ensayo G1; solo en `__DEV__`. Nunca textos tecleados ni nombres. */
+  traza?: (evento: string, extra?: { via?: string; n?: number }) => void;
 }) {
   const { c } = useTema();
   const inset = useSafeAreaInsets();
@@ -100,9 +103,19 @@ export function SelectorCategorias(p: {
     .map((x) => ({ x, n: arbol?.porId.get(x.categoria_id) }))
     .filter((y): y is { x: SugeridaCategoria; n: CategoriaNodo } => !!y.n && p.esSeleccionable(y.n));
 
+  // G1 v2: profundidad de un nodo (1 = raíz) para `selector_nivel` y `categoria_elegida`; solo con traza.
+  const nivelDe = (n: CategoriaNodo) => (arbol ? ancestros(arbol, n.id).length + 1 : 0);
+  const elegirCon = (via: string, n: CategoriaNodo) => {
+    p.traza?.('categoria_elegida', { via, n: nivelDe(n) });
+    p.onElegir(n);
+  };
+
   const tocar = (n: CategoriaNodo) => {
-    if (visiblesDe(n.id).length > 0) return setNivel(n.id);
-    if (p.esSeleccionable(n)) p.onElegir(n);
+    if (visiblesDe(n.id).length > 0) {
+      p.traza?.('selector_nivel', { n: nivelDe(n) });
+      return setNivel(n.id);
+    }
+    if (p.esSeleccionable(n)) elegirCon('arbol', n);
   };
 
   return (
@@ -110,7 +123,7 @@ export function SelectorCategorias(p: {
       <View style={[s.cab, { paddingTop: inset.top + espacio.s, borderBottomColor: c.borderDefault }]}>
         <View style={{ width: 72 }} />
         <Text accessibilityRole="header" style={[tipo.titleSmall, { color: c.textPrimary }]}>{p.titulo}</Text>
-        <BotonTexto testID="selector-cerrar" titulo="Cerrar" onPress={p.onCerrar} />
+        <BotonTexto testID="selector-cerrar" titulo="Cerrar" onPress={p.traza ? () => { p.traza?.('selector_cerrado'); p.onCerrar(); } : p.onCerrar} />
       </View>
 
       {p.carga.fase === 'ERROR' ? (
@@ -125,7 +138,11 @@ export function SelectorCategorias(p: {
           {p.onContinuarSinCategoria ? (
             <View style={{ gap: espacio.s }}>
               <Text style={[tipo.footnote, { color: c.textSecondary }]}>Si prefieres no clasificarlo ahora:</Text>
-              <BotonSecundario testID="selector-continuar-sin" titulo="Continuar sin categoría" onPress={p.onContinuarSinCategoria} />
+              <BotonSecundario
+                testID="selector-continuar-sin"
+                titulo="Continuar sin categoría"
+                onPress={p.traza ? () => { p.traza?.('categoria_elegida', { via: 'sin_categoria', n: 0 }); p.onContinuarSinCategoria?.(); } : p.onContinuarSinCategoria}
+              />
             </View>
           ) : null}
         </View>
@@ -137,7 +154,7 @@ export function SelectorCategorias(p: {
                 testID="selector-busqueda"
                 accessibilityLabel="Buscar categoría"
                 value={texto}
-                onChangeText={setTexto}
+                onChangeText={p.traza ? (x) => { if (texto === '' && x !== '') p.traza?.('selector_busqueda'); setTexto(x); } : setTexto}
                 placeholder="Buscar categoría"
                 placeholderTextColor={c.textSecondary}
                 autoCorrect={false}
@@ -165,7 +182,7 @@ export function SelectorCategorias(p: {
                     apagada={!sel}
                     elegida={p.seleccionadaId === n.id}
                     deshabilitada={!sel}
-                    onPress={() => p.onElegir(n)}
+                    onPress={() => elegirCon('busqueda', n)}
                   />
                 );
               })}
@@ -187,7 +204,7 @@ export function SelectorCategorias(p: {
                   subtitulo={x.ruta}
                   detalle={x.motivo}
                   elegida={p.seleccionadaId === n.id}
-                  onPress={() => p.onElegir(n)}
+                  onPress={() => elegirCon('sugerida', n)}
                 />
               ))}
               <Text style={[tipo.footnote, s.seccion, { color: c.textSecondary }]}>Todas</Text>
@@ -203,20 +220,20 @@ export function SelectorCategorias(p: {
               titulo={p.opcionRaiz.etiqueta}
               subtitulo={p.opcionRaiz.subtitulo}
               elegida={p.opcionRaiz.seleccionada}
-              onPress={p.opcionRaiz.onPress}
+              onPress={p.traza ? () => { p.traza?.('categoria_elegida', { via: p.modo === 'REGISTRO' ? 'sin_categoria' : 'raiz', n: 0 }); p.opcionRaiz?.onPress(); } : p.opcionRaiz.onPress}
             />
           ) : null}
 
           {nivel !== null ? (
             <View testID="selector-migas" style={[s.migas, { borderBottomColor: c.separator }]}>
-              <Pressable testID="selector-miga-todas" accessibilityRole="link" onPress={() => setNivel(null)} hitSlop={8}>
+              <Pressable testID="selector-miga-todas" accessibilityRole="link" onPress={() => { p.traza?.('selector_miga', { n: 0 }); setNivel(null); }} hitSlop={8}>
                 <Text style={[tipo.footnote, { color: c.accent }]}>Todas</Text>
               </Pressable>
               {migas.map((m, i) => (
                 <React.Fragment key={m.id}>
                   <Text style={[tipo.footnote, { color: c.textSecondary }]}> › </Text>
                   {i < migas.length - 1 ? (
-                    <Pressable testID={`selector-miga-${m.id}`} accessibilityRole="link" onPress={() => setNivel(m.id)} hitSlop={8}>
+                    <Pressable testID={`selector-miga-${m.id}`} accessibilityRole="link" onPress={() => { p.traza?.('selector_miga', { n: i + 1 }); setNivel(m.id); }} hitSlop={8}>
                       <Text style={[tipo.footnote, { color: c.accent }]}>{m.nombre}</Text>
                     </Pressable>
                   ) : (
@@ -239,7 +256,7 @@ export function SelectorCategorias(p: {
               subtitulo="Elegir la categoría general"
               enfasis
               elegida={p.seleccionadaId === actual.id}
-              onPress={() => p.onElegir(actual)}
+              onPress={() => elegirCon('arbol', actual)}
             />
           ) : null}
           {actual && !p.esSeleccionable(actual) && p.motivo(actual) ? (

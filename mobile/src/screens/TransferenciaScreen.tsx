@@ -5,6 +5,7 @@
 // Descripción: «Entre cuentas» (F05-04 J2 §2.3; D-DYN-09; lámina REG-DYN X01). Tarea inmersiva «Cancelar · Entre cuentas · Tipo»: «Desde» y «A» (cuentas elegibles que da el servidor para salida y entrada en la fecha), importe, fecha (Hoy · Ayer · Otra, nunca futura), «+ Añadir nota» y la nota fija de la lámina. Misma cuenta en «Desde» y «A»: aviso en el campo y no se puede registrar. Mismo ciclo de envío que el registro: UUID y payload sellados antes de enviar; doble toque ignorado; INDETERMINADO reintenta con la MISMA identidad; rechazo definitivo libera la edición (FECHA_FUTURA con su mensaje). El tipo solo se puede cambiar antes del primer envío. Sin categoría, tercero, presupuesto ni atribución: no es gasto ni ingreso.
 // Versión: 0.1.0 (F05-03/F05-04 J2 §2.3)
 // Versión: 0.2.0 (F05-06 M4 §3; lámina CAP B2/B3; D-CAP-06/08): al final de «Desde» y de «A», «¿Falta una cuenta? N sin configurar ›» (solo si N > 0) abre la lista de Cuentas encima del formulario, que conserva lo escrito; al volver se recargan ambas listas y el número. CUENTA_SIN_CAPACIDAD al guardar: mensaje del servidor y «El resto del formulario se conserva.»; se recargan las listas y la cuenta que perdió la capacidad deja de estar elegida (sin preselección).
+// Versión: 0.3.0 (F05-D051 paso 9.1 · G1 v2): prop opcional `traza` (solo `__DEV__`, desde App.tsx): `form_montado`, `cuentas_ok`/`cuentas_error`, importe (primer y último cambio, sin valor), `cuenta_desde_elegida` / `cuenta_a_elegida`, `tipo:<TIPO>` y `registrar_pulsado`. Sin la prop no se llama a nada; sin cambios de comportamiento.
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -52,6 +53,8 @@ export function TransferenciaScreen(p: {
   onCerrar: (registrado: boolean) => void;
   inicial?: { importeTexto: string; fechaHecho: string; aviso: string | null } | null;
   onCambiarTipo?: (hacia: TipoRegistro, conservar: { importeTexto: string; fechaHecho: string; aviso: string }) => void;
+  /** F05-D051 9.1 (G1 v2): hitos del ensayo G1; solo en `__DEV__` (en producción, undefined). Nunca valores. */
+  traza?: (evento: string, extra?: { via?: string; n?: number }) => void;
 }) {
   const { c } = useTema();
   const inset = useSafeAreaInsets();
@@ -83,6 +86,7 @@ export function TransferenciaScreen(p: {
     const [o, d] = await Promise.all([p.cliente.cuentasElegibles('TRANSFERENCIA_ORIGEN', f), p.cliente.cuentasElegibles('TRANSFERENCIA_DESTINO', f)]);
     const lo: Lista = o.tipo === 'OK' ? { fase: 'OK', lista: o.datos.cuentas } : { fase: 'ERROR' };
     const ld: Lista = d.tipo === 'OK' ? { fase: 'OK', lista: d.datos.cuentas } : { fase: 'ERROR' };
+    p.traza?.(o.tipo === 'OK' && d.tipo === 'OK' ? 'cuentas_ok' : 'cuentas_error');
     setOrigen(lo);
     setDestino(ld);
     // Una cuenta elegida que deja de ser elegible en la nueva fecha se quita (sin preselección).
@@ -92,6 +96,9 @@ export function TransferenciaScreen(p: {
   useEffect(() => {
     if (esFechaIso(fecha) && fecha <= hoyIso) void cargar(fecha);
   }, [fecha]);
+  useEffect(() => {
+    p.traza?.('form_montado', { via: 'TRANSFERENCIA' });
+  }, []);
 
   const bloqueado = estado.fase === 'ENVIANDO' || estado.fase === 'INDETERMINADO' || estado.fase === 'CONFIRMADO';
   const faltan = faltaTransferencia({ desde, hacia, importeTexto, fecha }, hoyIso);
@@ -124,6 +131,7 @@ export function TransferenciaScreen(p: {
   };
 
   const registrar = async () => {
+    p.traza?.('registrar_pulsado');
     if (enVuelo.current || !listo) return;
     if (sellada.current) return enviarPayload(sellada.current);
     const imp = parsearImporte(importeTexto);
@@ -146,6 +154,7 @@ export function TransferenciaScreen(p: {
   const cambiarTipo = (t: TipoRegistro) => {
     setHojaTipos(false);
     if (t === 'TRANSFERENCIA' || enviado) return;
+    p.traza?.(`tipo:${t}`);
     p.onCambiarTipo?.(t, { importeTexto, fechaHecho: fecha, aviso: avisoCambioDeTipo('TRANSFERENCIA', t, []) });
   };
 
@@ -184,7 +193,10 @@ export function TransferenciaScreen(p: {
       {l.fase === 'OK' ? (
         <View style={s.chips}>
           {l.lista.map((x) => (
-            <Chip key={x.cuenta_id} testID={`${prefijo}-${x.cuenta_id}`} etiqueta={x.nombre} seleccionado={sel === x.cuenta_id} onPress={() => editar(() => onElegir(x.cuenta_id))} />
+            <Chip key={x.cuenta_id} testID={`${prefijo}-${x.cuenta_id}`} etiqueta={x.nombre} seleccionado={sel === x.cuenta_id} onPress={() => editar(() => {
+              p.traza?.(`cuenta_${prefijo}_elegida`);
+              onElegir(x.cuenta_id);
+            })} />
           ))}
         </View>
       ) : null}
@@ -219,7 +231,10 @@ export function TransferenciaScreen(p: {
               testID="campo-importe"
               accessibilityLabel="Importe en euros"
               value={importeTexto}
-              onChangeText={(t) => editar(() => setImporte(t))}
+              onChangeText={(t) => editar(() => {
+                p.traza?.('cambio:importe');
+                setImporte(t);
+              })}
               editable={!bloqueado}
               keyboardType="decimal-pad"
               inputMode="decimal"

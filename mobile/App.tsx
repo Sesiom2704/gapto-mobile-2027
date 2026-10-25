@@ -14,18 +14,19 @@
 // v0.10.0 (F05-06 M5 §B1; láminas PREV v0.2 y HOME-01 v0.4): la campana y «Ver todos ›» de Inicio abren «Pendientes» (PendientesScreen) y una fila de Inicio o de la lista abre el detalle de la previsión (PrevisionDetalleScreen), que contiene sus salidas («Registrar pago/cobro», «Ya lo registré», «No hubo este mes»); el swipe «Abrir el formulario completo» abre el detalle directamente en el registro con el importe escrito. Son tareas superpuestas (ocultan la barra inferior); al terminar con cambios, Inicio, «Pendientes» y Día a día vuelven a leer.
 // v0.11.0 (F05-06 M1; lámina EDIT-HECHO v0.1): «Corregir» desde «Más» del detalle de un hecho en Día a día abre la tarea inmersiva CorregirHechoScreen; al terminar con cambios, Día a día e Inicio vuelven a leer y el detalle se reabre (rastro visible). «Anular por duplicado» vive en la propia Actividad.
 // v0.12.0 (F05-07 G1, F05-D050 §64.1): «Registrar» y los accesos de plantilla de Inicio abren el ensayo G1 (`dev/g1`, solo `__DEV__`) y el cliente usa `g1Fetch(fetch)`, que fuera de `__DEV__` es el `fetch` sin envolver; sin cambios de navegación.
-// Versión: 0.12.0
+// v0.13.0 (F05-D051 paso 9.1 · G1 v2): instrumentación por paso, solo `__DEV__`: `trazaG1` (= `g1Traza` en desarrollo, `undefined` en producción) llega por prop al registro y a la transferencia; hitos `hoja_tipos` y `tipo:<TIPO>` aquí, y teclado y AppState con `g1Suscribir` (sin suscripción fuera de `__DEV__`). Sin cambios de navegación ni de comportamiento.
+// Versión: 0.13.0
 // ============================================================
 
 import * as Crypto from 'expo-crypto';
 import { StatusBar } from 'expo-status-bar';
-import React, { useCallback, useMemo, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { AppState, Keyboard, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { ClienteApi, crearCliente } from './src/api/cliente';
 import { configApi } from './src/api/config';
-import { g1Abrir, g1Fetch } from './src/dev/g1';
+import { g1Abrir, g1Fetch, g1Suscribir, g1Traza } from './src/dev/g1';
 import { BarraInferior, Destino } from './src/components/BarraInferior';
 import { HojaTipos } from './src/components/HojaTipos';
 import type { TipoRegistro } from './src/domain/registro';
@@ -65,6 +66,8 @@ type TareaRegistro = {
 
 export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () => Date }) {
   const { c, esquema } = useTema();
+  /** G1 v2 (F05-D051 9.1): traza por paso solo en desarrollo; en producción, `undefined` (las pantallas no trazan nada). */
+  const trazaG1 = __DEV__ ? g1Traza : undefined;
   const [destino, setDestino] = useState<Destino>('INICIO');
   const [tarea, setTarea] = useState<TareaRegistro | null>(null);
   const [hojaTipos, setHojaTipos] = useState(false);
@@ -110,6 +113,7 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
             refresco={refresco}
             onRegistrar={() => {
               g1Abrir('inicio:registrar');
+              trazaG1?.('hoja_tipos');
               setHojaTipos(true);
             }}
             onAcceso={(pl) => {
@@ -226,6 +230,7 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
               plantilla={tarea.plantilla ?? null}
               inicial={tarea.inicial ?? null}
               onCambiarTipo={(t, conservar) => setTarea({ tipo: t, inicial: conservar, clave: tarea.clave + 1 })}
+              traza={trazaG1}
               onGastoCompartido={(base, inicial) => setCompartido({ base, inicial, clave: Date.now() })}
             />
           </View>
@@ -257,6 +262,7 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
               onCerrar={cerrarTarea}
               inicial={tarea.inicial ?? null}
               onCambiarTipo={(t, conservar) => setTarea({ tipo: t, inicial: conservar, clave: tarea.clave + 1 })}
+              traza={trazaG1}
             />
           </View>
         ) : null}
@@ -371,6 +377,7 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
         {hojaTipos ? (
           <HojaTipos
             onElegir={(t) => {
+              trazaG1?.(`tipo:${t}`);
               setHojaTipos(false);
               setTarea({ tipo: t, clave: Date.now() });
             }}
@@ -389,6 +396,8 @@ const ahoraDispositivo = () => new Date();
 
 export default function App() {
   const cliente = useMemo(() => crearCliente(configApi, g1Fetch(fetch)), []);
+  // G1 v2: teclado y AppState como hitos del ensayo abierto; fuera de `__DEV__` no se suscribe a nada.
+  useEffect(() => g1Suscribir({ Keyboard, AppState }), []);
   return (
     <SafeAreaProvider>
       <ProveedorTema>
