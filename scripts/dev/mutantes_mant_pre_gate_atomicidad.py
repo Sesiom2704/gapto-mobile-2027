@@ -4,7 +4,7 @@
 # Ruta: scripts/dev/mutantes_mant_pre_gate_atomicidad.py
 # Descripcion: Arnes de mutacion de MANT-PRE-GATE · atomicidad multirregistro
 #   (F05 §64.3 F05-D050, AJ-04; R-CAT-RECHAZO-COMMIT). Demuestra que cada
-#   prueba de fallo inyectado de test_212 discrimina: un mutante por FRONTERA
+#   prueba de fallo inyectado de test_215 discrimina: un mutante por FRONTERA
 #   transaccional de comando multirregistro de F05-06 (y, si la frontera es
 #   compartida, uno por cada prueba que la ejerce). El mutante envuelve la
 #   operacion que la frontera entrega a UnidadDeTrabajo con un `try` que
@@ -30,6 +30,7 @@
 #               [--detalle carpeta]   (salida de pytest de cada mutante: motivo de la muerte)
 #   No ejecutar en paralelo con otro arnes ni con la suite sobre el mismo arbol.
 # Version: 0.1.0 (F05-07/GATE adenda 2, MANT-PRE-GATE atomicidad multirregistro)
+# Version: 0.1.1 (F05-07/GATE adenda 2, integracion MANT-PRE-GATE: el test discriminante pasa a test_215)
 # ============================================================
 
 from __future__ import annotations
@@ -54,8 +55,8 @@ EJR = API + "ejecucion_registro.py"
 EJC = API + "ejecucion_correccion.py"
 EJA = API + "ejecucion_anulacion.py"
 EJV = API + "ejecucion_categoria_v3.py"
-T212 = "tests/api/test_212_f05_07_mpg_atomicidad_multirregistro.py::"
-BARRIDO = T212 + "test_rechazo_tras_cada_escritura_no_deja_escrituras_parciales"
+T215 = "tests/api/test_215_f05_07_mpg_atomicidad_multirregistro.py::"
+BARRIDO = T215 + "test_rechazo_tras_cada_escritura_no_deja_escrituras_parciales"
 
 
 def barrido(*comandos: str) -> list[str]:
@@ -163,7 +164,7 @@ MUTANTES = [
        '    @app.post("/v1/mutante/sin-clasificar", dependencies=[Depends(autorizar)])\n'
        '    def _mutante_sin_clasificar():\n        return {}\n\n'
        '    @app.post("/v1/afinidades", **_RAF)\n')],
-     [T212 + "test_inventario_post_cerrado"], None),
+     [T215 + "test_inventario_post_cerrado"], None),
 ]
 
 

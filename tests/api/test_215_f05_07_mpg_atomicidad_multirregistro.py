@@ -1,7 +1,7 @@
 # ============================================================
 # GAPTO MOBILE 2027
-# Fichero: test_212_f05_07_mpg_atomicidad_multirregistro.py
-# Ruta: tests/api/test_212_f05_07_mpg_atomicidad_multirregistro.py
+# Fichero: test_215_f05_07_mpg_atomicidad_multirregistro.py
+# Ruta: tests/api/test_215_f05_07_mpg_atomicidad_multirregistro.py
 # Descripcion: MANT-PRE-GATE · atomicidad de los comandos multirregistro de
 #   F05-06 (F05 §64.3 F05-D050, AJ-04; R-CAT-RECHAZO-COMMIT §32.6/§35.7).
 #   Inventario: C:/DEV/evidencia_f0507_gate/C/atomicidad/INVENTARIO_MULTIRREGISTRO.md
@@ -36,6 +36,8 @@
 #   frontera convierte en valor un rechazo posterior a la primera escritura).
 #   Exige GAPTO_TEST_DATABASE_URL (base desechable; estos tests confirman filas).
 # Version: 0.1.0 (F05-07/GATE adenda 2, MANT-PRE-GATE atomicidad multirregistro)
+# Version: 0.1.1 (F05-07/GATE adenda 2, integracion MANT-PRE-GATE: renumerado de test_212 a test_215;
+#   test_212 es G9 de f05-gate-g2 y 213/214 son de F04-R3)
 # ============================================================
 
 from __future__ import annotations
