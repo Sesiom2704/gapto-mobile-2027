@@ -10,9 +10,9 @@
 #   tests/backend/test_14h_mant_vinculo_concurrencia_serial.py (serie).
 #   Procede de dos arneses historicos identicos salvo rutas (HUECO-05):
 #     - C:/DEV/evidencia_mant_vinculo/mutante_mant.py (raiz cableada
-#       C:\DEV\wt_mant_vinculo);
+#       worktree wt_mant_vinculo);
 #     - C:/DEV/evidencia_f04_r2_rec/p5/mutante_mant_rec.py (copia del anterior
-#       sobre C:\DEV\wt_f04_r2_rec para el recierre F04-R2 P5).
+#       sobre el worktree wt_f04_r2_rec para el recierre F04-R2 P5).
 #   Mismo mutante, mismo texto protegido y mismos discriminantes: en el
 #   repositorio quedan consolidados en este unico arnes.
 #   Motor (D-181, D-192, D-193, WM 12C.2): sustitucion de texto exacto (UNA
@@ -29,6 +29,8 @@
 #   journal vive en la raiz del repo; consolida mutante_mant.py y
 #   mutante_mant_rec.py. El texto protegido sigue anclando en 5e39673
 #   (previsiones_service.py): sin reanclaje.
+# Version: 0.2.1 (F05-07/GATE adenda 2, integracion MANT-PRE-GATE: la cabecera nombra los
+#   worktrees historicos sin ruta absoluta (test_rv3_000, ruta_absoluta_windows))
 # ============================================================
 
 from __future__ import annotations
