@@ -20,6 +20,12 @@
 #        python scripts/dev/mutantes_f05_06_m5.py [--solo ID,ID] [--salida fichero]
 #   No ejecutar en paralelo con otro arnes ni con la suite sobre el mismo arbol.
 # Version: 0.1.0 (F05-06 M5 §A8)
+# Version: 0.1.1 (F05-07/GATE adenda 2, MANT-PRE-GATE arneses, HUECO-08; F05 §63.6 (2)):
+#   reanclaje persistente del discriminante de M12 y M12b en test_154. El test
+#   `test_i3_m5_excepcion_limitada_a_vincular_realidad_y_omitir` paso a llamarse
+#   `test_i3_m5_excepcion_limitada_a_los_metodos_autorizados` en 32253e8 (F05-06 M5-B,
+#   mismo contrato: la frontera de ejecucion_prevision.py solo usa los metodos
+#   autorizados de PrevisionesService). Mismos mutantes; censo sin cambios.
 # ============================================================
 
 from __future__ import annotations
@@ -133,12 +139,12 @@ MUTANTES = [
     ("M12", "llamada a corregir_vinculo desde la frontera",
      [(EJP, "CODIGO_PORCION_CAMBIADA = \"PORCION_CAMBIADA\"\n",
        "CODIGO_PORCION_CAMBIADA = \"PORCION_CAMBIADA\"\n_x = lambda s: _previsiones(s).corregir_vinculo  # noqa: E731\n")],
-     [T154 + "test_i3_m5_excepcion_limitada_a_vincular_realidad_y_omitir"], None),
+     [T154 + "test_i3_m5_excepcion_limitada_a_los_metodos_autorizados"], None),
     ("M12b", "llamada a corregir_vinculo con alias de importacion",
      [(EJP, "from app.services.previsiones_service import PrevisionesService\n",
        "from app.services.previsiones_service import PrevisionesService\nfrom app.services.previsiones_service import "
        "PrevisionesService as _P\n_y = lambda s: _P(UnidadDeTrabajoAdscrita(s)).corregir_vinculo  # noqa: E731\n")],
-     [T154 + "test_i3_m5_excepcion_limitada_a_vincular_realidad_y_omitir"], None),
+     [T154 + "test_i3_m5_excepcion_limitada_a_los_metodos_autorizados"], None),
     ("M13", "total monetario unico en «Pendientes»",
      [(LEC, "        \"por_cobrar\": _por_naturaleza(atencion, \"INGRESO\"),\n",
        "        \"por_cobrar\": _por_naturaleza(atencion, \"INGRESO\"), \"total\": \"0.00\",\n")],

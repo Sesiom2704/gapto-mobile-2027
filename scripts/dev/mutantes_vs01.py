@@ -126,7 +126,13 @@
 #   `if (registrado) setRefresco(...)` (cierre de la devolucion). Se reancla
 #   con la misma semantica sobre `cerrarTarea` (la tarea de registro cierra
 #   sin refrescar Inicio). Mismo discriminante; censo sin cambios: 67.
-# Version: 0.16.1
+#   v0.17.0 (F05-07/GATE adenda 2, MANT-PRE-GATE arneses; F05 §63.6 (5)): el
+#   preflight Jest se ejecuta sin cache y en serie (`--no-cache --runInBand`)
+#   para evitar las intermitencias de Jest en paralelo vistas en la tirada
+#   nocturna; las ejecuciones Jest de cada mutante van en serie (`--runInBand`;
+#   la cache de transformacion se conserva porque su clave incluye el contenido
+#   del fichero mutado). Ningun mutante cambia; censo sin cambios: 67.
+# Version: 0.17.0
 # ============================================================
 
 from __future__ import annotations
@@ -144,7 +150,9 @@ JOURNAL = RAIZ / ".mutantes_vs01.journal.json"
 
 PY = [sys.executable, "-m", "pytest", "tests/api", "-q", "-x", "-p", "no:cacheprovider", "--rootdir=tests/api"]
 # En Windows `npx` es npx.cmd: subprocess sin shell no lo resuelve por nombre (se resuelve con which).
-JS = [shutil.which("npx") or "npx", "jest", "--silent"]
+JS = [shutil.which("npx") or "npx", "jest", "--silent", "--runInBand"]
+# Preflight Jest sin cache y en serie (MANT-PRE-GATE, F05 §63.6 (5)).
+JS_PREFLIGHT = JS + ["--no-cache"]
 
 # (id, fichero, texto_original, texto_mutado, suite_discriminante)
 MUTANTES = [
@@ -296,10 +304,10 @@ def sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
-def correr(suite: str) -> int:
+def correr(suite: str, preflight: bool = False) -> int:
     if suite == "py":
         return subprocess.run(PY, cwd=RAIZ, capture_output=True).returncode
-    return subprocess.run(JS, cwd=RAIZ / "mobile", capture_output=True).returncode
+    return subprocess.run(JS_PREFLIGHT if preflight else JS, cwd=RAIZ / "mobile", capture_output=True).returncode
 
 
 def recuperar_si_pendiente() -> bool:
@@ -319,7 +327,7 @@ def main() -> None:
     if recuperar_si_pendiente():
         sys.exit("Habia un mutante pendiente: restaurado y verificado. Resultado NO-PASS; relanzar.")
     for suite in ("py", "js"):
-        if correr(suite) != 0:
+        if correr(suite, preflight=True) != 0:
             sys.exit(f"PREFLIGHT ROJO en suite {suite}: no se muta nada.")
     veredictos = []
     for mid, fichero, a, b, suite in MUTANTES:
