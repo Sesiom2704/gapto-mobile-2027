@@ -5,6 +5,7 @@
 // Descripción: Lógica pura del reparto, el pagador real y las posiciones (F05-06 M3; F05 §51.2 M3, §57 F05-D043; lámina REP v0.2 D-REP-01..09, P-REP-01..06). «Otra persona» pagó: no sale dinero de tus cuentas y la deuda solo nace con «Sí» (D-REP-01/02, INV-04; «No lo sé» no la crea, P-REP-01). «Repartir» conserva siempre el total y deja ver lo que falta, que se puede dejar sin indicar (PARCIAL, G3) y nunca se completa solo (D-REP-03). «A partes iguales» es un botón y el céntimo sobrante va a la última fila (D-REP-04). «¿Te deben su parte?» persona a persona (D-REP-05). Revisión en cuatro bloques (D-REP-06). «Pendiente con» separa lo que te debe y lo que le debes; el neto es una lectura que no salda nada y, con algún saldo desconocido, es «Sin determinar», nunca 0,00 € (D-REP-07/09, OP-20). Cobro y pago con cuenta Gapto; perdonar no mueve dinero (D-REP-08). «Corregir reparto» solo cambia importes de quien ya está (§57.1.1): altas, bajas, invitado → deudor y «Le debo esto» (E1) se ven atenuados con su motivo.
 // Versión: 0.1.0 (F05-06 M3 §B1)
 // Versión: 0.2.0 (F05-D051 paso 2; F05 §65.4 contrato HTTP Q4/Q4-H2): tipos wire con `apertura_indeterminada` (F04-D055 A4) y `estado` en PosicionDeParte. Sin copy de UI (pendiente de la lámina REP).
+// Versión: 0.3.0 (F05-D051 paso 8; lámina B D-F0507L-03): `textoPosicion`, el texto de una posición según su estado. Pendiente con saldo desconocido → «Sin determinar»; CERRADA → «0,00 € · Saldado» y, si su importe inicial no se conoció, «Importe inicial desconocido». Ninguna CERRADA dice «Sin determinar»; sin valores por defecto (si una CERRADA llegara sin saldo, solo «Saldado»).
 // ============================================================
 
 import type { Borrador, CategoriaWire } from './intencion';
@@ -463,6 +464,32 @@ export function origenPosicion(x: Pick<PosicionPendiente, 'origen_concepto' | 'o
 
 export function textoSaldo(saldo: string | null): string {
   return saldo === null ? 'Sin determinar' : formatearEur(saldo);
+}
+
+// ------------------------------------------------------------------ lámina B (D-F0507L-03)
+export const TEXTO_SALDADO = 'Saldado';
+export const TEXTO_IMPORTE_INICIAL_DESCONOCIDO = 'Importe inicial desconocido';
+
+/**
+ * Texto de una posición según su estado (lámina B, D-F0507L-03).
+ * - ACTIVA: su saldo («Sin determinar» si no se conoce).
+ * - CERRADA: «0,00 € · Saldado»; nunca «Sin determinar». Con `apertura_indeterminada`, además
+ *   `inicial` = «Importe inicial desconocido» (va debajo).
+ */
+export function textoPosicion(x: { saldo: string | null; estado: 'ACTIVA' | 'CERRADA'; apertura_indeterminada: boolean }): {
+  saldo: string;
+  inicial: string | null;
+} {
+  if (x.estado !== 'CERRADA') return { saldo: textoSaldo(x.saldo), inicial: null };
+  return {
+    saldo: x.saldo === null ? TEXTO_SALDADO : `${formatearEur(x.saldo)} · ${TEXTO_SALDADO}`,
+    inicial: x.apertura_indeterminada ? TEXTO_IMPORTE_INICIAL_DESCONOCIDO : null,
+  };
+}
+
+/** Etiqueta accesible de una posición: el mismo texto que se ve, con la línea de debajo si la hay. */
+export function etiquetaPosicion(linea: string, inicial: string | null): string {
+  return inicial ? `${linea.replace(/\.$/, '')}. ${inicial}` : linea;
 }
 
 /** ¿Hay algo pendiente con la persona? (E5: la fila solo aparece entonces). */
