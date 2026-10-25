@@ -11,6 +11,7 @@
 // Versión: 0.6.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados invertidos — la acción principal se desliza a la IZQUIERDA y la alternativa a la DERECHA; acciones accesibles con el nombre de la dirección nueva. La devolución pendiente se desliza a la IZQUIERDA («Recibido»).
 // Versión: 0.7.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // Versión: 0.8.0 (F05-07/GATE adenda 2, MANT-PRE-GATE arneses, HUECO-05): O-1 afirma también la señal de umbral vigente (lámina SWIPE-01 v0.2, estilo C): por debajo del umbral el círculo no crece y pasado el umbral crece (`circuloTotal`). Sustituye como discriminante a la franja que se intensificaba en M2-C (mutante MC03 de scripts/dev/mutantes_f05_06_m2c.py).
+// Versión: 0.8.1 (F05-07/GATE adenda 2, MANT-PRE-GATE arneses): tipo explícito del nodo en `circuloCrecido` (tsc --noEmit, TS7006); sin cambios de aserciones.
 // ============================================================
 
 import './tiempos_rn';
@@ -486,7 +487,7 @@ describe('Actividad', () => {
     const OCULTOS = { includeHiddenElements: true }; // el fondo es para el dedo: oculto a VoiceOver
     // Señal de umbral (SWIPE-01 v0.2): el círculo del botón crece pasado el umbral.
     const circuloCrecido = () => screen.getByTestId('swipe-boton-dev-izquierda', OCULTOS)
-      .findAll((n) => ((StyleSheet.flatten(n.props.style) as any)?.transform ?? []).some((t: any) => t.scale === 1.08)).length > 0;
+      .findAll((n: any) => ((StyleSheet.flatten(n.props.style) as any)?.transform ?? []).some((t: any) => t.scale === 1.08)).length > 0;
     expect(screen.queryByTestId('swipe-accion-dev-izquierda', OCULTOS)).toBeNull(); // en reposo no hay fondo
 
     // Por debajo del umbral: fondo verde suave con «Recibido»; al soltar vuelve y no abre la hoja.
