@@ -14,11 +14,12 @@
 // Versión: 0.9.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados `principal` («Recibido» / «Repetir hoy», se desliza a la izquierda) y `alternativa` («Más», a la derecha), del componente común. El scroll cierra la fila abierta.
 // Versión: 0.10.0 (F05-06 M1; lámina EDIT-HECHO v0.1 D-EDIT-01, 06, 07; CONTRATO_M1 v0.1 §2): el detalle ofrece «Más» (si la raíz pasa `onCorregirHecho`): lee la elegibilidad del servidor (GET …/edicion) y abre la hoja con «Corregir» (tarea inmersiva fuera de la pantalla) y «Anular por duplicado» (hoja B1 con la declaración explícita y el motivo), atenuadas con su motivo cuando no se admiten. Anular no borra: tras confirmar, «Registro anulado» y la lista vuelve a leer. Un reintento tras un fallo de conexión usa la MISMA intención. Sin swipe de editar ni anular.
 // Versión: 0.11.0 (F05-06 M1 v1.1; Q9 opción (a)): en un registro de V3, «Más › Corregir categoría» (solo si el servidor trae la acción): hoja con lo que no cambia, categoría actual → nueva (selector del registro con la naturaleza del efecto), motivo y «Guardar categoría». Al guardar, «Categoría corregida» y la lista vuelve a leer; «Ver registro» reabre el detalle. Un reintento tras un fallo de conexión usa la MISMA intención. Corregir y anular de V3 siguen atenuados con su motivo.
+// Versión: 0.11.1 (F05-07 G1 SDK 58, decisión de Moisés del 2026-10-25): la ref del scroll se tipa con `ScrollViewInstance` (RN 0.88). Solo tipos; nada más cambia.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View, type ScrollViewInstance } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ClienteApi, DetalleActividad, EdicionHecho, FilaActividad, TipoActividad } from '../api/cliente';
@@ -128,7 +129,7 @@ export function ActividadScreen(p: {
   const [detalle, setDetalle] = useState<{ fase: 'CARGANDO' } | { fase: 'ERROR' } | { fase: 'OK'; d: DetalleActividad }>({ fase: 'CARGANDO' });
   const [cargandoMas, setCargandoMas] = useState(false);
   const peticion = useRef(0);
-  const scroll = useRef<ScrollView | null>(null);
+  const scroll = useRef<ScrollViewInstance | null>(null);
   const desplazamiento = useRef(0);
   const guardado = useRef<{ periodo: Periodo; filtros: Filtros; y: number } | null>(null);
   // K4-C (P12): desplazamiento pendiente de restaurar tras «Cancelar», y la petición vigente al cancelar. Se aplica
