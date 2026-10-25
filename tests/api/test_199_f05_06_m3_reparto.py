@@ -23,6 +23,8 @@
 # Version: 0.2.0 (F05-06 M3 CORR-01, R-M3-05): dos personas con la misma
 #   parte; cada posicion devuelta lleva el tercero que fija el servidor y su
 #   entidad es la del actor de ESE tercero (contrato que empareja el cliente).
+# Version: 0.3.0 (F05-D051 paso 2; F05 §65.4 contrato HTTP Q4/Q4-H2): la
+#   posicion del reparto lleva `estado` y `apertura_indeterminada`.
 # ============================================================
 
 from __future__ import annotations
@@ -651,7 +653,8 @@ def test_lectura_reparto_cena(t):
     assert d["partes"][0]["es_yo"] is True and d["partes"][0]["nombre"] == "Tú"
     assert partes[str(ids["yo"])]["importe"] == "14.50" and partes[str(ids["yo"])]["posicion"] is None
     assert partes[str(ids["tania"])]["tercero_id"] == str(tania)
-    assert partes[str(ids["tania"])]["posicion"] == {"entidad_id": str(entidad), "tipo": "DERECHO_COBRO", "saldo": "10.00"}
+    assert partes[str(ids["tania"])]["posicion"] == {"entidad_id": str(entidad), "tipo": "DERECHO_COBRO", "saldo": "10.00",
+                                                     "estado": "ACTIVA", "apertura_indeterminada": False}
     assert partes[str(ids["carlos"])]["posicion"] is None  # invitado
 
 

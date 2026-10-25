@@ -5,6 +5,7 @@
 // Descripción: Gesto común del swipe tras la pasada de Moisés en el iPhone (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3). Lados invertidos con el gesto real en cada pantalla: a la IZQUIERDA la principal (verde: Pagado / Cobrado / Recibido / Repetir hoy), a la DERECHA la alternativa (No hubo / Más en gris; Desactivar en naranja); el círculo aparece en el lado que se descubre. Fila abierta a medias (patrón iOS): se cierra al abrir otra, al hacer scroll y al tocar fuera; tocar su botón la ejecuta y tocar la fila abre su detalle. Vibración con `expo-haptics` simulado: una sola vez al cruzar el umbral, impacto medio; si el módulo falla, aviso en consola y `Vibration` de reserva.
 // Versión: 0.1.0 (F05-06 M5 SWIPE3)
 // Versión: 0.2.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
+// Versión: 0.3.0 (F05-D051 paso 2; F05 §65.4 contrato HTTP Q4/Q4-H2): fixtures wire con `apertura_indeterminada` (y `estado` en PosicionDeParte); sin cambios de aserciones.
 // ============================================================
 
 import './tiempos_rn';
@@ -270,7 +271,7 @@ test('Actividad: izquierda del todo = «Repetir hoy»; derecha del todo = «Más
 test('«Pendiente con»: izquierda del todo cobra el saldo entero; derecha del todo abre «Más»', async () => {
   const PEND: PendienteConPersona = {
     tercero_id: 'tania', nombre: 'Tania', te_debe: '15.00', le_debes: null, neto: '15.00', neto_estado: 'DETERMINADO',
-    posiciones: [{ entidad_id: 'd1', entidad_row_version: 1, tipo: 'DERECHO_COBRO', nombre: 'Gasto compartido', saldo: '15.00', estado: 'ACTIVA', origen_hecho_id: 'cena', origen_fecha: '2026-10-09', origen_concepto: 'Cena' }],
+    posiciones: [{ entidad_id: 'd1', entidad_row_version: 1, tipo: 'DERECHO_COBRO', nombre: 'Gasto compartido', saldo: '15.00', estado: 'ACTIVA', apertura_indeterminada: false, origen_hecho_id: 'cena', origen_fecha: '2026-10-09', origen_concepto: 'Cena' }],
   };
   const c = {
     ...clienteCategoriasStub(),
