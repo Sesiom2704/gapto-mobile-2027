@@ -12,7 +12,8 @@
 // v0.8.0 (F05-05 K3 §2.1/§2.2/§2.4; F05 §49.4 A1/A2/A2 bis/A5, §49.5 R1/R2; D-SRCH-01/05/11; lámina SRCH-ACT-AFI A1, A5, A7): las sugerencias de categoría (GET /v1/senales/categorias por tipo, fecha del formulario y tercero) se muestran en la sección «Sugeridas» del selector (que ahora tiene búsqueda) y como hasta 3 chips de ACCIÓN bajo «Categoría» mientras está pendiente. El selector se construye una vez y los chips invocan su MISMO callback de selección (`props.onElegir`): elegir un chip, una sugerida o el nodo en el árbol produce la misma intención (R1); sin tocar, el estado sigue PENDIENTE y nada habilita «Registrar» (C01). Con categoría elegida por el usuario, «Elegida por ti.». Éxito: tarjeta «¿Recordar <categoría> para <tercero>?» (escritura independiente; un fallo no afecta al hecho).
 // v0.9.0 (F05-06 M4 §3; lámina CAP B2/B3; D-CAP-06/08): al final de «Pagado con» / «Cobrado en», «¿Falta una cuenta? N sin configurar ›» (solo si N > 0) abre la lista de Cuentas encima del formulario, que conserva lo escrito; al volver se recargan las cuentas y el número. CUENTA_SIN_CAPACIDAD al guardar: se muestra el mensaje del servidor y «El resto del formulario se conserva.»; se recargan las cuentas (la que perdió la capacidad ya no sale) y la cuenta queda sin elegir y pendiente de decisión del usuario: ninguna propuesta la vuelve a rellenar.
 // v0.10.0 (F05-06 M3 §B1; lámina REP v0.2 A1, B1; D-REP-01/03): en un gasto, «¿De quién es este gasto?» ofrece «Repartir» junto a «Solo mío» y «Pagado con» ofrece «Otra persona» tras las cuentas. Ambos abren el gasto compartido encima del formulario, que conserva lo común (importe, fecha, comercio, categoría y magnitudes, presupuesto y nota) y al que se vuelve con «Cambiar». Antes se valida lo común con la MISMA `validar` del sellado (sin la cuenta); el contexto todavía no viaja en un gasto compartido y se pide quitarlo, sin perderlo en silencio.
-// Versión: 0.10.0
+// v0.11.0 (F05-D051 paso 9.1 · G1 v2): prop opcional `traza` (instrumentación por paso; App.tsx solo la pasa en `__DEV__`): hitos de montaje, cargas (árbol, cuentas, sugeridas, propuesta), importe y magnitud (primer y último cambio, sin valor), tercero, selector y elección de categoría con su vía, magnitudes visibles, «No lo sé», presupuesto, cuenta, tipo, desplazamientos, `faltan:<claves>` y «Registrar». Sin la prop no se llama a nada ni se registra ningún manejador; ningún import nuevo, sin cambios de comportamiento ni de UX.
+// Versión: 0.11.0
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -118,6 +119,8 @@ export function RegistroGastoScreen(p: {
   onCambiarTipo?: (hacia: TipoRegistro, conservar: { importeTexto: string; fechaHecho: string; aviso: string }) => void;
   /** F05-06 M3: «Repartir» u «Otra persona» abren el gasto compartido con lo común ya validado. */
   onGastoCompartido?: (base: BaseCompartido, inicial: { repartir: boolean; otraPersona: boolean }) => void;
+  /** F05-D051 9.1 (G1 v2): hitos del ensayo G1; solo en `__DEV__` (en producción, undefined). Nunca valores. */
+  traza?: (evento: string, extra?: { via?: string; n?: number }) => void;
 }) {
   const { c } = useTema();
   const inset = useSafeAreaInsets();
@@ -160,6 +163,9 @@ export function RegistroGastoScreen(p: {
   useEffect(() => {
     if (p.inicial) setB((x) => ({ ...x, importeTexto: p.inicial!.importeTexto, fechaHecho: p.inicial!.fechaHecho, fechaOrigen: p.inicial!.fechaHecho === hoyIso ? 'INFERIDO' : 'USUARIO' }));
   }, []);
+  useEffect(() => {
+    p.traza?.('form_montado', { via: tipoReg });
+  }, []);
 
   // Árbol de categorías: se carga al abrir el formulario. Reintentar nunca crea intención.
   // F05-04: árbol vigente y su carga en curso, legibles desde la propuesta (la plantilla espera al árbol).
@@ -170,6 +176,7 @@ export function RegistroGastoScreen(p: {
     let fin: () => void = () => undefined;
     arbolCarga.current = new Promise<void>((resolver) => (fin = resolver));
     const r = await p.cliente.arbolCategorias();
+    p.traza?.(r.tipo === 'OK' ? 'arbol_ok' : 'arbol_error');
     arbolActual.current = r.tipo === 'OK' ? { fase: 'OK', arbol: construirArbol(r.datos.categorias) } : { fase: 'ERROR' };
     fin();
     if (r.tipo !== 'OK') return setArbol({ fase: 'ERROR' });
@@ -247,6 +254,7 @@ export function RegistroGastoScreen(p: {
         return aplicarPropuesta(y, ap2, lista);
       });
       if (pendiente) setAvisos((a) => [...a, ...nuevos, ...avisosPlantilla(r2.datos.avisos)]);
+      p.traza?.('propuesta_aplicada', { via: 'registro' });
       return;
     }
     const r = await p.cliente.propuestaPreferencias(fecha, categoriaId);
@@ -264,6 +272,7 @@ export function RegistroGastoScreen(p: {
       vista.current = null; // sin propuesta (incluida una categoría no elegible): nada que aplicar
     }
     setB((x) => aplicarPropuesta(x, ap, lista));
+    p.traza?.('propuesta_aplicada', { via: 'preferencias' });
   };
 
   // Cuentas y propuesta de financiación SIEMPRE para la fecha elegida (§16.4):
@@ -278,6 +287,7 @@ export function RegistroGastoScreen(p: {
         ? await cuentasDeIngreso(fecha) // «Cobrado en»: elegibles para cobrar (servidor)
         : await p.cliente.cuentasPago(fecha);
     if (n !== peticion.current) return; // respuesta de una fecha anterior: se ignora
+    p.traza?.(r.tipo === 'OK' ? 'cuentas_ok' : 'cuentas_error', r.tipo === 'OK' ? { n: r.datos.cuentas.length } : undefined);
     if (r.tipo !== 'OK') return setCuentas({ fase: 'ERROR' });
     const lista = r.datos.cuentas;
     setCuentas({ fase: 'OK', lista });
@@ -303,6 +313,7 @@ export function RegistroGastoScreen(p: {
     if (!esFechaIso(actual.fechaHecho) || actual.fechaHecho > hoyIso) return setSugeridas([]);
     const r = await p.cliente.senalesCategorias({ tipo: tipoRef.current, fecha: actual.fechaHecho, terceroId: actual.terceroId ?? null });
     if (n !== peticionSugeridas.current) return;
+    p.traza?.(r.tipo === 'OK' ? 'sugeridas_ok' : 'sugeridas_error', r.tipo === 'OK' ? { n: vistaSugeridas(r.datos, actual.terceroNombre ?? null).length } : undefined);
     setSugeridas(r.tipo === 'OK' ? vistaSugeridas(r.datos, actual.terceroNombre ?? null) : []);
   };
   useEffect(() => {
@@ -364,6 +375,15 @@ export function RegistroGastoScreen(p: {
   const pendientes = validar(b, hoyIso, tipoReg);
   const listo = Object.keys(pendientes).length === 0;
   const faltan = textoFaltan(pendientes, b, tipoReg);
+  // G1 v2: claves de lo que falta (nunca valores) cada vez que cambia el conjunto; y magnitudes visibles.
+  const clavesFaltan = Object.keys(pendientes).join(',');
+  useEffect(() => {
+    p.traza?.(`faltan:${clavesFaltan}`);
+  }, [clavesFaltan]);
+  const nMagnitudes = b.categoria.estado === 'CATEGORIA' ? b.categoria.magnitudes.length : 0;
+  useEffect(() => {
+    if (nMagnitudes > 0) p.traza?.('magnitudes_visibles', { n: nMagnitudes });
+  }, [nMagnitudes]);
   // Errores de formato visibles al escribir (no requieren pulsar un botón desactivado).
   const vivos: Errores = {};
   if (b.importeTexto.trim() !== '' && pendientes.importe) vivos.importe = pendientes.importe;
@@ -415,6 +435,8 @@ export function RegistroGastoScreen(p: {
   };
 
   const elegirNodo = (n: CategoriaNodo) => {
+    // G1 v2: con el selector cerrado, la elección viene de un chip (el selector traza las suyas).
+    if (!selectorAbierto) p.traza?.('categoria_elegida', { via: 'chip' });
     if (arbol.fase !== 'OK') return;
     proponerCategoria({
       estado: 'CATEGORIA',
@@ -436,6 +458,7 @@ export function RegistroGastoScreen(p: {
   };
 
   const onRegistrar = async () => {
+    p.traza?.('registrar_pulsado');
     editable.current = false; // desde el sellado, ninguna propuesta en vuelo toca el borrador
     if (Object.keys(validar(b, hoyIso, tipoReg)).length === 0) setEnviado(true); // primer envío: el tipo queda fijado
     const e = await enviar(b, hoyIso);
@@ -446,6 +469,7 @@ export function RegistroGastoScreen(p: {
   const cambiarTipo = (hacia: TipoRegistro) => {
     setHojaTipos(false);
     if (hacia === tipoReg || enviado || bloqueado) return;
+    p.traza?.(`tipo:${hacia}`);
     const nodoActual = b.categoria.estado === 'CATEGORIA' && arbol.fase === 'OK' ? arbol.arbol.porId.get(b.categoria.id) : undefined;
     const cuenta = cuentaSel ? { nombre: cuentaSel.nombre, admitida: false } : null; // otra operación: la cuenta se vuelve a elegir
     const quitados = cambioDeTipo(tipoReg, hacia, {
@@ -475,6 +499,7 @@ export function RegistroGastoScreen(p: {
   };
 
   const elegirTercero = (t: { id: string; nombre: string } | null) => {
+    p.traza?.(t ? 'tercero_elegido' : 'tercero_ninguno');
     setSelectorTercero(false);
     cambiar(t ? { terceroId: t.id, terceroNombre: t.nombre, terceroOrigen: 'USUARIO' } : { terceroId: null, terceroNombre: null, terceroOrigen: 'USUARIO' });
     setTimeout(reResolver, 0);
@@ -486,6 +511,7 @@ export function RegistroGastoScreen(p: {
   };
 
   const alternarNoLoSe = (m: MagnitudCategoria) => {
+    p.traza?.('no_lo_se');
     const actual = b.desconocidas ?? [];
     const marcada = actual.includes(m.magnitud_id);
     cambiar({
@@ -627,6 +653,7 @@ export function RegistroGastoScreen(p: {
       onElegir={elegirNodo}
       onCerrar={() => setSelectorAbierto(false)}
       onReintentar={() => void cargarArbol()}
+      traza={p.traza}
       onContinuarSinCategoria={() => proponerCategoria({ estado: 'SIN_CATEGORIA' })}
       sugeridas={sugeridas}
       buscar
@@ -651,7 +678,12 @@ export function RegistroGastoScreen(p: {
         </View>
       </View>
 
-      <ScrollView testID="registro-form" keyboardShouldPersistTaps="handled" contentContainerStyle={[s.form, { paddingBottom: inset.bottom + espacio.xxl }]}>
+      <ScrollView
+        testID="registro-form"
+        keyboardShouldPersistTaps="handled"
+        onScrollBeginDrag={p.traza ? () => p.traza?.('scroll_ini') : undefined}
+        onScrollEndDrag={p.traza ? () => p.traza?.('scroll_fin') : undefined}
+        contentContainerStyle={[s.form, { paddingBottom: inset.bottom + espacio.xxl }]}>
         {confirmarSalida ? (
           <View testID="confirmar-salida" style={[s.aviso, { backgroundColor: c.partialSurface }]}>
             <Text style={[tipo.subheadline, { color: c.textPrimary }]}>
@@ -690,7 +722,10 @@ export function RegistroGastoScreen(p: {
               testID="campo-importe"
               accessibilityLabel="Importe en euros"
               value={b.importeTexto}
-              onChangeText={(t) => cambiar({ importeTexto: t })}
+              onChangeText={(t) => {
+                p.traza?.('cambio:importe');
+                cambiar({ importeTexto: t });
+              }}
               editable={!bloqueado}
               keyboardType="decimal-pad"
               inputMode="decimal"
@@ -708,7 +743,10 @@ export function RegistroGastoScreen(p: {
             accessibilityRole="button"
             accessibilityLabel={`${esIngreso ? 'De' : 'Tercero'}: ${b.terceroNombre ?? 'Sin tercero'}`}
             disabled={bloqueado}
-            onPress={() => setSelectorTercero(true)}
+            onPress={() => {
+              p.traza?.('tercero_abierto');
+              setSelectorTercero(true);
+            }}
             style={[s.campoCategoria, { backgroundColor: c.surfacePrimary, borderColor: c.borderStandard }]}
           >
             <Text testID="tercero-valor" style={[tipo.body, { flex: 1, color: b.terceroNombre ? c.textPrimary : c.textSecondary }]}>{b.terceroNombre ?? 'Elige tercero'}</Text>
@@ -727,7 +765,10 @@ export function RegistroGastoScreen(p: {
             accessibilityLabel={`Categoría: ${textoCategoria(b.categoria)}`}
             accessibilityHint="Abre el selector de categorías"
             disabled={bloqueado}
-            onPress={() => setSelectorAbierto(true)}
+            onPress={() => {
+              p.traza?.('selector_abierto');
+              setSelectorAbierto(true);
+            }}
             style={[s.campoCategoria, { backgroundColor: c.surfacePrimary, borderColor: categoriaInvalida ? c.critical : c.borderStandard }]}
           >
             {b.categoria.estado === 'CATEGORIA' ? <IconoCategoriaVista iconKey={b.categoria.icon_key} /> : null}
@@ -791,7 +832,10 @@ export function RegistroGastoScreen(p: {
                       testID={`magnitud-${m.magnitud_id}`}
                       accessibilityLabel={`${m.nombre} en ${m.unidad_default}${m.obligatoria ? ', obligatorio' : ', opcional'}`}
                       value={b.magnitudesTexto[m.magnitud_id] ?? ''}
-                      onChangeText={(texto) => cambiar({ magnitudesTexto: { ...b.magnitudesTexto, [m.magnitud_id]: texto } })}
+                      onChangeText={(texto) => {
+                        p.traza?.('cambio:magnitud');
+                        cambiar({ magnitudesTexto: { ...b.magnitudesTexto, [m.magnitud_id]: texto } });
+                      }}
                       editable={!bloqueado}
                       keyboardType="decimal-pad"
                       inputMode="decimal"
@@ -828,7 +872,10 @@ export function RegistroGastoScreen(p: {
             etiquetaGrupo="¿Cuenta para el presupuesto?"
             opciones={[{ valor: true, etiqueta: 'Sí' }, { valor: false, etiqueta: 'No' }]}
             valor={b.presupuestable}
-            onCambiar={(v) => cambiar({ presupuestable: v, presupuestableOrigen: 'USUARIO', presupuestablePropuesta: null })}
+            onCambiar={(v) => {
+              p.traza?.('presupuesto_elegido');
+              cambiar({ presupuestable: v, presupuestableOrigen: 'USUARIO', presupuestablePropuesta: null });
+            }}
           />
           {b.presupuestable !== null && (b.presupuestableOrigen === 'USUARIO' || b.presupuestablePropuesta) ? (
             <Text testID="origen-presupuestable" style={[tipo.footnote, { color: c.textSecondary }]}>
@@ -874,7 +921,10 @@ export function RegistroGastoScreen(p: {
                   testID={`cuenta-${x.cuenta_id}`}
                   etiqueta={x.nombre}
                   seleccionado={b.cuentaId === x.cuenta_id}
-                  onPress={() => cambiar({ cuentaId: x.cuenta_id, cuentaOrigen: 'USUARIO', cuentaPropuesta: null, propuesta: x.propuesta_financiacion, propuestaRechazada: false })}
+                  onPress={() => {
+                    p.traza?.('cuenta_elegida');
+                    cambiar({ cuentaId: x.cuenta_id, cuentaOrigen: 'USUARIO', cuentaPropuesta: null, propuesta: x.propuesta_financiacion, propuestaRechazada: false });
+                  }}
                 />
               ))}
               {!esIngreso && p.onGastoCompartido && !enviado ? (
