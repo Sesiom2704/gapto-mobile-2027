@@ -16,6 +16,8 @@
 #     instantanea nueva por sentencia) ve el actor ya confirmado. Nunca se
 #     bloquea una fila inexistente.
 # Version: 0.1.0 (F05-06 M3 §A3)
+# Version: 0.2.0 (F05-D052 paso 2; F05 §66.A.3): constante NATURALEZA_EMPRESA
+#   para la politica C-03 del writer (servicio.py). Sin cambios de SQL.
 # ============================================================
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ from app.core.unidad_trabajo import SesionMotor
 
 TABLA = "actores_financieros"
 NATURALEZA_PERSONA = "PERSONA"
+NATURALEZA_EMPRESA = "EMPRESA"  # F05-D052 C-03 (politica del gasto reembolsable)
 
 
 def leer_tercero_compartido(sesion: SesionMotor, tercero_id: uuid.UUID) -> dict[str, Any] | None:

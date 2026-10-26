@@ -31,6 +31,12 @@
 #   TIPO_NO_SOPORTADO, VARIOS_EFECTOS. La lectura devuelve
 #   `acciones.corregir_categoria` y `categoria` (efecto, naturaleza y
 #   categoria actual) SOLO para registros de V3 (None en el resto). Sin locks.
+# Version: 0.3.0 (F05-D052 paso 2; F05 §66.A.9, AJ-F0507G3-04): motivo
+#   POSICIONES. «Anular por duplicado» no se ofrece para un hecho con posiciones
+#   vinculadas (la escritura lo rechaza igual, ejecucion_anulacion; es la guarda
+#   vigente POSICIONES de M3). «Corregir» de un hecho con posiciones y sin
+#   reparto con otras personas (una sola atribucion, p. ej. el gasto C-03)
+#   explica POSICIONES en lugar de REPARTO; con reparto sigue REPARTO.
 # ============================================================
 
 from __future__ import annotations
@@ -94,6 +100,19 @@ def _comun(sesion: SesionMotor, hecho_id: uuid.UUID, hecho: dict[str, Any],
     return None
 
 
+def con_posiciones(sesion: SesionMotor, hecho_id: uuid.UUID) -> bool:
+    """§66.A.9: el hecho tiene posiciones vinculadas (derecho u obligacion)."""
+    fila = sesion.uno(
+        "SELECT EXISTS (SELECT 1 FROM gapto.hecho_entidades v JOIN gapto.derechos_obligaciones_financieras p "
+        "ON p.entidad_id = v.entidad_id WHERE v.hecho_id = %s)", (hecho_id,))
+    return bool(fila and fila[0])
+
+
+def _atribuciones(sesion: SesionMotor, hecho_id: uuid.UUID) -> int:
+    return sesion.uno("SELECT count(*) FROM gapto.efecto_atribuciones a JOIN gapto.hecho_efectos e "
+                      "ON e.id = a.efecto_id WHERE e.hecho_id = %s", (hecho_id,))[0]
+
+
 def _con_reparto(sesion: SesionMotor, hecho_id: uuid.UUID) -> bool:
     """Reparto con otras personas o posiciones: fuera de M1 (P-EDIT-04)."""
     fila = sesion.uno(
@@ -112,6 +131,8 @@ def _motivo_corregir(sesion: SesionMotor, hecho_id: uuid.UUID, hecho: dict[str, 
     if hecho["tipo"] == "GASTO":
         if repo.es_origen_de_devolucion(sesion, hecho_id):
             return "DEVOLUCION"
+        if con_posiciones(sesion, hecho_id) and _atribuciones(sesion, hecho_id) <= 1:
+            return "POSICIONES"
         if _con_reparto(sesion, hecho_id):
             return "REPARTO"
         efectos = repo.efectos(sesion, hecho_id)
@@ -140,6 +161,8 @@ def _motivo_anular(sesion: SesionMotor, hecho_id: uuid.UUID, hecho: dict[str, An
                    movimientos: list[dict[str, Any]], comun: str | None) -> str | None:
     if comun is not None:
         return comun
+    if con_posiciones(sesion, hecho_id):
+        return "POSICIONES"
     if repo_hechos.dependencias_activas(sesion, hecho_id):
         return "DEPENDENCIAS_ACTIVAS"
     if hecho["tipo"] == "TRANSFERENCIA" and len(movimientos) != 2:

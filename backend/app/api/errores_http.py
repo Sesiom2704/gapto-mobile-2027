@@ -161,6 +161,17 @@
 #   ORIGEN_IMPORTADO dice que en V3 solo se corrige la categoria. Ningun codigo
 #   existente cambia de status.
 # Version: 0.25.0
+#   0.26.0 (F05-D052 paso 2; F05 §66.A.3, §66.A.9, §66.A.10): rechazos de capa
+#   F05 nuevos en _RECHAZOS_INTEGRACION (los codigos de capa F05 viven aqui; _MAPA
+#   solo traduce CodigoError del motor): NATURALEZA_NO_ADMITIDA_EN_REEMBOLSO
+#   (409) y GASTO_CON_DERECHO_DE_COBRO (409). Validaciones del DTO con codigo
+#   estable (CODIGOS_VALIDACION, 422, rechazo_validacion):
+#   REEMBOLSO_EXCEDE_TOTAL, CONTRAPARTE_ES_COMERCIO y
+#   REPARTO_SIN_MARGEN_PARA_DESCONOCIDO (texto propio que no sugiere «pon 0» ni
+#   reutiliza el de «Corregir reparto»). MOTIVOS_EDICION anade POSICIONES
+#   (corregir y anular un hecho con posiciones vinculadas). Ningun codigo
+#   existente cambia de status.
+# Version: 0.26.0
 # ============================================================
 
 from __future__ import annotations
@@ -346,7 +357,28 @@ _RECHAZOS_INTEGRACION: dict[str, tuple[int, str]] = {
     # F05-06 M5: registro desde la prevision.
     "PREVISION_TIPO_DISTINTO": (
         409, "Ese registro no es del mismo tipo que la previsión. No se ha guardado nada."),
+    # F05-D052 C-03 (§66.A.3, §66.A.9).
+    "NATURALEZA_NO_ADMITIDA_EN_REEMBOLSO": (
+        409, "Quien te lo debe tiene que ser una persona o una empresa. No se ha guardado nada."),
+    "GASTO_CON_DERECHO_DE_COBRO": (
+        409, "Este gasto tiene un importe que te deben vinculado: una devolución no se registra aquí, para no "
+             "cambiar lo que te deben ni lo ya cobrado. No se ha guardado nada."),
 }
+
+#: F05-D052: validaciones del DTO con codigo estable (422) y su texto propio.
+_VALIDACIONES_ESTABLES: dict[str, str] = {
+    "REEMBOLSO_EXCEDE_TOTAL": "Lo que te deben no puede ser más que el total del gasto. No se ha guardado nada.",
+    "CONTRAPARTE_ES_COMERCIO": "Quien te lo debe no puede ser el mismo comercio del gasto. No se ha guardado nada.",
+    "REPARTO_SIN_MARGEN_PARA_DESCONOCIDO": (
+        "Las partes que has indicado ya suman el total, pero queda alguna sin indicar. Indica cuánto es o quita a "
+        "esa persona del reparto. No se ha guardado nada."),
+}
+CODIGOS_VALIDACION = frozenset(_VALIDACIONES_ESTABLES)
+
+
+def rechazo_validacion(codigo: str) -> tuple[int, dict]:
+    """F05-D052: regla del DTO con codigo estable (422, definitivo)."""
+    return 422, {"codigo": codigo, "mensaje": _VALIDACIONES_ESTABLES[codigo], "reintentable": False}
 
 
 #: F05-06 M5: textos de las rutas de prevision y del registro con bloque `prevision`.
@@ -628,6 +660,7 @@ MOTIVOS_EDICION: dict[str, str] = {
     "SIN_TESORERIA": "No tiene un movimiento de cuenta registrado: no se corrige ni se anula por esta vía.",
     "VARIOS_MOVIMIENTOS": "Se pagó en varias partes o desde varias cuentas: no se corrige aquí en esta versión.",
     "REPARTO": "Tiene reparto con otras personas: en esta versión no se corrige aquí. El reparto se corrige con «Corregir reparto».",
+    "POSICIONES": "Tiene vinculado un importe que te deben o que debes: no se corrige ni se anula desde aquí, para no cambiar lo ya cobrado o pagado.",
     "MOVIMIENTO_COMPARTIDO": "El movimiento de la cuenta cubre también otros registros: no se corrige ni se anula desde aquí.",
     "REVERSION_EXISTENTE": "El movimiento tiene una reversión: lo que pasó después se registra con su operación.",
     "MOVIMIENTO_ANULADO": "El movimiento de la cuenta ya no está activo.",

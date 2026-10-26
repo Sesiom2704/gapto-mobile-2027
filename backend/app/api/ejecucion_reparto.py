@@ -55,6 +55,13 @@
 #   PosicionesService.saldo (estado autoritativo ACTIVA o CERRADA, sin tocarlo
 #   ni recalcular aperturas) en lugar del neto OP-20, que solo lee ACTIVAS y
 #   presentaba una CERRADA como «Sin determinar».
+# Version: 0.5.0 (F05-D052 paso 2/3; F05 §66.A.8, §66.5, AJ-F0507G3-13): en
+#   reparto_de_hecho cada posicion vinculada se lee UNA sola vez por entidad
+#   (antes, una lectura por vinculo: con vinculos repetidos de la misma
+#   entidad se repetia la lectura del motor) y la lectura gana la coleccion
+#   aditiva `posiciones_vinculadas`: las posiciones del hecho que no cuelgan de
+#   ninguna parte (derecho de cobro de C-03), separadas de partes y
+#   atribuciones; nunca se fabrica una parte ni se duplica una posicion.
 # ============================================================
 
 from __future__ import annotations
@@ -673,19 +680,14 @@ def reparto_de_hecho(sesion: SesionMotor, contexto: ContextoOperacion, hecho_id:
         motivo = "ORIGEN_IMPORTADO"
     partes: list[dict[str, Any]] = []
     estado_atr = gastos[0][3] if len(gastos) == 1 else "NO_DISPONIBLE"
+    # Q4-H2: estado autoritativo de cada posicion (ACTIVA o CERRADA), no el
+    # neto OP-20 (solo ACTIVAS: una CERRADA salia «Sin determinar»).
+    lecturas = _lecturas_posiciones(sesion, contexto, estado["vinculos"])
     if len(gastos) == 1:
         efecto_id = gastos[0][0]
         # Deudor de cada posicion: la contraparte en un derecho; yo en una obligacion.
         posicion_de = {(contraparte if tipo == TIPO_DERECHO else actor_self): (tipo, entidad)
                        for _, tipo, contraparte, entidad in estado["vinculos"]}
-        # Q4-H2: estado autoritativo de cada posicion (ACTIVA o CERRADA), no el
-        # neto OP-20 (solo ACTIVAS: una CERRADA salia «Sin determinar»).
-        lecturas: dict[uuid.UUID, dict[str, Any]] = {}
-        servicio_pos = PosicionesService(UnidadDeTrabajoAdscrita(sesion))
-        for _, _, _, entidad in estado["vinculos"]:
-            r = servicio_pos.saldo(contexto, entidad)
-            lecturas[entidad] = {"saldo": _texto(r.saldo.importe) if r.saldo.conocido else None,
-                                 "estado": r.estado, "apertura_indeterminada": r.apertura_indeterminada}
         propias = [a for a in estado["atribuciones"] if a[1] == efecto_id]
         for aid, _, actor, importe, _ in sorted(propias, key=lambda a: (a[2] != actor_self, str(a[2]))):
             tercero = None if actor == actor_self else sesion.uno(
@@ -701,9 +703,36 @@ def reparto_de_hecho(sesion: SesionMotor, contexto: ContextoOperacion, hecho_id:
             })
     if motivo is None and (estado_atr == "NO_DISPONIBLE" or len(partes) < 2):
         motivo = "SIN_REPARTO"
+    # §66.A.8: posiciones del hecho que ninguna parte muestra (sin duplicar).
+    vistas = {p["posicion"]["entidad_id"] for p in partes if p["posicion"] is not None}
+    vinculadas = []
+    for _, tipo, contraparte, entidad in sorted(estado["vinculos"], key=lambda v: str(v[3])):
+        if entidad in vistas:
+            continue
+        vistas.add(entidad)
+        tercero = sesion.uno("SELECT t.id, t.nombre FROM gapto.actores_financieros a JOIN gapto.terceros t "
+                             "ON t.id = a.tercero_id WHERE a.id = %s", (contraparte,))
+        vinculadas.append({"entidad_id": entidad, "tipo": tipo,
+                           "contraparte_tercero_id": None if tercero is None else tercero[0],
+                           "contraparte_nombre": None if tercero is None else tercero[1], **lecturas[entidad]})
     version = sesion.uno("SELECT row_version FROM gapto.hechos_financieros WHERE id = %s", (hecho_id,))[0]
     return {"hecho_id": hecho_id, "row_version": version, "importe": _texto(estado["importe_total"]),
-            "estado_atribucion": estado_atr, "corregible": motivo is None, "motivo": motivo, "partes": partes}
+            "estado_atribucion": estado_atr, "corregible": motivo is None, "motivo": motivo, "partes": partes,
+            "posiciones_vinculadas": vinculadas}
+
+
+def _lecturas_posiciones(sesion: SesionMotor, contexto: ContextoOperacion, vinculos) -> dict[uuid.UUID, dict[str, Any]]:
+    """Estado autoritativo (Q4-H2) de cada posicion vinculada, leido UNA vez por
+    entidad aunque varios vinculos la repitan (§66.5, AJ-F0507G3-13)."""
+    lecturas: dict[uuid.UUID, dict[str, Any]] = {}
+    servicio_pos = PosicionesService(UnidadDeTrabajoAdscrita(sesion))
+    for _, _, _, entidad in vinculos:
+        if entidad in lecturas:
+            continue
+        r = servicio_pos.saldo(contexto, entidad)
+        lecturas[entidad] = {"saldo": _texto(r.saldo.importe) if r.saldo.conocido else None,
+                             "estado": r.estado, "apertura_indeterminada": r.apertura_indeterminada}
+    return lecturas
 
 
 def _texto(valor: decimal.Decimal) -> str:

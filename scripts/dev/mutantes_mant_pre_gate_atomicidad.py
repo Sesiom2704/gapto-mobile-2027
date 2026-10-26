@@ -31,6 +31,9 @@
 #   No ejecutar en paralelo con otro arnes ni con la suite sobre el mismo arbol.
 # Version: 0.1.0 (F05-07/GATE adenda 2, MANT-PRE-GATE atomicidad multirregistro)
 # Version: 0.1.1 (F05-07/GATE adenda 2, integracion MANT-PRE-GATE: el test discriminante pasa a test_215)
+# Version: 0.2.0 (F05-D052 paso 2): AT18 frontera del gasto reembolsable C-03
+#   (ejecucion_reembolsable) y reanclaje de AT16: la entrada HTTP de «Anular por
+#   duplicado» tiene ahora su propia transaccion (guarda POSICIONES de §66.A.9).
 # ============================================================
 
 from __future__ import annotations
@@ -54,6 +57,7 @@ EJG = API + "ejecucion_gasto_pagado.py"
 EJR = API + "ejecucion_registro.py"
 EJC = API + "ejecucion_correccion.py"
 EJA = API + "ejecucion_anulacion.py"
+EJRB = API + "ejecucion_reembolsable.py"
 EJV = API + "ejecucion_categoria_v3.py"
 T215 = "tests/api/test_215_f05_07_mpg_atomicidad_multirregistro.py::"
 BARRIDO = T215 + "test_rechazo_tras_cada_escritura_no_deja_escrituras_parciales"
@@ -103,6 +107,10 @@ MUTANTES = [
      [_GC := frontera(REP, '    return unidad.ejecutar(contexto, con_rechazo_capacidad(operacion, RechazoRegistro),\n'
                            '                           nombre="F05-06 M3 gasto_compartido (locks + writer de actor + OP-22)")\n')],
      barrido("M3_gasto_compartido"), None),
+    ("AT18", "C-03 gasto reembolsable: rechazo tras escribir devuelto como valor",
+     [frontera(EJRB, '    return unidad.ejecutar(contexto, con_rechazo_capacidad(operacion, RechazoRegistro),\n'
+                     '                           nombre="F05-D052 C-03 gasto_reembolsable (locks + writer de actor + OP-22)")\n')],
+     barrido("C03_gasto_reembolsable"), None),
     ("AT03b", "M5 gasto compartido con prevision (misma frontera que AT03)",
      [_GC], barrido("M5_gasto_compartido_prevision"), None),
     ("AT04", "M3 cobro (_aplicar_reduccion): rechazo tras escribir devuelto como valor",
@@ -153,7 +161,7 @@ MUTANTES = [
                     '                           nombre="F04-R2 OP-21T (capacidad + motor)")\n')],
      barrido("M1_corregir_transferencia"), None),
     ("AT16", "M1 anular duplicado (OP-03P): rechazo tras escribir devuelto como valor",
-     [frontera(EJA, '    return unidad.ejecutar(contexto, operacion, nombre="F04-R2 OP-03P (adaptador F05)")\n')],
+     [frontera(EJA, '    return unidad.ejecutar(contexto, operacion, nombre="F05-D052 OP-03P HTTP (guarda POSICIONES + motor)")\n')],
      barrido("M1_anular_duplicado"), None),
     ("AT17", "M1 corregir categoria V3 (OP-21 lista blanca): rechazo tras escribir devuelto como valor",
      [frontera(EJV, '    return unidad.ejecutar(contexto, operacion, nombre="F05-06 M1 corregir_categoria_v3 (OP-21 lista blanca)")\n')],

@@ -377,6 +377,10 @@
 # Version: 0.33.0 (F05-GATE, tirada nocturna G2/G5): I1: altas R de los oraculos de los E2E
 #     nuevos (scripts/dev/e2e_f05_gate_g2.py::categoria_de_efectos y
 #     scripts/dev/e2e_f05_gate_g5.py::main, solo lecturas SQL de verificacion).
+# Version: 0.34.0 (F05-D052 paso 2; F05 §66.A, C-03): I1: altas del gasto reembolsable
+#     (dto_reembolsable: R; ejecucion_reembolsable.operacion: GUARDA C-a + C07 tras la
+#     identidad y antes de componer; componer_gasto_reembolsable: A_FRONTERA hacia OP-22;
+#     nombre_posicion: R, nombre de la categoria para el nombre de la posicion).
 # ============================================================
 
 from __future__ import annotations
@@ -631,6 +635,18 @@ REGISTRO.update({
     ("backend/app/api/ejecucion_devolucion.py", "contexto_devolucion"): (
         "R", "GET contexto de devolucion (M2)", "copia la categoria del origen para «De la compra»"),
     ("backend/app/api/dto_devolucion.py", "ContextoDevolucion"): ("R", "DTO F05-06 M2", "declaracion de campo"),
+})
+
+# F05-D052 C-03 (alta aditiva, v0.34.0): gasto reembolsable por OP-22 de una sola llamada.
+REGISTRO.update({
+    ("backend/app/api/dto_reembolsable.py", "IntencionGastoReembolsable.categoria_id"): (
+        "R", "DTO F05-D052 C-03", "lectura derivada del estado categorial sellado"),
+    ("backend/app/api/ejecucion_reembolsable.py", "registrar_gasto_reembolsable.operacion"): (
+        "GUARDA", "F05-D052 C-03 intencion", "C-a + C07 tras la identidad y antes de componer (I4)"),
+    ("backend/app/api/ejecucion_reembolsable.py", "componer_gasto_reembolsable"): (
+        "A_FRONTERA", "C-03 -> OP-22", "sella categoria_id en el efecto GASTO; guardado por I4"),
+    ("backend/app/api/ejecucion_reembolsable.py", "nombre_posicion"): (
+        "R", "F05-D052 C-03", "lee el nombre de la categoria para nombrar la posicion (§66.2); no decide nada"),
 })
 
 # F05-06 M3 (alta aditiva, v0.27.0): gasto compartido por OP-22 de una sola llamada.
