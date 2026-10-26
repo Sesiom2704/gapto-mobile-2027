@@ -39,6 +39,11 @@
 #   python scripts/mutantes/f0405.py            # los 32
 #   python scripts/mutantes/f0405.py M1 M2 E7   # un lote
 #
+# Version: 0.1.3
+#   0.1.3 (F05-D052 paso 8): lectura y escritura del fichero mutado en UTF-8 y
+#   sin traduccion de finales de linea (newline=""). En Windows, read_text()
+#   y write_text() por defecto reescribian LF como CRLF y la restauracion no
+#   devolvia el SHA (M1 abortaba). Mismos mutantes y discriminantes.
 # Version: 0.1.2
 #   0.1.2 (F05-D051 paso 1, C2-H1): el texto de E3 se reancla a la nueva
 #   sangria de la guarda del terminal posterior en `_sucesor_reabrible` (la
@@ -339,7 +344,7 @@ def correr(lote: list[Mutante]) -> list[tuple[Mutante, str, int, list[str]]]:
     filas: list[tuple[Mutante, str, int, list[str]]] = []
     for mut in lote:
         ruta = RAIZ / mut.fichero
-        original = ruta.read_text()
+        original = ruta.read_text(encoding="utf-8", newline="")
         antes = sha256(ruta)
 
         if mut.viejo not in original:
@@ -347,10 +352,10 @@ def correr(lote: list[Mutante]) -> list[tuple[Mutante, str, int, list[str]]]:
             print(f"  {mut.ident:4} DUDOSO    patron no encontrado", flush=True)
             continue
 
-        ruta.write_text(original.replace(mut.viejo, mut.nuevo, 1))
+        ruta.write_text(original.replace(mut.viejo, mut.nuevo, 1), encoding="utf-8", newline="")
         despues = sha256(ruta)
         if despues == antes:
-            ruta.write_text(original)
+            ruta.write_text(original, encoding="utf-8", newline="")
             filas.append((mut, "MUTACION INERTE", 0, []))
             print(f"  {mut.ident:4} DUDOSO    la mutacion no cambio el fichero",
                   flush=True)
@@ -359,7 +364,7 @@ def correr(lote: list[Mutante]) -> list[tuple[Mutante, str, int, list[str]]]:
         try:
             resumen, fallidos = ejecutar_suite(mut.suite)
         finally:
-            ruta.write_text(original)
+            ruta.write_text(original, encoding="utf-8", newline="")
         if sha256(ruta) != antes:  # pragma: no cover
             raise SystemExit(f"{mut.ident}: la restauracion no devolvio el SHA")
 
