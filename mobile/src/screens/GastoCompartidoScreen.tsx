@@ -5,6 +5,7 @@
 // Descripción: Gasto con reparto o pagado por otra persona (F05-06 M3; lámina REP v0.2 A1, A2, B1–B4, D1, E7, E8). Parte del registro, que conserva lo común (importe, fecha, comercio, categoría, presupuesto y nota) y se muestra fijo arriba con «Cambiar» para volver. A1: «Pagado con» admite «Otra persona» (D-REP-01): se pregunta quién pagó y «¿Le debes este dinero a X?» con «Sí, le debo X €» / «No» / «No lo sé» (D-REP-02; solo el «Sí» crea la obligación, INV-04; «No lo sé» no la crea, P-REP-01). B1/B2: «Repartir» abre el reparto por personas con importes (D-REP-03): el total nunca cambia, «Repartido» y «Falta por repartir» a la vista, lo vacío queda sin indicar (PARCIAL, G3) y nunca se completa solo; «A partes iguales» es un botón y el céntimo sobrante va a la última fila (D-REP-04). B3: «¿Te deben su parte?» persona a persona («Sí, me lo debe» / «No, invitado»; D-REP-05). A2/B4: revisión en cuatro bloques (D-REP-06): el gasto y su total, tu parte, el dinero (movimiento real o «No sale dinero de tus cuentas») y quién debe a quién. Se guarda en una sola operación (OP-22). Ciclo de envío del registro: UUID y payload sellados antes de enviar; doble toque ignorado; INDETERMINADO reintenta con la MISMA identidad; un rechazo definitivo libera la edición. Éxito con «Pendiente con <persona>» (P-REP-03).
 // Versión: 0.1.0 (F05-06 M3 §B1)
 // v0.1.1 (F05-06 M3 CORR-01, R-M3-05): en el éxito, cada «Pendiente con <persona>» sale del `tercero_id` que el servidor devuelve en cada posición creada, nunca de emparejar por importe (dos personas con la misma parte señalaban a la misma).
+// v0.2.0 (F05-D052 paso 2 · R6, F05 §66.A.10): espejo de R6 en «Reparto»: con alguna parte sin indicar y las indicadas sumando el total, aviso propio «reparto-sin-margen» (no sugiere poner 0), «Revisar» bloqueado y el rechazo del servidor `REPARTO_SIN_MARGEN_PARA_DESCONOCIDO` se explica con el mismo texto. El exceso («Supera el total») y la suma incompleta no cambian.
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -31,6 +32,9 @@ import {
   ResultadoGastoCompartido,
   resumenFila,
   resumenReparto,
+  sinMargenParaDesconocido,
+  CODIGO_SIN_MARGEN,
+  TEXTO_REPARTO_SIN_MARGEN,
   TEXTO_FALTA_SIN_INDICAR,
   TEXTO_NO_LO_SE,
   TEXTO_NO_SALE_DINERO,
@@ -148,7 +152,8 @@ export function GastoCompartidoScreen(p: {
     <>
       {envio.fase === 'RECHAZADO' ? (
         <Aviso testID="compartido-error" critico
-          texto={envio.codigo === 'CUENTA_SIN_CAPACIDAD' ? `${envio.mensaje} ${TEXTO_FORMULARIO_SE_CONSERVA}` : `No se ha registrado. ${envio.mensaje}`} />
+          texto={envio.codigo === 'CUENTA_SIN_CAPACIDAD' ? `${envio.mensaje} ${TEXTO_FORMULARIO_SE_CONSERVA}`
+            : envio.codigo === CODIGO_SIN_MARGEN ? `No se ha registrado. ${TEXTO_REPARTO_SIN_MARGEN}` : `No se ha registrado. ${envio.mensaje}`} />
       ) : null}
       {envio.fase === 'INDETERMINADO' ? <Aviso testID="compartido-indeterminado" texto={envio.mensaje} /> : null}
     </>
@@ -333,6 +338,7 @@ export function GastoCompartidoScreen(p: {
               </Text>
             </View>
           </View>
+          {sinMargenParaDesconocido(total, f.filas) ? <Aviso testID="reparto-sin-margen" critico texto={TEXTO_REPARTO_SIN_MARGEN} /> : null}
           <Text testID="reparto-texto" style={[tipo.footnote, { color: c.textSecondary }]}>
             {res.sinIndicar && f.filas.some((x) => !x.importeTexto.trim())
               ? `La parte de ${f.filas.filter((x) => !x.importeTexto.trim()).map((x) => x.nombre).join(' y ')} queda sin indicar. No cuenta como tuya ni como suya.`

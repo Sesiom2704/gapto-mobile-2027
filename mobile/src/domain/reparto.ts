@@ -7,6 +7,7 @@
 // Versión: 0.2.0 (F05-D051 paso 2; F05 §65.4 contrato HTTP Q4/Q4-H2): tipos wire con `apertura_indeterminada` (F04-D055 A4) y `estado` en PosicionDeParte. Sin copy de UI (pendiente de la lámina REP).
 // Versión: 0.3.0 (F05-D051 paso 8; lámina B D-F0507L-03): `textoPosicion`, el texto de una posición según su estado. Pendiente con saldo desconocido → «Sin determinar»; CERRADA → «0,00 € · Saldado» y, si su importe inicial no se conoció, «Importe inicial desconocido». Ninguna CERRADA dice «Sin determinar»; sin valores por defecto (si una CERRADA llegara sin saldo, solo «Saldado»).
 // Versión: 0.4.0 (F05-D052 paso 3 · lámina B, F05 §66.2, AJ-F0507G3-06): `TEXTO_SALDO_INICIAL_DESCONOCIDO` = «Saldo inicial desconocido» (sustituye a «Importe inicial desconocido»): se refiere al saldo con el que empezó el seguimiento y sale solo de `apertura_indeterminada`, nunca de la ausencia del importe original.
+// Versión: 0.5.0 (F05-D052 paso 2 · R6, F05 §66.A.10): `sinMargenParaDesconocido` (alguna parte sin indicar y las indicadas suman el total), código estable `REPARTO_SIN_MARGEN_PARA_DESCONOCIDO` y texto propio; `faltaCompartido` lo nombra. El exceso conserva su error y la suma incompleta con partes sin indicar sigue admitida.
 // ============================================================
 
 import type { Borrador, CategoriaWire } from './intencion';
@@ -307,6 +308,21 @@ export function resumenReparto(total: string, filas: FilaReparto[]): ResumenRepa
   return { repartido: decimalDe(suma), falta: decimalDe(Math.max(falta, 0)), sinIndicar: falta > 0, excede: falta < 0, invalidas };
 }
 
+/** R6 (F05 §66.A.10; espejo del validador del servidor): código estable del rechazo. */
+export const CODIGO_SIN_MARGEN = 'REPARTO_SIN_MARGEN_PARA_DESCONOCIDO';
+/** R6: texto propio (no sugiere poner 0 ni reutiliza el de «Corregir reparto»). */
+export const TEXTO_REPARTO_SIN_MARGEN = 'Lo que has indicado ya suma todo el gasto y no deja nada para quien está sin indicar. Revisa los importes.';
+export const FALTA_SIN_MARGEN = 'que quede importe para quien está sin indicar';
+
+/**
+ * R6: alguna parte sin indicar y las indicadas (válidas) suman exactamente el total. Distinto del
+ * exceso (error propio) y de la suma incompleta con partes sin indicar (admitida, D-REP-03).
+ */
+export function sinMargenParaDesconocido(total: string, filas: FilaReparto[]): boolean {
+  const r = resumenReparto(total, filas);
+  return r.invalidas === 0 && !r.excede && !r.sinIndicar && filas.some((f) => !f.importeTexto.trim());
+}
+
 export function textoFalta(r: ResumenReparto): string {
   return r.sinIndicar ? `${formatearEur(r.falta)} · sin indicar` : formatearEur(r.falta);
 }
@@ -347,6 +363,7 @@ export function faltaCompartido(total: string, f: FormularioCompartido): string[
     const res = resumenReparto(total, f.filas);
     if (res.invalidas > 0) r.push('importes válidos en el reparto');
     if (res.excede) r.push('un reparto que no supere el total');
+    if (sinMargenParaDesconocido(total, f.filas)) r.push(FALTA_SIN_MARGEN);
     if (pagueYo(f)) {
       for (const p of personas) {
         if (p.meDebe === null) r.push(`si ${p.nombre} te debe su parte`);
