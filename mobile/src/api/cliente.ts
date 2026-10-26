@@ -23,12 +23,14 @@
 // v0.18.0 (F05-06 M1 v1.1; Q9 opción (a)): «Corregir categoría» de un registro de V3, POST /v1/hechos/{id}/corregir-categoria (lista blanca: versión, motivo y `categoria_id`), con la clasificación de escritura (indeterminado = reintentar la MISMA intención). La lectura /edicion trae `categoria` y `acciones.corregir_categoria`, ambos null fuera de V3.
 // Versión: 0.18.0
 // v0.19.0 (F05-06 M5-B v1.1): «Pendientes» trae `resueltas_mes` (REALIZADA y OMITIDA cuya transición es del mes en curso, con `resuelta_el` y `resuelta_por`); aparte, no suma a nada.
-// Versión: 0.19.0
+// v0.20.0 (F05-D052 paso 2 · C-03, F05 §66.A; CONTRATO_API_C03): POST /v1/intenciones/gasto-reembolsable (`registrarGastoReembolsable`, clasificación de escritura: indeterminado = reintentar el MISMO UUID) y `posiciones_vinculadas` (aditivo, opcional) en el reparto del hecho.
+// Versión: 0.20.0
 // ============================================================
 
 import type { Ambito, CategoriaNodo } from '../domain/categoria';
 import type { PayloadGastoPagado } from '../domain/intencion';
 import type { MagnitudCatalogo } from '../domain/magnitud';
+import type { PayloadGastoReembolsable, ResultadoGastoReembolsable } from '../domain/reembolso';
 import type {
   PayloadCobroPago,
   PayloadCorregirReparto,
@@ -912,6 +914,8 @@ export interface ClienteApi {
   registrarAbono(devolucionId: string, p: PayloadAbono): Promise<Respuesta<ResultadoAbono>>;
   // F05-06 M3
   registrarGastoCompartido(p: PayloadGastoCompartido): Promise<Respuesta<ResultadoGastoCompartido>>;
+  // F05-D052 C-03
+  registrarGastoReembolsable(p: PayloadGastoReembolsable): Promise<Respuesta<ResultadoGastoReembolsable>>;
   pendienteCon(terceroId: string): Promise<Respuesta<PendienteConPersona>>;
   cobrarPosicion(entidadId: string, p: PayloadCobroPago): Promise<Respuesta<ResultadoPosicion>>;
   pagarPosicion(entidadId: string, p: PayloadCobroPago): Promise<Respuesta<ResultadoPosicion>>;
@@ -1094,6 +1098,7 @@ export function crearCliente(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): C
     registrarDevolucion: (id, payload) => llamar(`${HECHO(id)}/devoluciones`, post(payload), true),
     registrarAbono: (id, payload) => llamar(`${HECHO(id)}/abono`, post(payload), true),
     registrarGastoCompartido: (payload) => llamar('/v1/intenciones/gasto-compartido', post(payload), true),
+    registrarGastoReembolsable: (payload) => llamar('/v1/intenciones/gasto-reembolsable', post(payload), true),
     pendienteCon: (id) => llamar(`${TER}/${encodeURIComponent(id)}/pendiente`, { method: 'GET' }, false),
     cobrarPosicion: (id, payload) => llamar(`${POS(id)}/cobro`, post(payload), true),
     pagarPosicion: (id, payload) => llamar(`${POS(id)}/pago`, post(payload), true),

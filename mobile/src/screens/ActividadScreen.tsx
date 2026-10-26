@@ -15,6 +15,7 @@
 // Versión: 0.10.0 (F05-06 M1; lámina EDIT-HECHO v0.1 D-EDIT-01, 06, 07; CONTRATO_M1 v0.1 §2): el detalle ofrece «Más» (si la raíz pasa `onCorregirHecho`): lee la elegibilidad del servidor (GET …/edicion) y abre la hoja con «Corregir» (tarea inmersiva fuera de la pantalla) y «Anular por duplicado» (hoja B1 con la declaración explícita y el motivo), atenuadas con su motivo cuando no se admiten. Anular no borra: tras confirmar, «Registro anulado» y la lista vuelve a leer. Un reintento tras un fallo de conexión usa la MISMA intención. Sin swipe de editar ni anular.
 // Versión: 0.11.0 (F05-06 M1 v1.1; Q9 opción (a)): en un registro de V3, «Más › Corregir categoría» (solo si el servidor trae la acción): hoja con lo que no cambia, categoría actual → nueva (selector del registro con la naturaleza del efecto), motivo y «Guardar categoría». Al guardar, «Categoría corregida» y la lista vuelve a leer; «Ver registro» reabre el detalle. Un reintento tras un fallo de conexión usa la MISMA intención. Corregir y anular de V3 siguen atenuados con su motivo.
 // Versión: 0.11.1 (F05-07 G1 SDK 58, decisión de Moisés del 2026-10-25): la ref del scroll se tipa con `ScrollViewInstance` (RN 0.88). Solo tipos; nada más cambia.
+// Versión: 0.12.0 (F05-D052 paso 2 · C-03, §66.A.8): el detalle de un gasto con `posiciones_vinculadas` ACTIVAS ofrece «Pendiente con <quién>» por cada derecho (separadas de las partes del reparto, sin duplicar) y pasa su `entidad_id`.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -103,7 +104,8 @@ export function ActividadScreen(p: {
   abrir?: { id: string; clave: number } | null;
   /** F05-06 M3: «Corregir reparto» y «Pendiente con <persona>» desde el detalle de un gasto. */
   onCorregirReparto?: (hechoId: string) => void;
-  onPendienteCon?: (t: { terceroId: string; nombre: string }) => void;
+  /** `entidadId` (C-03, §66.A.8): el derecho concreto elegido en el detalle. */
+  onPendienteCon?: (t: { terceroId: string; nombre: string; entidadId?: string }) => void;
   /** F05-06 M1: «Corregir» desde «Más» del detalle (tarea inmersiva fuera de la pantalla). */
   onCorregirHecho?: (hechoId: string, titulo: string) => void;
 }) {
@@ -659,6 +661,13 @@ export function ActividadScreen(p: {
             ? reparto.partes.filter((x) => x.posicion && x.tercero_id).map((x) => (
                 <BotonSecundario key={x.atribucion_id} testID={`detalle-pendiente-${x.tercero_id}`} titulo={`Pendiente con ${x.nombre}`}
                   onPress={() => { setHoja(null); p.onPendienteCon!({ terceroId: x.tercero_id!, nombre: x.nombre }); }} />
+              ))
+            : null}
+          {detalle.fase === 'OK' && reparto && reparto.hecho_id === detalle.d.id && p.onPendienteCon
+            ? (reparto.posiciones_vinculadas ?? []).filter((x) => x.estado === 'ACTIVA').map((x) => (
+                // C-03 (§66.A.8): derechos que no cuelgan de ninguna parte; se pasa el `entidad_id` del elegido.
+                <BotonSecundario key={x.entidad_id} testID={`detalle-vinculada-${x.entidad_id}`} titulo={`Pendiente con ${x.contraparte_nombre}`}
+                  onPress={() => { setHoja(null); p.onPendienteCon!({ terceroId: x.contraparte_tercero_id, nombre: x.contraparte_nombre, entidadId: x.entidad_id }); }} />
               ))
             : null}
           {detalle.fase === 'OK' && reparto && reparto.hecho_id === detalle.d.id && reparto.corregible && p.onCorregirReparto ? (

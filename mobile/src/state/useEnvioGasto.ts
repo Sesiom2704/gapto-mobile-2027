@@ -6,35 +6,56 @@
 // v0.2.0 (F05-D003): la validación local recibe la fecha de hoy (fecha no futura) y un rechazo PROPUESTA_FINANCIACION_OBSOLETA se expone para recargar la propuesta.
 // v0.3.0 (F05-03/F05-04 J2 §2.3; D-DYN-08): el mismo ciclo sirve al ingreso cobrado: con `tipo` INGRESO se valida con las reglas del ingreso, se sella con `sellarIngreso` y se envía a POST /v1/intenciones/ingreso-cobrado. GASTO (por defecto) no cambia.
 // v0.3.1 (F05-03/F05-04 J3 §2.7): la nota del ingreso sale del borrador (campo «Nota»); el parámetro `nota` queda como fuente externa opcional.
-// Versión: 0.3.1
+// v0.4.0 (F05-D052 paso 2 · C-03, F05 §66.A): con «Me lo reembolsan» el gasto se sella con `sellarReembolsable` y se envía a POST /v1/intenciones/gasto-reembolsable, con el mismo ciclo (identidad sellada antes de enviar, doble toque ignorado, indeterminado = mismo UUID, rechazo = identidad nueva). El resultado confirmado lleva además `reembolso` (respuesta completa: posición y movimiento).
+// Versión: 0.4.0
 // ============================================================
 
 import { useCallback, useRef, useState } from 'react';
 
 import type { ClienteApi, ResultadoRegistro, ResultadoRegistroTipo } from '../api/cliente';
-import { Borrador, IntencionIngresoSellada, IntencionSellada, sellar, sellarIngreso, TipoConCategoria, validar } from '../domain/intencion';
+import { Borrador, IntencionIngresoSellada, IntencionSellada, sellar, sellarIngreso, sellarReembolsable, TipoConCategoria, validar } from '../domain/intencion';
+import type { IntencionReembolsableSellada, ResultadoGastoReembolsable } from '../domain/reembolso';
 
 /** Intención sellada del gasto (VS-01) o del ingreso (F05-04); `tipo` la distingue. */
 export type Sellada = IntencionSellada | (IntencionIngresoSellada & { readonly ingreso: true });
 
+/** Gasto pagado (VS-01) o gasto reembolsable (C-03): comparten los campos comunes del payload. */
+export type SelladaGasto = IntencionSellada | IntencionReembolsableSellada;
+
 export type EstadoEnvio =
   | { fase: 'EDITANDO' }
-  | { fase: 'ENVIANDO'; sellada: IntencionSellada }
-  | { fase: 'INDETERMINADO'; sellada: IntencionSellada; mensaje: string }
+  | { fase: 'ENVIANDO'; sellada: SelladaGasto }
+  | { fase: 'INDETERMINADO'; sellada: SelladaGasto; mensaje: string }
   | { fase: 'RECHAZADO'; codigo: string; mensaje: string }
-  | { fase: 'CONFIRMADO'; sellada: IntencionSellada; resultado: ResultadoRegistro };
+  | { fase: 'CONFIRMADO'; sellada: SelladaGasto; resultado: ResultadoRegistro & { reembolso?: ResultadoGastoReembolsable } };
 
 export function useEnvioGasto(cliente: ClienteApi, nuevoId: () => string, tipo: TipoConCategoria = 'GASTO', nota: () => string | null = () => null) {
   const [estado, setEstado] = useState<EstadoEnvio>({ fase: 'EDITANDO' });
   const enVuelo = useRef(false);
-  const selladaRef = useRef<IntencionSellada | null>(null);
+  const selladaRef = useRef<SelladaGasto | null>(null);
 
   const enviarSellada = useCallback(
-    async (sellada: IntencionSellada) => {
+    async (sellada: SelladaGasto) => {
       if (enVuelo.current) return; // doble tap: ignorado, nunca un segundo POST
       enVuelo.current = true;
       setEstado({ fase: 'ENVIANDO', sellada });
       try {
+        if ('reembolsable' in sellada) {
+          // C-03: misma clasificación de la respuesta; el resultado se adapta al del registro y conserva el completo.
+          const rr = await cliente.registrarGastoReembolsable(sellada.payload);
+          if (rr.tipo === 'OK') {
+            const pl = sellada.payload;
+            setEstado({ fase: 'CONFIRMADO', sellada, resultado: {
+              hecho_id: rr.datos.hecho_id, idempotente: rr.datos.idempotente, importe: rr.datos.importe, estado_atribucion: 'COMPLETA',
+              aportacion_criterio: null, financiacion: pl.financiacion.estado, estado_categorial: pl.categoria.estado, reembolso: rr.datos } });
+          } else if (rr.tipo === 'RECHAZADO') {
+            selladaRef.current = null;
+            setEstado({ fase: 'RECHAZADO', codigo: rr.codigo, mensaje: rr.mensaje });
+          } else {
+            setEstado({ fase: 'INDETERMINADO', sellada, mensaje: rr.mensaje });
+          }
+          return;
+        }
         const s2 = sellada as unknown as Sellada;
         const r = 'ingreso' in s2
           ? await cliente.registrarIngresoCobrado(s2.payload as never)
@@ -66,8 +87,9 @@ export function useEnvioGasto(cliente: ClienteApi, nuevoId: () => string, tipo: 
       const errores = validar(b, hoyIso, tipo);
       if (Object.keys(errores).length > 0) return errores;
       // El ingreso viaja con su propio payload; la máquina de estados es la misma.
-      const sellada: IntencionSellada =
-        tipo === 'INGRESO' ? (Object.freeze({ ...sellarIngreso(b, nuevoId(), nota()), ingreso: true }) as unknown as IntencionSellada) : sellar(b, nuevoId());
+      const sellada: SelladaGasto =
+        tipo === 'INGRESO' ? (Object.freeze({ ...sellarIngreso(b, nuevoId(), nota()), ingreso: true }) as unknown as IntencionSellada)
+          : b.reembolso ? sellarReembolsable(b, nuevoId()) : sellar(b, nuevoId());
       selladaRef.current = sellada;
       await enviarSellada(sellada);
       return {};

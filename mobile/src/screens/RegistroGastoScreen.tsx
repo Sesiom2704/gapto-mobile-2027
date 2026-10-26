@@ -14,7 +14,8 @@
 // v0.10.0 (F05-06 M3 §B1; lámina REP v0.2 A1, B1; D-REP-01/03): en un gasto, «¿De quién es este gasto?» ofrece «Repartir» junto a «Solo mío» y «Pagado con» ofrece «Otra persona» tras las cuentas. Ambos abren el gasto compartido encima del formulario, que conserva lo común (importe, fecha, comercio, categoría y magnitudes, presupuesto y nota) y al que se vuelve con «Cambiar». Antes se valida lo común con la MISMA `validar` del sellado (sin la cuenta); el contexto todavía no viaja en un gasto compartido y se pide quitarlo, sin perderlo en silencio.
 // v0.11.0 (F05-D051 paso 9.1 · G1 v2): prop opcional `traza` (instrumentación por paso; App.tsx solo la pasa en `__DEV__`): hitos de montaje, cargas (árbol, cuentas, sugeridas, propuesta), importe y magnitud (primer y último cambio, sin valor), tercero, selector y elección de categoría con su vía, magnitudes visibles, «No lo sé», presupuesto, cuenta, tipo, desplazamientos, `faltan:<claves>` y «Registrar». Sin la prop no se llama a nada ni se registra ningún manejador; ningún import nuevo, sin cambios de comportamiento ni de UX.
 // v0.12.0 (F05-D052 paso 3 · A′, D-F0507L-07; lámina F05-07 v0.3 A′1/A′2): SOLO en los campos de magnitud. Al elegir una categoría con magnitudes obligatorias, el foco y el teclado se abren en la primera obligatoria sin valor ni «No lo sé» (justo debajo de la categoría, mismo orden en que se pide). El teclado lleva «Hecho» (iOS: barra sobre el teclado decimal, VoiceOver «Hecho, siguiente campo»; Android y web: tecla de envío) que pasa a la siguiente obligatoria y, tras la última, cierra el teclado y sube hasta «¿Cuenta para el presupuesto?». Cambio de categoría: se conservan las comunes y las demás ni se ven ni se envían (sin cambios en `conservarMagnitudes` ni en el sellado). Cerrar el teclado tocando fuera conserva el valor (campo controlado; ningún manejador de blur lo toca). Presupuesto y cuenta siguen sin marcar (D-F0507L-02). Traza G1: `magnitud_foco` y `magnitud_hecho` (sin valores).
-// Versión: 0.12.0
+// v0.13.0 (F05-D052 paso 2 · C-03, F05 §66 y §66.A; lámina F05-07 v0.3 C1–C3; D-F0507L-04/05): «¿De quién es este gasto?» ofrece «Mío, pero me lo reembolsan» (solo en gastos y antes del primer envío), que abre «Me lo reembolsan» (ReembolsoHoja) ENCIMA del formulario, que conserva lo escrito; «Hecho» vuelve con quién y cuánto y el resumen «Te debe <quién> · <importe>» (tocar lo reabre; «Quitar» lo retira; «Solo mío» también). Con reembolso no se ofrecen «Repartir» ni «Otra persona». El envío va a POST /v1/intenciones/gasto-reembolsable (mismo ciclo y mismas reglas que el gasto pagado; `validar` lo comprueba también). Éxito C3: el gasto que cuenta en tu Resultado y lo que te deben, por separado. Rechazos de C-03 explicados en lenguaje llano. Cambiar a Ingreso quita el reembolso con aviso.
+// Versión: 0.13.0
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -30,6 +31,7 @@ import { GuardarPlantilla } from '../components/GuardarPlantilla';
 import { GuardarPreferencia } from '../components/GuardarPreferencia';
 import { HojaTipos } from '../components/HojaTipos';
 import { RecordarAfinidad } from '../components/RecordarAfinidad';
+import { ReembolsoHoja } from '../components/Reembolso';
 import { SelectorTercero } from '../components/SelectorTercero';
 import { BotonSecundario, CargaArbol, IconoCategoriaVista, SelectorCategorias } from '../components/SelectorCategorias';
 import {
@@ -45,7 +47,17 @@ import {
 } from '../domain/categoria';
 import { ayer, ddmmaaaaAIso, fechaCortaIso, isoADdmmaaaa, isoLocal } from '../domain/fechas';
 import { formatearEur, parsearImporte } from '../domain/importe';
-import { Borrador, borradorInicial, Errores, esDesconocida, esFechaIso, SeleccionCategoria, validar } from '../domain/intencion';
+import { Borrador, borradorInicial, Errores, esDesconocida, esFechaIso, PayloadGastoPagado, SeleccionCategoria, validar } from '../domain/intencion';
+import {
+  importeReembolso,
+  MOTIVO_RECHAZO_REEMBOLSO,
+  TEXTO_ATRIBUCION_REEMBOLSO,
+  TEXTO_CUENTA_RESULTADO,
+  TEXTO_OPCION_REEMBOLSO,
+  TEXTO_OPCION_REEMBOLSO_SUB,
+  TEXTO_TE_DEBE,
+  totalDe,
+} from '../domain/reembolso';
 import { BaseCompartido, baseDesdeBorrador, TEXTO_OTRA_PERSONA } from '../domain/reparto';
 import { conservarMagnitudes, descartadas, primeraMagnitudPendiente, siguienteMagnitud } from '../domain/magnitud';
 import type { IndicePreferencias, PropuestaVista } from '../domain/preferencias';
@@ -141,6 +153,8 @@ export function RegistroGastoScreen(p: {
   const bRef = useRef(b);
   bRef.current = b;
   const [hojaTipos, setHojaTipos] = useState(false);
+  /** C-03: «Me lo reembolsan» abierto encima del formulario. */
+  const [hojaReembolso, setHojaReembolso] = useState(false);
   const [avisos, setAvisos] = useState<string[]>(p.inicial?.aviso ? [p.inicial.aviso] : []);
   const [selectorTercero, setSelectorTercero] = useState(false);
   /** B2: lista de Cuentas abierta encima del formulario. */
@@ -379,7 +393,7 @@ export function RegistroGastoScreen(p: {
   const modificado =
     b.importeTexto.trim() !== '' || b.concepto.trim() !== '' || b.presupuestableOrigen === 'USUARIO' || b.soloMio || b.cuentaOrigen === 'USUARIO' || b.fechaOrigen === 'USUARIO' || b.propuestaRechazada ||
     b.categoria.estado !== 'PENDIENTE' || Object.values(b.magnitudesTexto).some((v) => v.trim() !== '') ||
-    b.terceroOrigen === 'USUARIO' || b.contextoOrigen === 'USUARIO';
+    b.terceroOrigen === 'USUARIO' || b.contextoOrigen === 'USUARIO' || !!b.reembolso;
   const cuentaSel = cuentas.fase === 'OK' ? cuentas.lista.find((x) => x.cuenta_id === b.cuentaId) : undefined;
   const nombreCategoria = b.categoria.estado === 'CATEGORIA' ? b.categoria.nombre : null;
 
@@ -401,6 +415,8 @@ export function RegistroGastoScreen(p: {
   const vivos: Errores = {};
   if (b.importeTexto.trim() !== '' && pendientes.importe) vivos.importe = pendientes.importe;
   if (pendientes.fecha && (otraFecha === null || otraFecha.length >= 10)) vivos.fecha = pendientes.fecha;
+  // C-03: lo que te deben deja de valer si cambia el total o el comercio (se ve al momento).
+  if (pendientes.reembolso) vivos.reembolso = pendientes.reembolso;
   // Magnitudes: el formato inválido se ve al escribir; la obligatoria vacía solo en `faltan`.
   const magnitudesVivas: Record<string, string> = {};
   for (const [id, msg] of Object.entries(pendientes.magnitudes ?? {})) if ((b.magnitudesTexto[id] ?? '').trim() !== '') magnitudesVivas[id] = msg;
@@ -495,6 +511,13 @@ export function RegistroGastoScreen(p: {
     p.onGastoCompartido(baseDesdeBorrador(b), inicial);
   };
 
+  /** C-03: abre «Me lo reembolsan» (necesita el total). */
+  const abrirReembolso = () => {
+    if (bloqueado || enviado || tipoReg !== 'GASTO') return;
+    if (totalDe(b) === null) return setErrores((e) => ({ ...e, importe: validar(b, hoyIso, 'GASTO').importe ?? 'Indica el importe.' }));
+    setHojaReembolso(true);
+  };
+
   const onRegistrar = async () => {
     p.traza?.('registrar_pulsado');
     editable.current = false; // desde el sellado, ninguna propuesta en vuelo toca el borrador
@@ -518,14 +541,15 @@ export function RegistroGastoScreen(p: {
       presupuestable: b.presupuestableOrigen === 'USUARIO' ? b.presupuestable : null,
       soloMio: b.soloMio,
     });
-    const aviso = avisoCambioDeTipo(tipoReg, hacia, quitados);
+    const avisoBase = avisoCambioDeTipo(tipoReg, hacia, quitados);
+    const aviso = b.reembolso ? `${avisoBase} Se quita «${TEXTO_OPCION_REEMBOLSO}»: solo existe en gastos.` : avisoBase;
     if (hacia === 'TRANSFERENCIA') return p.onCambiarTipo?.('TRANSFERENCIA', { importeTexto: b.importeTexto, fechaHecho: b.fechaHecho, aviso });
     const categoriaAdmitida = !!nodoActual && elegible(nodoActual, hacia);
     tipoRef.current = hacia;
     setTipoReg(hacia);
     setAvisos([aviso]);
     plantillaPendiente.current = null;
-    setB((x) => borradorTrasCambioDeTipo(x, false, categoriaAdmitida));
+    setB((x) => ({ ...borradorTrasCambioDeTipo(x, false, categoriaAdmitida), reembolso: null }));
     if (esFechaIso(b.fechaHecho)) void cargarCuentas(b.fechaHecho);
   };
 
@@ -573,7 +597,7 @@ export function RegistroGastoScreen(p: {
     // «Guardar como preferencia» (R05): solo con categoría y si algo difiere de lo propuesto.
     // F05-04: con tercero o en ingresos, para el tercero O la categoría (N01).
     const porTipo = esIngreso || !!b.terceroId;
-    const recordar = porTipo ? null : datosRecordables(estado.sellada.payload, vista.current);
+    const recordar = porTipo ? null : datosRecordables(estado.sellada.payload as Readonly<PayloadGastoPagado>, vista.current);
     const recordarTipo = porTipo
       ? datosRecordablesTipo(
           {
@@ -601,9 +625,26 @@ export function RegistroGastoScreen(p: {
           <Text accessibilityRole="header" style={[tipo.titleMedium, { color: c.textPrimary }]}>{tituloExito(tipoReg)}</Text>
           <Text style={[importe.primary, { color: c.textPrimary }]}>{formatearEur(r.importe)}</Text>
           <Text testID="exito-titulo" style={[tipo.body, { color: c.textSecondary }]}>{titulo}</Text>
-          <Text style={[tipo.footnote, { color: c.textSecondary, textAlign: 'center' }]}>
-            {r.estado_atribucion === 'COMPLETA' ? 'Atribuido: solo tuyo.' : 'Reparto sin indicar: no cuenta en tu gasto atribuible.'}
-          </Text>
+          {r.reembolso ? (
+            // C3: por separado, el gasto que cuenta en tu Resultado y lo que te deben.
+            <View testID="exito-reembolso" style={{ alignSelf: 'stretch', gap: espacio.xs }}>
+              <View testID="exito-resultado" style={s.filaExito} accessible accessibilityLabel={`${TEXTO_CUENTA_RESULTADO}: ${formatearEur(r.reembolso.tu_parte)}`}>
+                <Text style={[tipo.body, { color: c.textSecondary }]}>{TEXTO_CUENTA_RESULTADO}</Text>
+                <Text style={[tipo.bodyEmphasis, { color: c.textPrimary }]}>{formatearEur(r.reembolso.tu_parte)}</Text>
+              </View>
+              {r.reembolso.posiciones.map((x) => (
+                <View key={x.entidad_id} testID={`exito-te-debe-${x.entidad_id}`} style={s.filaExito} accessible
+                  accessibilityLabel={`${TEXTO_TE_DEBE(b.reembolso?.nombre ?? 'quien te lo debe')}: ${formatearEur(x.importe)}`}>
+                  <Text style={[tipo.body, { color: c.textSecondary }]}>{TEXTO_TE_DEBE(b.reembolso?.nombre ?? 'quien te lo debe')}</Text>
+                  <Text style={[tipo.bodyEmphasis, { color: c.textPrimary }]}>{formatearEur(x.importe)}</Text>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <Text style={[tipo.footnote, { color: c.textSecondary, textAlign: 'center' }]}>
+              {r.estado_atribucion === 'COMPLETA' ? 'Atribuido: solo tuyo.' : 'Reparto sin indicar: no cuenta en tu gasto atribuible.'}
+            </Text>
+          )}
           {esIngreso ? null : (
             <Text testID="exito-financiacion" style={[tipo.footnote, { color: c.textSecondary, textAlign: 'center' }]}>
               {r.financiacion === 'PROPUESTA_ACEPTADA' ? 'Financiado por ti.' : 'Financiación no determinada.'}
@@ -940,17 +981,33 @@ export function RegistroGastoScreen(p: {
             <Chip
               testID="solo-mio"
               etiqueta="Solo mío"
-              seleccionado={b.soloMio}
-              onPress={() => cambiar({ soloMio: !b.soloMio })}
+              seleccionado={b.soloMio && !b.reembolso}
+              onPress={() => cambiar(b.reembolso ? { soloMio: true, reembolso: null } : { soloMio: !b.soloMio })}
             />
-            {!esIngreso && p.onGastoCompartido && !enviado ? (
+            {!esIngreso && p.onGastoCompartido && !enviado && !b.reembolso ? (
               <Chip testID="repartir" etiqueta="Repartir" seleccionado={false} onPress={() => irACompartido({ repartir: true, otraPersona: false })} />
             ) : null}
+            {!esIngreso && (!enviado || b.reembolso) ? (
+              <Chip testID="reembolsable" etiqueta={TEXTO_OPCION_REEMBOLSO} accesibilidad={`${TEXTO_OPCION_REEMBOLSO}. ${TEXTO_OPCION_REEMBOLSO_SUB}`}
+                seleccionado={!!b.reembolso} onPress={abrirReembolso} />
+            ) : null}
           </View>
+          {!esIngreso && b.reembolso && b.reembolso.nombre ? (
+            <View style={s.filaFinanciacion}>
+              <Pressable testID="reembolso-resumen" accessibilityRole="button" disabled={bloqueado || enviado} onPress={abrirReembolso} style={{ flexShrink: 1, minHeight: TACTIL_MIN, justifyContent: 'center' }}>
+                <Text style={[tipo.subheadline, { color: c.textPrimary }]}>
+                  {`${TEXTO_TE_DEBE(b.reembolso.nombre)} · ${formatearEur(importeReembolso(totalDe(b), b.reembolso) ?? '0.00')}`}
+                </Text>
+              </Pressable>
+              {!bloqueado && !enviado ? <BotonTexto testID="reembolso-quitar" titulo="Quitar" onPress={() => cambiar({ reembolso: null })} /> : null}
+            </View>
+          ) : null}
+          {visibles.reembolso ? <Text testID="reembolso-error" accessibilityRole="alert" style={[tipo.footnote, { color: c.critical }]}>{visibles.reembolso}</Text> : null}
           <Text testID="origen-atribucion" style={[tipo.footnote, { color: c.textSecondary }]}>
             {esIngreso
               ? b.soloMio ? 'Decisión tuya: el ingreso es 100 % tuyo.' : 'Sin indicar: se guardará sin reparto.'
-              : b.soloMio ? 'Decisión tuya: el gasto es 100 % tuyo.' : 'Sin indicar: se guardará sin reparto y no contará en tu gasto atribuible.'}
+              : b.reembolso && b.reembolso.nombre ? TEXTO_ATRIBUCION_REEMBOLSO(b.reembolso.nombre)
+                : b.soloMio ? 'Decisión tuya: el gasto es 100 % tuyo.' : 'Sin indicar: se guardará sin reparto y no contará en tu gasto atribuible.'}
           </Text>
         </Campo>
 
@@ -978,7 +1035,7 @@ export function RegistroGastoScreen(p: {
                   }}
                 />
               ))}
-              {!esIngreso && p.onGastoCompartido && !enviado ? (
+              {!esIngreso && p.onGastoCompartido && !enviado && !b.reembolso ? (
                 <Chip testID="otra-persona" etiqueta={TEXTO_OTRA_PERSONA} seleccionado={false} onPress={() => irACompartido({ repartir: false, otraPersona: true })} />
               ) : null}
             </View>
@@ -1087,7 +1144,9 @@ export function RegistroGastoScreen(p: {
                   ? `No se ha registrado. ${TEXTO_FECHA_FUTURA}`
                   : estado.codigo === 'CUENTA_SIN_CAPACIDAD'
                     ? `${estado.mensaje} ${TEXTO_FORMULARIO_SE_CONSERVA}`
-                    : `No se ha registrado. ${estado.mensaje}`}
+                    : MOTIVO_RECHAZO_REEMBOLSO[estado.codigo] && b.reembolso
+                      ? `No se ha registrado. ${MOTIVO_RECHAZO_REEMBOLSO[estado.codigo]}`
+                      : `No se ha registrado. ${estado.mensaje}`}
             </Text>
           </View>
         ) : null}
@@ -1163,6 +1222,23 @@ export function RegistroGastoScreen(p: {
 
       {selectorAbierto ? selectorCategorias : null}
 
+      {hojaReembolso && totalDe(b) !== null ? (
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: c.background }]}>
+          <ReembolsoHoja
+            cliente={p.cliente}
+            nuevoId={p.nuevoId}
+            total={totalDe(b)!}
+            comercioId={b.terceroId ?? null}
+            inicial={b.reembolso ?? null}
+            onAtras={() => setHojaReembolso(false)}
+            onHecho={(x) => {
+              setHojaReembolso(false);
+              cambiar({ reembolso: x, soloMio: false });
+            }}
+          />
+        </View>
+      ) : null}
+
       {selectorTercero ? (
         <SelectorTercero
           cliente={p.cliente}
@@ -1222,13 +1298,14 @@ function rutaVisible(ruta: string, _nombre: string): string {
   return partes.length > 1 ? partes.slice(1).join(' › ') : ruta;
 }
 
-type ClaveFalta = 'importe' | 'concepto' | 'categoria' | 'presupuestable' | 'cuenta' | 'fecha';
+type ClaveFalta = 'importe' | 'concepto' | 'categoria' | 'presupuestable' | 'reembolso' | 'cuenta' | 'fecha';
 
 const NOMBRE_FALTA: Record<ClaveFalta, string> = {
   importe: 'importe',
   concepto: 'nota válida (máx. 200 caracteres)',
   categoria: 'categoría',
   presupuestable: 'si cuenta para el presupuesto',
+  reembolso: 'revisar lo que te deben',
   cuenta: 'cuenta de pago',
   fecha: 'fecha válida',
 };
@@ -1246,7 +1323,7 @@ export function textoFaltan(e: Errores, b: Pick<Borrador, 'importeTexto' | 'cate
       partes.push(`${escrito ? `${m.nombre.toLowerCase()} válido` : m.nombre.toLowerCase()} (${m.unidad_default})`);
     }
   }
-  for (const k of ['presupuestable', 'cuenta', 'fecha'] as const) if (e[k]) partes.push(nombre(k));
+  for (const k of ['presupuestable', 'reembolso', 'cuenta', 'fecha'] as const) if (e[k]) partes.push(nombre(k));
   if (partes.length === 0) return '';
   const lista = partes.length === 1 ? partes[0] : `${partes.slice(0, -1).join(', ')} y ${partes[partes.length - 1]}`;
   return `Para registrar falta: ${lista}.`;
@@ -1288,6 +1365,7 @@ const s = StyleSheet.create({
   magnitudCaja: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: radio.s, paddingHorizontal: espacio.m, gap: espacio.s, minHeight: TACTIL_MIN + 4 },
   hoja: { borderTopLeftRadius: radio.xl, borderTopRightRadius: radio.xl, padding: espacio.l, gap: espacio.m },
   filaDescarte: { flexDirection: 'row', justifyContent: 'space-between' },
+  filaExito: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: espacio.m },
   barraHecho: { flexDirection: 'row', justifyContent: 'flex-end', borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: espacio.s },
   chipPlantilla: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: espacio.s, borderRadius: radio.pill, paddingHorizontal: espacio.m, minHeight: TACTIL_MIN },
 });

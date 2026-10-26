@@ -17,6 +17,7 @@
 // Versión: 0.12.0 (F05-06 M5-B): el stub incluye «Dar por cubierta» y «Reabrir» (escrituras no esperadas: lanzan).
 // Versión: 0.13.0 (F05-06 M1): el stub incluye la edición del hecho (lectura y escrituras no esperadas: lanzan).
 // Versión: 0.14.0 (F05-06 M1 v1.1): el stub incluye «Corregir categoría» de V3 (escritura no esperada: lanza).
+// Versión: 0.15.0 (F05-D052 paso 2 · C-03): el stub incluye el gasto reembolsable (escritura no esperada: lanza).
 // ============================================================
 
 import type { ClienteApi, ListaPreferencias, PropuestaRegistro, Respuesta } from '../src/api/cliente';
@@ -125,6 +126,7 @@ export function clienteCategoriasStub(
     registrarDevolucion: noEsperado('registrarDevolucion'),
     registrarAbono: noEsperado('registrarAbono'),
     registrarGastoCompartido: noEsperado('registrarGastoCompartido'),
+    registrarGastoReembolsable: noEsperado('registrarGastoReembolsable'),
     pendienteCon: jest.fn(async (id: string) => ({ tipo: 'OK', datos: { tercero_id: id, nombre: '', te_debe: null, le_debes: null, neto: null, neto_estado: 'SIN_POSICIONES', posiciones: [] } }) as any),
     cobrarPosicion: noEsperado('cobrarPosicion'),
     pagarPosicion: noEsperado('pagarPosicion'),

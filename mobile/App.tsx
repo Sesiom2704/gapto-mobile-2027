@@ -15,7 +15,8 @@
 // v0.11.0 (F05-06 M1; lámina EDIT-HECHO v0.1): «Corregir» desde «Más» del detalle de un hecho en Día a día abre la tarea inmersiva CorregirHechoScreen; al terminar con cambios, Día a día e Inicio vuelven a leer y el detalle se reabre (rastro visible). «Anular por duplicado» vive en la propia Actividad.
 // v0.12.0 (F05-07 G1, F05-D050 §64.1): «Registrar» y los accesos de plantilla de Inicio abren el ensayo G1 (`dev/g1`, solo `__DEV__`) y el cliente usa `g1Fetch(fetch)`, que fuera de `__DEV__` es el `fetch` sin envolver; sin cambios de navegación.
 // v0.13.0 (F05-D051 paso 9.1 · G1 v2): instrumentación por paso, solo `__DEV__`: `trazaG1` (= `g1Traza` en desarrollo, `undefined` en producción) llega por prop al registro y a la transferencia; hitos `hoja_tipos` y `tipo:<TIPO>` aquí, y teclado y AppState con `g1Suscribir` (sin suscripción fuera de `__DEV__`). Sin cambios de navegación ni de comportamiento.
-// Versión: 0.13.0
+// v0.14.0 (F05-D052 paso 2 · C-03, §66.A.8): «Pendiente con…» recibe además el `entidad_id` del derecho elegido en el detalle del gasto y lo abre directamente.
+// Versión: 0.14.0
 // ============================================================
 
 import * as Crypto from 'expo-crypto';
@@ -83,9 +84,9 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
   const registrarDevolucion = useCallback((origenId: string) => setDevolucionDe({ origenId, clave: Date.now() }), []);
   /** F05-06 M3: gasto compartido encima del registro; «Pendiente con» y «Corregir reparto». */
   const [compartido, setCompartido] = useState<{ base: BaseCompartido; inicial: { repartir: boolean; otraPersona: boolean }; clave: number } | null>(null);
-  const [pendienteDe, setPendienteDe] = useState<{ terceroId: string; nombre: string; clave: number } | null>(null);
+  const [pendienteDe, setPendienteDe] = useState<{ terceroId: string; nombre: string; entidadId?: string; clave: number } | null>(null);
   const [corregirDe, setCorregirDe] = useState<{ hechoId: string; clave: number } | null>(null);
-  const abrirPendiente = useCallback((t: { terceroId: string; nombre: string }) => setPendienteDe({ ...t, clave: Date.now() }), []);
+  const abrirPendiente = useCallback((t: { terceroId: string; nombre: string; entidadId?: string }) => setPendienteDe({ ...t, clave: Date.now() }), []);
   const abrirCorregir = useCallback((hechoId: string) => setCorregirDe({ hechoId, clave: Date.now() }), []);
   /** F05-06 M1: «Corregir» un registro (OP-21P / OP-21T). */
   const [corregirHecho, setCorregirHecho] = useState<{ hechoId: string; titulo: string; clave: number } | null>(null);
@@ -331,6 +332,7 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
               ahora={p.ahora}
               terceroId={pendienteDe.terceroId}
               nombre={pendienteDe.nombre}
+              entidadId={pendienteDe.entidadId ?? null}
               onCerrar={(cambios) => {
                 setPendienteDe(null);
                 if (cambios) setRefresco((n) => n + 1);

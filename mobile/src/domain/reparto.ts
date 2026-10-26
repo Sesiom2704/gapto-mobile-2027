@@ -13,6 +13,7 @@
 import type { Borrador, CategoriaWire } from './intencion';
 import { categoriaWire } from './intencion';
 import { formatearEur, parsearImporte } from './importe';
+import type { PosicionVinculada } from './reembolso';
 
 // ------------------------------------------------------------------ wire
 export type RespuestaLeDebo = 'SI' | 'NO' | 'NO_LO_SE';
@@ -144,6 +145,8 @@ export interface RepartoDeHecho {
   corregible: boolean;
   motivo: MotivoNoCorregible | null;
   partes: ParteDeHecho[];
+  /** F05-D052 C-03 (§66.A.8): posiciones del hecho que no cuelgan de ninguna parte (aditivo; ausente en servidores previos). */
+  posiciones_vinculadas?: PosicionVinculada[];
 }
 
 export interface PayloadCorregirReparto {
@@ -310,8 +313,8 @@ export function resumenReparto(total: string, filas: FilaReparto[]): ResumenRepa
 
 /** R6 (F05 §66.A.10; espejo del validador del servidor): código estable del rechazo. */
 export const CODIGO_SIN_MARGEN = 'REPARTO_SIN_MARGEN_PARA_DESCONOCIDO';
-/** R6: texto propio (no sugiere poner 0 ni reutiliza el de «Corregir reparto»). */
-export const TEXTO_REPARTO_SIN_MARGEN = 'Lo que has indicado ya suma todo el gasto y no deja nada para quien está sin indicar. Revisa los importes.';
+/** R6: texto propio, el mismo del servidor sin su cierre (CONTRATO_API_C03 §6); no sugiere poner 0 ni reutiliza el de «Corregir reparto». */
+export const TEXTO_REPARTO_SIN_MARGEN = 'Las partes que has indicado ya suman el total, pero queda alguna sin indicar. Indica cuánto es o quita a esa persona del reparto.';
 export const FALTA_SIN_MARGEN = 'que quede importe para quien está sin indicar';
 
 /**

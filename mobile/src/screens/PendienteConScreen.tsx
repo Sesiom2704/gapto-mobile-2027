@@ -8,6 +8,7 @@
 // Versión: 0.3.0 (swipe (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados `principal` / `alternativa` del componente común (principal a la izquierda); la raíz y el scroll cierran la fila abierta a medias (`propsZonaSwipe`, `propsScrollSwipe`).)
 // Versión: 0.4.0 (F05-D051 paso 8; lámina B D-F0507L-03): el texto de cada posición sale de `textoPosicion`. Tras cobrar, pagar o perdonar, una CERRADA dice «0,00 € · Saldado. Ya no queda nada pendiente.» y, si su importe inicial no se conoció, debajo «Importe inicial desconocido» (etiqueta accesible con el mismo texto); nunca «Sin determinar». La lista solo trae ACTIVAS: la pendiente con saldo desconocido sigue en «Sin determinar».
 // Versión: 0.5.0 (F05-D052 paso 3 · lámina B, F05 §66.2): «Saldo inicial desconocido» solo con `apertura_indeterminada` (vía `textoPosicion`); una ACTIVA con saldo desconocido ya no lo dice (se derivaba de `saldo === null`, herencia de M3): muestra su origen y «Sin determinar».
+// Versión: 0.6.0 (F05-D052 paso 2 · C-03 C4, F05 §66.2/§66.A.8; D-F0507L-06): `entidadId` abre directamente el derecho elegido (si la contraparte tiene varios, el cobro se aplica solo a ese). En el derecho de un gasto reembolsable («Pendiente de cobro · …») el origen es «<quién> · Pendiente de cobro · <categoría> · te debe X» y la explicación «No es un ingreso: solo salda lo que te deben. Tu Resultado no cambia.». «Registrar cobro» sigue deshabilitado hasta elegir cuenta. Tras cualquier cobro, el título es «Saldado · no cuenta como ingreso» solo si extingue el saldo conocido; si no, «Cobro registrado · quedan X €» (nunca «Saldado» con saldo indeterminado).
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -42,6 +43,7 @@ import {
   textoPosicion,
   textoSaldo,
 } from '../domain/reparto';
+import { esDerechoReembolso, TEXTO_COBRO_NO_INGRESO, textoTrasCobro } from '../domain/reembolso';
 import { useTema } from '../theme/tema';
 import { espacio, importe, tipo } from '../theme/tokens';
 
@@ -60,6 +62,8 @@ export function PendienteConScreen(p: {
   ahora: () => Date;
   terceroId: string;
   nombre: string;
+  /** F05-D052 C-03 (§66.A.8): derecho elegido en el detalle del gasto; se abre directamente. */
+  entidadId?: string | null;
   /** Vuelve atrás; `cambios`: se registró algo. */
   onCerrar: (cambios: boolean) => void;
   onVerHecho?: (hechoId: string) => void;
@@ -82,10 +86,17 @@ export function PendienteConScreen(p: {
   const enVuelo = useRef(false);
   const sellada = useRef<string | null>(null);
 
+  /** C-03: el derecho elegido se abre una sola vez, al cargar (después manda el usuario). */
+  const entidadPendiente = useRef<string | null>(p.entidadId ?? null);
   const cargar = async () => {
     setCarga({ fase: 'CARGANDO' });
     const r = await p.cliente.pendienteCon(p.terceroId);
     setCarga(r.tipo === 'OK' ? { fase: 'OK', p: r.datos } : { fase: 'ERROR' });
+    if (r.tipo === 'OK' && entidadPendiente.current) {
+      const x = r.datos.posiciones.find((y) => y.entidad_id === entidadPendiente.current && y.estado === 'ACTIVA');
+      entidadPendiente.current = null;
+      if (x) setSel(x);
+    }
   };
   useEffect(() => {
     void cargar();
@@ -210,8 +221,8 @@ export function PendienteConScreen(p: {
         <View testID="posicion-exito" style={[s.pantalla, { backgroundColor: c.background, paddingTop: inset.top + espacio.xl, paddingBottom: inset.bottom + espacio.l }]}>
           <View style={[s.exito, { backgroundColor: c.surfacePrimary }]} accessibilityLiveRegion="polite">
             <Text style={{ fontSize: 40 }} accessibilityElementsHidden>✓</Text>
-            <Text accessibilityRole="header" style={[tipo.titleMedium, { color: c.textPrimary }]}>
-              {accion === 'PERDON' ? 'Perdonado' : esCobro ? 'Cobro registrado' : 'Pago registrado'}
+            <Text testID="posicion-exito-titulo" accessibilityRole="header" style={[tipo.titleMedium, { color: c.textPrimary, textAlign: 'center' }]}>
+              {accion === 'PERDON' ? 'Perdonado' : esCobro ? textoTrasCobro(r) : 'Pago registrado'}
             </Text>
             <Text style={[importe.primary, { color: c.textPrimary }]}>{formatearEur(r.importe)}</Text>
             {(() => {
@@ -235,7 +246,9 @@ export function PendienteConScreen(p: {
         <CabeceraTarea titulo={titulo} izquierda={<BotonTexto testID="accion-cancelar" titulo="Cancelar" onPress={() => (bloqueado ? undefined : cerrarAccion())} />} />
         <ScrollView testID={`accion-${accion.toLowerCase()}`} keyboardShouldPersistTaps="handled" contentContainerStyle={[s.form, { paddingBottom: inset.bottom + espacio.xxl }]}>
           <Text testID="accion-origen" style={[tipo.subheadline, { color: c.textSecondary }]}>
-            {`${sel.tipo === 'DERECHO_COBRO' ? `${nombre} te debe` : `Le debes a ${nombre}`} ${textoSaldo(sel.saldo)} · ${origen(sel)}`}
+            {esDerechoReembolso(sel)
+              ? `${nombre} · ${sel.nombre} · te debe ${textoSaldo(sel.saldo)}`
+              : `${sel.tipo === 'DERECHO_COBRO' ? `${nombre} te debe` : `Le debes a ${nombre}`} ${textoSaldo(sel.saldo)} · ${origen(sel)}`}
           </Text>
           <Campo etiqueta={accion === 'PERDON' ? 'Importe que perdonas' : esCobro ? 'Importe cobrado' : 'Importe pagado'}>
             <View style={[s.fila, { backgroundColor: c.surfacePrimary, borderColor: c.borderStandard, borderWidth: 1 }]}>
@@ -279,7 +292,7 @@ export function PendienteConScreen(p: {
             </Text>
           </Campo>
           <Text testID="accion-explicacion" style={[tipo.footnote, { color: c.textSecondary }]}>
-            {accion === 'PERDON' ? TEXTO_PERDONAR : esCobro ? TEXTO_NO_ES_INGRESO(nombre) : TEXTO_NO_ES_GASTO(nombre)}
+            {accion === 'PERDON' ? TEXTO_PERDONAR : esCobro ? (esDerechoReembolso(sel) ? TEXTO_COBRO_NO_INGRESO : TEXTO_NO_ES_INGRESO(nombre)) : TEXTO_NO_ES_GASTO(nombre)}
           </Text>
           {accion === 'PAGO' ? <Text testID="accion-sin-tercero" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_SIN_TERCERO_PAGA}</Text> : null}
           {envio.fase === 'RECHAZADO' ? <Aviso testID="accion-error" critico texto={`No se ha registrado. ${envio.mensaje}`} /> : null}
@@ -303,7 +316,7 @@ export function PendienteConScreen(p: {
         <ScrollView testID="posicion-acciones" contentContainerStyle={[s.form, { paddingBottom: inset.bottom + espacio.xxl }]}>
           <View style={[s.tarjeta, { backgroundColor: c.surfacePrimary }]}>
             <Text style={[tipo.bodyEmphasis, { color: c.textPrimary }]}>{derecho ? `${nombre} te debe ${textoSaldo(sel.saldo)}` : `Le debes a ${nombre} ${textoSaldo(sel.saldo)}`}</Text>
-            <Text style={[tipo.footnote, { color: c.textSecondary }]}>{origen(sel)}</Text>
+            <Text style={[tipo.footnote, { color: c.textSecondary }]}>{esDerechoReembolso(sel) ? `${sel.nombre} · ${origen(sel)}` : origen(sel)}</Text>
             {sel.origen_hecho_id && p.onVerHecho ? <BotonTexto testID="posicion-ver-origen" titulo="Ver el gasto" onPress={() => p.onVerHecho!(sel.origen_hecho_id!)} /> : null}
           </View>
           <BotonPrimario testID={derecho ? 'posicion-cobrar' : 'posicion-pagar'} titulo={derecho ? 'Registrar cobro' : 'Registrar pago'}
