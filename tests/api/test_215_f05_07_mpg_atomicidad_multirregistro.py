@@ -38,6 +38,9 @@
 # Version: 0.1.0 (F05-07/GATE adenda 2, MANT-PRE-GATE atomicidad multirregistro)
 # Version: 0.1.1 (F05-07/GATE adenda 2, integracion MANT-PRE-GATE: renumerado de test_212 a test_215;
 #   test_212 es G9 de f05-gate-g2 y 213/214 son de F04-R3)
+# Version: 0.2.0 (F05-D052 paso 2; F05 §66.A): comando nuevo C03_gasto_reembolsable
+#   (POST /v1/intenciones/gasto-reembolsable: writer de actor + OP-22) en el barrido,
+#   con una empresa sin actor (el alta perezosa va dentro de la transaccion).
 # ============================================================
 
 from __future__ import annotations
@@ -51,6 +54,7 @@ import f05_05_helpers as x
 import f05_06_m2_helpers as m2
 import f05_06_m3_helpers as r3
 import f05_06_m5_helpers as m5
+import f05_d052_c03_helpers as c03
 import vs01_api_helpers as h
 
 #: Tope de puntos de inyeccion por comando (defensa contra un bucle sin fin).
@@ -186,6 +190,12 @@ def p_m3_gasto_compartido(t):
     return r3.GASTO_COMPARTIDO, r3.cuerpo(
         "44.50", pagado_por=r3.con_cuenta(cta), fecha=r3.FECHA_CENA, nota="Cena con amigos",
         reparto=r3.repartir("14.50", (tania, "15.00", "SI"), (carlos, "15.00", "NO")))
+
+
+def p_c03_gasto_reembolsable(t):
+    owner, actor, cli, cta, ahorro = t
+    empresa = c03.tercero(cli, "Empresa SL")  # sin actor: el alta perezosa va dentro
+    return c03.RUTA, c03.cuerpo(cta, empresa, "40.00", importe="60.00")
 
 
 def _cena(t):
@@ -360,6 +370,7 @@ COMANDOS = {
     "M2_devolucion_cobrada": ("/v1/hechos/{origen_id}/devoluciones", p_m2_devolucion_cobrada),
     "M2_abono": ("/v1/hechos/{devolucion_id}/abono", p_m2_abono),
     "M3_gasto_compartido": ("/v1/intenciones/gasto-compartido", p_m3_gasto_compartido),
+    "C03_gasto_reembolsable": ("/v1/intenciones/gasto-reembolsable", p_c03_gasto_reembolsable),
     "M3_cobro": ("/v1/posiciones/{entidad_id}/cobro", p_m3_cobro),
     "M3_pago": ("/v1/posiciones/{entidad_id}/pago", p_m3_pago),
     "M3_perdon": ("/v1/posiciones/{entidad_id}/perdon", p_m3_perdon),

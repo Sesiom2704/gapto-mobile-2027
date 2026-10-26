@@ -94,6 +94,14 @@
 #   salida ACTIVO) alimenta tambien cuenta_compra del contexto (antes: el
 #   primer movimiento de salida, LIMIT 1); el abono posterior bloquea el
 #   origen antes que la devolucion.
+# Version: 0.3.0 (F05-D052 paso 2; F05 §66.A.9, AJ-F0507G3-04): un gasto con un
+#   DERECHO_COBRO vinculado (C-03 u otro) no admite devolucion contextual, en
+#   cualquier estado del derecho (antes de cobrar, tras un cobro parcial o el
+#   total) y por cualquier vinculo (GENERADO_POR o AFECTA_A de RV3):
+#   GASTO_CON_DERECHO_DE_COBRO (409, capa F05, sin escritura), bajo el
+#   lock del origen y antes de las demas guardas de forma; el contexto del
+#   formulario lo devuelve como motivo. Una devolucion nunca reduce el derecho
+#   de forma implicita (DEU-C03-POSTERIORES, F06).
 # ============================================================
 
 from __future__ import annotations
@@ -133,6 +141,7 @@ ATRIBUCION_NO_DEMOSTRABLE = "DEVOLUCION_ATRIBUCION_NO_DEMOSTRABLE"
 EXCEDE = "EXCEDE_CAPACIDAD_REVERSIBLE"
 NO_ES_DEVOLUCION = "HECHO_NO_ES_DEVOLUCION"
 DEVOLUCION_NO_ACTIVA = "DEVOLUCION_NO_ACTIVA"
+GASTO_CON_DERECHO_DE_COBRO = "GASTO_CON_DERECHO_DE_COBRO"
 CUENTA_SIN_CAPACIDAD = "CUENTA_SIN_CAPACIDAD"
 #: Operacion del abono para el texto de CUENTA_SIN_CAPACIDAD. Una cuenta que
 #: NO es la original exige recibir fondos: la operacion de elegibilidad
@@ -216,6 +225,16 @@ def motivo_origen(gastos: list[tuple], es_v3: bool) -> str | None:
     if len({f[4] for f in gastos}) > 1:
         return ORIGEN_MULTICATEGORIA
     return None
+
+
+def con_derecho_de_cobro(sesion: SesionMotor, origen_id: uuid.UUID) -> bool:
+    """§66.A.9: el gasto tiene un DERECHO_COBRO vinculado, en cualquier estado y
+    por CUALQUIER vinculo hecho -> posicion: GENERADO_POR (runtime, C-03 y M3)
+    o AFECTA_A (carga RV3, H9). Lectura literal de «vinculado»."""
+    fila = sesion.uno(
+        "SELECT EXISTS (SELECT 1 FROM gapto.hecho_entidades v JOIN gapto.derechos_obligaciones_financieras p "
+        "ON p.entidad_id = v.entidad_id WHERE v.hecho_id = %s AND p.tipo = 'DERECHO_COBRO')", (origen_id,))
+    return bool(fila and fila[0])
 
 
 def tuya_demostrable(gastos: list[tuple]) -> bool:
@@ -342,6 +361,8 @@ def registrar_devolucion(unidad: UnidadDeTrabajo, contexto: ContextoOperacion, o
             return RechazoRegistro(CODIGO_FECHA_FUTURA)
         if estado != "ACTIVO":
             raise _Rechazo(ORIGEN_NO_ACTIVO)
+        if con_derecho_de_cobro(sesion, origen_id):
+            raise _Rechazo(GASTO_CON_DERECHO_DE_COBRO)
         gastos = efectos_gasto(sesion, origen_id)
         motivo = motivo_origen(gastos, es_v3)
         if motivo is not None:
@@ -440,7 +461,12 @@ def contexto_devolucion(sesion: SesionMotor, origen_id: uuid.UUID) -> dict[str, 
         return None
     estado, fecha, nota, total, es_v3, tercero = fila
     gastos = efectos_gasto(sesion, origen_id)
-    motivo = ORIGEN_NO_ACTIVO if estado != "ACTIVO" else motivo_origen(gastos, es_v3)
+    if estado != "ACTIVO":
+        motivo = ORIGEN_NO_ACTIVO
+    elif con_derecho_de_cobro(sesion, origen_id):
+        motivo = GASTO_CON_DERECHO_DE_COBRO
+    else:
+        motivo = motivo_origen(gastos, es_v3)
     categoria_id = gastos[0][4] if gastos and motivo is None else None
     categoria = None
     if categoria_id is not None:

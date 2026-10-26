@@ -28,6 +28,9 @@
 #        python scripts/dev/mutantes_f04_r3_q4.py [--solo ID,ID] [--salida fichero]
 #   No ejecutar en paralelo con otro arnes ni con la suite sobre el mismo arbol.
 # Version: 0.1.0 (F05-D051 paso 2; F05 §65.4 contrato HTTP Q4/Q4-H2)
+# Version: 0.2.0 (F05-D052 paso 2/3): reanclaje de SALDO, LECTURA, BUCLE y NETO (Q5, Q6):
+#   la lectura de posiciones del reparto pasa a ejecucion_reparto._lecturas_posiciones,
+#   UNA lectura por entidad (§66.5). Mismas mutaciones semanticas.
 # ============================================================
 
 from __future__ import annotations
@@ -50,17 +53,19 @@ DESCONOCIDA = [T216 + "::test_derecho_apertura_desconocida_tres_estados_por_http
 CONOCIDA = [T216 + "::test_derecho_apertura_conocida_cerrado_por_http_es_cero_y_false",
             T216 + "::test_obligacion_apertura_conocida_pagada_por_http_es_cero_y_false"]
 AISLAMIENTO = [T216 + "::test_aislamiento_por_owner"]
-SALDO = '            lecturas[entidad] = {"saldo": _texto(r.saldo.importe) if r.saldo.conocido else None,\n'
-LECTURA = SALDO + '                                 "estado": r.estado, "apertura_indeterminada": r.apertura_indeterminada}\n'
-BUCLE = ('        for _, _, _, entidad in estado["vinculos"]:\n'
-         "            r = servicio_pos.saldo(contexto, entidad)\n" + SALDO)
-NETO = ('        for _, _, _c, entidad in estado["vinculos"]:\n'
-        "            r = servicio_pos.saldo(contexto, entidad)\n"
-        "            _seg = NetoService(UnidadDeTrabajoAdscrita(sesion)).posicion_neta(\n"
-        "                contexto, contraparte_actor_id=_c).segmento(_c, MONEDA)\n"
-        "            _det = [d for d in (_seg.posiciones if _seg is not None else ()) if d.entidad_id == entidad]\n"
-        '            lecturas[entidad] = {"saldo": _texto(_det[0].saldo.importe) if _det and _det[0].saldo.conocido\n'
-        "                                 else None,\n")
+SALDO = '        lecturas[entidad] = {"saldo": _texto(r.saldo.importe) if r.saldo.conocido else None,\n'
+LECTURA = SALDO + '                             "estado": r.estado, "apertura_indeterminada": r.apertura_indeterminada}\n'
+BUCLE = ('    for _, _, _, entidad in vinculos:\n'
+         "        if entidad in lecturas:\n            continue\n"
+         "        r = servicio_pos.saldo(contexto, entidad)\n" + SALDO)
+NETO = ('    for _, _, _c, entidad in vinculos:\n'
+        "        if entidad in lecturas:\n            continue\n"
+        "        r = servicio_pos.saldo(contexto, entidad)\n"
+        "        _seg = NetoService(UnidadDeTrabajoAdscrita(sesion)).posicion_neta(\n"
+        "            contexto, contraparte_actor_id=_c).segmento(_c, MONEDA)\n"
+        "        _det = [d for d in (_seg.posiciones if _seg is not None else ()) if d.entidad_id == entidad]\n"
+        '        lecturas[entidad] = {"saldo": _texto(_det[0].saldo.importe) if _det and _det[0].saldo.conocido\n'
+        "                             else None,\n")
 VISIBLE = ("    estado = _estado_reparto(sesion, hecho_id)\n    if estado is None:\n        return None\n"
            "    actor_self = leer_actor_self(sesion)\n")
 NO_ENCONTRADA = "        if posicion is None:\n            return RechazoRegistro(POSICION_NO_ENCONTRADA)\n"
@@ -81,7 +86,7 @@ MUTANTES = [
        '"apertura_indeterminada": r.estado == "CERRADA"}')],
      CONOCIDA, None),
     ("Q5", "reparto del hecho: estado omitido de la posicion",
-     [(REP, LECTURA, SALDO + '                                 "apertura_indeterminada": r.apertura_indeterminada}\n')],
+     [(REP, LECTURA, SALDO + '                             "apertura_indeterminada": r.apertura_indeterminada}\n')],
      CONOCIDA + [T199], None),
     ("Q6", "reparto del hecho: saldo tomado del neto OP-20 (solo ACTIVAS) y no de PosicionesService.saldo",
      [(REP, BUCLE, NETO)],

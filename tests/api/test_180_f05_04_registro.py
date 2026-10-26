@@ -33,6 +33,10 @@
 #   hasta F05-06 M3, que las autoriza: SOLO backend/app/api/ejecucion_reparto.py y
 #   dto_reparto.py pueden tocarlas, y en OpenAPI solo los esquemas y rutas de M3. El resto
 #   de F05 sigue vedado, y la lista de excepciones es cerrada.
+# Version: 0.5.0 (F05-D052 paso 2; F05 §66.A, contrato C-03 v1.0): la excepcion nominal
+#   se amplia SOLO con el adaptador C-03 (ejecucion_reembolsable.py: OP-12A dentro de
+#   la unica OP-22 y lectura del saldo de su posicion) y dto_reembolsable.py; en
+#   OpenAPI, sus esquemas, PosicionVinculadaHttp (§66.A.8) y la ruta del C-03.
 # ============================================================
 
 from __future__ import annotations
@@ -388,13 +392,19 @@ F05 = [p for d in ("api", "comun", "terceros", "contextos", "plantillas", "prefe
 
 
 #: F05-06 M3 (F05-D037/F05-D043): unicos modulos F05 que pueden tocar posiciones.
-EXCEPCIONES_M3 = frozenset({"ejecucion_reparto.py", "dto_reparto.py"})
+EXCEPCIONES_M3 = frozenset({"ejecucion_reparto.py", "dto_reparto.py",
+                            # F05-D052 C-03 (§66.A)
+                            "ejecucion_reembolsable.py", "dto_reembolsable.py"})
 #: Esquemas y rutas HTTP de M3 que pueden mencionar posiciones (lista cerrada).
 ESQUEMAS_M3 = frozenset({"ResultadoPosicionHttp", "PosicionCreadaHttp", "PosicionPendiente", "PendienteConPersona",
                          "IntencionCobroPago", "IntencionPerdon", "ResultadoGastoCompartidoHttp",
                          "ResultadoCorreccionRepartoHttp", "RepartoDeHecho", "ParteDeHechoHttp", "PosicionDeParteHttp",
-                         "ElegibilidadAnulacion", "IntencionGastoCompartido", "IntencionCorregirReparto"})
-RUTAS_M3 = ("/v1/posiciones/", "/v1/intenciones/gasto-compartido", "/pendiente", "/reparto", "/anulacion")
+                         "ElegibilidadAnulacion", "IntencionGastoCompartido", "IntencionCorregirReparto",
+                         # F05-D052 C-03 (§66.A.7, §66.A.8)
+                         "IntencionGastoReembolsable", "BloqueReembolso", "ResultadoGastoReembolsableHttp",
+                         "PosicionReembolsoHttp", "MovimientoReembolsableHttp", "PosicionVinculadaHttp"})
+RUTAS_M3 = ("/v1/posiciones/", "/v1/intenciones/gasto-compartido", "/pendiente", "/reparto", "/anulacion",
+            "/v1/intenciones/gasto-reembolsable")
 
 
 def test_caso19_20_ninguna_ruta_f05_crea_ni_expone_posiciones():

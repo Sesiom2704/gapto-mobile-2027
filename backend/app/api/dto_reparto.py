@@ -21,6 +21,11 @@
 # Version: 0.3.0 (F05-D051 paso 2; F05 §65.4 contrato HTTP Q4/Q4-H2, ampliacion
 #   aditiva): `apertura_indeterminada` en las tres exposiciones de posiciones
 #   (AJ-D055-B1-09, contrato F04-D055 A4) y `estado` en PosicionDeParteHttp.
+# Version: 0.4.0 (F05-D052 paso 2; F05 §66.A.8 y §66.A.10): R6 en el validador
+#   del gasto compartido (alguna parte desconocida y la suma de las conocidas
+#   igual al total -> codigo estable REPARTO_SIN_MARGEN_PARA_DESCONOCIDO; el
+#   exceso conserva su error y la suma incompleta sigue admitida) y coleccion
+#   aditiva `posiciones_vinculadas` en RepartoDeHecho, separada de las partes.
 # ============================================================
 
 from __future__ import annotations
@@ -31,12 +36,16 @@ import uuid
 from typing import Annotated, Literal, Union
 
 from pydantic import Field, model_validator
+from pydantic_core import PydanticCustomError
 
 from app.api.dto_prevision import BloquePrevision
 from app.api.dto_registro import _ConNota, _Estricto
 from app.api.dto_vs01 import CategoriaSeleccionada, CategoriaVs01
 
 Importe = Annotated[decimal.Decimal, Field(gt=0, max_digits=14, decimal_places=2)]
+
+#: R6 (F05 §66.A.10): codigo estable del validador (422), con texto propio.
+REPARTO_SIN_MARGEN_PARA_DESCONOCIDO = "REPARTO_SIN_MARGEN_PARA_DESCONOCIDO"
 
 
 # ------------------------------------------------------------------ pagador
@@ -129,6 +138,13 @@ class IntencionGastoCompartido(_ConNota):
             conocidas.append(self.reparto.mi_parte)
         if sum(conocidas, decimal.Decimal(0)) > self.importe:
             raise ValueError("El reparto supera el total del gasto.")
+        if isinstance(self.reparto, RepartoEntrePersonas):
+            # R6: con alguna parte sin indicar, lo conocido no puede cubrir ya el
+            # total (no se infiere cero para lo desconocido, G3).
+            desconocida = self.reparto.mi_parte is None or any(p.importe is None for p in self.partes)
+            if desconocida and sum(conocidas, decimal.Decimal(0)) == self.importe:
+                raise PydanticCustomError(REPARTO_SIN_MARGEN_PARA_DESCONOCIDO,
+                                          "Lo indicado ya suma el total y queda una parte sin indicar.")
         paga_persona = isinstance(self.pagado_por, PagadoPorPersona)
         for parte in self.partes:
             if parte.me_debe is not None and paga_persona:
@@ -269,6 +285,20 @@ class ParteDeHechoHttp(_Estricto):
     posicion: PosicionDeParteHttp | None
 
 
+class PosicionVinculadaHttp(_Estricto):
+    """F05 §66.A.8: posicion vinculada al hecho que NO cuelga de ninguna
+    parte del reparto (p. ej. el derecho de cobro de C-03). Nunca se fabrica
+    una parte ni una atribucion cero para mostrarla."""
+
+    entidad_id: uuid.UUID
+    contraparte_tercero_id: uuid.UUID | None
+    contraparte_nombre: str | None
+    tipo: Literal["DERECHO_COBRO", "OBLIGACION_PAGO"]
+    saldo: str | None  # None = «Sin determinar»
+    estado: Literal["ACTIVA", "CERRADA"]
+    apertura_indeterminada: bool  # F04-D055 A4
+
+
 class RepartoDeHecho(_Estricto):
     """Lectura sin locks para «Corregir reparto» (E6). `corregible` solo
     sirve para mostrar; la correccion revalida la whitelist bajo lock."""
@@ -280,6 +310,8 @@ class RepartoDeHecho(_Estricto):
     corregible: bool
     motivo: Literal["TIPO_NO_ADMITIDO", "ORIGEN_IMPORTADO", "NO_ACTIVO", "SIN_REPARTO"] | None
     partes: list[ParteDeHechoHttp]
+    # F05 §66.A.8 (aditivo): posiciones del hecho no mostradas ya en `partes`.
+    posiciones_vinculadas: list[PosicionVinculadaHttp] = []
 
 
 # ------------------------------------------------------------------ Elegibilidad de anulacion (iii)

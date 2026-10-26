@@ -239,6 +239,16 @@
 #   aditiva): la respuesta de cobro, pago y perdon (_posicion_http) transporta
 #   `apertura_indeterminada` del motor (F04-D055 A4).
 # Version: 0.29.0
+#   v0.30.0 (F05-D052 paso 2; F05 §66.A, contrato C-03 v1.0):
+#     POST /v1/intenciones/gasto-reembolsable  gasto propio reembolsable C-03
+#          (ejecucion_reembolsable: writer de actor con politica C-03 + UNA
+#          llamada a OP-22). Rechazos de capa F05 con rechazo_integracion.
+#   Los errores de validacion del DTO con codigo ESTABLE (PydanticCustomError
+#   de errores_http.CODIGOS_VALIDACION: REEMBOLSO_EXCEDE_TOTAL,
+#   CONTRAPARTE_ES_COMERCIO, REPARTO_SIN_MARGEN_PARA_DESCONOCIDO) responden
+#   422 con ese `codigo` y su texto propio; el resto sigue siendo
+#   ENTRADA_INVALIDA. La lectura del reparto gana `posiciones_vinculadas`.
+# Version: 0.30.0
 # ============================================================
 
 from __future__ import annotations
@@ -385,6 +395,8 @@ from app.api.dto_reparto import (
     ResultadoPosicionHttp,
 )
 from app.api import ejecucion_reparto as rep
+from app.api import ejecucion_reembolsable as ejr
+from app.api.dto_reembolsable import IntencionGastoReembolsable, ResultadoGastoReembolsableHttp
 from app.api import ejecucion_prevision as ejp
 from app.api import ejecucion_anulacion as eja
 from app.api import ejecucion_correccion as ejc
@@ -521,6 +533,11 @@ def create_app(
 
     @app.exception_handler(RequestValidationError)
     def _h_validacion(_: Request, exc: RequestValidationError) -> JSONResponse:
+        # F05-D052: una regla del DTO con codigo estable se devuelve con ese codigo.
+        estable = next((e["type"] for e in exc.errors() if e.get("type") in eh.CODIGOS_VALIDACION), None)
+        if estable is not None:
+            status, cuerpo = eh.rechazo_validacion(estable)
+            return JSONResponse(cuerpo, status_code=status)
         campos = sorted({".".join(str(p) for p in e.get("loc", ())[1:]) for e in exc.errors()})
         return JSONResponse(
             {
@@ -1165,6 +1182,29 @@ def create_app(
             "tu_parte": None if salida.tu_parte is None else str(salida.tu_parte.quantize(_CENT)),
             "movimiento": None if salida.movimiento is None else str(salida.movimiento.quantize(_CENT)),
             "posiciones": _posiciones_http(salida.posiciones), "aviso": _AVISO_F05,
+        }
+
+    @app.post("/v1/intenciones/gasto-reembolsable", response_model=ResultadoGastoReembolsableHttp,
+              dependencies=[Depends(autorizar)])
+    def gasto_reembolsable(intencion: IntencionGastoReembolsable):
+        # F05-D052 C-03 (§66.A): la politica de naturaleza la fija esta ruta en el servidor.
+        salida = ejr.registrar_gasto_reembolsable(unidad, contexto(), intencion, reloj)
+        if isinstance(salida, RechazoRegistro):
+            status, cuerpo = eh.rechazo_integracion(salida.codigo, salida.detalle)
+            return JSONResponse(cuerpo, status_code=status)
+        total = str(salida.total.quantize(_CENT))
+        return {
+            "intencion_id": intencion.intencion_id, "hecho_id": salida.hecho_id, "idempotente": salida.idempotente,
+            "importe": total, "moneda": intencion.moneda, "estado_atribucion": "COMPLETA", "tu_parte": total,
+            "movimiento": {"movimiento_id": salida.movimiento_id, "cuenta_id": salida.cuenta_id,
+                           "importe": str((-salida.total).quantize(_CENT))},
+            "posiciones": [{"entidad_id": p.entidad_id, "tipo": "DERECHO_COBRO",
+                            "contraparte_tercero_id": p.contraparte_tercero_id, "nombre": p.nombre,
+                            "importe": str(p.importe.quantize(_CENT)),
+                            "saldo": None if p.saldo is None else str(p.saldo.quantize(_CENT)),
+                            "estado": p.estado, "apertura_indeterminada": p.apertura_indeterminada}
+                           for p in salida.posiciones],
+            "aviso": _AVISO_F05,
         }
 
     def _reduccion(fn, entidad_id, intencion):

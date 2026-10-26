@@ -20,6 +20,13 @@
 #     TERCERO_NO_DISPONIBLE sin efectos: no revela si el tercero existe.
 #   Los rechazos son codigos de capa F05 (sin escritura previa).
 # Version: 0.1.0 (F05-06 M3 §A3)
+# Version: 0.2.0 (F05-D052 paso 2; F05 §66.A.3, AJ-F0507G3-02): politica de
+#   naturaleza CERRADA POR LLAMANTE y fijada en el servidor (nunca un parametro
+#   del cliente): el reparto conserva validar_tercero_persona (solo PERSONA,
+#   TERCERO_NO_PERSONA); el gasto reembolsable C-03 usa
+#   validar_tercero_reembolso (PERSONA o EMPRESA; ORGANISMO, OTRO y NULL ->
+#   NATURALEZA_NO_ADMITIDA_EN_REEMBOLSO, DEU-C03-NATURALEZAS). El alta del
+#   actor no cambia; solo el motivo de auditoria lo elige el llamante.
 # ============================================================
 
 from __future__ import annotations
@@ -34,7 +41,11 @@ from app.repositories import auditoria_repository as auditoria
 
 TERCERO_NO_DISPONIBLE = "TERCERO_NO_DISPONIBLE"
 TERCERO_NO_PERSONA = "TERCERO_NO_PERSONA"
+NATURALEZA_NO_ADMITIDA_EN_REEMBOLSO = "NATURALEZA_NO_ADMITIDA_EN_REEMBOLSO"
 MOTIVO_ALTA = "F05-06 M3: alta del actor financiero de un tercero persona"
+MOTIVO_ALTA_REEMBOLSO = "F05-D052 C-03: alta del actor financiero de quien debe un gasto reembolsable"
+#: Politica de C-03 (F05 §66.A.3): cerrada en el servidor, no la elige el cliente.
+NATURALEZAS_REEMBOLSO = frozenset({repo.NATURALEZA_PERSONA, repo.NATURALEZA_EMPRESA})
 
 
 class RechazoActor(Exception):
@@ -55,9 +66,21 @@ def validar_tercero_persona(sesion: SesionMotor, tercero_id: uuid.UUID) -> None:
         raise RechazoActor(TERCERO_NO_PERSONA, tercero_id)
 
 
-def actor_de_tercero(sesion: SesionMotor, tercero_id: uuid.UUID) -> uuid.UUID:
+def validar_tercero_reembolso(sesion: SesionMotor, tercero_id: uuid.UUID) -> None:
+    """C-03 (F05 §66.A.3): FOR SHARE del tercero y relectura: owner,
+    habilitado y naturaleza PERSONA o EMPRESA. Ausente, ajeno o deshabilitado
+    -> TERCERO_NO_DISPONIBLE (sin revelar si existe, como en M3)."""
+    tercero = repo.leer_tercero_compartido(sesion, tercero_id)
+    if not (tercero and tercero["enabled"]):
+        raise RechazoActor(TERCERO_NO_DISPONIBLE, tercero_id)
+    if tercero["naturaleza"] not in NATURALEZAS_REEMBOLSO:
+        raise RechazoActor(NATURALEZA_NO_ADMITIDA_EN_REEMBOLSO, tercero_id)
+
+
+def actor_de_tercero(sesion: SesionMotor, tercero_id: uuid.UUID, motivo: str = MOTIVO_ALTA) -> uuid.UUID:
     """Actor del tercero; lo crea si no existe. Exige `validar_tercero_persona`
-    previo en la MISMA transaccion (el FOR SHARE debe seguir retenido)."""
+    (o `validar_tercero_reembolso` en C-03) previo en la MISMA transaccion (el
+    FOR SHARE debe seguir retenido)."""
     try:
         with sesion.conexion.transaction():
             creado = repo.insertar_si_no_existe(sesion, tercero_id)
@@ -71,7 +94,7 @@ def actor_de_tercero(sesion: SesionMotor, tercero_id: uuid.UUID) -> uuid.UUID:
             registro_id=actor_id,
             accion=auditoria.ACCION_CREAR,
             datos_despues_json=foto,
-            motivo=MOTIVO_ALTA,
+            motivo=motivo,
         )
         return actor_id
     actor_id = repo.leer_actor_de_tercero(sesion, tercero_id)

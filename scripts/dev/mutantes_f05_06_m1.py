@@ -17,6 +17,9 @@
 #        python scripts/dev/mutantes_f05_06_m1.py [--solo ID,ID] [--salida fichero]
 #   No ejecutar en paralelo con otro arnes ni con la suite sobre el mismo arbol.
 # Version: 0.1.0 (F05-06 M1)
+# Version: 0.2.0 (F05-D052 paso 2): reanclaje de E01; anular_duplicado_http compone
+#   DatosAnulacionRegistro en una variable (guarda POSICIONES de §66.A.9): la linea
+#   protegida termina ahora en un solo parentesis. Sin cambios de semantica.
 # ============================================================
 
 from __future__ import annotations
@@ -45,8 +48,8 @@ JEST = "jest:__tests__/edicion_hecho.test.tsx::"
 #: (id, descripcion, [(fichero, texto, sustituto)], discriminantes, equivalencia o None)
 MUTANTES = [
     ("E01", "anulacion: sin declaracion el motor recibe igualmente movimiento_en_banco=false",
-     [(EJA, "movimiento_en_banco=False if intencion.duplicado_declarado is True else None))",
-       "movimiento_en_banco=False))")],
+     [(EJA, "movimiento_en_banco=False if intencion.duplicado_declarado is True else None)\n",
+       "movimiento_en_banco=False)\n")],
      [T209 + "test_anular_duplicado_sin_declaracion"], None),
     ("E02", "DTO: declaracion de duplicado con valor por defecto",
      [(DTO, "    duplicado_declarado: StrictBool  # sin defecto: declaracion explicita\n",
