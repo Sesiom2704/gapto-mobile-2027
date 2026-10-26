@@ -72,12 +72,9 @@ MUTANTES = [
      "la lista solo recibe ACTIVAS (activasDe filtra estado === 'ACTIVA'), y para una ACTIVA "
      "textoPosicion(x).saldo === textoSaldo(x.saldo); el cambio es defensivo, sin salida observable distinta"),
     ("B10", "Pendiente con · lista: una ACTIVA con saldo desconocido vuelve a decir «Saldo inicial desconocido» (F05 §66.2)",
-     [(PEN, "                    ? textoPosicion(x).inicial
-                    : [",
-       "                    ? textoPosicion(x).inicial
-                    : x.saldo === null && x.estado !== 'CERRADA'
-                    ? 'Saldo inicial desconocido'
-                    : [")], True, None),
+     [(PEN, "                    ? textoPosicion(x).inicial\n                    : [",
+       "                    ? textoPosicion(x).inicial\n                    : x.saldo === null && x.estado !== 'CERRADA'\n"
+       "                    ? 'Saldo inicial desconocido'\n                    : [")], True, None),
 ]
 
 

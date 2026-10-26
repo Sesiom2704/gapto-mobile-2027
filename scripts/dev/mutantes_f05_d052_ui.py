@@ -90,7 +90,9 @@ MUTANTES = [
        "centimos(imp.valor) >= 1 ? imp.valor : null")], [C3 + "importe recuperable", C3 + "C2: nada marcado"], None),
     ("C07", "dominio: el importe recuperable admite 0,00 €",
      [(REE, "centimos(imp.valor) >= 1 && centimos(imp.valor) <= centimos(total) ? imp.valor : null",
-       "centimos(imp.valor) >= 0 && centimos(imp.valor) <= centimos(total) ? imp.valor : null")], [C3 + "importe recuperable"], None),
+       "centimos(imp.valor) >= 0 && centimos(imp.valor) <= centimos(total) ? imp.valor : null")], [C3 + "importe recuperable"],
+     "parsearImporte ya rechaza 0 y negativos (NO_POSITIVO) antes de esta comparacion, asi que >= 1 y >= 0 dan lo mismo "
+     "para todo importe aceptado; la guarda del limite inferior es defensiva (el limite 0,01 lo cubre parsearImporte)"),
     ("C08", "sellado: el payload C-03 conserva `atribucion`",
      [(INT, "  const { atribucion: _atribucion, ...comun } = sellar(b, intencionId).payload;", "  const comun = sellar(b, intencionId).payload;")],
      [C3 + "sellado", C3 + "C2→C3"], None),
