@@ -381,6 +381,13 @@
 #     (dto_reembolsable: R; ejecucion_reembolsable.operacion: GUARDA C-a + C07 tras la
 #     identidad y antes de componer; componer_gasto_reembolsable: A_FRONTERA hacia OP-22;
 #     nombre_posicion: R, nombre de la categoria para el nombre de la posicion).
+# Version: 0.35.0 (F05-D052 paso 8, integracion v3; F05 §66.3 A' y §66.A C-03 UI): altas
+#     aditivas. I1: oraculo R del E2E de A' (scripts/dev/e2e_f05_d052_a_prima.py::main,
+#     compara el payload enviado). I13a: imports nuevos del registro (hoja «Me lo
+#     reembolsan», textos y total de domain/reembolso, foco de magnitudes A', tipos de RN)
+#     y del cliente (tipos del wire C-03); ninguno propone, resuelve ni completa categoria.
+#     I13b: aplicarCategoria separa el calculo de las magnitudes conservadas (A') en una
+#     constante; la escritura del estado categorial es la misma (destino elegido).
 # ============================================================
 
 from __future__ import annotations
@@ -679,6 +686,8 @@ REGISTRO.update({
         "R", "E2E F05-GATE G2 verificacion", "lee la categoria de los efectos del hecho (oraculo fisico)"),
     ("scripts/dev/e2e_f05_gate_g5.py", "main"): (
         "R", "E2E F05-GATE G5 verificacion", "lee categoria_magnitudes por categoria_id (oraculo de MAG)"),
+    ("scripts/dev/e2e_f05_d052_a_prima.py", "main"): (
+        "R", "E2E F05-D052 A' verificacion", "compara la categoria del payload enviado con la elegida (oraculo)"),
 })
 
 #: Servicios del motor que la frontera NO puede referenciar (I3): tienen
@@ -1522,7 +1531,7 @@ _CAMPO_CATEGORIA = re.compile(r"\bcategoria:\s")
 SITIOS_ESTADO_CATEGORIAL: dict[str, str] = {
     "setB((x) => ({ ...x, categoria: { estado: 'PENDIENTE' } }));":
         "reinicio a PENDIENTE tras rechazo categorial definitivo (se pide otra categoria)",
-    "cambiar({ categoria: destino, magnitudesTexto: conservarMagnitudes(b.magnitudesTexto, nuevas) });":
+    "cambiar({ categoria: destino, magnitudesTexto: conservadas });":
         "aplicarCategoria: aplica el destino que eligio el usuario (directo o tras confirmar el descarte)",
     "estado: 'CATEGORIA',":
         "elegirNodo: el usuario toca un nodo elegible del selector (onElegir)",
@@ -1702,6 +1711,22 @@ IMPORTS_CAMINO[CLI] = IMPORTS_CAMINO[CLI] | {
     ("../domain/reparto", f"type {t}") for t in (
         "PayloadCobroPago", "PayloadCorregirReparto", "PayloadGastoCompartido", "PayloadPerdon", "PendienteConPersona",
         "RepartoDeHecho", "ResultadoCorreccionReparto", "ResultadoGastoCompartido", "ResultadoPosicion")
+}
+
+# F05-D052 paso 8 (alta aditiva; §66.3 A' y §66.A C-03 UI): la hoja «Me lo reembolsan»,
+# sus textos y el total (domain/reembolso), el foco de magnitudes de A' (domain/magnitud)
+# y tipos de RN. Ninguno propone, resuelve ni completa la categoria: el reembolso viaja
+# con el mismo `categoriaWire` del registro. El cliente solo importa los tipos del wire C-03.
+IMPORTS_CAMINO[REG] = IMPORTS_CAMINO[REG] | {
+    ("../components/Reembolso", "ReembolsoHoja"), ("../domain/intencion", "PayloadGastoPagado"),
+    ("../domain/magnitud", "primeraMagnitudPendiente"), ("../domain/magnitud", "siguienteMagnitud"),
+    ("react-native", "InputAccessoryView"), ("react-native", "Keyboard"),
+    ("react-native", "type ScrollViewInstance"), ("react-native", "type TextInputInstance"),
+} | {("../domain/reembolso", n) for n in (
+    "MOTIVO_RECHAZO_REEMBOLSO", "TEXTO_ATRIBUCION_REEMBOLSO", "TEXTO_CUENTA_RESULTADO", "TEXTO_OPCION_REEMBOLSO",
+    "TEXTO_OPCION_REEMBOLSO_SUB", "TEXTO_TE_DEBE", "importeReembolso", "totalDe")}
+IMPORTS_CAMINO[CLI] = IMPORTS_CAMINO[CLI] | {
+    ("../domain/reembolso", "type PayloadGastoReembolsable"), ("../domain/reembolso", "type ResultadoGastoReembolsable"),
 }
 
 MENCIONES_CLIENTE.update({
