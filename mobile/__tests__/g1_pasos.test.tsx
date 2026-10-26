@@ -4,6 +4,7 @@
 // Ruta: mobile/__tests__/g1_pasos.test.tsx
 // Descripción: F05-D051 paso 9.1 (G1 v2): instrumentación por paso a través de la app real (Raiz). En `__DEV__`, el caso 5 de G1 (Registrar · Gasto · importe · Coche › Gasolina · Litros · Presupuesto · Cuenta · Registrar) deja en la línea [G1] de su ensayo los hitos en orden, con la vía y los niveles de la categoría, sin valores tecleados, y su D1 observado es 5 (el del guion); un chip de «Sugeridas» se traza con vía `chip` y una búsqueda con vía `busqueda`; la transferencia traza sus dos cuentas. Fuera de `__DEV__` la app no llama a la traza ni escribe ninguna línea, y el registro sigue funcionando igual.
 // Versión: 0.1.0 (F05-D051 paso 9.1 · G1 v2, instrumentación por paso)
+// Versión: 0.2.0 (F05-D052 paso 3 · A′): el caso 5 traza además `magnitud_foco` (el teclado se abre solo en Litros al elegir la categoría); no es una decisión: D1 observado sigue en 5.
 // ============================================================
 
 import './tiempos_rn';
@@ -130,7 +131,7 @@ test('caso 5 en __DEV__: hitos en orden en la línea del ensayo, vía y niveles 
   expect(hitos).toEqual([
     'hoja_tipos', 'tipo:GASTO', 'form_montado',
     'importe_1er_cambio', 'importe_ult_cambio',
-    'selector_abierto', 'selector_nivel', 'categoria_elegida', 'magnitudes_visibles',
+    'selector_abierto', 'selector_nivel', 'categoria_elegida', 'magnitudes_visibles', 'magnitud_foco',
     'magnitud_1er_cambio', 'presupuesto_elegido', 'cuenta_elegida', 'registrar_pulsado',
   ]);
   for (const e of ['arbol_ok', 'cuentas_ok', 'sugeridas_ok', 'propuesta_aplicada']) expect(pasos.map((p) => p.e)).toContain(e);

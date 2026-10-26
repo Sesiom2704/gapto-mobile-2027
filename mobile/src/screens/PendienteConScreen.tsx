@@ -7,6 +7,7 @@
 // Versión: 0.2.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2 S6; SWIPE-RULE): cada posición va en tarjeta con los dos lados. Derecha «Cobrado» / «Pagado» del saldo ENTERO: acción rápida (aviso «Cobrado de <persona> · <importe> · Deshacer» y, a los 5 s, la misma ruta de cobro o pago que el formulario, con fecha de hoy) solo con saldo conocido y UNA sola cuenta posible hoy (leída con la lista); si no, abre el formulario con el saldo escrito. Izquierda «Más»: abre las acciones de la posición. «Perdonar» nunca va en un swipe.
 // Versión: 0.3.0 (swipe (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados `principal` / `alternativa` del componente común (principal a la izquierda); la raíz y el scroll cierran la fila abierta a medias (`propsZonaSwipe`, `propsScrollSwipe`).)
 // Versión: 0.4.0 (F05-D051 paso 8; lámina B D-F0507L-03): el texto de cada posición sale de `textoPosicion`. Tras cobrar, pagar o perdonar, una CERRADA dice «0,00 € · Saldado. Ya no queda nada pendiente.» y, si su importe inicial no se conoció, debajo «Importe inicial desconocido» (etiqueta accesible con el mismo texto); nunca «Sin determinar». La lista solo trae ACTIVAS: la pendiente con saldo desconocido sigue en «Sin determinar».
+// Versión: 0.5.0 (F05-D052 paso 3 · lámina B, F05 §66.2): «Saldo inicial desconocido» solo con `apertura_indeterminada` (vía `textoPosicion`); una ACTIVA con saldo desconocido ya no lo dice (se derivaba de `saldo === null`, herencia de M3): muestra su origen y «Sin determinar».
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -332,8 +333,6 @@ export function PendienteConScreen(p: {
                 <Text style={[tipo.footnote, { color: c.textSecondary }]}>
                   {textoPosicion(x).inicial
                     ? textoPosicion(x).inicial
-                    : x.saldo === null && x.estado !== 'CERRADA'
-                    ? 'Saldo inicial desconocido'
                     : [x.origen_concepto && x.origen_tercero ? x.origen_tercero : null, x.origen_fecha ? diaMesIso(x.origen_fecha) : null].filter(Boolean).join(' · ')}
                 </Text>
               </View>

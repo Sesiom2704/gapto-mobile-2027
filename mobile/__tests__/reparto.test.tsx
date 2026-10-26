@@ -8,6 +8,7 @@
 // Versión: 0.2.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // Versión: 0.3.0 (F05-D051 paso 2; F05 §65.4 contrato HTTP Q4/Q4-H2): fixtures wire con `apertura_indeterminada` (y `estado` en PosicionDeParte); sin cambios de aserciones.
 // Versión: 0.4.0 (F05-D051 paso 8; lámina B D-F0507L-03): bloque «Lámina B» con los tres estados de una posición (pendiente con saldo desconocido, CERRADA con importe inicial conocido y CERRADA con importe inicial desconocido) en «Corregir reparto» y en «Pendiente con» (lista y éxito), en claro y oscuro, con su etiqueta accesible; el éxito de una CERRADA pasa a «0,00 € · Saldado. Ya no queda nada pendiente.».
+// Versión: 0.5.0 (F05-D052 paso 3 · lámina B, F05 §66.2, AJ-F0507G3-06): el texto es «Saldo inicial desconocido» (saldo con el que empezó el seguimiento, solo con `apertura_indeterminada`); C4: una pendiente con saldo desconocido ya no dice «Saldo inicial desconocido» (se derivaba de `saldo === null`).
 // ============================================================
 
 import './tiempos_rn';
@@ -29,7 +30,7 @@ import {
   PendienteConPersona,
   RepartoDeHecho,
   resumenReparto,
-  TEXTO_IMPORTE_INICIAL_DESCONOCIDO,
+  TEXTO_SALDO_INICIAL_DESCONOCIDO,
   TEXTO_NETO_SIN_DETERMINAR,
   TEXTO_SIN_TERCERO_PAGA,
   TEXTO_SOLO_PERSONAS,
@@ -431,7 +432,10 @@ describe('C · Pendiente con', () => {
     expect(await screen.findByTestId('pendiente-le-debes')).toBeTruthy();
     expect(screen.getByTestId('pendiente-le-debes').props.children).toBe('Sin determinar');
     expect(screen.getByTestId('pendiente-neto').props.children).toBe(TEXTO_NETO_SIN_DETERMINAR);
-    expect(screen.getByText('Saldo inicial desconocido')).toBeTruthy();
+    // F05 §66.2: «Saldo inicial desconocido» solo con `apertura_indeterminada`; una pendiente con saldo desconocido
+    // muestra su origen, no ese texto (antes se derivaba de `saldo === null`).
+    expect(screen.queryByText('Saldo inicial desconocido')).toBeNull();
+    expect(screen.getByText('Préstamo viaje')).toBeTruthy();
   });
 
   test('C2/C3: cobro con cuenta obligatoria (las que reciben dinero), parcial permitido, sin superar lo pendiente', async () => {
@@ -651,10 +655,10 @@ describe('Lámina B · saldada frente a desconocida (D-F0507L-03)', () => {
     expect(textoPosicion(ACTIVA_DESCONOCIDA)).toEqual({ saldo: 'Sin determinar', inicial: null });
     expect(textoPosicion({ ...ACTIVA_DESCONOCIDA, saldo: '15.00' })).toEqual({ saldo: '15,00 €', inicial: null });
     expect(textoPosicion(CERRADA_CONOCIDA)).toEqual({ saldo: '0,00 € · Saldado', inicial: null });
-    expect(textoPosicion(CERRADA_DESCONOCIDA)).toEqual({ saldo: '0,00 € · Saldado', inicial: TEXTO_IMPORTE_INICIAL_DESCONOCIDO });
-    expect(TEXTO_IMPORTE_INICIAL_DESCONOCIDO).toBe('Importe inicial desconocido');
+    expect(textoPosicion(CERRADA_DESCONOCIDA)).toEqual({ saldo: '0,00 € · Saldado', inicial: TEXTO_SALDO_INICIAL_DESCONOCIDO });
+    expect(TEXTO_SALDO_INICIAL_DESCONOCIDO).toBe('Saldo inicial desconocido');
     // Una CERRADA sin saldo (fuera de contrato) tampoco se vuelve «Sin determinar» ni inventa un importe.
-    expect(textoPosicion({ ...CERRADA_DESCONOCIDA, saldo: null })).toEqual({ saldo: 'Saldado', inicial: TEXTO_IMPORTE_INICIAL_DESCONOCIDO });
+    expect(textoPosicion({ ...CERRADA_DESCONOCIDA, saldo: null })).toEqual({ saldo: 'Saldado', inicial: TEXTO_SALDO_INICIAL_DESCONOCIDO });
   });
 
   const TRES: RepartoDeHecho = {
@@ -666,7 +670,7 @@ describe('Lámina B · saldada frente a desconocida (D-F0507L-03)', () => {
     ],
   };
 
-  test.each(['light', 'dark'] as const)('Corregir reparto (%s): pendiente «Sin determinar»; saldadas «0,00 € · Saldado»; Marta además «Importe inicial desconocido»', async (modo) => {
+  test.each(['light', 'dark'] as const)('Corregir reparto (%s): pendiente «Sin determinar»; saldadas «0,00 € · Saldado»; Marta además «Saldo inicial desconocido»', async (modo) => {
     envolver(<CorregirRepartoScreen cliente={cliente({ repartoDeHecho: jest.fn(async () => ({ tipo: 'OK', datos: TRES }) as any) })} hechoId="cena" onCerrar={jest.fn()} />, modo);
     await screen.findByTestId('corregir-form');
     const linea = (id: string) => screen.getByTestId(`corregir-posicion-saldo-${id}`).props.children;
@@ -675,11 +679,11 @@ describe('Lámina B · saldada frente a desconocida (D-F0507L-03)', () => {
     expect(linea('a-marta')).toBe('Te debe · 0,00 € · Saldado');
     expect(screen.queryByTestId('corregir-posicion-inicial-a-simon')).toBeNull();
     expect(screen.queryByTestId('corregir-posicion-inicial-a-tania')).toBeNull();
-    expect(screen.getByTestId('corregir-posicion-inicial-a-marta').props.children).toBe('Importe inicial desconocido');
+    expect(screen.getByTestId('corregir-posicion-inicial-a-marta').props.children).toBe('Saldo inicial desconocido');
     // Accesibilidad: la etiqueta dice lo mismo que se ve.
     expect(screen.getByTestId('corregir-posicion-a-simon').props.accessibilityLabel).toBe('Te debe · pendiente Sin determinar');
     expect(screen.getByTestId('corregir-posicion-a-tania').props.accessibilityLabel).toBe('Te debe · 0,00 € · Saldado');
-    expect(screen.getByTestId('corregir-posicion-a-marta').props.accessibilityLabel).toBe('Te debe · 0,00 € · Saldado. Importe inicial desconocido');
+    expect(screen.getByTestId('corregir-posicion-a-marta').props.accessibilityLabel).toBe('Te debe · 0,00 € · Saldado. Saldo inicial desconocido');
     // Ninguna CERRADA dice «Sin determinar».
     for (const id of ['a-tania', 'a-marta']) expect(within(screen.getByTestId(`corregir-posicion-${id}`)).queryByText(/Sin determinar/)).toBeNull();
     expect(plano()).toContain(colores[modo].background);
@@ -693,7 +697,7 @@ describe('Lámina B · saldada frente a desconocida (D-F0507L-03)', () => {
     envolver(<CorregirRepartoScreen cliente={cliente({ repartoDeHecho: jest.fn(async () => ({ tipo: 'OK', datos: r }) as any) })} hechoId="cena" onCerrar={jest.fn()} />);
     await screen.findByTestId('corregir-form');
     expect(screen.getByTestId('corregir-posicion-saldo-a-yo').props.children).toBe('Le debes · 0,00 € · Saldado');
-    expect(screen.getByTestId('corregir-posicion-inicial-a-yo').props.children).toBe('Importe inicial desconocido');
+    expect(screen.getByTestId('corregir-posicion-inicial-a-yo').props.children).toBe('Saldo inicial desconocido');
   });
 
   test('Pendiente con: la pendiente con saldo desconocido sigue en «Sin determinar»', async () => {
@@ -701,7 +705,7 @@ describe('Lámina B · saldada frente a desconocida (D-F0507L-03)', () => {
       posiciones: [{ ...PEND.posiciones[0], ...ACTIVA_DESCONOCIDA }] };
     montarPendiente(cliente({ pendienteCon: jest.fn(async () => ({ tipo: 'OK', datos: p }) as any) }));
     expect((await screen.findByTestId('posicion-saldo-d1')).props.children).toBe('Sin determinar');
-    expect(screen.queryByText('Importe inicial desconocido')).toBeNull();
+    expect(screen.queryByText('Saldo inicial desconocido')).toBeNull();
   });
 
   const cobrarHasta = async (respuesta: object, modo?: 'dark') => {
@@ -715,7 +719,7 @@ describe('Lámina B · saldada frente a desconocida (D-F0507L-03)', () => {
     await screen.findByTestId('posicion-exito');
   };
 
-  test('Pendiente con · éxito: CERRADA con importe inicial conocido → «0,00 € · Saldado», sin línea de importe inicial', async () => {
+  test('Pendiente con · éxito: CERRADA con saldo inicial conocido → «0,00 € · Saldado», sin línea de saldo inicial', async () => {
     await cobrarHasta(CERRADA_CONOCIDA);
     expect(screen.getByTestId('posicion-exito-saldo').props.children).toBe('0,00 € · Saldado. Ya no queda nada pendiente.');
     expect(screen.queryByTestId('posicion-exito-inicial')).toBeNull();
@@ -723,11 +727,11 @@ describe('Lámina B · saldada frente a desconocida (D-F0507L-03)', () => {
     expect(plano()).not.toMatch(/Sin determinar/);
   });
 
-  test('Pendiente con · éxito: CERRADA con importe inicial desconocido → además «Importe inicial desconocido» (oscuro)', async () => {
+  test('Pendiente con · éxito: CERRADA con saldo inicial desconocido → además «Saldo inicial desconocido» (oscuro)', async () => {
     await cobrarHasta(CERRADA_DESCONOCIDA, 'dark');
     expect(screen.getByTestId('posicion-exito-saldo').props.children).toBe('0,00 € · Saldado. Ya no queda nada pendiente.');
-    expect(screen.getByTestId('posicion-exito-inicial').props.children).toBe('Importe inicial desconocido');
-    expect(screen.getByTestId('posicion-exito-estado').props.accessibilityLabel).toBe('0,00 € · Saldado. Ya no queda nada pendiente. Importe inicial desconocido');
+    expect(screen.getByTestId('posicion-exito-inicial').props.children).toBe('Saldo inicial desconocido');
+    expect(screen.getByTestId('posicion-exito-estado').props.accessibilityLabel).toBe('0,00 € · Saldado. Ya no queda nada pendiente. Saldo inicial desconocido');
     expect(plano()).not.toMatch(/Sin determinar/);
     expect(plano()).toContain(colores.dark.background);
   });

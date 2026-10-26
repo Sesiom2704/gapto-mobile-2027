@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-01 S6-WIRE+UI (este mandato))
 // Versión: 0.2.0 (F05-01 S7-MAG UI, hito 1; F05-D020, F09 §12.97.10, lámina SET-MAG v0.1): catálogo de magnitudes del owner (GET /v1/magnitudes) y lógica pura de la sección «Magnitudes» de Ajustes › Categorías: «unidad · decimales», resumen «N obligatorias, M opcionales», estado «No usable en registros nuevos» (obligatoria deshabilitada, M03), secciones del selector (Disponibles / Deshabilitadas / Ya en <categoría>, M06) con búsqueda por nombre normalizado y subtítulo «… · usada en …» / «sin categorías». Lectura: nunca autoridad; el servidor decide en cada comando.
 // Versión: 0.3.0 (F05-01 S7-MAG UI, hito 2): validación del alta rápida igual que el servidor (nombre 1..80 y unidad 1..20 visibles tras NFKC + recorte + colapso; decimales 0..6) y el texto «Para crear falta: …» (M07); conjunto COMPLETO para reordenar con el orden y la obligatoriedad cargados (M10); lista de impacto de deshabilitar (M14/M15): obligatorias afectadas según el servidor, opcionales del catálogo «sigue usable» y las que aparecen por primera vez marcadas «nueva».
+// Versión: 0.4.0 (F05-D052 paso 3 · A′, D-F0507L-07): `primeraMagnitudPendiente` (dónde se abre el teclado al elegir la categoría) y `siguienteMagnitud` (a dónde lleva «Hecho»): solo obligatorias sin «No lo sé», en el orden del formulario; sin siguiente, se pasa a presupuesto.
 // ============================================================
 
 import type { MagnitudCategoria } from './categoria';
@@ -50,6 +51,22 @@ export function conservarMagnitudes(previos: Record<string, string>, nuevas: Mag
   const res: Record<string, string> = {};
   for (const [id, texto] of Object.entries(previos)) if (ids.has(id)) res[id] = texto;
   return res;
+}
+
+// ------------------------------------------------------------------ A′ (D-F0507L-07): orden en que se piden las magnitudes
+type MagnitudPedida = Pick<MagnitudCategoria, 'magnitud_id' | 'obligatoria'>;
+
+/** A′: primera obligatoria sin valor ni «No lo sé», en el orden del formulario (donde se abre el teclado al elegir la categoría). */
+export function primeraMagnitudPendiente(ms: MagnitudPedida[], textos: Record<string, string>, desconocidas: string[] = []): string | null {
+  const m = ms.find((x) => x.obligatoria && !desconocidas.includes(x.magnitud_id) && (textos[x.magnitud_id] ?? '').trim() === '');
+  return m ? m.magnitud_id : null;
+}
+
+/** A′: tras «Hecho» en `desde`, la siguiente obligatoria (sin «No lo sé») en el orden del formulario; null = se pasa a presupuesto. */
+export function siguienteMagnitud(ms: MagnitudPedida[], desde: string, desconocidas: string[] = []): string | null {
+  const i = ms.findIndex((x) => x.magnitud_id === desde);
+  const m = ms.slice(i + 1).find((x) => x.obligatoria && !desconocidas.includes(x.magnitud_id));
+  return m ? m.magnitud_id : null;
 }
 
 /** Magnitudes con valor INFORMADO que se perderían al pasar a `nuevas` (null = «Sin categoría»). */

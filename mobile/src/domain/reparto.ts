@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-06 M3 §B1)
 // Versión: 0.2.0 (F05-D051 paso 2; F05 §65.4 contrato HTTP Q4/Q4-H2): tipos wire con `apertura_indeterminada` (F04-D055 A4) y `estado` en PosicionDeParte. Sin copy de UI (pendiente de la lámina REP).
 // Versión: 0.3.0 (F05-D051 paso 8; lámina B D-F0507L-03): `textoPosicion`, el texto de una posición según su estado. Pendiente con saldo desconocido → «Sin determinar»; CERRADA → «0,00 € · Saldado» y, si su importe inicial no se conoció, «Importe inicial desconocido». Ninguna CERRADA dice «Sin determinar»; sin valores por defecto (si una CERRADA llegara sin saldo, solo «Saldado»).
+// Versión: 0.4.0 (F05-D052 paso 3 · lámina B, F05 §66.2, AJ-F0507G3-06): `TEXTO_SALDO_INICIAL_DESCONOCIDO` = «Saldo inicial desconocido» (sustituye a «Importe inicial desconocido»): se refiere al saldo con el que empezó el seguimiento y sale solo de `apertura_indeterminada`, nunca de la ausencia del importe original.
 // ============================================================
 
 import type { Borrador, CategoriaWire } from './intencion';
@@ -468,13 +469,13 @@ export function textoSaldo(saldo: string | null): string {
 
 // ------------------------------------------------------------------ lámina B (D-F0507L-03)
 export const TEXTO_SALDADO = 'Saldado';
-export const TEXTO_IMPORTE_INICIAL_DESCONOCIDO = 'Importe inicial desconocido';
+export const TEXTO_SALDO_INICIAL_DESCONOCIDO = 'Saldo inicial desconocido';
 
 /**
  * Texto de una posición según su estado (lámina B, D-F0507L-03).
  * - ACTIVA: su saldo («Sin determinar» si no se conoce).
  * - CERRADA: «0,00 € · Saldado»; nunca «Sin determinar». Con `apertura_indeterminada`, además
- *   `inicial` = «Importe inicial desconocido» (va debajo).
+ *   `inicial` = «Saldo inicial desconocido» (va debajo).
  */
 export function textoPosicion(x: { saldo: string | null; estado: 'ACTIVA' | 'CERRADA'; apertura_indeterminada: boolean }): {
   saldo: string;
@@ -483,7 +484,7 @@ export function textoPosicion(x: { saldo: string | null; estado: 'ACTIVA' | 'CER
   if (x.estado !== 'CERRADA') return { saldo: textoSaldo(x.saldo), inicial: null };
   return {
     saldo: x.saldo === null ? TEXTO_SALDADO : `${formatearEur(x.saldo)} · ${TEXTO_SALDADO}`,
-    inicial: x.apertura_indeterminada ? TEXTO_IMPORTE_INICIAL_DESCONOCIDO : null,
+    inicial: x.apertura_indeterminada ? TEXTO_SALDO_INICIAL_DESCONOCIDO : null,
   };
 }
 

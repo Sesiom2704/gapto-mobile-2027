@@ -13,12 +13,13 @@
 // v0.9.0 (F05-06 M4 §3; lámina CAP B2/B3; D-CAP-06/08): al final de «Pagado con» / «Cobrado en», «¿Falta una cuenta? N sin configurar ›» (solo si N > 0) abre la lista de Cuentas encima del formulario, que conserva lo escrito; al volver se recargan las cuentas y el número. CUENTA_SIN_CAPACIDAD al guardar: se muestra el mensaje del servidor y «El resto del formulario se conserva.»; se recargan las cuentas (la que perdió la capacidad ya no sale) y la cuenta queda sin elegir y pendiente de decisión del usuario: ninguna propuesta la vuelve a rellenar.
 // v0.10.0 (F05-06 M3 §B1; lámina REP v0.2 A1, B1; D-REP-01/03): en un gasto, «¿De quién es este gasto?» ofrece «Repartir» junto a «Solo mío» y «Pagado con» ofrece «Otra persona» tras las cuentas. Ambos abren el gasto compartido encima del formulario, que conserva lo común (importe, fecha, comercio, categoría y magnitudes, presupuesto y nota) y al que se vuelve con «Cambiar». Antes se valida lo común con la MISMA `validar` del sellado (sin la cuenta); el contexto todavía no viaja en un gasto compartido y se pide quitarlo, sin perderlo en silencio.
 // v0.11.0 (F05-D051 paso 9.1 · G1 v2): prop opcional `traza` (instrumentación por paso; App.tsx solo la pasa en `__DEV__`): hitos de montaje, cargas (árbol, cuentas, sugeridas, propuesta), importe y magnitud (primer y último cambio, sin valor), tercero, selector y elección de categoría con su vía, magnitudes visibles, «No lo sé», presupuesto, cuenta, tipo, desplazamientos, `faltan:<claves>` y «Registrar». Sin la prop no se llama a nada ni se registra ningún manejador; ningún import nuevo, sin cambios de comportamiento ni de UX.
-// Versión: 0.11.0
+// v0.12.0 (F05-D052 paso 3 · A′, D-F0507L-07; lámina F05-07 v0.3 A′1/A′2): SOLO en los campos de magnitud. Al elegir una categoría con magnitudes obligatorias, el foco y el teclado se abren en la primera obligatoria sin valor ni «No lo sé» (justo debajo de la categoría, mismo orden en que se pide). El teclado lleva «Hecho» (iOS: barra sobre el teclado decimal, VoiceOver «Hecho, siguiente campo»; Android y web: tecla de envío) que pasa a la siguiente obligatoria y, tras la última, cierra el teclado y sube hasta «¿Cuenta para el presupuesto?». Cambio de categoría: se conservan las comunes y las demás ni se ven ni se envían (sin cambios en `conservarMagnitudes` ni en el sellado). Cerrar el teclado tocando fuera conserva el valor (campo controlado; ningún manejador de blur lo toca). Presupuesto y cuenta siguen sin marcar (D-F0507L-02). Traza G1: `magnitud_foco` y `magnitud_hecho` (sin valores).
+// Versión: 0.12.0
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { InputAccessoryView, Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type ScrollViewInstance, type TextInputInstance } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ClienteApi, CuentaPago } from '../api/cliente';
@@ -46,7 +47,7 @@ import { ayer, ddmmaaaaAIso, fechaCortaIso, isoADdmmaaaa, isoLocal } from '../do
 import { formatearEur, parsearImporte } from '../domain/importe';
 import { Borrador, borradorInicial, Errores, esDesconocida, esFechaIso, SeleccionCategoria, validar } from '../domain/intencion';
 import { BaseCompartido, baseDesdeBorrador, TEXTO_OTRA_PERSONA } from '../domain/reparto';
-import { conservarMagnitudes, descartadas } from '../domain/magnitud';
+import { conservarMagnitudes, descartadas, primeraMagnitudPendiente, siguienteMagnitud } from '../domain/magnitud';
 import type { IndicePreferencias, PropuestaVista } from '../domain/preferencias';
 import {
   aplicarPropuesta,
@@ -101,6 +102,12 @@ export const RECHAZOS_CATEGORIA = new Set([
 
 /** Cambio de categoría pendiente de confirmar porque descartaría valores informados (C07). */
 type CambioPendiente = { destino: SeleccionCategoria; perdidas: MagnitudCategoria[]; etiqueta: string };
+
+/** A′ (D-F0507L-07): la tecla del teclado de magnitudes y su anuncio en VoiceOver. */
+export const TEXTO_HECHO = 'Hecho';
+export const ETIQUETA_HECHO = 'Hecho, siguiente campo';
+/** Barra «Hecho» sobre el teclado decimal de iOS (que no tiene tecla de envío). */
+const ID_BARRA_HECHO = 'magnitud-barra-hecho';
 
 export const TEXTO_CONTEXTO_COMPARTIDO = 'Un gasto repartido o pagado por otra persona todavía no guarda el contexto. Quítalo en «Más detalles» para continuar.';
 
@@ -159,6 +166,12 @@ export function RegistroGastoScreen(p: {
   // F05-05 A1/A2 bis: sugeridas de categoría (lectura; nunca preseleccionan ni cambian orígenes, R1/C01).
   const [sugeridas, setSugeridas] = useState<SugeridaCategoria[]>([]);
   const peticionSugeridas = useRef(0);
+  // A′ (D-F0507L-07): campos de magnitud, foco pendiente tras elegir categoría y posición de «¿Cuenta para el presupuesto?».
+  const camposMagnitud = useRef<Map<string, TextInputInstance>>(new Map());
+  const magnitudEnFoco = useRef<string | null>(null);
+  const [focoMagnitud, setFocoMagnitud] = useState<string | null>(null);
+  const formRef = useRef<ScrollViewInstance | null>(null);
+  const yPresupuesto = useRef<number | null>(null);
 
   useEffect(() => {
     if (p.inicial) setB((x) => ({ ...x, importeTexto: p.inicial!.importeTexto, fechaHecho: p.inicial!.fechaHecho, fechaOrigen: p.inicial!.fechaHecho === hoyIso ? 'INFERIDO' : 'USUARIO' }));
@@ -418,10 +431,35 @@ export function RegistroGastoScreen(p: {
     setCategoriaInvalida(null);
     setCambioPendiente(null);
     setSelectorAbierto(false);
-    cambiar({ categoria: destino, magnitudesTexto: conservarMagnitudes(b.magnitudesTexto, nuevas) });
+    const conservadas = conservarMagnitudes(b.magnitudesTexto, nuevas);
+    cambiar({ categoria: destino, magnitudesTexto: conservadas });
+    // A′: el teclado se abre en la primera obligatoria que falta (nada si no hay ninguna).
+    setFocoMagnitud(bloqueado ? null : primeraMagnitudPendiente(nuevas, conservadas, b.desconocidas ?? []));
     // Cambio de categoría: se vuelve a resolver sin pisar los campos tocados (R03).
     categoriaActual.current = destino.estado === 'CATEGORIA' ? destino.id : null;
     if (!bloqueado && cuentas.fase === 'OK') void pedirPropuesta(b.fechaHecho, categoriaActual.current, cuentas.lista);
+  };
+
+  // A′: el foco se pide cuando el campo ya está montado (tras volver del selector o de la confirmación).
+  useEffect(() => {
+    if (!focoMagnitud) return;
+    const campo = camposMagnitud.current.get(focoMagnitud);
+    setFocoMagnitud(null);
+    if (!campo) return;
+    p.traza?.('magnitud_foco');
+    campo.focus();
+  }, [focoMagnitud, b.categoria]);
+
+  /** A′: «Hecho» en una magnitud pasa a la siguiente obligatoria; tras la última, cierra el teclado y sube a presupuesto. */
+  const hechoMagnitud = (desde: string | null) => {
+    if (!desde || b.categoria.estado !== 'CATEGORIA') return;
+    p.traza?.('magnitud_hecho');
+    const sig = siguienteMagnitud(b.categoria.magnitudes, desde, b.desconocidas ?? []);
+    const campo = sig ? camposMagnitud.current.get(sig) : undefined;
+    if (campo) return campo.focus();
+    camposMagnitud.current.get(desde)?.blur();
+    Keyboard.dismiss();
+    if (yPresupuesto.current !== null) formRef.current?.scrollTo({ y: Math.max(0, yPresupuesto.current - espacio.l), animated: true });
   };
 
   /** Pide confirmación si el cambio descartaría valores informados (C07; lámina R07). */
@@ -679,6 +717,7 @@ export function RegistroGastoScreen(p: {
       </View>
 
       <ScrollView
+        ref={formRef}
         testID="registro-form"
         keyboardShouldPersistTaps="handled"
         onScrollBeginDrag={p.traza ? () => p.traza?.('scroll_ini') : undefined}
@@ -829,9 +868,19 @@ export function RegistroGastoScreen(p: {
                   </Text>
                   <View style={[s.magnitudCaja, { backgroundColor: c.surfacePrimary, borderColor: err ? c.critical : c.borderStandard }]}>
                     <TextInput
+                      ref={(x) => {
+                        if (x) camposMagnitud.current.set(m.magnitud_id, x);
+                        else camposMagnitud.current.delete(m.magnitud_id);
+                      }}
                       testID={`magnitud-${m.magnitud_id}`}
                       accessibilityLabel={`${m.nombre} en ${m.unidad_default}${m.obligatoria ? ', obligatorio' : ', opcional'}`}
                       value={b.magnitudesTexto[m.magnitud_id] ?? ''}
+                      onFocus={() => (magnitudEnFoco.current = m.magnitud_id)}
+                      returnKeyType={siguienteMagnitud(todas, m.magnitud_id, b.desconocidas ?? []) ? 'next' : 'done'}
+                      returnKeyLabel={TEXTO_HECHO}
+                      submitBehavior="submit"
+                      onSubmitEditing={() => hechoMagnitud(m.magnitud_id)}
+                      inputAccessoryViewID={Platform.OS === 'ios' ? ID_BARRA_HECHO : undefined}
                       onChangeText={(texto) => {
                         p.traza?.('cambio:magnitud');
                         cambiar({ magnitudesTexto: { ...b.magnitudesTexto, [m.magnitud_id]: texto } });
@@ -866,6 +915,7 @@ export function RegistroGastoScreen(p: {
           </View>
         ) : null}
 
+        <View testID="bloque-presupuestable" onLayout={(e) => (yPresupuesto.current = e.nativeEvent.layout.y)}>
         <Campo etiqueta="¿Cuenta para el presupuesto?" error={visibles.presupuestable}>
           <Segmentado<boolean>
             testIDBase="presupuestable"
@@ -883,6 +933,7 @@ export function RegistroGastoScreen(p: {
             </Text>
           ) : null}
         </Campo>
+        </View>
 
         <Campo etiqueta={esIngreso ? '¿De quién es este ingreso?' : '¿De quién es este gasto?'} opcional>
           <View style={s.chips}>
@@ -1065,6 +1116,23 @@ export function RegistroGastoScreen(p: {
         )}
       </ScrollView>
 
+      {Platform.OS === 'ios' && b.categoria.estado === 'CATEGORIA' && b.categoria.magnitudes.length > 0 ? (
+        <InputAccessoryView nativeID={ID_BARRA_HECHO}>
+          <View style={[s.barraHecho, { backgroundColor: c.surfaceSecondary, borderTopColor: c.borderDefault }]}>
+            <Pressable
+              testID="magnitud-hecho"
+              accessibilityRole="button"
+              accessibilityLabel={ETIQUETA_HECHO}
+              onPress={() => hechoMagnitud(magnitudEnFoco.current)}
+              hitSlop={8}
+              style={{ minHeight: TACTIL_MIN, justifyContent: 'center', paddingHorizontal: espacio.m }}
+            >
+              <Text style={[tipo.bodyEmphasis, { color: c.accent }]}>{TEXTO_HECHO}</Text>
+            </Pressable>
+          </View>
+        </InputAccessoryView>
+      ) : null}
+
       {cambioPendiente ? (
         <View testID="confirmar-descarte" style={[StyleSheet.absoluteFill, { justifyContent: 'flex-end' }]}>
           <Velo />
@@ -1220,5 +1288,6 @@ const s = StyleSheet.create({
   magnitudCaja: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: radio.s, paddingHorizontal: espacio.m, gap: espacio.s, minHeight: TACTIL_MIN + 4 },
   hoja: { borderTopLeftRadius: radio.xl, borderTopRightRadius: radio.xl, padding: espacio.l, gap: espacio.m },
   filaDescarte: { flexDirection: 'row', justifyContent: 'space-between' },
+  barraHecho: { flexDirection: 'row', justifyContent: 'flex-end', borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: espacio.s },
   chipPlantilla: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: espacio.s, borderRadius: radio.pill, paddingHorizontal: espacio.m, minHeight: TACTIL_MIN },
 });
