@@ -38,6 +38,11 @@
 #   python scripts/mutantes/f0406.py            # todos
 #   python scripts/mutantes/f0406.py N14         # un lote
 #
+# Version: 0.1.5
+#   0.1.5 (F05-D052 paso 8): lectura y escritura del fichero mutado en UTF-8 y
+#   sin traduccion de finales de linea (newline=""). En Windows, read_text()
+#   y write_text() por defecto reescribian LF como CRLF y la restauracion no
+#   devolvia el SHA (N9 abortaba). Mismos mutantes y discriminantes.
 # Version: 0.1.4
 #   0.1.4 (F04-D046 R2): N8 apunta a `SuplementosService._datos_hecho`, que
 #   desde R2 construye la raiz del suplemento para el alta y el replay. La
@@ -619,22 +624,22 @@ def correr(lote: list[Mutante]) -> list[tuple[Mutante, str, int]]:
                 raise SystemExit(f"{mut.ident}: la garantia NO quedo restaurada")
         else:
             ruta = RAIZ / mut.fichero
-            original = ruta.read_text()
+            original = ruta.read_text(encoding="utf-8", newline="")
             antes = sha256(ruta)
             if mut.viejo not in original:
                 filas.append((mut, "PATRON NO ENCONTRADO", 0))
                 print(f"  {mut.ident:8} DUDOSO    patron no encontrado", flush=True)
                 continue
-            ruta.write_text(original.replace(mut.viejo, mut.nuevo, 1))
+            ruta.write_text(original.replace(mut.viejo, mut.nuevo, 1), encoding="utf-8", newline="")
             if sha256(ruta) == antes:
-                ruta.write_text(original)
+                ruta.write_text(original, encoding="utf-8", newline="")
                 filas.append((mut, "MUTACION INERTE", 0))
                 print(f"  {mut.ident:8} DUDOSO    el fichero no cambio", flush=True)
                 continue
             try:
                 resumen, fallidos = ejecutar_suite(mut.suite)
             finally:
-                ruta.write_text(original)
+                ruta.write_text(original, encoding="utf-8", newline="")
             if sha256(ruta) != antes:  # pragma: no cover
                 raise SystemExit(f"{mut.ident}: la restauracion no devolvio el SHA")
 

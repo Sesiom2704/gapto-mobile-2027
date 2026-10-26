@@ -20,6 +20,10 @@
 # Uso:
 #   python scripts/mutantes/f04_d053.py             # todos
 #   python scripts/mutantes/f04_d053.py D053-M4     # subconjunto
+# Version: 0.1.1
+#   0.1.1 (F05-D052 paso 8): D053-M15 se reancla a la llamada vigente de la
+#   creacion de posicion, que desde F04-R1 pasa tambien `hechos=hechos_raiz`.
+#   Mismo mutante (advisory=False) y mismo discriminante.
 # Version: 0.1.0
 #   0.1.0 (F04-D053 B1 · v0.2/v0.3): 16 mutantes (A1 x3, B2, B3 x2, B4 x2,
 #   B5 x2, B6 x2, OP-09, B8 x3).
@@ -169,8 +173,8 @@ MUTANTES = (
     Mutante(
         "D053-M15", "B8: advisory D-080 antes de cualquier fila en la creacion",
         POS,
-        "                sesion, owner, posiciones=[entidad_id], advisory=True\n",
-        "                sesion, owner, posiciones=[entidad_id], advisory=False\n",
+        "                sesion, owner, hechos=hechos_raiz, posiciones=[entidad_id], advisory=True\n",
+        "                sesion, owner, hechos=hechos_raiz, posiciones=[entidad_id], advisory=False\n",
         "test_4_mismo_owner_creaciones_serializan_en_advisory",
         CONCURRENCIA,
     ),
