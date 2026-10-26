@@ -8,12 +8,14 @@
 // v0.4.0 (F05-02 B2; F05-D026 E1/E2, lámina REG-PREF R01–R03): `presupuestableOrigen` (USUARIO cuando el usuario lo toca; INFERIDO cuando viene de una preferencia; PENDIENTE sin valor) y el origen VISIBLE de cada propuesta (`cuentaPropuesta`, `presupuestablePropuesta`). La propuesta no cuenta como modificación y se sella como cualquier valor visible; el payload no cambia. Campos nuevos al final del borrador.
 // v0.5.0 (F05-03/F05-04 J2 §2.3/§2.4; F05 §46.3 A5/A6/A9, §45.3): campos ADITIVOS al final del borrador: tercero y contexto (con su origen: USUARIO o INFERIDO por la plantilla), magnitudes declaradas «No lo sé» (`desconocidas`: una obligatoria declarada desconocida NO bloquea y viaja en `categoria.desconocidas`), plantilla aplicada y la categoría que puso la plantilla (para no pisar una categoría tocada por el usuario y para «Quitar»). `validar` y `sellar` reciben el tipo (GASTO por defecto: VS-01 sin cambios); el ingreso se sella con `sellarIngreso` (sin concepto ni financiación; nota en §2.7). El payload del gasto solo lleva `tercero_id`, `contexto_id` y `desconocidas` cuando tienen valor: el de VS-01 no cambia.
 // v0.6.0 (F05-03/F05-04 J3 §2.7; F05 §46.3 A8, F05-D022; CORTE DE CONCEPTO): `concepto` del borrador es la NOTA OPCIONAL («Nota (opcional)»). Ya no bloquea el registro; solo su longitud (200, sobre el valor recortado). Ausencia canónica: vacía o solo espacios no viaja (el payload del gasto omite `concepto`; el del ingreso, `nota`); con texto viaja recortada. El título de presentación se calcula y nunca se persiste (domain/registro.ts).
-// Versión: 0.6.0
+// v0.7.0 (F05-D052 paso 2 · C-03, F05 §66.A): borrador con `reembolso` (aditivo); `validar` exige, con él, quién y cuánto (0,01 € .. total, nunca el comercio del gasto) y `sellarReembolsable` produce el payload de POST /v1/intenciones/gasto-reembolsable: el del gasto pagado sin `atribucion` y con `reembolso`.
+// Versión: 0.7.0
 // ============================================================
 
 import type { MagnitudCategoria } from './categoria';
 import { parsearImporte } from './importe';
 import { normalizarValorMagnitud, textoMotivoValor } from './magnitud';
+import { faltaReembolso, importeReembolso, type IntencionReembolsableSellada, type PayloadGastoReembolsable, type ReembolsoBorrador, totalDe } from './reembolso';
 
 export type Origen = 'USUARIO' | 'INFERIDO' | 'PENDIENTE';
 
@@ -87,6 +89,9 @@ export interface Borrador {
   plantilla?: PlantillaAplicada | null;
   /** Categoría que puso la plantilla (si el usuario no la cambia, sigue siendo «de tu plantilla»). */
   categoriaPlantillaId?: string | null;
+  // ---- F05-D052 C-03 (aditivo)
+  /** «Mío, pero me lo reembolsan»: quién te lo debe y cuánto (null = no es un gasto reembolsable). */
+  reembolso?: ReembolsoBorrador | null;
 }
 
 export interface MagnitudCapturada {
@@ -142,7 +147,7 @@ export interface IntencionIngresoSellada {
   readonly payload: Readonly<PayloadIngresoCobrado>;
 }
 
-export type Errores = Partial<Record<'importe' | 'concepto' | 'categoria' | 'presupuestable' | 'cuenta' | 'fecha', string>> & {
+export type Errores = Partial<Record<'importe' | 'concepto' | 'categoria' | 'presupuestable' | 'cuenta' | 'fecha' | 'reembolso', string>> & {
   /** Error por magnitud_id (obligatoria vacía o valor no válido). */
   magnitudes?: Record<string, string>;
 };
@@ -232,6 +237,11 @@ export function validar(b: Borrador, hoyIso: string, tipo: TipoConCategoria = 'G
   else if (tipo === 'GASTO' && b.propuesta === null) e.cuenta = 'Comprobando la cuenta; espera un momento.';
   if (!esFechaIso(b.fechaHecho)) e.fecha = 'Fecha no válida (dd/mm/aaaa).';
   else if (b.fechaHecho > hoyIso) e.fecha = tipo === 'GASTO' ? 'Solo gastos ya ocurridos: la fecha no puede ser futura.' : 'Solo ingresos ya cobrados: la fecha no puede ser futura.';
+  // C-03 (§66.A.2/§66.A.3): con «Me lo reembolsan», quién y cuánto (0,01 € .. total; nunca el comercio).
+  if (tipo === 'GASTO' && b.reembolso) {
+    const f = faltaReembolso(totalDe(b), b.reembolso, b.terceroId ?? null);
+    if (f.length > 0) e.reembolso = `Revisa «Me lo reembolsan»: falta ${f.join(' y ')}.`;
+  }
   return e;
 }
 
@@ -282,6 +292,18 @@ export function sellar(b: Borrador, intencionId: string): IntencionSellada {
     ...maestrosWire(b),
   });
   return Object.freeze({ intencionId, payload });
+}
+
+/** Sellado C-03 (CONTRATO_API_C03 §1): el del gasto pagado (mismas reglas y campos) sin `atribucion` y con `reembolso`. Lanza si no es sellable. */
+export function sellarReembolsable(b: Borrador, intencionId: string): IntencionReembolsableSellada {
+  const r = b.reembolso;
+  if (!r || faltaReembolso(totalDe(b), r, b.terceroId ?? null).length > 0) throw new Error('No se sella un reembolso incompleto');
+  const { atribucion: _atribucion, ...comun } = sellar(b, intencionId).payload;
+  const payload: PayloadGastoReembolsable = Object.freeze({
+    ...comun,
+    reembolso: Object.freeze({ tercero_id: r.terceroId!, importe: importeReembolso(totalDe(b), r)! }),
+  });
+  return Object.freeze({ intencionId, payload, reembolsable: true as const });
 }
 
 /** Tercero y contexto del wire: solo cuando tienen valor (A5/A6). */

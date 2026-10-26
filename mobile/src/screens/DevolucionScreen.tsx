@@ -5,6 +5,7 @@
 // Descripción: «Registrar devolución» desde una compra (F05-06 M2-B §B1; F05 §14, §51.2; lámina DEV v0.1 A1, A2, B3, B4, C1, C2). Tarea inmersiva «Cancelar · Registrar devolución». A1: compra origen fija arriba con lo ya devuelto y lo que queda (D-DEV-02); importe, fecha (Hoy · Ayer · Otra, nunca futura), categoría de la compra marcada «De la compra» (no editable), «¿De quién es lo devuelto?» (P-DEV-01: «Tuya» propuesta solo si el servidor la demuestra; si no, «Sin indicar» por defecto y «Todo mío» atenuado con su motivo, B4), «¿Ya te han abonado el dinero?» (D-DEV-03: «Sí, en <cuenta original>» solo si la compra tiene cuenta original demostrable, «En otra cuenta» con las cuentas que pueden recibir dinero (RECIBIR_INGRESO), «Todavía no»; sin respuesta por defecto) y nota opcional. Límite visible (B3, D-DEV-08): un importe mayor que lo que queda se explica y no deja revisar. A2: revisión con la relación visible, lo que se registra, el abono (real o pendiente: sin liquidez, C2) y lo que no cambia, y el neto derivado (D-DEV-05). Confirmación con ida y vuelta (D-DEV-06): «Ver la devolución» y «Ver la compra». Mismo ciclo de envío que el registro: UUID y payload sellados antes de enviar; doble toque ignorado; INDETERMINADO reintenta con la MISMA identidad; rechazo definitivo libera la edición. Nunca se ofrece «Ingreso» (D-DEV-04).
 // Versión: 0.1.0 (F05-06 M2-B §B1)
 // Versión: 0.2.0 (F05-06 M2-D §2; decisión R-M2A-02 opción b): «Sí, en <cuenta>» solo cuando `cuenta_compra` (cuenta ORIGINAL demostrable) no es null, sin exigir que esté en la lista (el servidor no le exige capacidad); «En otra cuenta» con las de RECIBIR_INGRESO (operación INGRESO). CUENTA_SIN_CAPACIDAD sigue con el mensaje del servidor, que nombra la capacidad del detalle.
+// Versión: 0.3.0 (F05-D052 paso 2 · C-03, §66.A.9): el rechazo GASTO_CON_DERECHO_DE_COBRO al guardar se explica con el mismo motivo que la lectura.
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -197,7 +198,7 @@ export function DevolucionScreen(p: {
           <Text style={[tipo.subheadline, { color: c.textPrimary }]}>
             {estado.codigo === 'CUENTA_SIN_CAPACIDAD'
               ? `${estado.mensaje} ${TEXTO_FORMULARIO_SE_CONSERVA}`
-              : `No se ha registrado. ${estado.codigo === 'FECHA_FUTURA' ? TEXTO_FECHA_FUTURA : estado.mensaje}`}
+              : `No se ha registrado. ${estado.codigo === 'FECHA_FUTURA' ? TEXTO_FECHA_FUTURA : estado.codigo === 'GASTO_CON_DERECHO_DE_COBRO' ? motivoNoDisponible(estado.codigo) : estado.mensaje}`}
           </Text>
         </View>
       ) : null}

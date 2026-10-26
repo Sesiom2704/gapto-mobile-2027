@@ -27,11 +27,11 @@
 #   Escenario desde la UI:
 #     B1  Día a día › detalle › «Pendiente con Tania» › «Registrar cobro» de
 #         los 30,00 €: el exito dice «0,00 € · Saldado. Ya no queda nada
-#         pendiente.» sin «Importe inicial desconocido» ni «Sin determinar»;
+#         pendiente.» sin «Saldo inicial desconocido» ni «Sin determinar»;
 #     B2  «Pendiente con Simón»: su posicion dice «Sin determinar»;
 #     B3  «Corregir reparto» de la cena (claro y oscuro): Simón «Te debe ·
 #         pendiente Sin determinar»; Tania «Te debe · 0,00 € · Saldado»; Marta
-#         «Te debe · 0,00 € · Saldado» y debajo «Importe inicial desconocido»;
+#         «Te debe · 0,00 € · Saldado» y debajo «Saldo inicial desconocido»;
 #         ninguna saldada dice «Sin determinar»; etiqueta accesible
 #         (aria-label en web) igual al texto.
 #   Oraculo fisico (solo lectura): estado y saldo_apertura de las tres filas
@@ -42,6 +42,7 @@
 #   --web (o --dist), GAPTO_DATABASE_URL (base LOCAL), GAPTO_DEV_OWNER_USER_ID y
 #   GAPTO_DEV_TOKEN (nunca se imprime).
 # Version: 0.1.0 (F05-D051 paso 8; lamina B D-F0507L-03)
+# Version: 0.2.0 (F05-D052 paso 3 · lamina B, F05 §66.2): texto «Saldo inicial desconocido»; B2 exige ademas que la ACTIVA de Simon no lo muestre.
 # ============================================================
 
 from __future__ import annotations
@@ -239,7 +240,7 @@ def main() -> None:
         t("posicion-exito").wait_for()
         res["B1_exito"] = t("posicion-exito").inner_text()
         comprobar(t("posicion-exito-saldo").inner_text() == "0,00 € · Saldado. Ya no queda nada pendiente.", f"B1: {res['B1_exito']}")
-        comprobar(t("posicion-exito-inicial").count() == 0, "B1: «Importe inicial desconocido» con apertura conocida")
+        comprobar(t("posicion-exito-inicial").count() == 0, "B1: «Saldo inicial desconocido» con apertura conocida")
         comprobar("Sin determinar" not in res["B1_exito"], "B1: «Sin determinar» en una saldada")
         comprobar(t("posicion-exito-estado").get_attribute("aria-label") == "0,00 € · Saldado. Ya no queda nada pendiente.", "B1: aria-label")
         shot("B1_exito_tania_saldado")
@@ -252,7 +253,7 @@ def main() -> None:
         e_simon = parte[simon]["posicion"]["entidad_id"]
         res["B2_pendiente_simon"] = t("pendiente-con").inner_text()
         comprobar(t(f"posicion-saldo-{e_simon}").inner_text() == "Sin determinar", f"B2: {res['B2_pendiente_simon']}")
-        comprobar("Importe inicial desconocido" not in res["B2_pendiente_simon"], "B2: indicador en una ACTIVA")
+        comprobar("Saldo inicial desconocido" not in res["B2_pendiente_simon"], "B2: indicador en una ACTIVA")
         shot("B2_pendiente_con_simon")
 
         # ------------------------------------------------------------ B3 Corregir reparto: los tres estados
@@ -265,13 +266,13 @@ def main() -> None:
         comprobar(res["B3_lineas"] == {"Simón": "Te debe · pendiente Sin determinar", "Tania": "Te debe · 0,00 € · Saldado",
                                        "Marta": "Te debe · 0,00 € · Saldado"}, f"B3: {res['B3_lineas']}")
         comprobar(t(f"corregir-posicion-inicial-{ids[simon]}").count() == 0 and t(f"corregir-posicion-inicial-{ids[tania]}").count() == 0,
-                  "B3: «Importe inicial desconocido» fuera de Marta")
-        comprobar(t(f"corregir-posicion-inicial-{ids[marta]}").inner_text() == "Importe inicial desconocido", "B3: Marta sin indicador")
+                  "B3: «Saldo inicial desconocido» fuera de Marta")
+        comprobar(t(f"corregir-posicion-inicial-{ids[marta]}").inner_text() == "Saldo inicial desconocido", "B3: Marta sin indicador")
         for x in (tania, marta):
             comprobar("Sin determinar" not in t(f"corregir-posicion-{ids[x]}").inner_text(), f"B3: «Sin determinar» en una saldada ({x})")
         res["B3_aria"] = {n: t(f"corregir-posicion-{ids[x]}").get_attribute("aria-label") for n, x in (("Simón", simon), ("Tania", tania), ("Marta", marta))}
         comprobar(res["B3_aria"] == {"Simón": "Te debe · pendiente Sin determinar", "Tania": "Te debe · 0,00 € · Saldado",
-                                     "Marta": "Te debe · 0,00 € · Saldado. Importe inicial desconocido"}, f"B3: {res['B3_aria']}")
+                                     "Marta": "Te debe · 0,00 € · Saldado. Saldo inicial desconocido"}, f"B3: {res['B3_aria']}")
         t(f"corregir-parte-{ids[marta]}").scroll_into_view_if_needed()
         shot("B3_corregir_reparto_tres_estados")
         oscuro("B3_corregir_reparto_tres_estados")

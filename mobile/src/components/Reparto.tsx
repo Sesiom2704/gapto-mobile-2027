@@ -4,6 +4,7 @@
 // Ruta: mobile/src/components/Reparto.tsx
 // Descripción: Piezas comunes de las pantallas de reparto y posiciones (F05-06 M3; lámina REP v0.2). `SelectorPersona` (E7, P-REP-05): solo terceros ACTIVOS de tipo persona, con filtro local, «Recientes» por uso y alta en el momento («+ Crear persona «texto»», naturaleza PERSONA, UUID generado al iniciar el alta y reutilizado en el reintento). `OpcionAtenuada`: lo que esta versión no hace se ve atenuado y con su motivo en lenguaje llano (§57.1.1). `Campo`, `FilaRevision`, `CabeceraTarea` y `Aviso` siguen el patrón de la devolución (DEV v0.1).
 // Versión: 0.1.0 (F05-06 M3 §B1)
+// Versión: 0.2.0 (F05-D052 paso 2 · C-03, F05 §66.A.3): `SelectorPersona` admite `naturalezas` (por defecto solo PERSONA: el reparto no cambia). Con PERSONA y EMPRESA («Quién te lo debe» de C-03) lista ambas con su tipo, busca «persona o empresa», ofrece crear persona o empresa y su nota es la de C-03; ORGANISMO, OTRO y sin naturaleza nunca aparecen (DEU-C03-NATURALEZAS). `excluir` sigue quitando, p. ej., el comercio del gasto.
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -96,7 +97,10 @@ export function Inicial({ nombre }: { nombre: string }) {
   );
 }
 
-/** E7 · P-REP-05: personas del reparto (solo terceros de tipo persona). */
+type NaturalezaAdmitida = 'PERSONA' | 'EMPRESA';
+const NOMBRE_NATURALEZA: Record<NaturalezaAdmitida, string> = { PERSONA: 'Persona', EMPRESA: 'Empresa' };
+
+/** E7 · P-REP-05: personas del reparto (solo terceros de tipo persona); con `naturalezas`, también empresas (C-03). */
 export function SelectorPersona(p: {
   cliente: ClienteApi;
   nuevoId: () => string;
@@ -104,7 +108,13 @@ export function SelectorPersona(p: {
   titulo?: string;
   onElegir: (t: { id: string; nombre: string }) => void;
   onCancelar: () => void;
+  /** F05-D052 C-03: naturalezas admitidas (por defecto solo PERSONA). La política la fija el servidor por ruta. */
+  naturalezas?: NaturalezaAdmitida[];
+  /** Nota al pie (por defecto la del reparto). */
+  nota?: string;
 }) {
+  const naturalezas: NaturalezaAdmitida[] = p.naturalezas ?? ['PERSONA'];
+  const conEmpresas = naturalezas.includes('EMPRESA');
   const { c } = useTema();
   const inset = useSafeAreaInsets();
   const [lista, setLista] = useState<{ fase: 'CARGANDO' } | { fase: 'ERROR' } | { fase: 'OK'; terceros: Tercero[] }>({ fase: 'CARGANDO' });
@@ -125,18 +135,20 @@ export function SelectorPersona(p: {
   const personas =
     lista.fase === 'OK'
       ? lista.terceros
-          .filter((t) => t.enabled && t.naturaleza === 'PERSONA' && !p.excluir.includes(t.id))
+          .filter((t) => t.enabled && naturalezas.includes(t.naturaleza as NaturalezaAdmitida) && !p.excluir.includes(t.id))
           .filter((t) => !texto.trim() || norm(t.nombre).includes(norm(texto)))
           .sort((a, b) => (b.usos ?? 0) - (a.usos ?? 0) || a.nombre.localeCompare(b.nombre))
       : [];
   const nombreNuevo = texto.trim();
   const existeIgual = personas.some((t) => norm(t.nombre) === norm(nombreNuevo));
 
-  const crear = async () => {
+  const crear = async (naturaleza: NaturalezaAdmitida = 'PERSONA') => {
     if (!nombreNuevo || alta.fase === 'ENVIANDO') return;
-    if (!idAlta.current || idAlta.current.nombre !== nombreNuevo) idAlta.current = { nombre: nombreNuevo, id: p.nuevoId() };
+    // Mismo UUID en el reintento del MISMO alta (nombre y naturaleza); otro alta, UUID nuevo.
+    const clave = `${naturaleza}:${nombreNuevo}`;
+    if (!idAlta.current || idAlta.current.nombre !== clave) idAlta.current = { nombre: clave, id: p.nuevoId() };
     setAlta({ fase: 'ENVIANDO' });
-    const r = await p.cliente.altaTercero({ id: idAlta.current.id, nombre: nombreNuevo, naturaleza: 'PERSONA' });
+    const r = await p.cliente.altaTercero({ id: idAlta.current.id, nombre: nombreNuevo, naturaleza });
     if (r.tipo === 'OK') {
       idAlta.current = null;
       setAlta({ fase: 'NADA' });
@@ -148,7 +160,8 @@ export function SelectorPersona(p: {
     <View testID="selector-persona" style={[StyleSheet.absoluteFill, { backgroundColor: c.background }]}>
       <CabeceraTarea titulo={p.titulo ?? 'Añadir persona'} izquierda={<BotonTexto testID="selector-persona-atras" titulo="‹ Atrás" onPress={p.onCancelar} />} />
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: espacio.l, gap: espacio.m, paddingBottom: inset.bottom + espacio.xxl }}>
-        <TextInput testID="selector-persona-buscar" accessibilityLabel="Buscar persona" placeholder="Buscar persona" placeholderTextColor={c.textSecondary}
+        <TextInput testID="selector-persona-buscar" accessibilityLabel={conEmpresas ? 'Buscar persona o empresa' : 'Buscar persona'}
+          placeholder={conEmpresas ? 'Buscar persona o empresa' : 'Buscar persona'} placeholderTextColor={c.textSecondary}
           value={texto} onChangeText={setTexto}
           style={[tipo.body, s.input, { color: c.textPrimary, backgroundColor: c.surfacePrimary, borderColor: c.borderStandard }]} />
         {lista.fase === 'CARGANDO' ? <EstadoDato estado="CARGANDO" /> : null}
@@ -159,29 +172,34 @@ export function SelectorPersona(p: {
         ) : null}
         {lista.fase === 'OK' ? (
           <View style={{ gap: espacio.xs }}>
-            <Text style={[tipo.footnote, { color: c.textSecondary, fontWeight: '600' }]}>{texto.trim() ? 'Personas' : 'Recientes'}</Text>
+            <Text style={[tipo.footnote, { color: c.textSecondary, fontWeight: '600' }]}>{texto.trim() ? (conEmpresas ? 'Personas y empresas' : 'Personas') : 'Recientes'}</Text>
             {personas.map((t) => (
               <Pressable key={t.id} testID={`persona-${t.id}`} accessibilityRole="button" accessibilityLabel={t.nombre} onPress={() => p.onElegir({ id: t.id, nombre: t.nombre })}
                 style={[s.fila, { backgroundColor: c.surfacePrimary }]}>
                 <Inicial nombre={t.nombre} />
                 <View style={{ flex: 1 }}>
                   <Text style={[tipo.body, { color: c.textPrimary }]}>{t.nombre}</Text>
-                  <Text style={[tipo.footnote, { color: c.textSecondary }]}>{`Persona${t.usos ? ` · ${t.usos} ${t.usos === 1 ? 'registro' : 'registros'}` : ''}`}</Text>
+                  <Text style={[tipo.footnote, { color: c.textSecondary }]}>{`${NOMBRE_NATURALEZA[t.naturaleza as NaturalezaAdmitida] ?? 'Persona'}${t.usos ? ` · ${t.usos} ${t.usos === 1 ? 'registro' : 'registros'}` : ''}`}</Text>
                 </View>
               </Pressable>
             ))}
             {personas.length === 0 && !nombreNuevo ? (
-              <Text style={[tipo.subheadline, { color: c.textSecondary }]}>Todavía no tienes personas. Escribe un nombre para crearla.</Text>
+              <Text style={[tipo.subheadline, { color: c.textSecondary }]}>{conEmpresas ? 'Todavía no tienes personas ni empresas. Escribe un nombre para crearla.' : 'Todavía no tienes personas. Escribe un nombre para crearla.'}</Text>
             ) : null}
           </View>
         ) : null}
         {nombreNuevo && !existeIgual ? (
-          <Pressable testID="selector-persona-crear" accessibilityRole="button" onPress={() => void crear()} style={[s.fila, { backgroundColor: c.surfacePrimary }]}>
+          <Pressable testID="selector-persona-crear" accessibilityRole="button" onPress={() => void crear('PERSONA')} style={[s.fila, { backgroundColor: c.surfacePrimary }]}>
             <Text style={[tipo.body, { color: c.accent }]}>{alta.fase === 'ENVIANDO' ? 'Creando…' : `+ Crear persona «${nombreNuevo}»`}</Text>
           </Pressable>
         ) : null}
+        {conEmpresas && nombreNuevo && !existeIgual && alta.fase !== 'ENVIANDO' ? (
+          <Pressable testID="selector-persona-crear-empresa" accessibilityRole="button" onPress={() => void crear('EMPRESA')} style={[s.fila, { backgroundColor: c.surfacePrimary }]}>
+            <Text style={[tipo.body, { color: c.accent }]}>{`+ Crear empresa «${nombreNuevo}»`}</Text>
+          </Pressable>
+        ) : null}
         {alta.fase === 'ERROR' ? <Aviso testID="selector-persona-alta-error" texto={alta.mensaje} critico /> : null}
-        <Text testID="selector-persona-solo-personas" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_SOLO_PERSONAS}</Text>
+        <Text testID="selector-persona-solo-personas" style={[tipo.footnote, { color: c.textSecondary }]}>{p.nota ?? TEXTO_SOLO_PERSONAS}</Text>
       </ScrollView>
     </View>
   );

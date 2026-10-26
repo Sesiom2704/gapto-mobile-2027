@@ -4,6 +4,7 @@
 // Ruta: mobile/src/domain/devolucion.ts
 // Descripción: Lógica pura de la devolución contextual D-194 (F05-06 M2; F05 §14, §51.2; lámina DEV v0.1 D-DEV-01..08 y P-DEV-01..06, F09 §12.105). La devolución siempre parte de una compra (D-DEV-01): origen fijo con lo ya devuelto y lo que queda (D-DEV-02); límite visible (D-DEV-08: no se deja revisar más de lo que queda); abono como pregunta aparte («Sí, en <cuenta de la compra>», «En otra cuenta», «Todavía no»; D-DEV-03, P-DEV-02); «Tuya» propuesta solo si el servidor la demuestra (COMPLETA de un único actor propio), si no «Sin indicar» por defecto y «Todo mío» no disponible con su motivo (P-DEV-01; el canon F05 §51.2 manda sobre la lámina); nunca «Ingreso» (D-DEV-04); el neto es derivado (D-DEV-05). En la Actividad (P-DEV-03) el importe va sin «+» ni verde con la etiqueta «Devolución» o «Abono pendiente» (D-DEV-07).
 // Versión: 0.1.0 (F05-06 M2-B §B1)
+// Versión: 0.2.0 (F05-D052 paso 2 · C-03, §66.A.9): motivo GASTO_CON_DERECHO_DE_COBRO (devolución bloqueada en un gasto con derecho de cobro vinculado, en cualquier estado).
 // ============================================================
 
 import type { ContextoDevolucion, FilaActividad } from '../api/cliente';
@@ -31,6 +32,8 @@ export const MOTIVO_NO_DISPONIBLE: Record<string, string> = {
   DEVOLUCION_ORIGEN_V3_VARIOS_EFECTOS: 'Viene de la versión anterior con varias partes: no se puede saber qué se devuelve.',
   DEVOLUCION_ORIGEN_MULTICATEGORIA: 'Tiene varias categorías: aún no se puede registrar su devolución.',
   EXCEDE_CAPACIDAD_REVERSIBLE: 'Ya se ha devuelto todo el importe de esta compra.',
+  // F05-D052 §66.A.9: una devolución nunca reduce lo que te deben de forma implícita (DEU-C03-POSTERIORES).
+  GASTO_CON_DERECHO_DE_COBRO: 'Este gasto tiene algo pendiente de cobro (lo que te deben). Por ahora no se puede registrar una devolución de él: no cambiaría lo que te deben.',
 };
 
 export function motivoNoDisponible(codigo: string | null): string {

@@ -17,7 +17,7 @@
 #     - el veredicto de CADA mutante se escribe a disco en cuanto se conoce
 #       (--salida, append + fsync);
 #     - veredicto: MUERTO | VIVO | NO_CLASIFICABLE (EQUIVALENTE si se declara).
-#   Discriminantes: el bloque «Lámina B» de mobile/__tests__/reparto.test.tsx
+#   Discriminantes: el bloque «Lámina B» (y el caso C4 de «Pendiente con») de mobile/__tests__/reparto.test.tsx
 #   (jest --runInBand) y, con --e2e, ademas el E2E web
 #   e2e_f05_d051_lamina_b.py (lanzador indicado en --lanzador: export web del
 #   arbol mutado, base dev recreada en el cluster desechable). Con --e2e un
@@ -26,6 +26,7 @@
 #        [--salida fichero] [--e2e --lanzador <ps1> --dist <carpeta> --evidencia <carpeta>]
 #   No ejecutar en paralelo con otro arnes ni con la suite sobre el mismo arbol.
 # Version: 0.1.0 (F05-D051 paso 8; lamina B D-F0507L-03)
+# Version: 0.2.0 (F05-D052 paso 3 · lamina B, F05 §66.2): texto «Saldo inicial desconocido» y mutante B10 (una ACTIVA con saldo desconocido vuelve a decir «Saldo inicial desconocido»).
 # ============================================================
 
 from __future__ import annotations
@@ -43,33 +44,37 @@ DOM = "mobile/src/domain/reparto.ts"
 COR = "mobile/src/screens/CorregirRepartoScreen.tsx"
 PEN = "mobile/src/screens/PendienteConScreen.tsx"
 JEST_FICHERO = "__tests__/reparto.test.tsx"
-JEST_FILTRO = "Lámina B"
+JEST_FILTRO = "Lámina B|C4: con un saldo desconocido"  # F05-D052: C4 discrimina B10
 
 SALDO_CERRADA = "    saldo: x.saldo === null ? TEXTO_SALDADO : `${formatearEur(x.saldo)} · ${TEXTO_SALDADO}`,\n"
-INICIAL = "    inicial: x.apertura_indeterminada ? TEXTO_IMPORTE_INICIAL_DESCONOCIDO : null,\n"
+INICIAL = "    inicial: x.apertura_indeterminada ? TEXTO_SALDO_INICIAL_DESCONOCIDO : null,\n"
 
 #: (id, descripcion, [(fichero, texto, sustituto)], usa_e2e, equivalencia o None)
 MUTANTES = [
     ("B1", "dominio: una CERRADA muestra «Sin determinar»",
      [(DOM, SALDO_CERRADA, "    saldo: 'Sin determinar',\n")], True, None),
-    ("B2", "dominio: se omite «Importe inicial desconocido» en una CERRADA con apertura desconocida",
+    ("B2", "dominio: se omite «Saldo inicial desconocido» en una CERRADA con apertura desconocida",
      [(DOM, INICIAL, "    inicial: null,\n")], True, None),
-    ("B3", "dominio: «Importe inicial desconocido» en cualquier CERRADA (indicador ignorado)",
-     [(DOM, INICIAL, "    inicial: TEXTO_IMPORTE_INICIAL_DESCONOCIDO,\n")], True, None),
-    ("B4", "dominio: la etiqueta accesible pierde la linea de importe inicial",
+    ("B3", "dominio: «Saldo inicial desconocido» en cualquier CERRADA (indicador ignorado)",
+     [(DOM, INICIAL, "    inicial: TEXTO_SALDO_INICIAL_DESCONOCIDO,\n")], True, None),
+    ("B4", "dominio: la etiqueta accesible pierde la linea de saldo inicial",
      [(DOM, "  return inicial ? `${linea.replace(/\\.$/, '')}. ${inicial}` : linea;", "  return linea;")], True, None),
     ("B5", "Corregir reparto: ignora el estado (una CERRADA sale «pendiente 0,00 €»)",
      [(COR, "const tp = textoPosicion(x.posicion);", "const tp = textoPosicion({ ...x.posicion, estado: 'ACTIVA' });")], True, None),
-    ("B6", "Corregir reparto: no pinta la linea «Importe inicial desconocido»",
+    ("B6", "Corregir reparto: no pinta la linea «Saldo inicial desconocido»",
      [(COR, "{tp.inicial ? (", "{false ? (")], True, None),
     ("B7", "Pendiente con · exito: ignora el estado (una CERRADA sale «Sigue pendiente: 0,00 €»)",
      [(PEN, "const tp = textoPosicion(r);", "const tp = textoPosicion({ ...r, estado: 'ACTIVA' });")], True, None),
-    ("B8", "Pendiente con · exito: no pinta la linea «Importe inicial desconocido»",
+    ("B8", "Pendiente con · exito: no pinta la linea «Saldo inicial desconocido»",
      [(PEN, '{tp.inicial ? <Text testID="posicion-exito-inicial"', '{false ? <Text testID="posicion-exito-inicial"')], False, None),
     ("B9", "Pendiente con · lista: importe con textoSaldo en vez de textoPosicion",
      [(PEN, "{textoPosicion(x).saldo}</Text>", "{textoSaldo(x.saldo)}</Text>")], False,
      "la lista solo recibe ACTIVAS (activasDe filtra estado === 'ACTIVA'), y para una ACTIVA "
      "textoPosicion(x).saldo === textoSaldo(x.saldo); el cambio es defensivo, sin salida observable distinta"),
+    ("B10", "Pendiente con · lista: una ACTIVA con saldo desconocido vuelve a decir «Saldo inicial desconocido» (F05 §66.2)",
+     [(PEN, "                    ? textoPosicion(x).inicial\n                    : [",
+       "                    ? textoPosicion(x).inicial\n                    : x.saldo === null && x.estado !== 'CERRADA'\n"
+       "                    ? 'Saldo inicial desconocido'\n                    : [")], True, None),
 ]
 
 

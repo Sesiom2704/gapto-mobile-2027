@@ -13,12 +13,14 @@
 // v0.9.0 (F05-06 M4 §3; lámina CAP B2/B3; D-CAP-06/08): al final de «Pagado con» / «Cobrado en», «¿Falta una cuenta? N sin configurar ›» (solo si N > 0) abre la lista de Cuentas encima del formulario, que conserva lo escrito; al volver se recargan las cuentas y el número. CUENTA_SIN_CAPACIDAD al guardar: se muestra el mensaje del servidor y «El resto del formulario se conserva.»; se recargan las cuentas (la que perdió la capacidad ya no sale) y la cuenta queda sin elegir y pendiente de decisión del usuario: ninguna propuesta la vuelve a rellenar.
 // v0.10.0 (F05-06 M3 §B1; lámina REP v0.2 A1, B1; D-REP-01/03): en un gasto, «¿De quién es este gasto?» ofrece «Repartir» junto a «Solo mío» y «Pagado con» ofrece «Otra persona» tras las cuentas. Ambos abren el gasto compartido encima del formulario, que conserva lo común (importe, fecha, comercio, categoría y magnitudes, presupuesto y nota) y al que se vuelve con «Cambiar». Antes se valida lo común con la MISMA `validar` del sellado (sin la cuenta); el contexto todavía no viaja en un gasto compartido y se pide quitarlo, sin perderlo en silencio.
 // v0.11.0 (F05-D051 paso 9.1 · G1 v2): prop opcional `traza` (instrumentación por paso; App.tsx solo la pasa en `__DEV__`): hitos de montaje, cargas (árbol, cuentas, sugeridas, propuesta), importe y magnitud (primer y último cambio, sin valor), tercero, selector y elección de categoría con su vía, magnitudes visibles, «No lo sé», presupuesto, cuenta, tipo, desplazamientos, `faltan:<claves>` y «Registrar». Sin la prop no se llama a nada ni se registra ningún manejador; ningún import nuevo, sin cambios de comportamiento ni de UX.
-// Versión: 0.11.0
+// v0.12.0 (F05-D052 paso 3 · A′, D-F0507L-07; lámina F05-07 v0.3 A′1/A′2): SOLO en los campos de magnitud. Al elegir una categoría con magnitudes obligatorias, el foco y el teclado se abren en la primera obligatoria sin valor ni «No lo sé» (justo debajo de la categoría, mismo orden en que se pide). El teclado lleva «Hecho» (iOS: barra sobre el teclado decimal, VoiceOver «Hecho, siguiente campo»; Android y web: tecla de envío) que pasa a la siguiente obligatoria y, tras la última, cierra el teclado y sube hasta «¿Cuenta para el presupuesto?». Cambio de categoría: se conservan las comunes y las demás ni se ven ni se envían (sin cambios en `conservarMagnitudes` ni en el sellado). Cerrar el teclado tocando fuera conserva el valor (campo controlado; ningún manejador de blur lo toca). Presupuesto y cuenta siguen sin marcar (D-F0507L-02). Traza G1: `magnitud_foco` y `magnitud_hecho` (sin valores).
+// v0.13.0 (F05-D052 paso 2 · C-03, F05 §66 y §66.A; lámina F05-07 v0.3 C1–C3; D-F0507L-04/05): «¿De quién es este gasto?» ofrece «Mío, pero me lo reembolsan» (solo en gastos y antes del primer envío), que abre «Me lo reembolsan» (ReembolsoHoja) ENCIMA del formulario, que conserva lo escrito; «Hecho» vuelve con quién y cuánto y el resumen «Te debe <quién> · <importe>» (tocar lo reabre; «Quitar» lo retira; «Solo mío» también). Con reembolso no se ofrecen «Repartir» ni «Otra persona». El envío va a POST /v1/intenciones/gasto-reembolsable (mismo ciclo y mismas reglas que el gasto pagado; `validar` lo comprueba también). Éxito C3: el gasto que cuenta en tu Resultado y lo que te deben, por separado. Rechazos de C-03 explicados en lenguaje llano. Cambiar a Ingreso quita el reembolso con aviso.
+// Versión: 0.13.0
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { InputAccessoryView, Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, type ScrollViewInstance, type TextInputInstance } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ClienteApi, CuentaPago } from '../api/cliente';
@@ -29,6 +31,7 @@ import { GuardarPlantilla } from '../components/GuardarPlantilla';
 import { GuardarPreferencia } from '../components/GuardarPreferencia';
 import { HojaTipos } from '../components/HojaTipos';
 import { RecordarAfinidad } from '../components/RecordarAfinidad';
+import { ReembolsoHoja } from '../components/Reembolso';
 import { SelectorTercero } from '../components/SelectorTercero';
 import { BotonSecundario, CargaArbol, IconoCategoriaVista, SelectorCategorias } from '../components/SelectorCategorias';
 import {
@@ -44,9 +47,19 @@ import {
 } from '../domain/categoria';
 import { ayer, ddmmaaaaAIso, fechaCortaIso, isoADdmmaaaa, isoLocal } from '../domain/fechas';
 import { formatearEur, parsearImporte } from '../domain/importe';
-import { Borrador, borradorInicial, Errores, esDesconocida, esFechaIso, SeleccionCategoria, validar } from '../domain/intencion';
+import { Borrador, borradorInicial, Errores, esDesconocida, esFechaIso, PayloadGastoPagado, SeleccionCategoria, validar } from '../domain/intencion';
+import {
+  importeReembolso,
+  MOTIVO_RECHAZO_REEMBOLSO,
+  TEXTO_ATRIBUCION_REEMBOLSO,
+  TEXTO_CUENTA_RESULTADO,
+  TEXTO_OPCION_REEMBOLSO,
+  TEXTO_OPCION_REEMBOLSO_SUB,
+  TEXTO_TE_DEBE,
+  totalDe,
+} from '../domain/reembolso';
 import { BaseCompartido, baseDesdeBorrador, TEXTO_OTRA_PERSONA } from '../domain/reparto';
-import { conservarMagnitudes, descartadas } from '../domain/magnitud';
+import { conservarMagnitudes, descartadas, primeraMagnitudPendiente, siguienteMagnitud } from '../domain/magnitud';
 import type { IndicePreferencias, PropuestaVista } from '../domain/preferencias';
 import {
   aplicarPropuesta,
@@ -102,6 +115,12 @@ export const RECHAZOS_CATEGORIA = new Set([
 /** Cambio de categoría pendiente de confirmar porque descartaría valores informados (C07). */
 type CambioPendiente = { destino: SeleccionCategoria; perdidas: MagnitudCategoria[]; etiqueta: string };
 
+/** A′ (D-F0507L-07): la tecla del teclado de magnitudes y su anuncio en VoiceOver. */
+export const TEXTO_HECHO = 'Hecho';
+export const ETIQUETA_HECHO = 'Hecho, siguiente campo';
+/** Barra «Hecho» sobre el teclado decimal de iOS (que no tiene tecla de envío). */
+const ID_BARRA_HECHO = 'magnitud-barra-hecho';
+
 export const TEXTO_CONTEXTO_COMPARTIDO = 'Un gasto repartido o pagado por otra persona todavía no guarda el contexto. Quítalo en «Más detalles» para continuar.';
 
 export function RegistroGastoScreen(p: {
@@ -134,6 +153,8 @@ export function RegistroGastoScreen(p: {
   const bRef = useRef(b);
   bRef.current = b;
   const [hojaTipos, setHojaTipos] = useState(false);
+  /** C-03: «Me lo reembolsan» abierto encima del formulario. */
+  const [hojaReembolso, setHojaReembolso] = useState(false);
   const [avisos, setAvisos] = useState<string[]>(p.inicial?.aviso ? [p.inicial.aviso] : []);
   const [selectorTercero, setSelectorTercero] = useState(false);
   /** B2: lista de Cuentas abierta encima del formulario. */
@@ -159,6 +180,12 @@ export function RegistroGastoScreen(p: {
   // F05-05 A1/A2 bis: sugeridas de categoría (lectura; nunca preseleccionan ni cambian orígenes, R1/C01).
   const [sugeridas, setSugeridas] = useState<SugeridaCategoria[]>([]);
   const peticionSugeridas = useRef(0);
+  // A′ (D-F0507L-07): campos de magnitud, foco pendiente tras elegir categoría y posición de «¿Cuenta para el presupuesto?».
+  const camposMagnitud = useRef<Map<string, TextInputInstance>>(new Map());
+  const magnitudEnFoco = useRef<string | null>(null);
+  const [focoMagnitud, setFocoMagnitud] = useState<string | null>(null);
+  const formRef = useRef<ScrollViewInstance | null>(null);
+  const yPresupuesto = useRef<number | null>(null);
 
   useEffect(() => {
     if (p.inicial) setB((x) => ({ ...x, importeTexto: p.inicial!.importeTexto, fechaHecho: p.inicial!.fechaHecho, fechaOrigen: p.inicial!.fechaHecho === hoyIso ? 'INFERIDO' : 'USUARIO' }));
@@ -366,7 +393,7 @@ export function RegistroGastoScreen(p: {
   const modificado =
     b.importeTexto.trim() !== '' || b.concepto.trim() !== '' || b.presupuestableOrigen === 'USUARIO' || b.soloMio || b.cuentaOrigen === 'USUARIO' || b.fechaOrigen === 'USUARIO' || b.propuestaRechazada ||
     b.categoria.estado !== 'PENDIENTE' || Object.values(b.magnitudesTexto).some((v) => v.trim() !== '') ||
-    b.terceroOrigen === 'USUARIO' || b.contextoOrigen === 'USUARIO';
+    b.terceroOrigen === 'USUARIO' || b.contextoOrigen === 'USUARIO' || !!b.reembolso;
   const cuentaSel = cuentas.fase === 'OK' ? cuentas.lista.find((x) => x.cuenta_id === b.cuentaId) : undefined;
   const nombreCategoria = b.categoria.estado === 'CATEGORIA' ? b.categoria.nombre : null;
 
@@ -388,6 +415,8 @@ export function RegistroGastoScreen(p: {
   const vivos: Errores = {};
   if (b.importeTexto.trim() !== '' && pendientes.importe) vivos.importe = pendientes.importe;
   if (pendientes.fecha && (otraFecha === null || otraFecha.length >= 10)) vivos.fecha = pendientes.fecha;
+  // C-03: lo que te deben deja de valer si cambia el total o el comercio (se ve al momento).
+  if (pendientes.reembolso) vivos.reembolso = pendientes.reembolso;
   // Magnitudes: el formato inválido se ve al escribir; la obligatoria vacía solo en `faltan`.
   const magnitudesVivas: Record<string, string> = {};
   for (const [id, msg] of Object.entries(pendientes.magnitudes ?? {})) if ((b.magnitudesTexto[id] ?? '').trim() !== '') magnitudesVivas[id] = msg;
@@ -418,10 +447,35 @@ export function RegistroGastoScreen(p: {
     setCategoriaInvalida(null);
     setCambioPendiente(null);
     setSelectorAbierto(false);
-    cambiar({ categoria: destino, magnitudesTexto: conservarMagnitudes(b.magnitudesTexto, nuevas) });
+    const conservadas = conservarMagnitudes(b.magnitudesTexto, nuevas);
+    cambiar({ categoria: destino, magnitudesTexto: conservadas });
+    // A′: el teclado se abre en la primera obligatoria que falta (nada si no hay ninguna).
+    setFocoMagnitud(bloqueado ? null : primeraMagnitudPendiente(nuevas, conservadas, b.desconocidas ?? []));
     // Cambio de categoría: se vuelve a resolver sin pisar los campos tocados (R03).
     categoriaActual.current = destino.estado === 'CATEGORIA' ? destino.id : null;
     if (!bloqueado && cuentas.fase === 'OK') void pedirPropuesta(b.fechaHecho, categoriaActual.current, cuentas.lista);
+  };
+
+  // A′: el foco se pide cuando el campo ya está montado (tras volver del selector o de la confirmación).
+  useEffect(() => {
+    if (!focoMagnitud) return;
+    const campo = camposMagnitud.current.get(focoMagnitud);
+    setFocoMagnitud(null);
+    if (!campo) return;
+    p.traza?.('magnitud_foco');
+    campo.focus();
+  }, [focoMagnitud, b.categoria]);
+
+  /** A′: «Hecho» en una magnitud pasa a la siguiente obligatoria; tras la última, cierra el teclado y sube a presupuesto. */
+  const hechoMagnitud = (desde: string | null) => {
+    if (!desde || b.categoria.estado !== 'CATEGORIA') return;
+    p.traza?.('magnitud_hecho');
+    const sig = siguienteMagnitud(b.categoria.magnitudes, desde, b.desconocidas ?? []);
+    const campo = sig ? camposMagnitud.current.get(sig) : undefined;
+    if (campo) return campo.focus();
+    camposMagnitud.current.get(desde)?.blur();
+    Keyboard.dismiss();
+    if (yPresupuesto.current !== null) formRef.current?.scrollTo({ y: Math.max(0, yPresupuesto.current - espacio.l), animated: true });
   };
 
   /** Pide confirmación si el cambio descartaría valores informados (C07; lámina R07). */
@@ -457,6 +511,13 @@ export function RegistroGastoScreen(p: {
     p.onGastoCompartido(baseDesdeBorrador(b), inicial);
   };
 
+  /** C-03: abre «Me lo reembolsan» (necesita el total). */
+  const abrirReembolso = () => {
+    if (bloqueado || enviado || tipoReg !== 'GASTO') return;
+    if (totalDe(b) === null) return setErrores((e) => ({ ...e, importe: validar(b, hoyIso, 'GASTO').importe ?? 'Indica el importe.' }));
+    setHojaReembolso(true);
+  };
+
   const onRegistrar = async () => {
     p.traza?.('registrar_pulsado');
     editable.current = false; // desde el sellado, ninguna propuesta en vuelo toca el borrador
@@ -480,14 +541,15 @@ export function RegistroGastoScreen(p: {
       presupuestable: b.presupuestableOrigen === 'USUARIO' ? b.presupuestable : null,
       soloMio: b.soloMio,
     });
-    const aviso = avisoCambioDeTipo(tipoReg, hacia, quitados);
+    const avisoBase = avisoCambioDeTipo(tipoReg, hacia, quitados);
+    const aviso = b.reembolso ? `${avisoBase} Se quita «${TEXTO_OPCION_REEMBOLSO}»: solo existe en gastos.` : avisoBase;
     if (hacia === 'TRANSFERENCIA') return p.onCambiarTipo?.('TRANSFERENCIA', { importeTexto: b.importeTexto, fechaHecho: b.fechaHecho, aviso });
     const categoriaAdmitida = !!nodoActual && elegible(nodoActual, hacia);
     tipoRef.current = hacia;
     setTipoReg(hacia);
     setAvisos([aviso]);
     plantillaPendiente.current = null;
-    setB((x) => borradorTrasCambioDeTipo(x, false, categoriaAdmitida));
+    setB((x) => ({ ...borradorTrasCambioDeTipo(x, false, categoriaAdmitida), reembolso: null }));
     if (esFechaIso(b.fechaHecho)) void cargarCuentas(b.fechaHecho);
   };
 
@@ -535,7 +597,7 @@ export function RegistroGastoScreen(p: {
     // «Guardar como preferencia» (R05): solo con categoría y si algo difiere de lo propuesto.
     // F05-04: con tercero o en ingresos, para el tercero O la categoría (N01).
     const porTipo = esIngreso || !!b.terceroId;
-    const recordar = porTipo ? null : datosRecordables(estado.sellada.payload, vista.current);
+    const recordar = porTipo ? null : datosRecordables(estado.sellada.payload as Readonly<PayloadGastoPagado>, vista.current);
     const recordarTipo = porTipo
       ? datosRecordablesTipo(
           {
@@ -563,9 +625,26 @@ export function RegistroGastoScreen(p: {
           <Text accessibilityRole="header" style={[tipo.titleMedium, { color: c.textPrimary }]}>{tituloExito(tipoReg)}</Text>
           <Text style={[importe.primary, { color: c.textPrimary }]}>{formatearEur(r.importe)}</Text>
           <Text testID="exito-titulo" style={[tipo.body, { color: c.textSecondary }]}>{titulo}</Text>
-          <Text style={[tipo.footnote, { color: c.textSecondary, textAlign: 'center' }]}>
-            {r.estado_atribucion === 'COMPLETA' ? 'Atribuido: solo tuyo.' : 'Reparto sin indicar: no cuenta en tu gasto atribuible.'}
-          </Text>
+          {r.reembolso ? (
+            // C3: por separado, el gasto que cuenta en tu Resultado y lo que te deben.
+            <View testID="exito-reembolso" style={{ alignSelf: 'stretch', gap: espacio.xs }}>
+              <View testID="exito-resultado" style={s.filaExito} accessible accessibilityLabel={`${TEXTO_CUENTA_RESULTADO}: ${formatearEur(r.reembolso.tu_parte)}`}>
+                <Text style={[tipo.body, { color: c.textSecondary }]}>{TEXTO_CUENTA_RESULTADO}</Text>
+                <Text style={[tipo.bodyEmphasis, { color: c.textPrimary }]}>{formatearEur(r.reembolso.tu_parte)}</Text>
+              </View>
+              {r.reembolso.posiciones.map((x) => (
+                <View key={x.entidad_id} testID={`exito-te-debe-${x.entidad_id}`} style={s.filaExito} accessible
+                  accessibilityLabel={`${TEXTO_TE_DEBE(b.reembolso?.nombre ?? 'quien te lo debe')}: ${formatearEur(x.importe)}`}>
+                  <Text style={[tipo.body, { color: c.textSecondary }]}>{TEXTO_TE_DEBE(b.reembolso?.nombre ?? 'quien te lo debe')}</Text>
+                  <Text style={[tipo.bodyEmphasis, { color: c.textPrimary }]}>{formatearEur(x.importe)}</Text>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <Text style={[tipo.footnote, { color: c.textSecondary, textAlign: 'center' }]}>
+              {r.estado_atribucion === 'COMPLETA' ? 'Atribuido: solo tuyo.' : 'Reparto sin indicar: no cuenta en tu gasto atribuible.'}
+            </Text>
+          )}
           {esIngreso ? null : (
             <Text testID="exito-financiacion" style={[tipo.footnote, { color: c.textSecondary, textAlign: 'center' }]}>
               {r.financiacion === 'PROPUESTA_ACEPTADA' ? 'Financiado por ti.' : 'Financiación no determinada.'}
@@ -679,6 +758,7 @@ export function RegistroGastoScreen(p: {
       </View>
 
       <ScrollView
+        ref={formRef}
         testID="registro-form"
         keyboardShouldPersistTaps="handled"
         onScrollBeginDrag={p.traza ? () => p.traza?.('scroll_ini') : undefined}
@@ -829,9 +909,19 @@ export function RegistroGastoScreen(p: {
                   </Text>
                   <View style={[s.magnitudCaja, { backgroundColor: c.surfacePrimary, borderColor: err ? c.critical : c.borderStandard }]}>
                     <TextInput
+                      ref={(x) => {
+                        if (x) camposMagnitud.current.set(m.magnitud_id, x);
+                        else camposMagnitud.current.delete(m.magnitud_id);
+                      }}
                       testID={`magnitud-${m.magnitud_id}`}
                       accessibilityLabel={`${m.nombre} en ${m.unidad_default}${m.obligatoria ? ', obligatorio' : ', opcional'}`}
                       value={b.magnitudesTexto[m.magnitud_id] ?? ''}
+                      onFocus={() => (magnitudEnFoco.current = m.magnitud_id)}
+                      returnKeyType={siguienteMagnitud(todas, m.magnitud_id, b.desconocidas ?? []) ? 'next' : 'done'}
+                      returnKeyLabel={TEXTO_HECHO}
+                      submitBehavior="submit"
+                      onSubmitEditing={() => hechoMagnitud(m.magnitud_id)}
+                      inputAccessoryViewID={Platform.OS === 'ios' ? ID_BARRA_HECHO : undefined}
                       onChangeText={(texto) => {
                         p.traza?.('cambio:magnitud');
                         cambiar({ magnitudesTexto: { ...b.magnitudesTexto, [m.magnitud_id]: texto } });
@@ -866,6 +956,7 @@ export function RegistroGastoScreen(p: {
           </View>
         ) : null}
 
+        <View testID="bloque-presupuestable" onLayout={(e) => (yPresupuesto.current = e.nativeEvent.layout.y)}>
         <Campo etiqueta="¿Cuenta para el presupuesto?" error={visibles.presupuestable}>
           <Segmentado<boolean>
             testIDBase="presupuestable"
@@ -883,23 +974,40 @@ export function RegistroGastoScreen(p: {
             </Text>
           ) : null}
         </Campo>
+        </View>
 
         <Campo etiqueta={esIngreso ? '¿De quién es este ingreso?' : '¿De quién es este gasto?'} opcional>
           <View style={s.chips}>
             <Chip
               testID="solo-mio"
               etiqueta="Solo mío"
-              seleccionado={b.soloMio}
-              onPress={() => cambiar({ soloMio: !b.soloMio })}
+              seleccionado={b.soloMio && !b.reembolso}
+              onPress={() => cambiar(b.reembolso ? { soloMio: true, reembolso: null } : { soloMio: !b.soloMio })}
             />
-            {!esIngreso && p.onGastoCompartido && !enviado ? (
+            {!esIngreso && p.onGastoCompartido && !enviado && !b.reembolso ? (
               <Chip testID="repartir" etiqueta="Repartir" seleccionado={false} onPress={() => irACompartido({ repartir: true, otraPersona: false })} />
             ) : null}
+            {!esIngreso && (!enviado || b.reembolso) ? (
+              <Chip testID="reembolsable" etiqueta={TEXTO_OPCION_REEMBOLSO} accesibilidad={`${TEXTO_OPCION_REEMBOLSO}. ${TEXTO_OPCION_REEMBOLSO_SUB}`}
+                seleccionado={!!b.reembolso} onPress={abrirReembolso} />
+            ) : null}
           </View>
+          {!esIngreso && b.reembolso && b.reembolso.nombre ? (
+            <View style={s.filaFinanciacion}>
+              <Pressable testID="reembolso-resumen" accessibilityRole="button" disabled={bloqueado || enviado} onPress={abrirReembolso} style={{ flexShrink: 1, minHeight: TACTIL_MIN, justifyContent: 'center' }}>
+                <Text style={[tipo.subheadline, { color: c.textPrimary }]}>
+                  {`${TEXTO_TE_DEBE(b.reembolso.nombre)} · ${formatearEur(importeReembolso(totalDe(b), b.reembolso) ?? '0.00')}`}
+                </Text>
+              </Pressable>
+              {!bloqueado && !enviado ? <BotonTexto testID="reembolso-quitar" titulo="Quitar" onPress={() => cambiar({ reembolso: null })} /> : null}
+            </View>
+          ) : null}
+          {visibles.reembolso ? <Text testID="reembolso-error" accessibilityRole="alert" style={[tipo.footnote, { color: c.critical }]}>{visibles.reembolso}</Text> : null}
           <Text testID="origen-atribucion" style={[tipo.footnote, { color: c.textSecondary }]}>
             {esIngreso
               ? b.soloMio ? 'Decisión tuya: el ingreso es 100 % tuyo.' : 'Sin indicar: se guardará sin reparto.'
-              : b.soloMio ? 'Decisión tuya: el gasto es 100 % tuyo.' : 'Sin indicar: se guardará sin reparto y no contará en tu gasto atribuible.'}
+              : b.reembolso && b.reembolso.nombre ? TEXTO_ATRIBUCION_REEMBOLSO(b.reembolso.nombre)
+                : b.soloMio ? 'Decisión tuya: el gasto es 100 % tuyo.' : 'Sin indicar: se guardará sin reparto y no contará en tu gasto atribuible.'}
           </Text>
         </Campo>
 
@@ -927,7 +1035,7 @@ export function RegistroGastoScreen(p: {
                   }}
                 />
               ))}
-              {!esIngreso && p.onGastoCompartido && !enviado ? (
+              {!esIngreso && p.onGastoCompartido && !enviado && !b.reembolso ? (
                 <Chip testID="otra-persona" etiqueta={TEXTO_OTRA_PERSONA} seleccionado={false} onPress={() => irACompartido({ repartir: false, otraPersona: true })} />
               ) : null}
             </View>
@@ -1036,7 +1144,9 @@ export function RegistroGastoScreen(p: {
                   ? `No se ha registrado. ${TEXTO_FECHA_FUTURA}`
                   : estado.codigo === 'CUENTA_SIN_CAPACIDAD'
                     ? `${estado.mensaje} ${TEXTO_FORMULARIO_SE_CONSERVA}`
-                    : `No se ha registrado. ${estado.mensaje}`}
+                    : MOTIVO_RECHAZO_REEMBOLSO[estado.codigo] && b.reembolso
+                      ? `No se ha registrado. ${MOTIVO_RECHAZO_REEMBOLSO[estado.codigo]}`
+                      : `No se ha registrado. ${estado.mensaje}`}
             </Text>
           </View>
         ) : null}
@@ -1064,6 +1174,23 @@ export function RegistroGastoScreen(p: {
           />
         )}
       </ScrollView>
+
+      {Platform.OS === 'ios' && b.categoria.estado === 'CATEGORIA' && b.categoria.magnitudes.length > 0 ? (
+        <InputAccessoryView nativeID={ID_BARRA_HECHO}>
+          <View style={[s.barraHecho, { backgroundColor: c.surfaceSecondary, borderTopColor: c.borderDefault }]}>
+            <Pressable
+              testID="magnitud-hecho"
+              accessibilityRole="button"
+              accessibilityLabel={ETIQUETA_HECHO}
+              onPress={() => hechoMagnitud(magnitudEnFoco.current)}
+              hitSlop={8}
+              style={{ minHeight: TACTIL_MIN, justifyContent: 'center', paddingHorizontal: espacio.m }}
+            >
+              <Text style={[tipo.bodyEmphasis, { color: c.accent }]}>{TEXTO_HECHO}</Text>
+            </Pressable>
+          </View>
+        </InputAccessoryView>
+      ) : null}
 
       {cambioPendiente ? (
         <View testID="confirmar-descarte" style={[StyleSheet.absoluteFill, { justifyContent: 'flex-end' }]}>
@@ -1094,6 +1221,23 @@ export function RegistroGastoScreen(p: {
       ) : null}
 
       {selectorAbierto ? selectorCategorias : null}
+
+      {hojaReembolso && totalDe(b) !== null ? (
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: c.background }]}>
+          <ReembolsoHoja
+            cliente={p.cliente}
+            nuevoId={p.nuevoId}
+            total={totalDe(b)!}
+            comercioId={b.terceroId ?? null}
+            inicial={b.reembolso ?? null}
+            onAtras={() => setHojaReembolso(false)}
+            onHecho={(x) => {
+              setHojaReembolso(false);
+              cambiar({ reembolso: x, soloMio: false });
+            }}
+          />
+        </View>
+      ) : null}
 
       {selectorTercero ? (
         <SelectorTercero
@@ -1154,13 +1298,14 @@ function rutaVisible(ruta: string, _nombre: string): string {
   return partes.length > 1 ? partes.slice(1).join(' › ') : ruta;
 }
 
-type ClaveFalta = 'importe' | 'concepto' | 'categoria' | 'presupuestable' | 'cuenta' | 'fecha';
+type ClaveFalta = 'importe' | 'concepto' | 'categoria' | 'presupuestable' | 'reembolso' | 'cuenta' | 'fecha';
 
 const NOMBRE_FALTA: Record<ClaveFalta, string> = {
   importe: 'importe',
   concepto: 'nota válida (máx. 200 caracteres)',
   categoria: 'categoría',
   presupuestable: 'si cuenta para el presupuesto',
+  reembolso: 'revisar lo que te deben',
   cuenta: 'cuenta de pago',
   fecha: 'fecha válida',
 };
@@ -1178,7 +1323,7 @@ export function textoFaltan(e: Errores, b: Pick<Borrador, 'importeTexto' | 'cate
       partes.push(`${escrito ? `${m.nombre.toLowerCase()} válido` : m.nombre.toLowerCase()} (${m.unidad_default})`);
     }
   }
-  for (const k of ['presupuestable', 'cuenta', 'fecha'] as const) if (e[k]) partes.push(nombre(k));
+  for (const k of ['presupuestable', 'reembolso', 'cuenta', 'fecha'] as const) if (e[k]) partes.push(nombre(k));
   if (partes.length === 0) return '';
   const lista = partes.length === 1 ? partes[0] : `${partes.slice(0, -1).join(', ')} y ${partes[partes.length - 1]}`;
   return `Para registrar falta: ${lista}.`;
@@ -1220,5 +1365,7 @@ const s = StyleSheet.create({
   magnitudCaja: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: radio.s, paddingHorizontal: espacio.m, gap: espacio.s, minHeight: TACTIL_MIN + 4 },
   hoja: { borderTopLeftRadius: radio.xl, borderTopRightRadius: radio.xl, padding: espacio.l, gap: espacio.m },
   filaDescarte: { flexDirection: 'row', justifyContent: 'space-between' },
+  filaExito: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: espacio.m },
+  barraHecho: { flexDirection: 'row', justifyContent: 'flex-end', borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: espacio.s },
   chipPlantilla: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: espacio.s, borderRadius: radio.pill, paddingHorizontal: espacio.m, minHeight: TACTIL_MIN },
 });

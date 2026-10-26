@@ -8,6 +8,8 @@
 // Versión: 0.2.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // Versión: 0.3.0 (F05-D051 paso 2; F05 §65.4 contrato HTTP Q4/Q4-H2): fixtures wire con `apertura_indeterminada` (y `estado` en PosicionDeParte); sin cambios de aserciones.
 // Versión: 0.4.0 (F05-D051 paso 8; lámina B D-F0507L-03): bloque «Lámina B» con los tres estados de una posición (pendiente con saldo desconocido, CERRADA con importe inicial conocido y CERRADA con importe inicial desconocido) en «Corregir reparto» y en «Pendiente con» (lista y éxito), en claro y oscuro, con su etiqueta accesible; el éxito de una CERRADA pasa a «0,00 € · Saldado. Ya no queda nada pendiente.».
+// Versión: 0.5.0 (F05-D052 paso 3 · lámina B, F05 §66.2, AJ-F0507G3-06): el texto es «Saldo inicial desconocido» (saldo con el que empezó el seguimiento, solo con `apertura_indeterminada`); C4: una pendiente con saldo desconocido ya no dice «Saldo inicial desconocido» (se derivaba de `saldo === null`).
+// Versión: 0.6.0 (F05-D052 paso 2 · R6, F05 §66.A.10): bloque «R6»: igualdad con alguna parte sin indicar (aviso propio y «Revisar» bloqueado), exceso (su error) y suma incompleta (admitida) distinguidos; rechazo del servidor con el código estable explicado con el texto propio.
 // ============================================================
 
 import './tiempos_rn';
@@ -18,6 +20,11 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import type { ClienteApi, DetalleActividad, FilaActividad } from '../src/api/cliente';
 import {
   BaseCompartido,
+  CODIGO_SIN_MARGEN,
+  FALTA_SIN_MARGEN,
+  MOTIVO_NO_CORREGIBLE,
+  sinMargenParaDesconocido,
+  TEXTO_REPARTO_SIN_MARGEN,
   componerCorreccion,
   componerPayload,
   deudasPrevistas,
@@ -29,7 +36,7 @@ import {
   PendienteConPersona,
   RepartoDeHecho,
   resumenReparto,
-  TEXTO_IMPORTE_INICIAL_DESCONOCIDO,
+  TEXTO_SALDO_INICIAL_DESCONOCIDO,
   TEXTO_NETO_SIN_DETERMINAR,
   TEXTO_SIN_TERCERO_PAGA,
   TEXTO_SOLO_PERSONAS,
@@ -274,6 +281,75 @@ async function cenaHastaReparto(c: ClienteApi, forzar?: 'dark', onCerrar: jest.M
   }
 }
 
+// ================================================================== R6 (F05 §66.A.10)
+describe('R6 · sin margen para una parte sin indicar', () => {
+  const filas = (yo: string, tania: string, carlos: string) => [
+    { terceroId: null, nombre: 'Tú', importeTexto: yo, meDebe: null },
+    { terceroId: 'tania', nombre: 'Tania', importeTexto: tania, meDebe: 'SI' as const },
+    { terceroId: 'carlos', nombre: 'Carlos', importeTexto: carlos, meDebe: 'NO' as const },
+  ];
+  const form = (yo: string, tania: string, carlos: string): FormularioCompartido => ({ modo: 'REPARTIR', filas: filas(yo, tania, carlos), pagador: { tipo: 'CUENTA', cuentaId: 'bbva' } });
+
+  test('dominio: igualdad con alguna sin indicar → R6; exceso → su error; suma incompleta → admitida', () => {
+    // Igualdad: las indicadas suman el total y Carlos queda sin indicar.
+    expect(sinMargenParaDesconocido('44.50', filas('14,50', '30', ''))).toBe(true);
+    expect(faltaCompartido('44.50', form('14,50', '30', ''))).toEqual([FALTA_SIN_MARGEN]);
+    // Basta con que la desconocida sea la tuya.
+    expect(sinMargenParaDesconocido('44.50', filas('', '30', '14,50'))).toBe(true);
+    // Exceso: conserva su error y no es R6.
+    expect(sinMargenParaDesconocido('44.50', filas('20', '30', ''))).toBe(false);
+    expect(faltaCompartido('44.50', form('20', '30', ''))).toEqual(['un reparto que no supere el total']);
+    // Suma incompleta con alguna sin indicar: admitida (D-REP-03).
+    expect(sinMargenParaDesconocido('44.50', filas('14,50', '15', ''))).toBe(false);
+    expect(faltaCompartido('44.50', form('14,50', '15', ''))).toEqual([]);
+    // Todas indicadas y sumando el total: no es R6.
+    expect(sinMargenParaDesconocido('44.50', filas('14,50', '15', '15'))).toBe(false);
+    expect(CODIGO_SIN_MARGEN).toBe('REPARTO_SIN_MARGEN_PARA_DESCONOCIDO');
+  });
+
+  test('texto propio: no sugiere poner 0 ni reutiliza los de «Corregir reparto»', () => {
+    expect(TEXTO_REPARTO_SIN_MARGEN).not.toMatch(/0|cero|pon /i);
+    expect(Object.values(MOTIVO_NO_CORREGIBLE)).not.toContain(TEXTO_REPARTO_SIN_MARGEN);
+    expect(FALTA_SIN_MARGEN).not.toMatch(/0|cero/i);
+  });
+
+  test('pantalla: igualdad → aviso propio y «Revisar» bloqueado; exceso → «Supera el total» sin aviso R6; incompleta → sin aviso', async () => {
+    await cenaHastaReparto(cliente());
+    fireEvent.changeText(screen.getByTestId('reparto-importe-yo'), '14,50');
+    fireEvent.changeText(screen.getByTestId('reparto-importe-tania'), '30');
+    expect(screen.getByTestId('reparto-sin-margen')).toBeTruthy();
+    expect(screen.getByText(TEXTO_REPARTO_SIN_MARGEN)).toBeTruthy();
+    expect(screen.getByTestId('reparto-falta').props.children).toBe('0,00 €');
+    fireEvent.changeText(screen.getByTestId('reparto-importe-tania'), '31');
+    expect(screen.queryByTestId('reparto-sin-margen')).toBeNull();
+    expect(screen.getByTestId('reparto-falta').props.children).toBe('Supera el total');
+    fireEvent.changeText(screen.getByTestId('reparto-importe-tania'), '15');
+    expect(screen.queryByTestId('reparto-sin-margen')).toBeNull();
+    fireEvent.changeText(screen.getByTestId('reparto-importe-tania'), '30');
+    fireEvent.press(screen.getByTestId('reparto-listo'));
+    fireEvent.press(await screen.findByTestId('compartido-cuenta-bbva'));
+    expect(screen.getByTestId('compartido-revisar').props.accessibilityState?.disabled).toBe(true);
+    expect(screen.getByTestId('compartido-faltan').props.children).toBe(`Para revisar falta: ${FALTA_SIN_MARGEN}.`);
+  });
+
+  test('rechazo del servidor con el código estable: se explica con el texto propio, no con el mensaje libre', async () => {
+    const c = cliente({ registrarGastoCompartido: jest.fn(async () => ({ tipo: 'RECHAZADO', codigo: CODIGO_SIN_MARGEN, mensaje: 'mensaje libre del servidor' })) as any });
+    await cenaHastaReparto(c);
+    fireEvent.changeText(screen.getByTestId('reparto-importe-yo'), '14,50');
+    fireEvent.changeText(screen.getByTestId('reparto-importe-tania'), '15');
+    fireEvent.changeText(screen.getByTestId('reparto-importe-carlos'), '15');
+    fireEvent.press(screen.getByTestId('reparto-listo'));
+    fireEvent.press(await screen.findByTestId('compartido-cuenta-bbva'));
+    fireEvent.press(screen.getByTestId('compartido-revisar'));
+    fireEvent.press(await screen.findByTestId('te-debe-tania-si'));
+    fireEvent.press(screen.getByTestId('te-debe-carlos-no'));
+    fireEvent.press(screen.getByTestId('te-deben-revisar'));
+    await act(async () => fireEvent.press(await screen.findByTestId('registrar-compartido')));
+    expect(await screen.findByText(`No se ha registrado. ${TEXTO_REPARTO_SIN_MARGEN}`)).toBeTruthy();
+    expect(screen.queryByText(/mensaje libre/)).toBeNull();
+  });
+});
+
 describe('B · cena repartida', () => {
   test('B2: «A partes iguales» rellena a la vista con el céntimo en la última fila; el total no cambia', async () => {
     await cenaHastaReparto(cliente());
@@ -431,7 +507,10 @@ describe('C · Pendiente con', () => {
     expect(await screen.findByTestId('pendiente-le-debes')).toBeTruthy();
     expect(screen.getByTestId('pendiente-le-debes').props.children).toBe('Sin determinar');
     expect(screen.getByTestId('pendiente-neto').props.children).toBe(TEXTO_NETO_SIN_DETERMINAR);
-    expect(screen.getByText('Saldo inicial desconocido')).toBeTruthy();
+    // F05 §66.2: «Saldo inicial desconocido» solo con `apertura_indeterminada`; una pendiente con saldo desconocido
+    // muestra su origen, no ese texto (antes se derivaba de `saldo === null`).
+    expect(screen.queryByText('Saldo inicial desconocido')).toBeNull();
+    expect(screen.getByText('Préstamo viaje')).toBeTruthy();
   });
 
   test('C2/C3: cobro con cuenta obligatoria (las que reciben dinero), parcial permitido, sin superar lo pendiente', async () => {
@@ -651,10 +730,10 @@ describe('Lámina B · saldada frente a desconocida (D-F0507L-03)', () => {
     expect(textoPosicion(ACTIVA_DESCONOCIDA)).toEqual({ saldo: 'Sin determinar', inicial: null });
     expect(textoPosicion({ ...ACTIVA_DESCONOCIDA, saldo: '15.00' })).toEqual({ saldo: '15,00 €', inicial: null });
     expect(textoPosicion(CERRADA_CONOCIDA)).toEqual({ saldo: '0,00 € · Saldado', inicial: null });
-    expect(textoPosicion(CERRADA_DESCONOCIDA)).toEqual({ saldo: '0,00 € · Saldado', inicial: TEXTO_IMPORTE_INICIAL_DESCONOCIDO });
-    expect(TEXTO_IMPORTE_INICIAL_DESCONOCIDO).toBe('Importe inicial desconocido');
+    expect(textoPosicion(CERRADA_DESCONOCIDA)).toEqual({ saldo: '0,00 € · Saldado', inicial: TEXTO_SALDO_INICIAL_DESCONOCIDO });
+    expect(TEXTO_SALDO_INICIAL_DESCONOCIDO).toBe('Saldo inicial desconocido');
     // Una CERRADA sin saldo (fuera de contrato) tampoco se vuelve «Sin determinar» ni inventa un importe.
-    expect(textoPosicion({ ...CERRADA_DESCONOCIDA, saldo: null })).toEqual({ saldo: 'Saldado', inicial: TEXTO_IMPORTE_INICIAL_DESCONOCIDO });
+    expect(textoPosicion({ ...CERRADA_DESCONOCIDA, saldo: null })).toEqual({ saldo: 'Saldado', inicial: TEXTO_SALDO_INICIAL_DESCONOCIDO });
   });
 
   const TRES: RepartoDeHecho = {
@@ -666,7 +745,7 @@ describe('Lámina B · saldada frente a desconocida (D-F0507L-03)', () => {
     ],
   };
 
-  test.each(['light', 'dark'] as const)('Corregir reparto (%s): pendiente «Sin determinar»; saldadas «0,00 € · Saldado»; Marta además «Importe inicial desconocido»', async (modo) => {
+  test.each(['light', 'dark'] as const)('Corregir reparto (%s): pendiente «Sin determinar»; saldadas «0,00 € · Saldado»; Marta además «Saldo inicial desconocido»', async (modo) => {
     envolver(<CorregirRepartoScreen cliente={cliente({ repartoDeHecho: jest.fn(async () => ({ tipo: 'OK', datos: TRES }) as any) })} hechoId="cena" onCerrar={jest.fn()} />, modo);
     await screen.findByTestId('corregir-form');
     const linea = (id: string) => screen.getByTestId(`corregir-posicion-saldo-${id}`).props.children;
@@ -675,11 +754,11 @@ describe('Lámina B · saldada frente a desconocida (D-F0507L-03)', () => {
     expect(linea('a-marta')).toBe('Te debe · 0,00 € · Saldado');
     expect(screen.queryByTestId('corregir-posicion-inicial-a-simon')).toBeNull();
     expect(screen.queryByTestId('corregir-posicion-inicial-a-tania')).toBeNull();
-    expect(screen.getByTestId('corregir-posicion-inicial-a-marta').props.children).toBe('Importe inicial desconocido');
+    expect(screen.getByTestId('corregir-posicion-inicial-a-marta').props.children).toBe('Saldo inicial desconocido');
     // Accesibilidad: la etiqueta dice lo mismo que se ve.
     expect(screen.getByTestId('corregir-posicion-a-simon').props.accessibilityLabel).toBe('Te debe · pendiente Sin determinar');
     expect(screen.getByTestId('corregir-posicion-a-tania').props.accessibilityLabel).toBe('Te debe · 0,00 € · Saldado');
-    expect(screen.getByTestId('corregir-posicion-a-marta').props.accessibilityLabel).toBe('Te debe · 0,00 € · Saldado. Importe inicial desconocido');
+    expect(screen.getByTestId('corregir-posicion-a-marta').props.accessibilityLabel).toBe('Te debe · 0,00 € · Saldado. Saldo inicial desconocido');
     // Ninguna CERRADA dice «Sin determinar».
     for (const id of ['a-tania', 'a-marta']) expect(within(screen.getByTestId(`corregir-posicion-${id}`)).queryByText(/Sin determinar/)).toBeNull();
     expect(plano()).toContain(colores[modo].background);
@@ -693,7 +772,7 @@ describe('Lámina B · saldada frente a desconocida (D-F0507L-03)', () => {
     envolver(<CorregirRepartoScreen cliente={cliente({ repartoDeHecho: jest.fn(async () => ({ tipo: 'OK', datos: r }) as any) })} hechoId="cena" onCerrar={jest.fn()} />);
     await screen.findByTestId('corregir-form');
     expect(screen.getByTestId('corregir-posicion-saldo-a-yo').props.children).toBe('Le debes · 0,00 € · Saldado');
-    expect(screen.getByTestId('corregir-posicion-inicial-a-yo').props.children).toBe('Importe inicial desconocido');
+    expect(screen.getByTestId('corregir-posicion-inicial-a-yo').props.children).toBe('Saldo inicial desconocido');
   });
 
   test('Pendiente con: la pendiente con saldo desconocido sigue en «Sin determinar»', async () => {
@@ -701,7 +780,7 @@ describe('Lámina B · saldada frente a desconocida (D-F0507L-03)', () => {
       posiciones: [{ ...PEND.posiciones[0], ...ACTIVA_DESCONOCIDA }] };
     montarPendiente(cliente({ pendienteCon: jest.fn(async () => ({ tipo: 'OK', datos: p }) as any) }));
     expect((await screen.findByTestId('posicion-saldo-d1')).props.children).toBe('Sin determinar');
-    expect(screen.queryByText('Importe inicial desconocido')).toBeNull();
+    expect(screen.queryByText('Saldo inicial desconocido')).toBeNull();
   });
 
   const cobrarHasta = async (respuesta: object, modo?: 'dark') => {
@@ -715,7 +794,7 @@ describe('Lámina B · saldada frente a desconocida (D-F0507L-03)', () => {
     await screen.findByTestId('posicion-exito');
   };
 
-  test('Pendiente con · éxito: CERRADA con importe inicial conocido → «0,00 € · Saldado», sin línea de importe inicial', async () => {
+  test('Pendiente con · éxito: CERRADA con saldo inicial conocido → «0,00 € · Saldado», sin línea de saldo inicial', async () => {
     await cobrarHasta(CERRADA_CONOCIDA);
     expect(screen.getByTestId('posicion-exito-saldo').props.children).toBe('0,00 € · Saldado. Ya no queda nada pendiente.');
     expect(screen.queryByTestId('posicion-exito-inicial')).toBeNull();
@@ -723,11 +802,11 @@ describe('Lámina B · saldada frente a desconocida (D-F0507L-03)', () => {
     expect(plano()).not.toMatch(/Sin determinar/);
   });
 
-  test('Pendiente con · éxito: CERRADA con importe inicial desconocido → además «Importe inicial desconocido» (oscuro)', async () => {
+  test('Pendiente con · éxito: CERRADA con saldo inicial desconocido → además «Saldo inicial desconocido» (oscuro)', async () => {
     await cobrarHasta(CERRADA_DESCONOCIDA, 'dark');
     expect(screen.getByTestId('posicion-exito-saldo').props.children).toBe('0,00 € · Saldado. Ya no queda nada pendiente.');
-    expect(screen.getByTestId('posicion-exito-inicial').props.children).toBe('Importe inicial desconocido');
-    expect(screen.getByTestId('posicion-exito-estado').props.accessibilityLabel).toBe('0,00 € · Saldado. Ya no queda nada pendiente. Importe inicial desconocido');
+    expect(screen.getByTestId('posicion-exito-inicial').props.children).toBe('Saldo inicial desconocido');
+    expect(screen.getByTestId('posicion-exito-estado').props.accessibilityLabel).toBe('0,00 € · Saldado. Ya no queda nada pendiente. Saldo inicial desconocido');
     expect(plano()).not.toMatch(/Sin determinar/);
     expect(plano()).toContain(colores.dark.background);
   });
