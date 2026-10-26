@@ -145,6 +145,7 @@ def main() -> None:
                 shot("C2_vacio")
             t("reembolso-quien").click()
             t("selector-persona").wait_for(timeout=10000)
+            t(f"persona-{ter[quien]}").wait_for(timeout=15000)  # la lista se carga despues de abrir
             if nombre == "R1":
                 ofrecidos = sorted(x.get_attribute("data-testid") for x in page.locator('[data-testid^="persona-"]:visible').all())
                 res["R1_selector"] = ofrecidos
