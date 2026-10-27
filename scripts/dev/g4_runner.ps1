@@ -40,13 +40,30 @@
 # Uso:
 #   powershell -File scripts/dev/g4_runner.ps1 -Modo Ensayo -Evidencia <dir> -Dist <export>
 #     -Lanzador <lanzar_e2e_mpg.ps1> [-Reducido] [-Tramos a,b]
-#   powershell -File scripts/dev/g4_runner.ps1 -Modo Neon -HostHija ep-... -HostRef ep-...
-#     -Evidencia <dir> -Dist <export> -CatalogoSerie <sh> -CatalogoMutantes <sh>
+#   powershell -File scripts/dev/g4_runner.ps1 -Modo Neon -Ventana Neon -HostHija ep-... -HostRef ep-...
+#     -Evidencia <dir_neon>
+#   powershell -File scripts/dev/g4_runner.ps1 -Ventana Local -Evidencia <dir_local> -EvidenciaNeon <dir_neon>
+#     -Dist <export> -CatalogoSerie <sh> -CatalogoMutantes <sh> -ManifiestoCatalogos <txt> [-Reanudar]
 # Version: 0.1.0 (F05-07/GATE MANT-PRE-BATERIA ampliacion G)
 # Version: 0.2.0 (MANT-PRE-BATERIA G, ensayo 1): sin rutas absolutas por
 #   defecto (test_rv3_000); virginidad e inicio.txt con evidencia_neon_inicio.py.
 # Version: 0.2.1 (MANT-PRE-BATERIA G, ensayo 2): Marca escribia en ficheros
 #   sueltos del arbol ($t y $T son la misma variable en PowerShell).
+# Version: 0.3.0 (F05-D053 paso 5; F05 §67.6, AJ-F0507G4-15/16): G4 en DOS
+#   ventanas sobre el MISMO SHA. -Ventana Neon (hija, firma, replay, huellas,
+#   suites, post) o Local (concurrencia, jest, e2e, mutantes); Todo = ambas.
+#   Trazabilidad: tramos_g4.tsv (tramo, estado, HEAD, fin UTC) y head.txt; una
+#   carpeta de evidencia solo admite su HEAD. -Reanudar repite solo los tramos
+#   no OK de la ventana Local (los registros previos se mueven a
+#   reanudacion_<ts>); una ventana Neon cortada NO se reanuda: se descarta y
+#   se repite sobre una hija nueva. -EvidenciaNeon enlaza la ventana Local con
+#   la Neon y exige el mismo HEAD. Autovacuum desactivado SOLO en el cluster
+#   local 127.0.0.1:5463 durante los mutantes (f03, R-ARN-01) y restaurado
+#   siempre (finally). Aislamiento entre suites en la misma hija: semillas
+#   intactas y residuos por suite (residuos.py, solo lectura). lc_messages: si
+#   el rol de la hija no puede fijarlo, STOP antes de las suites (no SKIP).
+#   Catalogos congelados: -ManifiestoCatalogos (SHA-256) obligatorio fuera de
+#   -Reducido para los catalogos y el lanzador que se usen.
 # ============================================================
 param(
   [ValidateSet('Ensayo', 'Neon')][string]$Modo = 'Ensayo',
@@ -62,10 +79,23 @@ param(
   [string]$CatalogoMutantes = '',
   [string]$Lanzador = '',
   [string]$Psql = 'psql',
-  [string[]]$Tramos = @('hija', 'firma_antes', 'replay', 'huellas_antes', 'suites', 'concurrencia', 'jest', 'e2e',
-                        'huellas_despues', 'post', 'mutantes', 'firma_despues', 'manifiesto'),
+  [ValidateSet('Neon', 'Local', 'Todo')][string]$Ventana = 'Todo',
+  [string[]]$Tramos = @(),
+  [string]$EvidenciaNeon = '',
+  [string]$ManifiestoCatalogos = '',
+  [switch]$Reanudar,
   [switch]$Reducido
 )
+$TRAMOS_NEON = @('hija', 'firma_antes', 'replay', 'huellas_antes', 'suites', 'huellas_despues', 'post', 'firma_despues', 'manifiesto')
+$TRAMOS_LOCAL = @('concurrencia', 'jest', 'e2e', 'mutantes', 'manifiesto')
+if (-not $Tramos) {
+  $Tramos = switch ($Ventana) {
+    'Neon' { $TRAMOS_NEON }
+    'Local' { $TRAMOS_LOCAL }
+    default { @('hija', 'firma_antes', 'replay', 'huellas_antes', 'suites', 'concurrencia', 'jest', 'e2e',
+                'huellas_despues', 'post', 'mutantes', 'firma_despues', 'manifiesto') }
+  }
+}
 $ErrorActionPreference = 'Continue'
 $LOCAL = 'host=127.0.0.1 port=5463 user=postgres'
 $PSQL = $Psql
@@ -80,6 +110,14 @@ function Anota([string]$tramo, [string]$estado, [double]$seg) {
   ('{0,-16} {1,-10} {2,8:N1} s' -f $tramo, $estado, $seg) | Out-File -Encoding utf8 -Append $Resumen
 }
 function Stop-G4([string]$motivo) { "STOP: $motivo" | Out-File -Encoding utf8 -Append $Resumen; throw "STOP-G4: $motivo" }
+$Registro = Join-Path $Evidencia 'tramos_g4.tsv'
+function Registra([string]$tramo, [string]$estado) {
+  "$tramo`t$estado`t$script:HeadActual`t$((Get-Date).ToUniversalTime().ToString('o'))" | Out-File -Encoding utf8 -Append $Registro
+}
+function Tramos-OK {
+  if (-not (Test-Path $Registro)) { return @() }
+  return @(Get-Content $Registro | ForEach-Object { $c = $_ -split "`t"; if ($c[1] -eq 'OK') { $c[0] } })
+}
 
 # ---- destinos: nunca se imprime ninguna URL
 function UrlNeon([string]$h, [string]$base) {
@@ -87,7 +125,11 @@ function UrlNeon([string]$h, [string]$base) {
   if ($h -notlike 'ep-*.neon.tech') { Stop-G4 'host no Neon' }
   return "postgresql://$RolNeon@$h/${base}?sslmode=require&connect_timeout=30"
 }
-if ($Modo -eq 'Neon') {
+foreach ($tr in $Tramos) {
+  if ($Ventana -eq 'Neon' -and $tr -notin $TRAMOS_NEON) { Stop-G4 "el tramo $tr no es de la ventana Neon" }
+  if ($Ventana -eq 'Local' -and $tr -notin $TRAMOS_LOCAL) { Stop-G4 "el tramo $tr no es de la ventana Local" }
+}
+if ($Modo -eq 'Neon' -and $Ventana -ne 'Local') {
   if (-not $HostHija -or -not $HostRef) { Stop-G4 'modo Neon sin -HostHija o -HostRef' }
   if ($HostHija -eq $HostRef) { Stop-G4 'la hija no puede ser la referencia' }
   $URL_HIJA = UrlNeon $HostHija $BaseNeon
@@ -102,6 +144,19 @@ function Psql-Local([string[]]$sql) {
   $a = @('-h', '127.0.0.1', '-p', '5463', '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-q')
   foreach ($s in $sql) { $a += @('-c', $s) }
   & $PSQL @a 2>&1
+}
+# Autovacuum: SOLO el cluster local desechable 127.0.0.1:5463 (Psql-Local no admite otro destino); nunca Neon.
+$script:AutovacuumOff = $false
+function Autovacuum-Local([ValidateSet('off', 'restaurar')][string]$accion) {
+  $f = Join-Path $Evidencia 'autovacuum_local.txt'
+  $antes = (& $PSQL -h 127.0.0.1 -p 5463 -U postgres -d postgres -Atc 'SHOW autovacuum' 2>&1)
+  if ($accion -eq 'off') { Psql-Local @('ALTER SYSTEM SET autovacuum = off', 'SELECT pg_reload_conf()') | Out-Null; $script:AutovacuumOff = $true }
+  else { Psql-Local @('ALTER SYSTEM RESET autovacuum', 'SELECT pg_reload_conf()') | Out-Null; $script:AutovacuumOff = $false }
+  Start-Sleep -Milliseconds 500
+  $despues = (& $PSQL -h 127.0.0.1 -p 5463 -U postgres -d postgres -Atc 'SHOW autovacuum' 2>&1)
+  "$(Get-Date -Format o) $accion 127.0.0.1:5463 autovacuum $antes -> $despues" | Out-File -Encoding utf8 -Append $f
+  $esperado = if ($accion -eq 'off') { 'off' } else { 'on' }
+  if ("$despues".Trim() -ne $esperado) { Stop-G4 "autovacuum local no quedo en $esperado" }
 }
 function Base-Local([string]$nombre, [string]$plantilla = '', [string]$lc = '') {
   $crear = if ($plantilla) { "CREATE DATABASE $nombre TEMPLATE $plantilla" } else { "CREATE DATABASE $nombre" }
@@ -140,6 +195,39 @@ except Exception as e:
 open(sys.argv[1], "w", encoding="utf-8").write(t + "\n"); sys.exit(rc)
 '@
 $fFirma = Join-Path $Evidencia 'firma_ref.py'; $FIRMA | Out-File -Encoding utf8 $fFirma
+# Aislamiento entre suites en la MISMA hija (F05 §67.6; R-G4-03): solo lectura. «base» guarda las filas de las
+# tablas no vacias tras el replay (semillas) y el recuento de cada tabla; «comparar» exige que TODAS esas filas sigan
+# intactas (ni borradas ni modificadas) y anota los residuos (filas nuevas por tabla) que deja cada suite.
+$RESIDUOS = @'
+import json, os, sys, psycopg
+modo, salida = sys.argv[1], sys.argv[2]
+try:
+    with psycopg.connect(os.environ["GAPTO_CLEANROOM_URL"], connect_timeout=30) as c:
+        with c.transaction():
+            c.execute("SET TRANSACTION READ ONLY")
+            tablas = [r[0] for r in c.execute("SELECT tablename FROM pg_tables WHERE schemaname = 'gapto' ORDER BY 1")]
+            n = {t: c.execute(f"SELECT count(*) FROM gapto.{t}").fetchone()[0] for t in tablas}
+            if modo == "base":
+                filas = {t: sorted(r[0] for r in c.execute(f"SELECT x::text FROM gapto.{t} x")) for t in tablas if n[t]}
+                json.dump({"recuentos": n, "filas": filas}, open(salida, "w", encoding="utf-8"))
+                print(f"base: {sum(n.values())} filas en {len(filas)} tablas no vacias"); sys.exit(0)
+            base = json.load(open(sys.argv[3], encoding="utf-8"))
+            perdidas = {}
+            for t, fb in base["filas"].items():
+                ahora = set(r[0] for r in c.execute(f"SELECT x::text FROM gapto.{t} x"))
+                falta = [f for f in fb if f not in ahora]
+                if falta:
+                    perdidas[t] = len(falta)
+    residuos = {t: n[t] - base["recuentos"].get(t, 0) for t in tablas if n[t] != base["recuentos"].get(t, 0)}
+    ok = not perdidas
+    lineas = [f"{sys.argv[4]}: semillas {'INTACTAS' if ok else 'ALTERADAS ' + json.dumps(perdidas)}",
+              f"  residuos (filas nuevas por tabla desde el replay): {json.dumps(residuos, sort_keys=True)}"]
+    open(salida, "a", encoding="utf-8").write("\n".join(lineas) + "\n"); print("\n".join(lineas)); sys.exit(0 if ok else 1)
+except Exception as e:
+    print(f"RESIDUOS KO clase={type(e).__name__}"); sys.exit(2)
+'@
+$fResiduos = Join-Path $Evidencia 'residuos.py'; $RESIDUOS | Out-File -Encoding utf8 $fResiduos
+
 
 # Parametros que solo exigen los tramos que los usan
 $faltan = @()
@@ -148,15 +236,52 @@ if ($largos -and -not $Dist) { $faltan += '-Dist' }
 if ('e2e' -in $Tramos -and $Reducido -and -not $Lanzador) { $faltan += '-Lanzador' }
 if (-not $Reducido -and ('concurrencia' -in $Tramos -or 'e2e' -in $Tramos) -and -not $CatalogoSerie) { $faltan += '-CatalogoSerie' }
 if (-not $Reducido -and 'mutantes' -in $Tramos -and -not $CatalogoMutantes) { $faltan += '-CatalogoMutantes' }
+if (-not $Reducido -and $largos -and -not $ManifiestoCatalogos) { $faltan += '-ManifiestoCatalogos' }
 if ($faltan) { Stop-G4 "faltan parametros: $($faltan -join ', ')" }
+# Catalogos congelados (AJ-F0507G4-15): cada catalogo y lanzador usado debe estar en el manifiesto con su SHA-256.
+if ($ManifiestoCatalogos) {
+  if (-not (Test-Path $ManifiestoCatalogos)) { Stop-G4 'no existe el manifiesto de catalogos' }
+  $congelados = @(Get-Content $ManifiestoCatalogos | Where-Object { $_ -match '^[0-9a-f]{64}\s' } | ForEach-Object { ($_ -split '\s+')[0] })
+  foreach ($c in @($CatalogoSerie, $CatalogoMutantes, $Lanzador) | Where-Object { $_ }) {
+    if (-not (Test-Path $c)) { Stop-G4 "no existe el catalogo $(Split-Path $c -Leaf)" }
+    $h = (Get-FileHash -Algorithm SHA256 $c).Hash.ToLower()
+    if ($h -notin $congelados) { Stop-G4 "catalogo no congelado o modificado: $(Split-Path $c -Leaf) ($h)" }
+  }
+  Copy-Item $ManifiestoCatalogos (Join-Path $Evidencia 'manifiesto_catalogos.txt') -Force
+}
 
 Set-Location $Worktree
-git rev-parse HEAD | Out-File -Encoding utf8 (Join-Path $Evidencia 'head.txt')
-git status --porcelain | Out-File -Encoding utf8 (Join-Path $Evidencia 'status_antes.txt')
-"modo=$Modo reducido=$($Reducido.IsPresent) head_cadena=$Head tramos=$($Tramos -join ',')" | Out-File -Encoding utf8 $Resumen
+$script:HeadActual = (git rev-parse HEAD).Trim()
+$fHead = Join-Path $Evidencia 'head.txt'
+if (Test-Path $Registro) {
+  if (-not $Reanudar) { Stop-G4 'la carpeta de evidencia ya tiene tramos: usa otra carpeta o -Reanudar' }
+  if ($Tramos | Where-Object { $_ -in $TRAMOS_NEON -and $_ -ne 'manifiesto' }) {
+    Stop-G4 'una ventana Neon cortada no se reanuda: la evidencia se descarta y se repite sobre una hija nueva'
+  }
+}
+if ((Test-Path $fHead) -and ((Get-Content $fHead -Raw).Trim() -ne $script:HeadActual)) { Stop-G4 'la evidencia es de otro HEAD (mismo SHA en todo G4)' }
+$script:HeadActual | Out-File -Encoding utf8 $fHead
+git status --porcelain | Out-File -Encoding utf8 (Join-Path $Evidencia "status_antes_$(Get-Date -Format yyyyMMdd-HHmmss).txt")
+if ($EvidenciaNeon) {
+  $hn = Join-Path $EvidenciaNeon 'head.txt'
+  if (-not (Test-Path $hn) -or (Get-Content $hn -Raw).Trim() -ne $script:HeadActual) { Stop-G4 'la ventana Neon enlazada es de otro HEAD (o no existe)' }
+  $okNeon = @(Get-Content (Join-Path $EvidenciaNeon 'tramos_g4.tsv') -ErrorAction SilentlyContinue | Where-Object { ($_ -split "`t")[1] -eq 'OK' }).Count
+  "ventana Neon enlazada: mismo HEAD; tramos OK registrados $okNeon" | Out-File -Encoding utf8 -Append $Resumen
+}
+$hechos = @()
+if ($Reanudar) {
+  $hechos = Tramos-OK
+  $dirR = Join-Path $Evidencia ("reanudacion_" + (Get-Date -Format yyyyMMdd-HHmmss)); New-Item -ItemType Directory -Force $dirR | Out-Null
+  foreach ($tr in $Tramos | Where-Object { $_ -notin $hechos -and $_ -ne 'manifiesto' }) {
+    Get-ChildItem $Evidencia -File -Filter "$tr*" | Move-Item -Destination $dirR
+  }
+  "reanudacion: tramos ya OK $($hechos -join ','); registros previos de los demas en $(Split-Path $dirR -Leaf)" | Out-File -Encoding utf8 -Append $Resumen
+}
+"modo=$Modo ventana=$Ventana reducido=$($Reducido.IsPresent) head=$script:HeadActual head_cadena=$Head tramos=$($Tramos -join ',')" | Out-File -Encoding utf8 -Append $Resumen
 
 try {
   foreach ($tr in $Tramos) {
+    if ($tr -in $hechos -and $tr -ne 'manifiesto') { Marca "$tr ya OK (reanudacion)"; continue }
     Marca "$tr inicio"
     $t0 = Get-Date
     $estado = 'OK'
@@ -203,12 +328,31 @@ try {
         if ($rc -ne 0) { $estado = 'KO' }
       }
       'suites' {
-        # Suites sobre la hija (proveedor). Laboratorio RV3 y es_ES/C: ver riesgos del informe de ensayo.
+        # Suites sobre la hija (proveedor). §67.6: si la suite en C no puede ejecutarse -> STOP, no SKIP.
+        $fInicio = Join-Path $Evidencia 'inicio.txt'
+        if (-not $Reducido) {
+          if (-not (Test-Path $fInicio)) { Stop-G4 'falta inicio.txt (tramo hija)' }
+          if (-not (Select-String -Path $fInicio -Pattern 'puede fijar lc_messages: SI' -Quiet)) { Stop-G4 'STOP-LC: el rol de la hija no puede fijar lc_messages (suite en C no ejecutable)' }
+        }
+        # Aislamiento: instantanea de las semillas tras el replay y comprobacion tras cada suite.
+        $fAisl = Join-Path $Evidencia 'aislamiento_suites.txt'
+        $env:GAPTO_CLEANROOM_URL = $URL_HIJA
+        $rcB = Py (Join-Path $Evidencia 'aislamiento_base.log') @('-I', $fResiduos, 'base', (Join-Path $Evidencia 'aislamiento_base.json'))
+        Remove-Item Env:GAPTO_CLEANROOM_URL
+        if ($rcB -ne 0) { Stop-G4 'no se pudo tomar la instantanea de aislamiento' }
+        $script:Aislamiento = @()
+        function Tras-Suite([string]$n, [int]$rc) {
+          $env:GAPTO_CLEANROOM_URL = $URL_HIJA
+          $x = Py (Join-Path $Evidencia "aislamiento_$n.log") @('-I', $fResiduos, 'comparar', $fAisl, (Join-Path $Evidencia 'aislamiento_base.json'), $n)
+          Remove-Item Env:GAPTO_CLEANROOM_URL
+          $script:Aislamiento += $x
+          return $rc
+        }
         if ($Reducido) {
           $r = @(
-            (Pytest 'database' $URL_HIJA @('tests/database/test_017_seeds_sistema.py', 'tests/database/test_045_f03_06_0350_tipo_hecho_condonacion.py')),
+            (Tras-Suite 'database' (Pytest 'database' $URL_HIJA @('tests/database/test_017_seeds_sistema.py', 'tests/database/test_045_f03_06_0350_tipo_hecho_condonacion.py'))),
             (Pytest 'sin_bd' '' @('tests/database/test_044_envdev_head_autorizado.py', 'tests/migration/test_rv3_000_repo_sin_datos_v3.py', 'tests/api/test_230_f05_d052_no_invocacion_f06.py')),
-            (Pytest 'api_es_ES' $URL_HIJA @('tests/api/test_154_f05_01_inventario_categorias.py') @('--rootdir=tests/api'))
+            (Tras-Suite 'api_es_ES' (Pytest 'api_es_ES' $URL_HIJA @('tests/api/test_154_f05_01_inventario_categorias.py') @('--rootdir=tests/api')))
           )
         } else {
           Base-Local 'g4e_rv3lab' | Out-Null
@@ -216,15 +360,16 @@ try {
           python scripts/postgres/run_clean_room.py --desde 0002 *> (Join-Path $Evidencia 'rv3lab_replay.log')
           Remove-Item Env:GAPTO_CLEANROOM_URL
           $r = @(
-            (Pytest 'database' $URL_HIJA @('tests/database')),
+            (Tras-Suite 'database' (Pytest 'database' $URL_HIJA @('tests/database'))),
             (Pytest 'migration' '' @('tests/migration')),
             (& { $env:GAPTO_RV3_IMPORT_URL = $URL_LAB; $x = Pytest 'migration_lab' '' @('tests/migration'); Remove-Item Env:GAPTO_RV3_IMPORT_URL; $x }),
             (Pytest 'sin_bd' '' @('tests/database/test_044_envdev_head_autorizado.py', 'tests/migration/test_rv3_000_repo_sin_datos_v3.py', 'tests/api/test_230_f05_d052_no_invocacion_f06.py')),
-            (& { $env:PGOPTIONS = '-c lc_messages=es_ES'; $x = Pytest 'suite_es_ES' $URL_HIJA @('tests/backend', 'tests/api') @('--rootdir=tests/api'); Remove-Item Env:PGOPTIONS; $x }),
-            (& { $env:PGOPTIONS = '-c lc_messages=C'; $x = Pytest 'suite_C' $URL_HIJA @('tests/backend', 'tests/api') @('--rootdir=tests/api'); Remove-Item Env:PGOPTIONS; $x })
+            (Tras-Suite 'suite_es_ES' (& { $env:PGOPTIONS = '-c lc_messages=es_ES'; $x = Pytest 'suite_es_ES' $URL_HIJA @('tests/backend', 'tests/api') @('--rootdir=tests/api'); Remove-Item Env:PGOPTIONS; $x })),
+            (Tras-Suite 'suite_C' (& { $env:PGOPTIONS = '-c lc_messages=C'; $x = Pytest 'suite_C' $URL_HIJA @('tests/backend', 'tests/api') @('--rootdir=tests/api'); Remove-Item Env:PGOPTIONS; $x }))
           )
         }
         if ($r | Where-Object { $_ -ne 0 }) { $estado = 'KO' }
+        if ($script:Aislamiento | Where-Object { $_ -ne 0 }) { $estado = 'KO'; 'aislamiento entre suites: semillas ALTERADAS (aislamiento_suites.txt)' | Out-File -Encoding utf8 -Append $Resumen }
       }
       'concurrencia' {
         if ($Reducido) {
@@ -263,8 +408,10 @@ try {
         if ($rc -ne 0) { $estado = 'KO' }
       }
       'mutantes' {
-        # Siempre local: el catalogo crea sus propias bases vm* en 5463.
+        # Siempre local: el catalogo crea sus propias bases vm* en 5463. Autovacuum off solo aqui y en 5463 (f03).
         foreach ($v in $VARS) { Remove-Item "Env:$v" -ErrorAction SilentlyContinue }
+        Autovacuum-Local 'off'
+        try {
         if ($Reducido) {
           Base-Local 'g4e_rv3lab' | Out-Null
           $env:GAPTO_CLEANROOM_URL = $URL_LAB
@@ -277,6 +424,7 @@ try {
         } else {
           sh $CatalogoMutantes $Worktree (Join-Path $Evidencia 'mut') $Dist g4m *> (Join-Path $Evidencia 'mut_consola.log')
         }
+        } finally { Autovacuum-Local 'restaurar' }
       }
       'manifiesto' {
         git status --porcelain | Out-File -Encoding utf8 (Join-Path $Evidencia 'status_despues.txt')
@@ -289,9 +437,11 @@ try {
     }
     $seg = ((Get-Date) - $t0).TotalSeconds
     Anota $tr $estado $seg
+    Registra $tr $estado
     Marca "$tr fin $estado"
   }
 } finally {
+  if ($script:AutovacuumOff) { Autovacuum-Local 'restaurar' }
   foreach ($v in $VARS + 'GAPTO_MANT_VINCULO_CONCURRENCIA') { Remove-Item "Env:$v" -ErrorAction SilentlyContinue }
 }
 Get-Content $Resumen
