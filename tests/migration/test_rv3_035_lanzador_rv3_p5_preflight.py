@@ -9,6 +9,8 @@
 #              locales (Neon, Supabase, otro host, hostaddr, varios hosts con uno remoto) y sin
 #              dbname abortan; un laboratorio local de loopback pasa. El arnes certificado no cambia.
 # Version: 0.1.0 (F05-D053 paso 2)
+# Version: 0.1.1 (F05-D053 paso 5, ensayo del runner): se omite a nivel de modulo en una copia parcial del
+#              repositorio sin el lanzador (la del arnes rv3_p5), que no debe romper su linea base.
 # ============================================================
 from __future__ import annotations
 
@@ -20,6 +22,9 @@ from pathlib import Path
 import pytest
 
 RAIZ = Path(__file__).resolve().parents[2]
+if not (RAIZ / "scripts" / "dev" / "lanzar_mutantes_rv3_p5.py").exists():
+    # Copia parcial del repositorio (la que prepara el arnes certificado rv3_p5): sin lanzador no hay nada que probar.
+    pytest.skip("sin scripts/dev/lanzar_mutantes_rv3_p5.py (copia parcial del repositorio)", allow_module_level=True)
 _s = importlib.util.spec_from_file_location("lanzar_mutantes_rv3_p5", RAIZ / "scripts" / "dev" / "lanzar_mutantes_rv3_p5.py")
 L = importlib.util.module_from_spec(_s)
 sys.modules["lanzar_mutantes_rv3_p5"] = L
