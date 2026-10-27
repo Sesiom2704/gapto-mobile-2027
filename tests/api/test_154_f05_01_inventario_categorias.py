@@ -388,6 +388,11 @@
 #     y del cliente (tipos del wire C-03); ninguno propone, resuelve ni completa categoria.
 #     I13b: aplicarCategoria separa el calculo de las magnitudes conservadas (A') en una
 #     constante; la escritura del estado categorial es la misma (destino elegido).
+# Version: 0.36.0 (F05-D053 paso 1; F05 §67.2, O3 opcion 1): alta aditiva. I13a: imports
+#     nuevos del registro desde domain/preferencias (categoriaRechazadaEnPropuesta y
+#     TEXTO_CATEGORIA_NO_DISPONIBLE): con CATEGORIA_NO_ELEGIBLE en la propuesta de la
+#     categoria elegida, la dejan PENDIENTE (no valida, como el 409 del registro) con su
+#     motivo; no proponen, resuelven ni completan categoria.
 # ============================================================
 
 from __future__ import annotations
@@ -1456,7 +1461,8 @@ IMPORTS_CAMINO: dict[str, set[tuple[str, str]]] = {
         # F05-02 B2 (alta aditiva): preferencias de registro (cuenta y presupuestable; nunca categoria).
         ("../components/GuardarPreferencia", "GuardarPreferencia"),
         ("../domain/preferencias", "type IndicePreferencias"), ("../domain/preferencias", "type PropuestaVista"),
-        ("../domain/preferencias", "aplicarPropuesta"), ("../domain/preferencias", "datosRecordables"),
+        ("../domain/preferencias", "aplicarPropuesta"), ("../domain/preferencias", "categoriaRechazadaEnPropuesta"),
+        ("../domain/preferencias", "datosRecordables"), ("../domain/preferencias", "TEXTO_CATEGORIA_NO_DISPONIBLE"),
         ("../domain/preferencias", "faltanPreferencias"), ("../domain/preferencias", "indexar"),
         ("../domain/preferencias", "propuestaAplicable"), ("../domain/preferencias", "SIN_PROPUESTA"),
         ("../domain/preferencias", "TEXTO_ELEGIDA"), ("../domain/preferencias", "textoOrigen"),
