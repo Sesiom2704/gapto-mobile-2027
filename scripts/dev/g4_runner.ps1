@@ -45,6 +45,8 @@
 # Version: 0.1.0 (F05-07/GATE MANT-PRE-BATERIA ampliacion G)
 # Version: 0.2.0 (MANT-PRE-BATERIA G, ensayo 1): sin rutas absolutas por
 #   defecto (test_rv3_000); virginidad e inicio.txt con evidencia_neon_inicio.py.
+# Version: 0.2.1 (MANT-PRE-BATERIA G, ensayo 2): Marca escribia en ficheros
+#   sueltos del arbol ($t y $T son la misma variable en PowerShell).
 # ============================================================
 param(
   [ValidateSet('Ensayo', 'Neon')][string]$Modo = 'Ensayo',
@@ -69,11 +71,11 @@ $LOCAL = 'host=127.0.0.1 port=5463 user=postgres'
 $PSQL = $Psql
 $VARS = 'GAPTO_CLEANROOM_URL', 'GAPTO_SONDA_URL', 'GAPTO_TEST_DATABASE_URL', 'GAPTO_RV3_IMPORT_URL', 'GAPTO_CONCURRENCY_URL', 'PGPASSWORD', 'PGOPTIONS'
 New-Item -ItemType Directory -Force $Evidencia | Out-Null
-$T = Join-Path $Evidencia 'tiempos_g4.txt'
+$Tiempos = Join-Path $Evidencia 'tiempos_g4.txt'
 $Resumen = Join-Path $Evidencia 'RESUMEN_G4.txt'
 $env:PYTHONIOENCODING = 'utf-8'
 
-function Marca([string]$t) { "$t $(Get-Date -Format o)" | Out-File -Encoding utf8 -Append $T }
+function Marca([string]$texto) { "$texto $(Get-Date -Format o)" | Out-File -Encoding utf8 -Append $Tiempos }
 function Anota([string]$tramo, [string]$estado, [double]$seg) {
   ('{0,-16} {1,-10} {2,8:N1} s' -f $tramo, $estado, $seg) | Out-File -Encoding utf8 -Append $Resumen
 }
