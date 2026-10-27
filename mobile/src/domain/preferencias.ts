@@ -8,6 +8,7 @@
 // Versión: 0.2.0 (F05-02 B3; lámina SET-PREF v0.1 S01–S06, D-PREF-01/04; AJ-B1-10): SOLO altas para Ajustes › Preferencias: ámbito visible (D-PREF-01), grupos y orden de la lista (S01), textos de lo que propone cada preferencia, preferencia existente del mismo ámbito (S03, «nunca crear otra»), estado del formulario (S02/S06) con el espejo del CHECK «propone algo» y el contenido COMPLETO que se envía (E05). Ninguna regla de elegibilidad: las cuentas y categorías ofrecidas son las de REG-01 y la disponibilidad de la cuenta la dice el servidor (`cuenta_disponible_hoy`).
 // Versión: 0.5.0 (F05-03/F05-04 J2 §2.3/§2.4; lámina REG-DYN G01/I01/N01 y REG-PLT R01–R05): propuesta del registro por tipo con la capa plantilla (GET /v1/registro/propuesta): origen visible «De tu plantilla <nombre>.», «Propuesta: tu preferencia para <tercero>.» y, en ingresos, «… para todos los ingresos.»; «Guardar como preferencia» para el tercero O para la categoría (nunca ambos) con la misma lógica de alta / edición / conflicto.
 // Versión: 0.4.0 (F05-03/F05-04 J2 §2.5; F05 §46.4 R6, §46.5 E2/E3; lámina REG-DYN / SET-TH / SET-CTX v0.1 S04): Ajustes › Preferencias con CUATRO ámbitos: «Todos los gastos», «Todos los ingresos», «Una categoría» y «Un tercero»; los dos últimos con tipo Gasto/Ingreso, siempre enviado. Categoría + tercero no se ofrece (PREFERENCIA_AMBITO_NO_ADMITIDO). Grupo nuevo «Por tercero». «Proponer cuenta» del tipo INGRESO usa las cuentas elegibles para cobrar (servidor).
+// Versión: 0.6.0 (F05-D053 §67.2 · O3, opción 1): `categoriaRechazadaEnPropuesta` y `TEXTO_CATEGORIA_NO_DISPONIBLE`. Si la propuesta de la categoría elegida se rechaza con CATEGORIA_NO_ELEGIBLE, la categoría queda no válida y se conservan la cuenta y el presupuesto mostrados (no es SIN_PROPUESTA). `aplicarPropuesta` no cambia.
 // ============================================================
 
 import type { ContenidoPreferencia, CuentaPago, OrigenPropuesta, Preferencia, PropuestaRegistro, PropuestaRegistroTipo, TiposRegistro } from '../api/cliente';
@@ -112,6 +113,21 @@ export function propuestaAplicable(p: PropuestaRegistro, indice: IndicePreferenc
     if (origen) presupuestable = { valor: p.presupuestable.valor, origen };
   }
   return { cuenta, presupuestable };
+}
+
+/** O3 (F05-D053 §67.2, opción 1): motivo visible cuando la categoría deja de ser elegible antes de su propuesta. */
+export const TEXTO_CATEGORIA_NO_DISPONIBLE = 'Esta categoría ya no está disponible. Elige otra categoría.';
+
+/**
+ * O3 (F05-D053 §67.2, opción 1): la propuesta de la categoría `categoriaId` se rechazó con CATEGORIA_NO_ELEGIBLE.
+ * Si esa categoría sigue elegida, queda no válida (pendiente de elegir otra; `validar` impide registrar) y la cuenta y el
+ * presupuesto mostrados se conservan: NO es SIN_PROPUESTA. null si el rechazo no es de la categoría elegida (respuesta
+ * antigua o sin categoría): entonces no se toca el borrador.
+ */
+export function categoriaRechazadaEnPropuesta(b: Borrador, categoriaId: string | null, codigo: string): Borrador | null {
+  if (codigo !== 'CATEGORIA_NO_ELEGIBLE' || categoriaId === null) return null;
+  if (b.categoria.estado !== 'CATEGORIA' || b.categoria.id !== categoriaId) return null;
+  return { ...b, categoria: { estado: 'PENDIENTE' } };
 }
 
 /** Aplica la propuesta SOLO a los campos no tocados; sin propuesta, el campo queda sin preselección (R01). */

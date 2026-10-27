@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-03/F05-04 J2+J3 §2.1–§2.4; AJUSTE A1)
 // Versión: 0.2.0 (F05-03/F05-04 J3 §2.7 y §3): corte de Concepto (CNC-18/20) y casos de cierre §45.7-6 (plantilla con magnitud obligatoria) y §46.7-11 (duplicado activo «Usar el existente»).
 // Versión: 0.3.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
+// Versión: 0.4.0 (F05-D053 §67.2 · O3, opción 1): alta aditiva del caso O3 en la propuesta del registro por tipo (ingreso): categoría rechazada con CATEGORIA_NO_ELEGIBLE → no válida y la cuenta propuesta se conserva. Ningún oráculo anterior cambia.
 // ============================================================
 
 import './tiempos_rn';
@@ -212,6 +213,27 @@ test('Ingreso: «Cobrado en» con cuentas para cobrar, solo categorías de ingre
   expect(c.registrarGastoPagado).not.toHaveBeenCalled();
   expect(await screen.findByText('Ingreso registrado')).toBeTruthy();
   expect(screen.getByTestId('exito-titulo').props.children).toBe('Nómina octubre');
+}, 30000);
+
+test('O3 (F05-D053 §67.2) en la propuesta por tipo: categoría rechazada con CATEGORIA_NO_ELEGIBLE → no válida; la cuenta propuesta se conserva', async () => {
+  const c = fake();
+  c.propuestaRegistro = jest.fn(async (q: any) =>
+    q.categoriaId === 'nomina'
+      ? { tipo: 'RECHAZADO', codigo: 'CATEGORIA_NO_ELEGIBLE', mensaje: '' }
+      : { tipo: 'OK', datos: { tipo: q.tipo, campos: { categoria: null, tercero: null, contexto: null, cuenta: { valor: NOMINA, origen: { capa: 'DEFAULT_GENERAL', plantilla_id: null, preferencia_id: null } }, presupuestable: null }, avisos: [] } },
+  ) as any;
+  await montar(c);
+  await abrirTipo('INGRESO');
+  await waitFor(() => expect(screen.getByTestId(`cuenta-${NOMINA}`).props.accessibilityState.checked).toBe(true));
+  fireEvent.changeText(screen.getByTestId('campo-importe'), '1500');
+  fireEvent.press(screen.getByTestId('presupuestable-false'));
+  fireEvent.press(screen.getByTestId('campo-categoria'));
+  fireEvent.press(screen.getByTestId('cat-trabajo'));
+  await act(async () => fireEvent.press(screen.getByTestId('cat-nomina')));
+  await waitFor(() => expect(screen.getByTestId('categoria-invalida').props.children).toBe('Esta categoría ya no está disponible. Elige otra categoría.'));
+  expect(screen.getByTestId(`cuenta-${NOMINA}`).props.accessibilityState.checked).toBe(true);
+  expect(screen.getByTestId('registrar')).toBeDisabled();
+  expect(c.registrarIngresoCobrado).not.toHaveBeenCalled();
 }, 30000);
 
 // ------------------------------------------------------------------ Gasto con tercero

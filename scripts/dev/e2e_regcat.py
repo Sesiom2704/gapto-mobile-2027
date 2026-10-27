@@ -76,6 +76,16 @@
 #   (layout_inventario; sustituye a truncados_elipsis).
 # Version: 0.4.3 (MANT-PRE-BATERIA A): espera el formulario real y la propuesta
 #   de categoria antes de desactivarla; no depende de financiacion sin cuenta.
+# Version: 0.5.0 (F05-D053 §67.2 · O3, opcion 1): escenario nuevo (f), orden O3
+#   DETERMINISTA: la peticion de propuesta de una categoria propia se retiene
+#   (page.route, como la sonda 5 de MANT-PRE-BATERIA), se desactiva la categoria
+#   y se libera -> propuesta 409 CATEGORIA_NO_ELEGIBLE. Se afirma: motivo
+#   «Esta categoria ya no esta disponible. Elige otra categoria.», categoria no
+#   valida, «faltan» = categoria, «Registrar» deshabilitado y sin envio, cuenta
+#   y presupuesto conservados (mismo origen), sin aviso de registro; recuperacion
+#   con «Sin categoria» y un hecho. (c) sigue siendo el orden O1. Cada 409
+#   esperado explica como mucho un error de consola de SU ruta (registro o
+#   propuesta); cualquier otro error falla.
 # ============================================================
 
 from __future__ import annotations
@@ -253,6 +263,10 @@ def main() -> None:
         # Categoria propia del escenario (c): hoja GASTO en la raiz.
         cat_c = str(uuid.uuid4())
         api(a.api, "POST", "/v1/categorias", {"id": cat_c, "nombre": f"E2E desactivable {run[-6:]}", "parent_id": None,
+                                              "ambito": "GASTO", "presupuestable_default": True, "icon_key": None})
+        # Categoria propia del escenario (f), O3: se desactiva con su propuesta retenida.
+        cat_f = str(uuid.uuid4())
+        api(a.api, "POST", "/v1/categorias", {"id": cat_f, "nombre": f"E2E O3 {run[-6:]}", "parent_id": None,
                                               "ambito": "GASTO", "presupuestable_default": True, "icon_key": None})
 
         def comprobar(cond: bool, msg: str) -> None:
@@ -486,6 +500,88 @@ def main() -> None:
             comprobar(len(bd_c) == 1 and bd_c[0]["efectos"][0][1] is None, f"(c) persistencia final inesperada: {bd_c}")
             resultado["c"] = {"intenciones": ids_c, "bd": bd_c}
 
+            # -------------------------------------------------------------- (f) O3: la propuesta llega tras desactivar (Light)
+            # F05-D053 §67.2: la peticion de propuesta de cat_f se RETIENE (route), se desactiva la categoria y
+            # se libera: la respuesta es el 409 CATEGORIA_NO_ELEGIBLE de la propuesta (orden O3, determinista).
+            concepto_f = f"E2E O3 {run[-6:]}"
+            def marcado(el) -> str | None:
+                """Como e2e_preferencias: aria-checked (casillas) o, en chips y segmentos de Basicos
+                (react-native-web no traduce accessibilityState), el «✓ » del chip o la superficie del segmento."""
+                if el.get_attribute("aria-checked") is not None:
+                    return el.get_attribute("aria-checked")
+                if el.get_attribute("role") == "radio":
+                    return str(el.evaluate("e => getComputedStyle(e).backgroundColor !== 'rgba(0, 0, 0, 0)'")).lower()
+                return str(el.inner_text().startswith("✓")).lower()
+
+            def cuentas_marcadas() -> list[str]:
+                cs = page.locator("[data-testid^=cuenta-]")
+                return [cs.nth(i).get_attribute("data-testid") for i in range(cs.count()) if marcado(cs.nth(i)) == "true"]
+
+            abrir_formulario(concepto_f, "17,30")
+            cuentas_antes = cuentas_marcadas()
+            origen_antes = page.get_by_test_id("origen-cuenta").inner_text() if page.get_by_test_id("origen-cuenta").count() else None
+            retenidas: list = []
+            def coincide_f(url: str) -> bool:
+                partes = urllib.parse.urlsplit(url)
+                return (partes.path == "/v1/preferencias/propuesta"
+                        and urllib.parse.parse_qs(partes.query).get("categoria_id") == [cat_f])
+            page.route(coincide_f, lambda route: retenidas.append(route))  # sin bloquear: se libera tras desactivar
+            page.get_by_test_id("campo-categoria").click()
+            with page.expect_response(lambda r: r.request.method == "GET" and coincide_f(r.url), timeout=15000) as propuesta_f:
+                page.get_by_test_id(f"cat-{cat_f}").click()
+                fin = time.monotonic() + 10
+                while not retenidas and time.monotonic() < fin:
+                    page.wait_for_timeout(20)
+                comprobar(len(retenidas) == 1, f"(f) la propuesta de la categoría no se retuvo: {len(retenidas)}")
+                rv = next(c["row_version"] for c in api(a.api, "GET", "/v1/categorias")["categorias"] if c["id"] == cat_f)
+                api(a.api, "POST", f"/v1/categorias/{cat_f}/desactivar", {"modo": "SOLO_SI_SIN_HIJOS_ACTIVOS", "row_version": rv})
+                for r_ in retenidas:
+                    r_.continue_()
+            page.unroute(coincide_f)
+            p409 = propuesta_f.value
+            cuerpo_p409 = p409.json()
+            rechazos_esperados.append({"status": p409.status, "codigo": cuerpo_p409.get("codigo"), "metodo": p409.request.method,
+                                       "ruta": urllib.parse.urlsplit(p409.url).path, "categoria_id": cat_f})
+            comprobar(p409.status == 409 and cuerpo_p409.get("codigo") == "CATEGORIA_NO_ELEGIBLE",
+                      f"(f) la propuesta no se rechazó como se esperaba: {p409.status} {cuerpo_p409.get('codigo')}")
+            n_antes_f = len(intenciones)
+            page.get_by_test_id("categoria-invalida").wait_for(timeout=15000)
+            estado_f = {
+                "categoria_invalida": page.get_by_test_id("categoria-invalida").inner_text(),
+                "categoria_valor": page.get_by_test_id("categoria-valor").inner_text(),
+                "faltan": page.get_by_test_id("faltan").inner_text() if page.get_by_test_id("faltan").count() else None,
+                "registrar_deshabilitado": page.get_by_test_id("registrar").get_attribute("aria-disabled"),
+                "cuentas_marcadas": cuentas_marcadas(),
+                "origen_cuenta": page.get_by_test_id("origen-cuenta").inner_text() if page.get_by_test_id("origen-cuenta").count() else None,
+                "presupuesto_si": marcado(page.get_by_test_id("presupuestable-true")),
+                "error_dominio": page.get_by_test_id("error-dominio").count(),
+            }
+            comprobar(estado_f["categoria_invalida"] == "Esta categoría ya no está disponible. Elige otra categoría.",
+                      f"(f) motivo distinto: {estado_f['categoria_invalida']!r}")
+            comprobar(estado_f["categoria_valor"] == "Elige otra categoría", f"(f) la categoría no queda no válida: {estado_f['categoria_valor']!r}")
+            comprobar(estado_f["faltan"] == "Para registrar falta: categoría.", f"(f) «faltan» apunta a otro campo: {estado_f['faltan']!r}")
+            comprobar(estado_f["registrar_deshabilitado"] == "true", "(f) «Registrar» no queda deshabilitado")
+            comprobar(bool(cuentas_antes) and estado_f["cuentas_marcadas"] == cuentas_antes,
+                      f"(f) la cuenta no se conserva: {cuentas_antes} -> {estado_f['cuentas_marcadas']}")
+            comprobar(estado_f["origen_cuenta"] == origen_antes, f"(f) el origen de la cuenta cambia: {origen_antes!r} -> {estado_f['origen_cuenta']!r}")
+            comprobar(estado_f["presupuesto_si"] == "true", "(f) el presupuesto elegido no se conserva")
+            comprobar(estado_f["error_dominio"] == 0, "(f) aparece un aviso de rechazo de registro sin haber registrado")
+            shot("L13_o3_categoria_no_valida")
+            page.get_by_test_id("registrar").click(force=True)  # deshabilitado: no debe enviar nada
+            page.wait_for_timeout(300)
+            comprobar(len(intenciones) == n_antes_f, "(f) se envió un registro con la categoría no válida")
+            # Recuperación: otra elección (Sin categoría) aplica las reglas normales y registra.
+            page.get_by_test_id("campo-categoria").click()
+            comprobar(page.get_by_test_id(f"cat-{cat_f}").count() == 0, "(f) la desactivada sigue ofreciéndose")
+            page.get_by_test_id("selector-sin-categoria").click()
+            page.get_by_test_id("registrar").click()
+            page.get_by_test_id("registro-exito").wait_for(timeout=15000)
+            ids_f = intenciones[n_antes_f:]
+            bd_f = hechos_de(dsn, owner, ids_f)
+            comprobar(len(ids_f) == 1 and len(bd_f) == 1 and bd_f[0]["efectos"][0][1] is None, f"(f) persistencia final inesperada: {bd_f}")
+            resultado["f"] = {"propuesta": {"status": p409.status, "codigo": cuerpo_p409.get("codigo")}, "estado": estado_f,
+                              "cuentas_antes": cuentas_antes, "origen_antes": origen_antes, "intenciones": ids_f, "bd": bd_f}
+
             # -------------------------------------------------------------- SET-CAT: capturas Light y Dark
             for esquema in ("light", "dark"):
                 page.emulate_media(color_scheme=esquema)
@@ -515,13 +611,16 @@ def main() -> None:
                 page.get_by_test_id("alta-cancelar").click()
             nav.close()
 
-        # AJ-S6WIREUI-05: cada 409 esperado de (c) explica como mucho UN error de consola del navegador
-        # («Failed to load resource ... 409») sobre la ruta del registro; cualquier otro error falla el E2E.
+        # AJ-S6WIREUI-05: cada 409 esperado de (c) y (f) explica como mucho UN error de consola del navegador
+        # («Failed to load resource ... 409») sobre SU ruta (registro o propuesta); cualquier otro error falla el E2E.
         pendientes = [r for r in rechazos_esperados if r["status"] == 409]
         no_esperados: list[dict] = []
         for e in errores_consola:
-            if pendientes and "409" in e["texto"] and urllib.parse.urlsplit(e["url"]).path == RUTA_REGISTRO:
-                pendientes.pop(0)["error_consola"] = e
+            ruta_e = urllib.parse.urlsplit(e["url"]).path
+            esperado = next((r for r in pendientes if r["ruta"] == ruta_e), None) if "409" in e["texto"] else None
+            if esperado is not None:
+                pendientes.remove(esperado)
+                esperado["error_consola"] = e
             else:
                 no_esperados.append(e)
         comprobar(not no_esperados, f"(consola) errores no esperados: {no_esperados}")

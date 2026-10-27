@@ -9,6 +9,7 @@
 // v0.5.0 (F05-03/F05-04 J2+J3 §2.2/§2.7): navegación «Registrar» + hoja de tipos y nota opcional en «Más detalles» (corte de Concepto). Ningún oráculo de preferencias cambia.
 // Versión: 0.5.0
 // Versión: 0.6.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
+// Versión: 0.7.0 (F05-D053 §67.2 · O3, opción 1): alta aditiva de los casos O3 (propuesta retenida y rechazada con CATEGORIA_NO_ELEGIBLE: categoría no válida en el acto, cuenta y presupuesto conservados, sin registro, recuperación con otra categoría; cuenta elegida por el usuario; respuesta obsoleta; dominio). Ningún oráculo anterior cambia.
 // ============================================================
 
 import './tiempos_rn';
@@ -29,7 +30,7 @@ import type {
   ResultadoRegistro,
 } from '../src/api/cliente';
 import { borradorInicial, type PayloadGastoPagado } from '../src/domain/intencion';
-import { aplicarPropuesta, indexar, propuestaAplicable } from '../src/domain/preferencias';
+import { aplicarPropuesta, categoriaRechazadaEnPropuesta, indexar, propuestaAplicable, TEXTO_CATEGORIA_NO_DISPONIBLE } from '../src/domain/preferencias';
 import { ProveedorTema } from '../src/theme/tema';
 
 import { clienteCategoriasStub, nodo } from './fixtures_categorias';
@@ -551,4 +552,106 @@ test.each([
   expect(f.cliente.editarPreferencia).toHaveBeenCalledTimes(via === 'EDITAR' ? 1 : 0);
   expect(f.cliente.altaPreferencia).toHaveBeenCalledTimes(via === 'ALTA' ? 1 : 0);
   expect(f.cliente.registrarGastoPagado).toHaveBeenCalledTimes(1);
+});
+
+// ------------------------------------------------------------------ O3 (F05-D053 §67.2, opción 1)
+/** Propuesta que se retiene hasta que el test la libera (orden O3 determinista). */
+function retenida() {
+  let soltar: (r: Respuesta<PropuestaRegistro>) => void = () => undefined;
+  const promesa = new Promise<Respuesta<PropuestaRegistro>>((res) => (soltar = res));
+  return { promesa, soltar: (r: Respuesta<PropuestaRegistro>) => act(async () => soltar(r)) };
+}
+const NO_ELEGIBLE: Respuesta<PropuestaRegistro> = { tipo: 'RECHAZADO', codigo: 'CATEGORIA_NO_ELEGIBLE', mensaje: 'La categoría no está disponible.' };
+const GENERAL_TARJETA = pref({ id: 'p-general', cuenta_default_id: TARJETA, presupuestable_default: true });
+
+/** La propuesta de `super` (y, si se da, la de `limpieza`) se retiene; el resto, la del doble. */
+function retener(f: ReturnType<typeof fake>, retenidas: Partial<Record<string, Promise<Respuesta<PropuestaRegistro>>>>) {
+  const base = f.cliente.propuestaPreferencias as jest.Mock;
+  const original = base.getMockImplementation()!;
+  base.mockImplementation((fecha: string, cat: string | null) => (cat !== null && retenidas[cat]) || original(fecha, cat));
+  return base;
+}
+
+test('O3: la propuesta de la categoría elegida llega rechazada (CATEGORIA_NO_ELEGIBLE) → no válida en el acto; cuenta y presupuesto se conservan; no se registra; al elegir otra, reglas normales', async () => {
+  const f = fake({ propuesta: () => prop([TARJETA, 'p-general'], [true, 'p-general']), prefs: () => [GENERAL_TARJETA] });
+  const r = retenida();
+  const base = retener(f, { super: r.promesa });
+  await abrir(f.cliente);
+  basicos();
+  await waitFor(() => expect(seleccionada(`cuenta-${TARJETA}`)).toBe(true));
+  elegirCategoria('super');
+  await waitFor(() => expect(base).toHaveBeenLastCalledWith(HOY, 'super'));
+  expect(textoDe('categoria-valor')).toBe('Supermercado');
+  await r.soltar(NO_ELEGIBLE);
+  // No válida en el acto, con su motivo; la cuenta y el presupuesto mostrados siguen (no es SIN_PROPUESTA).
+  expect(textoDe('categoria-invalida')).toBe('Esta categoría ya no está disponible. Elige otra categoría.');
+  expect(textoDe('categoria-valor')).toBe('Elige otra categoría');
+  expect(seleccionada(`cuenta-${TARJETA}`)).toBe(true);
+  expect(textoDe('origen-cuenta')).toBe('Propuesta: tu preferencia general.');
+  expect(screen.getByTestId('presupuestable-true').props.accessibilityState.selected).toBe(true);
+  expect(textoDe('faltan')).toBe('Para registrar falta: categoría.');
+  expect(screen.queryByTestId('error-dominio')).toBeNull();
+  expect(screen.getByTestId('registrar')).toBeDisabled();
+  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
+  expect(f.cliente.registrarGastoPagado).not.toHaveBeenCalled();
+  // Recuperación: otra categoría → se pide su propuesta y se aplica con las reglas normales.
+  elegirCategoria('limpieza');
+  await waitFor(() => expect(base).toHaveBeenLastCalledWith(HOY, 'limpieza'));
+  await act(async () => {});
+  expect(screen.queryByTestId('categoria-invalida')).toBeNull();
+  expect(textoDe('categoria-valor')).toBe('Limpieza');
+  expect(seleccionada(`cuenta-${TARJETA}`)).toBe(true);
+  expect(screen.getByTestId('registrar')).toBeEnabled();
+  await registrar();
+  expect(f.enviados[0]).toMatchObject({ cuenta_id: TARJETA, presupuestable: true, categoria: { estado: 'CATEGORIA', categoria_id: 'limpieza' } });
+});
+
+test('O3: la cuenta elegida por el usuario tampoco se toca al invalidarse la categoría', async () => {
+  const f = fake();
+  const r = retenida();
+  retener(f, { super: r.promesa });
+  await abrir(f.cliente);
+  basicos();
+  fireEvent.press(await screen.findByTestId(`cuenta-${EFECTIVO}`));
+  fireEvent.press(screen.getByTestId('presupuestable-false'));
+  elegirCategoria('super');
+  await r.soltar(NO_ELEGIBLE);
+  expect(textoDe('categoria-invalida')).toBe('Esta categoría ya no está disponible. Elige otra categoría.');
+  expect(seleccionada(`cuenta-${EFECTIVO}`)).toBe(true);
+  expect(textoDe('origen-cuenta')).toBe('Elegida por ti.');
+  expect(screen.getByTestId('presupuestable-false').props.accessibilityState.selected).toBe(true);
+  expect(screen.getByTestId('registrar')).toBeDisabled();
+});
+
+test('O3 respuesta obsoleta: el rechazo de una categoría que ya no es la elegida no sobrescribe la selección posterior', async () => {
+  const f = fake({ propuesta: () => prop([TARJETA, 'p-general'], [true, 'p-general']), prefs: () => [GENERAL_TARJETA] });
+  const rSuper = retenida();
+  const rLimpieza = retenida();
+  retener(f, { super: rSuper.promesa, limpieza: rLimpieza.promesa });
+  await abrir(f.cliente);
+  basicos();
+  await waitFor(() => expect(seleccionada(`cuenta-${TARJETA}`)).toBe(true));
+  elegirCategoria('super');
+  elegirCategoria('limpieza');
+  // Llega primero la de la categoría actual y después el rechazo antiguo: el rechazo no toca nada.
+  await rLimpieza.soltar({ tipo: 'OK', datos: prop([COMUN, 'p-general'], [false, 'p-general']) });
+  await rSuper.soltar(NO_ELEGIBLE);
+  expect(screen.queryByTestId('categoria-invalida')).toBeNull();
+  expect(textoDe('categoria-valor')).toBe('Limpieza');
+  expect(seleccionada(`cuenta-${COMUN}`)).toBe(true);
+  expect(screen.getByTestId('presupuestable-false').props.accessibilityState.selected).toBe(true);
+  expect(screen.getByTestId('registrar')).toBeEnabled();
+});
+
+test('O3 (dominio): solo invalida la categoría que sigue elegida y nunca toca cuenta ni presupuesto', () => {
+  const elegida = { estado: 'CATEGORIA' as const, id: 'super', nombre: 'Supermercado', ruta: '', icon_key: null, magnitudes: [] };
+  const b = { ...borradorInicial(HOY), categoria: elegida, cuentaId: TARJETA, cuentaOrigen: 'INFERIDO' as const, presupuestable: true, presupuestableOrigen: 'INFERIDO' as const };
+  const y = categoriaRechazadaEnPropuesta(b, 'super', 'CATEGORIA_NO_ELEGIBLE')!;
+  expect(y.categoria).toEqual({ estado: 'PENDIENTE' });
+  expect({ ...y, categoria: b.categoria }).toEqual(b);
+  expect(categoriaRechazadaEnPropuesta(b, 'limpieza', 'CATEGORIA_NO_ELEGIBLE')).toBeNull();
+  expect(categoriaRechazadaEnPropuesta(b, null, 'CATEGORIA_NO_ELEGIBLE')).toBeNull();
+  expect(categoriaRechazadaEnPropuesta(b, 'super', 'OTRO_CODIGO')).toBeNull();
+  expect(categoriaRechazadaEnPropuesta(borradorInicial(HOY), 'super', 'CATEGORIA_NO_ELEGIBLE')).toBeNull();
+  expect(TEXTO_CATEGORIA_NO_DISPONIBLE).toBe('Esta categoría ya no está disponible. Elige otra categoría.');
 });
