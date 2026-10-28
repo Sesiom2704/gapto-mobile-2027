@@ -90,6 +90,10 @@
 #   ($SALIDAS_TRAMO: prefijo del tramo y ficheros sin prefijo como local_C.*,
 #   local_es_ES.*, conc_muestra.*, mut_* o tsc.log). Las carpetas compartidas
 #   entre tramos (serie) quedan en su sitio y conservadas en la instantanea.
+#   Rev. tras la prueba de corte (DIAG-S1): la instantanea se toma ANTES de
+#   cualquier escritura de la reanudacion (head.txt, status_antes_*, RESUMEN);
+#   antes RESUMEN_G4.txt ya llevaba la linea del enlace con la ventana Neon y
+#   no coincidia con el intento cortado. La retirada sigue tras las validaciones.
 # ============================================================
 param(
   [ValidateSet('Ensayo', 'Neon')][string]$Modo = 'Ensayo',
@@ -308,6 +312,31 @@ if (Test-Path $Registro) {
   }
 }
 if ((Test-Path $fHead) -and ((Get-Content $fHead -Raw).Trim() -ne $script:HeadActual)) { Stop-G4 'la evidencia es de otro HEAD (mismo SHA en todo G4)' }
+if ($Reanudar) {
+  # 0.4.1 (F05 §68.3, AJ-F0507G5-14): instantanea del intento cortado ANTES de escribir nada en la carpeta
+  # (head.txt, status_antes_*, identidad, RESUMEN); la retirada de salidas se hace tras las validaciones.
+  $hechos = Tramos-OK
+  $repetir = @($Tramos | Where-Object { $_ -notin $hechos -and $_ -ne 'manifiesto' })
+  $ts = Get-Date -Format yyyyMMdd-HHmmss
+  $dirR = Join-Path $Evidencia "intento_cortado_$ts"
+  $dirI = Join-Path $dirR 'instantanea'
+  $previos = '^(intento_cortado_|reanudacion_)'
+  $origen = @(Get-ChildItem $Evidencia | Where-Object { $_.Name -notmatch $previos })
+  New-Item -ItemType Directory -Force $dirI | Out-Null
+  foreach ($x in $origen) { Copy-Item -Recurse -Force $x.FullName $dirI }
+  $mI = Join-Path $dirR 'manifest_sha256.txt'
+  $filas = @(Get-ChildItem $dirI -Recurse -File | Sort-Object FullName | ForEach-Object { '{0}  {1}' -f (Sha $_.FullName), $_.FullName.Substring($dirI.Length + 1) })
+  $filas | Out-File -Encoding utf8 $mI
+  foreach ($f in $filas) {
+    $h, $rel = $f -split '  ', 2
+    $o = Join-Path $Evidencia $rel
+    if (-not (Test-Path $o) -or (Sha $o) -ne $h) { Stop-G4 "la instantanea del intento cortado no coincide con el original: $rel" }
+  }
+  $shaM = Sha $mI
+  @("fecha_utc=$((Get-Date).ToUniversalTime().ToString('o'))", "motivo=$MotivoCorte", "head=$script:HeadActual",
+    "tramos_ok=$($hechos -join ',')", "tramos_a_repetir=$($repetir -join ',')", "ficheros=$($filas.Count)",
+    "manifest_sha256=$shaM") | Out-File -Encoding utf8 (Join-Path $dirR 'sello.txt')
+}
 $script:HeadActual | Out-File -Encoding utf8 $fHead
 $sucio = git status --porcelain
 $sucio | Out-File -Encoding utf8 (Join-Path $Evidencia "status_antes_$(Get-Date -Format yyyyMMdd-HHmmss).txt")
@@ -335,31 +364,9 @@ if ($EvidenciaNeon) {
   $okNeon = @(Get-Content (Join-Path $EvidenciaNeon 'tramos_g4.tsv') -ErrorAction SilentlyContinue | Where-Object { ($_ -split "`t")[1] -eq 'OK' }).Count
   "ventana Neon enlazada: mismo HEAD; tramos OK registrados $okNeon" | Out-File -Encoding utf8 -Append $Resumen
 }
-$hechos = @()
+if (-not $Reanudar) { $hechos = @() }
 if ($Reanudar) {
-  $hechos = Tramos-OK
-  $repetir = @($Tramos | Where-Object { $_ -notin $hechos -and $_ -ne 'manifiesto' })
-  # 0.4.1 (F05 §68.3, AJ-F0507G5-14): el intento cortado se ARCHIVA entero antes de repetir nada; nunca se sobrescribe.
-  $ts = Get-Date -Format yyyyMMdd-HHmmss
-  $dirR = Join-Path $Evidencia "intento_cortado_$ts"
-  $dirI = Join-Path $dirR 'instantanea'
-  New-Item -ItemType Directory -Force $dirI | Out-Null
-  $previos = '^(intento_cortado_|reanudacion_)'
-  foreach ($x in Get-ChildItem $Evidencia | Where-Object { $_.Name -notmatch $previos }) { Copy-Item -Recurse -Force $x.FullName $dirI }
-  $mI = Join-Path $dirR 'manifest_sha256.txt'
-  $filas = @(Get-ChildItem $dirI -Recurse -File | Sort-Object FullName | ForEach-Object { '{0}  {1}' -f (Sha $_.FullName), $_.FullName.Substring($dirI.Length + 1) })
-  $filas | Out-File -Encoding utf8 $mI
-  # La copia debe ser identica al original, fichero a fichero, antes de retirar nada.
-  foreach ($f in $filas) {
-    $h, $rel = $f -split '  ', 2
-    $o = Join-Path $Evidencia $rel
-    if (-not (Test-Path $o) -or (Sha $o) -ne $h) { Stop-G4 "la instantanea del intento cortado no coincide con el original: $rel" }
-  }
-  $shaM = Sha $mI
-  @("fecha_utc=$((Get-Date).ToUniversalTime().ToString('o'))", "motivo=$MotivoCorte", "head=$script:HeadActual",
-    "tramos_ok=$($hechos -join ',')", "tramos_a_repetir=$($repetir -join ',')", "ficheros=$($filas.Count)",
-    "manifest_sha256=$shaM") | Out-File -Encoding utf8 (Join-Path $dirR 'sello.txt')
-  # Retirada de las salidas propias de cada tramo a repetir (ya conservadas en la instantanea).
+  # Retirada de las salidas propias de cada tramo a repetir (ya conservadas en la instantanea, tomada antes de escribir nada).
   $dirX = Join-Path $dirR 'retirados'
   New-Item -ItemType Directory -Force $dirX | Out-Null
   foreach ($tr in $repetir) {
