@@ -80,6 +80,16 @@
 #   reanudar y al enlazar ventanas; arbol limpio obligatorio fuera de
 #   -Reducido; -Reanudar exige -MotivoCorte. En Ensayo la hija local puede
 #   fijar lc_messages: la parte Neon de R-LOCALE queda NO EJECUTADO.
+# Version: 0.4.1 (F05 §68.3, AJ-F0507G5-14; R-RUN-01): -Reanudar ARCHIVA el
+#   intento cortado en vez de sobrescribirlo. Antes de repetir nada copia TODA
+#   la carpeta de evidencia (salvo archivos de intentos anteriores) a
+#   intento_cortado_<ts>\instantanea, con manifest_sha256.txt y sello.txt (hora
+#   UTC, motivo, HEAD, tramos OK y tramos a repetir, SHA del manifiesto),
+#   comprueba la copia contra el manifiesto y despues retira a
+#   intento_cortado_<ts>\retirados las salidas propias de cada tramo a repetir
+#   ($SALIDAS_TRAMO: prefijo del tramo y ficheros sin prefijo como local_C.*,
+#   local_es_ES.*, conc_muestra.*, mut_* o tsc.log). Las carpetas compartidas
+#   entre tramos (serie) quedan en su sitio y conservadas en la instantanea.
 # ============================================================
 param(
   [ValidateSet('Ensayo', 'Neon')][string]$Modo = 'Ensayo',
@@ -106,6 +116,15 @@ param(
 )
 $TRAMOS_NEON = @('hija', 'firma_antes', 'replay', 'huellas_antes', 'suites', 'huellas_despues', 'post', 'firma_despues', 'manifiesto')
 $TRAMOS_LOCAL = @('rlocale_local', 'concurrencia', 'jest', 'e2e', 'mutantes', 'manifiesto')
+# 0.4.1: salidas de cada tramo de la ventana Local que NO empiezan por su nombre (se retiran al reanudar, tras archivarlas).
+# 'serie' la comparten concurrencia y e2e: no se retira (queda en la instantanea del intento cortado).
+$SALIDAS_TRAMO = @{
+  rlocale_local = @('local_C*', 'local_es_ES*')
+  concurrencia  = @('conc_muestra*', 'serie_consola.log')
+  jest          = @('tsc.log')
+  e2e           = @()
+  mutantes      = @('mut_*', 'mut', 'rv3lab_replay.log', 'autovacuum_local.txt')
+}
 if (-not $Tramos) {
   $Tramos = switch ($Ventana) {
     'Neon' { $TRAMOS_NEON }
@@ -319,12 +338,37 @@ if ($EvidenciaNeon) {
 $hechos = @()
 if ($Reanudar) {
   $hechos = Tramos-OK
-  $dirR = Join-Path $Evidencia ("reanudacion_" + (Get-Date -Format yyyyMMdd-HHmmss)); New-Item -ItemType Directory -Force $dirR | Out-Null
-  foreach ($tr in $Tramos | Where-Object { $_ -notin $hechos -and $_ -ne 'manifiesto' }) {
-    Get-ChildItem $Evidencia -File -Filter "$tr*" | Move-Item -Destination $dirR
+  $repetir = @($Tramos | Where-Object { $_ -notin $hechos -and $_ -ne 'manifiesto' })
+  # 0.4.1 (F05 §68.3, AJ-F0507G5-14): el intento cortado se ARCHIVA entero antes de repetir nada; nunca se sobrescribe.
+  $ts = Get-Date -Format yyyyMMdd-HHmmss
+  $dirR = Join-Path $Evidencia "intento_cortado_$ts"
+  $dirI = Join-Path $dirR 'instantanea'
+  New-Item -ItemType Directory -Force $dirI | Out-Null
+  $previos = '^(intento_cortado_|reanudacion_)'
+  foreach ($x in Get-ChildItem $Evidencia | Where-Object { $_.Name -notmatch $previos }) { Copy-Item -Recurse -Force $x.FullName $dirI }
+  $mI = Join-Path $dirR 'manifest_sha256.txt'
+  $filas = @(Get-ChildItem $dirI -Recurse -File | Sort-Object FullName | ForEach-Object { '{0}  {1}' -f (Sha $_.FullName), $_.FullName.Substring($dirI.Length + 1) })
+  $filas | Out-File -Encoding utf8 $mI
+  # La copia debe ser identica al original, fichero a fichero, antes de retirar nada.
+  foreach ($f in $filas) {
+    $h, $rel = $f -split '  ', 2
+    $o = Join-Path $Evidencia $rel
+    if (-not (Test-Path $o) -or (Sha $o) -ne $h) { Stop-G4 "la instantanea del intento cortado no coincide con el original: $rel" }
   }
-  "$(Get-Date -Format o) motivo del corte: $MotivoCorte" | Out-File -Encoding utf8 (Join-Path $dirR 'motivo_corte.txt')
-  "reanudacion: tramos ya OK $($hechos -join ','); registros previos de los demas en $(Split-Path $dirR -Leaf); motivo: $MotivoCorte" | Out-File -Encoding utf8 -Append $Resumen
+  $shaM = Sha $mI
+  @("fecha_utc=$((Get-Date).ToUniversalTime().ToString('o'))", "motivo=$MotivoCorte", "head=$script:HeadActual",
+    "tramos_ok=$($hechos -join ',')", "tramos_a_repetir=$($repetir -join ',')", "ficheros=$($filas.Count)",
+    "manifest_sha256=$shaM") | Out-File -Encoding utf8 (Join-Path $dirR 'sello.txt')
+  # Retirada de las salidas propias de cada tramo a repetir (ya conservadas en la instantanea).
+  $dirX = Join-Path $dirR 'retirados'
+  New-Item -ItemType Directory -Force $dirX | Out-Null
+  foreach ($tr in $repetir) {
+    foreach ($patron in @("$tr*") + @($SALIDAS_TRAMO[$tr])) {
+      if (-not $patron) { continue }
+      Get-ChildItem $Evidencia -Filter $patron | Where-Object { $_.Name -notmatch $previos } | Move-Item -Destination $dirX -Force
+    }
+  }
+  "reanudacion: tramos ya OK $($hechos -join ','); intento cortado archivado en $(Split-Path $dirR -Leaf) ($($filas.Count) ficheros, manifest $shaM); motivo: $MotivoCorte" | Out-File -Encoding utf8 -Append $Resumen
 }
 "modo=$Modo ventana=$Ventana reducido=$($Reducido.IsPresent) head=$script:HeadActual head_cadena=$Head tramos=$($Tramos -join ',')" | Out-File -Encoding utf8 -Append $Resumen
 
