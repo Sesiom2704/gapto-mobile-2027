@@ -64,6 +64,22 @@
 #   el rol de la hija no puede fijarlo, STOP antes de las suites (no SKIP).
 #   Catalogos congelados: -ManifiestoCatalogos (SHA-256) obligatorio fuera de
 #   -Reducido para los catalogos y el lanzador que se usen.
+# Version: 0.4.0 (F05-D055 paso 1; F05 §68.2, §68.3 y §69.1, AJ-F0507G6-02..06):
+#   excepcion cerrada R-LOCALE con g4_rlocale.py y g4_rlocale_catalogo.json.
+#   Preflight (tramo hija): lc_messages efectivo por SQL igual al autorizado
+#   (C.UTF-8 en Neon) y evidencia de compatibilidad (-Compatibilidad) con su
+#   SHA-256; si no puede comprobarse o difiere, STOP-LC. Sustituye a la
+#   exigencia imposible «puede fijar lc_messages». La ventana Neon ejecuta
+#   backend+api UNA vez con el lc_messages del servidor (sin PGOPTIONS), con
+#   la sonda por conexion (-p g4_rlocale), y valida: los siete SKIP con su
+#   motivo, ningun otro SKIP, FAIL, ERROR ni XFAIL (database y suite_neon).
+#   La ventana Local agrega el tramo rlocale_local: backend+api en local C y
+#   en local es_ES; los siete PASS, misma coleccion que Neon y misma
+#   identidad. identidad.txt (SHA de producto, de tests, del runner, de
+#   g4_rlocale y de los catalogos) se escribe al inicio y debe coincidir al
+#   reanudar y al enlazar ventanas; arbol limpio obligatorio fuera de
+#   -Reducido; -Reanudar exige -MotivoCorte. En Ensayo la hija local puede
+#   fijar lc_messages: la parte Neon de R-LOCALE queda NO EJECUTADO.
 # ============================================================
 param(
   [ValidateSet('Ensayo', 'Neon')][string]$Modo = 'Ensayo',
@@ -83,19 +99,23 @@ param(
   [string[]]$Tramos = @(),
   [string]$EvidenciaNeon = '',
   [string]$ManifiestoCatalogos = '',
+  [string]$Compatibilidad = '',
+  [string]$MotivoCorte = '',
   [switch]$Reanudar,
   [switch]$Reducido
 )
 $TRAMOS_NEON = @('hija', 'firma_antes', 'replay', 'huellas_antes', 'suites', 'huellas_despues', 'post', 'firma_despues', 'manifiesto')
-$TRAMOS_LOCAL = @('concurrencia', 'jest', 'e2e', 'mutantes', 'manifiesto')
+$TRAMOS_LOCAL = @('rlocale_local', 'concurrencia', 'jest', 'e2e', 'mutantes', 'manifiesto')
 if (-not $Tramos) {
   $Tramos = switch ($Ventana) {
     'Neon' { $TRAMOS_NEON }
     'Local' { $TRAMOS_LOCAL }
-    default { @('hija', 'firma_antes', 'replay', 'huellas_antes', 'suites', 'concurrencia', 'jest', 'e2e',
+    default { @('hija', 'firma_antes', 'replay', 'huellas_antes', 'suites', 'rlocale_local', 'concurrencia', 'jest', 'e2e',
                 'huellas_despues', 'post', 'mutantes', 'firma_despues', 'manifiesto') }
   }
 }
+if ($Ventana -eq 'Todo' -and -not $EvidenciaNeon) { $EvidenciaNeon = $Evidencia }
+$SUITE_RLOCALE_REDUCIDA = @('tests/api/test_160_f05_01_traduccion_locale.py', 'tests/api/test_183_f05_04_corte_concepto.py')
 $ErrorActionPreference = 'Continue'
 $LOCAL = 'host=127.0.0.1 port=5463 user=postgres'
 $PSQL = $Psql
@@ -229,6 +249,11 @@ except Exception as e:
 $fResiduos = Join-Path $Evidencia 'residuos.py'; $RESIDUOS | Out-File -Encoding utf8 $fResiduos
 
 
+$RLOCALE = Join-Path $Worktree 'scripts\dev\g4_rlocale.py'
+$CAT_RLOCALE = Join-Path $Worktree 'scripts\dev\g4_rlocale_catalogo.json'
+function Sha([string]$p) { return (Get-FileHash -Algorithm SHA256 $p).Hash.ToLower() }
+function RLocale([string]$log, [string[]]$argumentos) { return (Py $log (@('-I', $RLOCALE) + $argumentos)) }
+
 # Parametros que solo exigen los tramos que los usan
 $faltan = @()
 $largos = @($Tramos | Where-Object { $_ -in 'concurrencia', 'e2e', 'mutantes' })
@@ -236,13 +261,17 @@ if ($largos -and -not $Dist) { $faltan += '-Dist' }
 if ('e2e' -in $Tramos -and $Reducido -and -not $Lanzador) { $faltan += '-Lanzador' }
 if (-not $Reducido -and ('concurrencia' -in $Tramos -or 'e2e' -in $Tramos) -and -not $CatalogoSerie) { $faltan += '-CatalogoSerie' }
 if (-not $Reducido -and 'mutantes' -in $Tramos -and -not $CatalogoMutantes) { $faltan += '-CatalogoMutantes' }
-if (-not $Reducido -and $largos -and -not $ManifiestoCatalogos) { $faltan += '-ManifiestoCatalogos' }
+if (-not $Reducido -and -not $ManifiestoCatalogos) { $faltan += '-ManifiestoCatalogos' }
+if ('hija' -in $Tramos -and -not $Compatibilidad) { $faltan += '-Compatibilidad' }
+if ('rlocale_local' -in $Tramos -and -not $EvidenciaNeon) { $faltan += '-EvidenciaNeon' }
+if ($Reanudar -and -not $MotivoCorte) { $faltan += '-MotivoCorte' }
 if ($faltan) { Stop-G4 "faltan parametros: $($faltan -join ', ')" }
 # Catalogos congelados (AJ-F0507G4-15): cada catalogo y lanzador usado debe estar en el manifiesto con su SHA-256.
 if ($ManifiestoCatalogos) {
   if (-not (Test-Path $ManifiestoCatalogos)) { Stop-G4 'no existe el manifiesto de catalogos' }
   $congelados = @(Get-Content $ManifiestoCatalogos | Where-Object { $_ -match '^[0-9a-f]{64}\s' } | ForEach-Object { ($_ -split '\s+')[0] })
-  foreach ($c in @($CatalogoSerie, $CatalogoMutantes, $Lanzador) | Where-Object { $_ }) {
+  # 0.4.0: tambien el runner, g4_rlocale.py y la lista cerrada R-LOCALE (AJ-F0507G6-06).
+  foreach ($c in @($CatalogoSerie, $CatalogoMutantes, $Lanzador, $PSCommandPath, $RLOCALE, $CAT_RLOCALE) | Where-Object { $_ }) {
     if (-not (Test-Path $c)) { Stop-G4 "no existe el catalogo $(Split-Path $c -Leaf)" }
     $h = (Get-FileHash -Algorithm SHA256 $c).Hash.ToLower()
     if ($h -notin $congelados) { Stop-G4 "catalogo no congelado o modificado: $(Split-Path $c -Leaf) ($h)" }
@@ -261,10 +290,29 @@ if (Test-Path $Registro) {
 }
 if ((Test-Path $fHead) -and ((Get-Content $fHead -Raw).Trim() -ne $script:HeadActual)) { Stop-G4 'la evidencia es de otro HEAD (mismo SHA en todo G4)' }
 $script:HeadActual | Out-File -Encoding utf8 $fHead
-git status --porcelain | Out-File -Encoding utf8 (Join-Path $Evidencia "status_antes_$(Get-Date -Format yyyyMMdd-HHmmss).txt")
+$sucio = git status --porcelain
+$sucio | Out-File -Encoding utf8 (Join-Path $Evidencia "status_antes_$(Get-Date -Format yyyyMMdd-HHmmss).txt")
+if ($sucio -and -not $Reducido) { Stop-G4 'arbol no limpio: G4 exige el candidato confirmado (F05 §68.3)' }
+# Identidad (F05 §68.3, §69.1 G): SHA de producto, de tests, del runner, de g4_rlocale y de los catalogos.
+$identidad = [ordered]@{
+  head = $script:HeadActual
+  tests = (git rev-parse HEAD:tests).Trim()
+  runner = Sha $PSCommandPath
+  rlocale = Sha $RLOCALE
+  catalogo_rlocale = Sha $CAT_RLOCALE
+  catalogos = if ($ManifiestoCatalogos) { Sha $ManifiestoCatalogos } else { 'ninguno' }
+}
+$lineasId = @($identidad.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" })
+$fId = Join-Path $Evidencia 'identidad.txt'
+if (Test-Path $fId) {
+  $previa = @(Get-Content $fId | Where-Object { $_ -match '^(head|tests|runner|rlocale|catalogo_rlocale|catalogos)=' })
+  if (Compare-Object $previa $lineasId) { Stop-G4 'identidad distinta de la registrada: mismo SHA, runner y catalogos en todo G4 (F05 §68.3)' }
+} else { $lineasId | Out-File -Encoding utf8 $fId }
 if ($EvidenciaNeon) {
   $hn = Join-Path $EvidenciaNeon 'head.txt'
   if (-not (Test-Path $hn) -or (Get-Content $hn -Raw).Trim() -ne $script:HeadActual) { Stop-G4 'la ventana Neon enlazada es de otro HEAD (o no existe)' }
+  $idNeon = @(Get-Content (Join-Path $EvidenciaNeon 'identidad.txt') -ErrorAction SilentlyContinue | Where-Object { $_ -match '^(head|tests|runner|rlocale|catalogo_rlocale|catalogos)=' })
+  if (-not $idNeon -or (Compare-Object $idNeon $lineasId)) { Stop-G4 'la ventana Neon enlazada tiene otra identidad (SHA de tests, runner o catalogos)' }
   $okNeon = @(Get-Content (Join-Path $EvidenciaNeon 'tramos_g4.tsv') -ErrorAction SilentlyContinue | Where-Object { ($_ -split "`t")[1] -eq 'OK' }).Count
   "ventana Neon enlazada: mismo HEAD; tramos OK registrados $okNeon" | Out-File -Encoding utf8 -Append $Resumen
 }
@@ -275,7 +323,8 @@ if ($Reanudar) {
   foreach ($tr in $Tramos | Where-Object { $_ -notin $hechos -and $_ -ne 'manifiesto' }) {
     Get-ChildItem $Evidencia -File -Filter "$tr*" | Move-Item -Destination $dirR
   }
-  "reanudacion: tramos ya OK $($hechos -join ','); registros previos de los demas en $(Split-Path $dirR -Leaf)" | Out-File -Encoding utf8 -Append $Resumen
+  "$(Get-Date -Format o) motivo del corte: $MotivoCorte" | Out-File -Encoding utf8 (Join-Path $dirR 'motivo_corte.txt')
+  "reanudacion: tramos ya OK $($hechos -join ','); registros previos de los demas en $(Split-Path $dirR -Leaf); motivo: $MotivoCorte" | Out-File -Encoding utf8 -Append $Resumen
 }
 "modo=$Modo ventana=$Ventana reducido=$($Reducido.IsPresent) head=$script:HeadActual head_cadena=$Head tramos=$($Tramos -join ',')" | Out-File -Encoding utf8 -Append $Resumen
 
@@ -288,7 +337,7 @@ try {
     switch ($tr) {
       'hija' {
         if ($Modo -eq 'Ensayo') {
-          Base-Local 'g4e_hija' | Out-File -Encoding utf8 (Join-Path $Evidencia 'hija.log')
+          Base-Local 'g4e_hija' '' 'C' | Out-File -Encoding utf8 (Join-Path $Evidencia 'hija.log')
           # «referencia» simulada: copia de una base en head 0350 con datos sinteticos (no se toca despues)
           Base-Local 'g4e_ref' 'm3_ref' | Out-File -Encoding utf8 -Append (Join-Path $Evidencia 'hija.log')
         }
@@ -301,6 +350,15 @@ try {
           if (Select-String -Path (Join-Path $Evidencia 'hija_inicio.log') -Pattern 'OperationalError' -Quiet) { Stop-G4 'STOP-NEON: conexion a la hija fallida' }
           Stop-G4 'la hija no esta virgen (ver inicio.txt)'
         }
+        # Preflight lc_messages (F05 §68.2): valor efectivo por SQL y evidencia de compatibilidad; si no, STOP-LC.
+        $env:GAPTO_CLEANROOM_URL = $URL_HIJA
+        $a = @('preflight', '--env', 'GAPTO_CLEANROOM_URL', '--compatibilidad', $Compatibilidad, '--salida', (Join-Path $Evidencia 'preflight_lc.txt'))
+        if ($Modo -eq 'Ensayo') { $a += @('--ensayo-lc', 'C') }
+        $rc = RLocale (Join-Path $Evidencia 'preflight_lc.log') $a
+        Remove-Item Env:GAPTO_CLEANROOM_URL
+        if ($rc -ne 0) { Stop-G4 'STOP-LC: lc_messages no comprobable o distinto del autorizado, o evidencia de compatibilidad ausente (preflight_lc.txt)' }
+        $lc = (Select-String -Path (Join-Path $Evidencia 'preflight_lc.txt') -Pattern 'lc_messages efectivo: (.+)$' | Select-Object -Last 1).Matches[0].Groups[1].Value
+        "lc_messages_neon=$lc" | Out-File -Encoding utf8 -Append $fId
       }
       { $_ -in 'firma_antes', 'firma_despues' } {
         $env:GAPTO_SONDA_URL = $URL_REF
@@ -328,11 +386,17 @@ try {
         if ($rc -ne 0) { $estado = 'KO' }
       }
       'suites' {
-        # Suites sobre la hija (proveedor). §67.6: si la suite en C no puede ejecutarse -> STOP, no SKIP.
-        $fInicio = Join-Path $Evidencia 'inicio.txt'
-        if (-not $Reducido) {
-          if (-not (Test-Path $fInicio)) { Stop-G4 'falta inicio.txt (tramo hija)' }
-          if (-not (Select-String -Path $fInicio -Pattern 'puede fijar lc_messages: SI' -Quiet)) { Stop-G4 'STOP-LC: el rol de la hija no puede fijar lc_messages (suite en C no ejecutable)' }
+        # Suites sobre la hija (proveedor) con el lc_messages efectivo del servidor (F05 §68.1); el preflight debe ser CONFORME.
+        $fPre = Join-Path $Evidencia 'preflight_lc.txt'
+        if (-not (Test-Path $fPre) -or -not (Select-String -Path $fPre -Pattern '^PREFLIGHT lc_messages: CONFORME' -Quiet)) { Stop-G4 'STOP-LC: falta el preflight de lc_messages CONFORME (tramo hija)' }
+        # Sonda por conexion (-p g4_rlocale) y suite unica backend+api sin PGOPTIONS.
+        function Suite-Neon([string[]]$objetivo) {
+          Remove-Item Env:PGOPTIONS -ErrorAction SilentlyContinue
+          $env:PYTHONPATH = Join-Path $Worktree 'scripts\dev'
+          $env:G4_SONDA_LC_SALIDA = Join-Path $Evidencia 'sonda_suite_neon.json'
+          $x = Pytest 'suite_neon' $URL_HIJA $objetivo @('--rootdir=tests/api', '-p', 'g4_rlocale')
+          Remove-Item Env:PYTHONPATH, Env:G4_SONDA_LC_SALIDA -ErrorAction SilentlyContinue
+          return $x
         }
         # Aislamiento: instantanea de las semillas tras el replay y comprobacion tras cada suite.
         $fAisl = Join-Path $Evidencia 'aislamiento_suites.txt'
@@ -352,7 +416,8 @@ try {
           $r = @(
             (Tras-Suite 'database' (Pytest 'database' $URL_HIJA @('tests/database/test_017_seeds_sistema.py', 'tests/database/test_045_f03_06_0350_tipo_hecho_condonacion.py'))),
             (Pytest 'sin_bd' '' @('tests/database/test_044_envdev_head_autorizado.py', 'tests/migration/test_rv3_000_repo_sin_datos_v3.py', 'tests/api/test_230_f05_d052_no_invocacion_f06.py')),
-            (Tras-Suite 'api_es_ES' (Pytest 'api_es_ES' $URL_HIJA @('tests/api/test_154_f05_01_inventario_categorias.py') @('--rootdir=tests/api')))
+            (Tras-Suite 'api_es_ES' (Pytest 'api_es_ES' $URL_HIJA @('tests/api/test_154_f05_01_inventario_categorias.py') @('--rootdir=tests/api'))),
+            (Tras-Suite 'suite_neon' (Suite-Neon $SUITE_RLOCALE_REDUCIDA))
           )
         } else {
           Base-Local 'g4e_rv3lab' | Out-Null
@@ -364,12 +429,41 @@ try {
             (Pytest 'migration' '' @('tests/migration')),
             (& { $env:GAPTO_RV3_IMPORT_URL = $URL_LAB; $x = Pytest 'migration_lab' '' @('tests/migration'); Remove-Item Env:GAPTO_RV3_IMPORT_URL; $x }),
             (Pytest 'sin_bd' '' @('tests/database/test_044_envdev_head_autorizado.py', 'tests/migration/test_rv3_000_repo_sin_datos_v3.py', 'tests/api/test_230_f05_d052_no_invocacion_f06.py')),
-            (Tras-Suite 'suite_es_ES' (& { $env:PGOPTIONS = '-c lc_messages=es_ES'; $x = Pytest 'suite_es_ES' $URL_HIJA @('tests/backend', 'tests/api') @('--rootdir=tests/api'); Remove-Item Env:PGOPTIONS; $x })),
-            (Tras-Suite 'suite_C' (& { $env:PGOPTIONS = '-c lc_messages=C'; $x = Pytest 'suite_C' $URL_HIJA @('tests/backend', 'tests/api') @('--rootdir=tests/api'); Remove-Item Env:PGOPTIONS; $x }))
+            (Tras-Suite 'suite_neon' (Suite-Neon @('tests/backend', 'tests/api')))
           )
+        }
+        # Validacion posterior R-LOCALE (F05 §69.1): sobre las ejecuciones contra la hija (database y suite_neon).
+        # Un SKIP no cambia el rc de pytest: el rc 0 no basta y lo decide la lista cerrada.
+        $jn = @('--junit', (Join-Path $Evidencia 'suite_neon.xml'))
+        if (Test-Path (Join-Path $Evidencia 'database.xml')) { $jn += @('--junit', (Join-Path $Evidencia 'database.xml')) }
+        if ($Modo -eq 'Ensayo') {
+          'R-LOCALE Neon: NO EJECUTADO (Ensayo: la hija local puede fijar lc_messages; los siete no pueden ser SKIP)' | Out-File -Encoding utf8 -Append $Resumen
+        } else {
+          $rcV = RLocale (Join-Path $Evidencia 'rlocale_neon.log') (@('validar-neon') + $jn + @('--salida', (Join-Path $Evidencia 'rlocale_neon.txt'),
+            '--sonda', (Join-Path $Evidencia 'sonda_suite_neon.json'), '--coleccion', (Join-Path $Evidencia 'coleccion_suite_neon.txt')))
+          if ($rcV -eq 3) { Stop-G4 'STOP-LC: lc_messages de las suites distinto del autorizado o no comprobado (rlocale_neon.txt)' }
+          if ($rcV -ne 0) { $estado = 'KO'; 'R-LOCALE Neon: FAIL (rlocale_neon.txt)' | Out-File -Encoding utf8 -Append $Resumen }
         }
         if ($r | Where-Object { $_ -ne 0 }) { $estado = 'KO' }
         if ($script:Aislamiento | Where-Object { $_ -ne 0 }) { $estado = 'KO'; 'aislamiento entre suites: semillas ALTERADAS (aislamiento_suites.txt)' | Out-File -Encoding utf8 -Append $Resumen }
+      }
+      'rlocale_local' {
+        # Cobertura obligatoria R-LOCALE (F05 §68.1 req. 4, §69.1): la MISMA coleccion que suite_neon en local C y es_ES.
+        $obj = if ($Reducido) { $SUITE_RLOCALE_REDUCIDA } else { @('tests/backend', 'tests/api') }
+        Remove-Item Env:PGOPTIONS -ErrorAction SilentlyContinue
+        $rl = @()
+        foreach ($lc in 'C', 'es_ES') {
+          $n = "local_$lc"
+          Base-Local "g4l_$($lc.ToLower() -replace '_', '')" 'm3_ref' $lc | Out-File -Encoding utf8 (Join-Path $Evidencia "$n.base.log")
+          $rl += Pytest $n "postgresql://postgres@127.0.0.1:5463/g4l_$($lc.ToLower() -replace '_', '')" $obj @('--rootdir=tests/api')
+        }
+        "lc_messages_local=C,es_ES" | Out-File -Encoding utf8 -Append $fId
+        $a = @('validar-local', '--neon', (Join-Path $EvidenciaNeon 'suite_neon.xml'), '--c', (Join-Path $Evidencia 'local_C.xml'),
+               '--es', (Join-Path $Evidencia 'local_es_ES.xml'), '--identidad-neon', (Join-Path $EvidenciaNeon 'identidad.txt'),
+               '--identidad-local', $fId, '--salida', (Join-Path $Evidencia 'rlocale_local.txt'))
+        if ($Modo -eq 'Ensayo') { $a += '--ensayo' }
+        $rcV = RLocale (Join-Path $Evidencia 'rlocale_local.log') $a
+        if ($rcV -ne 0 -or ($rl | Where-Object { $_ -ne 0 })) { $estado = 'KO' }
       }
       'concurrencia' {
         if ($Reducido) {

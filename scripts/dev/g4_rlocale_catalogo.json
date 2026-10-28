@@ -1,0 +1,22 @@
+{
+ "catalogo": "g4_rlocale_catalogo",
+ "version": "1.0.0",
+ "decision": "F05-D055 (F05 §69.1, P-1; AJ-F0507G6-02)",
+ "candidato_funcional": "9c62d69d236f9005b66f4eb64137ebe9a92d4b91",
+ "lc_messages_autorizado_neon": "C.UTF-8",
+ "matriz": "R-LOCALE: no ejecutable en Neon por privilegio del proveedor. Siete SKIP contractuales identificados. Cobertura obligatoria PASS en local C y es_ES.",
+ "compatibilidad": {
+  "informe": {"fichero": "INFORME_COMPATIBILIDAD_LC.md", "sha256": "7984faceae00d671bb49c01cbf3e7215f4051dacf28cca732c3a4074bd582339"},
+  "comparacion": {"fichero": "comparacion.json", "sha256": "8914da6fa91551ae2c7b3b93f05a30e83f45645a931bec2fce0c57bc22285f9e"}
+ },
+ "motivo_skip": "R-LOCALE: el rol de conexion no puede fijar lc_messages (parametro de superusuario)",
+ "casos": [
+  "tests/api/test_160_f05_01_traduccion_locale.py::test_aciclicidad_por_trigger_real_se_traduce[C]",
+  "tests/api/test_160_f05_01_traduccion_locale.py::test_aciclicidad_por_trigger_real_se_traduce[es_ES]",
+  "tests/api/test_160_f05_01_traduccion_locale.py::test_mover_bloqueado_por_presupuesto_congelado_d122_en_cada_idioma[C]",
+  "tests/api/test_160_f05_01_traduccion_locale.py::test_mover_bloqueado_por_presupuesto_congelado_d122_en_cada_idioma[es_ES]",
+  "tests/api/test_160_f05_01_traduccion_locale.py::test_mover_que_solapa_bolsas_sin_prioridad_d121_en_cada_idioma[C]",
+  "tests/api/test_160_f05_01_traduccion_locale.py::test_mover_que_solapa_bolsas_sin_prioridad_d121_en_cada_idioma[es_ES]",
+  "tests/api/test_183_f05_04_corte_concepto.py::test_aj_rlocale03_forma_funcional_del_error_igual_en_c_y_es_es"
+ ]
+}
