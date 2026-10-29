@@ -21,6 +21,14 @@
 #   loopback). SKIP != PASS. `test_destino_no_permitido_aborta_antes_de_conectar`
 #   y `test_envdev_y_e2e_permitidos` se ejecutan siempre. `exigir_destino`,
 #   LOOPBACK y PERMITIDOS del script no cambian. Nuevo test de la decision.
+# Version: 0.4.0 (F05-D056 paso 4, F05 §70.3, H-S1-01): defensa doble del script
+#   0.3.0. Un rol distinto de gapto_runtime aborta antes de conectar y un rol
+#   efectivo privilegiado aborta en la lectura de cuentas; prueba
+#   negativa cross-owner (cuenta explicita de otro owner) con oraculo fisico
+#   privilegiado de la base de tests: 0 previsiones y 0 terceros escritos en
+#   ninguno de los dos owners; cuenta ambigua o inexistente sin explicitas aborta
+#   sin escribir; con dos owners en la base, la siembra sin explicitas toma la
+#   cuenta del propio owner (la otra AHORRO no es candidata).
 # ============================================================
 
 from __future__ import annotations
@@ -99,6 +107,81 @@ def test_destino_no_permitido_aborta_antes_de_conectar(dsn, monkeypatch):
     with pytest.raises(SystemExit) as e:
         mod.sembrar(dsn, uuid.uuid4())
     assert "no permitido" in str(e.value) and "password" not in str(e.value) and "y" != str(e.value)
+
+
+@pytest.mark.parametrize("rol", [None, "postgres", "gapto_owner", "gapto_bootstrap", ""])
+def test_rol_distinto_de_runtime_aborta_antes_de_conectar(rol, monkeypatch):
+    """§70.3: sin fallback a superusuario ni a otro rol: aborta antes de conectar."""
+    mod = _cargar_script()
+    monkeypatch.setattr(mod.psycopg, "connect", lambda *a, **k: (_ for _ in ()).throw(AssertionError("conecto")))
+    with pytest.raises(SystemExit) as e:
+        mod.sembrar("host=127.0.0.1 port=5434 dbname=gapto2027_dev user=app_dev", uuid.uuid4(), rol_runtime=rol)
+    assert "rol no permitido" in str(e.value)
+
+
+@solo_loopback
+def test_rol_efectivo_privilegiado_aborta_en_la_lectura(siembra):
+    """Segunda capa: aunque se salte exigir_rol, una unidad sin SET ROLE (conexion privilegiada
+    de la base de tests) aborta al comprobar el rol efectivo, sin elegir cuenta."""
+    owner, *_ = m.entorno()
+    unidad = siembra._unidad(h.dsn(), None)
+    with pytest.raises(SystemExit) as e:
+        siembra._cuentas(unidad, m.ctx(owner), owner)
+    assert "rol efectivo no permitido" in str(e.value)
+
+
+def _fisico(owners) -> dict:
+    """Oraculo fisico con la conexion de la base de tests (no gapto_runtime): previsiones,
+    terceros y hechos por owner, sin pasar por la RLS de la siembra."""
+    with psycopg.connect(h.dsn()) as c:
+        return {o: tuple(c.execute(f"SELECT count(*) FROM gapto.{t} WHERE owner_user_id = %s", (o,)).fetchone()[0]
+                         for t in ("previsiones", "terceros", "hechos_financieros"))
+                for o in owners}
+
+
+@solo_loopback
+def test_cross_owner_cuenta_explicita_de_otro_owner_aborta_sin_escribir(siembra):
+    """H-S1-01: la cuenta de otro owner pasada como explicita aborta; nada se escribe en ninguno."""
+    a, *_ = m.entorno()
+    b, _, _, cta_b, ahorro_b = m.entorno()
+    antes = _fisico([a, b])
+    for cuentas in ({"ahorro": ahorro_b}, {"nomina": cta_b}):
+        with pytest.raises(siembra.CuentaNoValida) as e:
+            siembra.sembrar(h.dsn(), a, hoy=dt.date(2026, 10, 10), cuentas=cuentas)
+        assert "otro owner" in str(e.value)
+    assert _fisico([a, b]) == antes
+
+
+@solo_loopback
+def test_cuenta_ambigua_o_de_otro_tipo_aborta_sin_escribir(siembra):
+    owner, actor, cli, cta, ahorro = m.entorno()
+    h.crear_cuenta(owner, [(actor, 100)], tipo="AHORRO")  # segunda AHORRO: ambigua
+    antes = _fisico([owner])
+    with pytest.raises(siembra.CuentaNoValida) as e:
+        siembra.sembrar(h.dsn(), owner, hoy=dt.date(2026, 10, 10))
+    assert "ambigua" in str(e.value)
+    with pytest.raises(siembra.CuentaNoValida) as e:  # CORRIENTE pasada como ahorro: tipo incorrecto
+        siembra.sembrar(h.dsn(), owner, hoy=dt.date(2026, 10, 10), cuentas={"ahorro": cta})
+    assert "no es AHORRO" in str(e.value)
+    assert _fisico([owner]) == antes
+    # Con la explicita correcta, siembra.
+    assert [r for r in siembra.sembrar(h.dsn(), owner, hoy=dt.date(2026, 10, 10), cuentas={"ahorro": ahorro})
+            if r["alta"] and r["fixture"].startswith("prevision.")]
+
+
+@solo_loopback
+def test_sin_explicitas_toma_la_cuenta_del_propio_owner(siembra):
+    """Con varios owners en la base, el traspaso «Nómina → Ahorro» queda en las cuentas del owner."""
+    m.entorno()  # otro owner con su AHORRO
+    owner, _, _, cta, ahorro = m.entorno()
+    reg = siembra.sembrar(h.dsn(), owner, hoy=dt.date(2026, 10, 10))
+    traspaso = next(uuid.UUID(r["uuid"]) for r in reg if r["fixture"] == "prevision.traspaso")
+    assert m.uno(owner, "SELECT cuenta_salida_esperada_id, cuenta_entrada_esperada_id FROM gapto.previsiones WHERE id = %s",
+                 (traspaso,)) == (cta, ahorro)
+    with psycopg.connect(h.dsn()) as c:  # oraculo fisico: ninguna prevision del owner con cuenta ajena
+        assert c.execute("SELECT count(*) FROM gapto.previsiones p JOIN gapto.cuentas k "
+                         "ON k.id IN (p.cuenta_salida_esperada_id, p.cuenta_entrada_esperada_id) "
+                         "WHERE p.owner_user_id = %s AND k.owner_user_id <> p.owner_user_id", (owner,)).fetchone()[0] == 0
 
 
 def test_envdev_y_e2e_permitidos(siembra):
