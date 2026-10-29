@@ -2,8 +2,9 @@
 // GAPTO MOBILE 2027
 // Fichero: exploradorColaAR.ts
 // Ruta: mobile/__tests__/explorador/exploradorColaAR.ts
-// Descripción: Explorador de intercalaciones de COLA-AR (F05 §70.A; mandato de la consulta 10, AJ-F0507G9-01). Ejecuta la cola REAL (`ColaAccionRapida` y `manejarEstadoApp` del adaptador) dentro de un mundo simulado: reloj y temporizadores, almacén con lecturas y escrituras en una sola cola en orden (FIFO, como AsyncStorage) que pueden fallar, y escrituras que se pierden o se completan al matar la app, identidad servida (A, sin conexión u otro owner B), ejecutor de red cuyas respuestas llegan en cualquier orden (OK, respuesta perdida con o sin aplicación, rechazo) y un servidor idempotente por `intencion_id` (y «omitir» sin replay de éxito: 409 al repetir). AppState active / inactive / background, matar la app (con las escrituras pendientes perdidas o completadas) y reabrirla. Cada paso es un evento atómico tras el que se asientan todas las microtareas; los únicos puntos de elección son los eventos. Recorre en profundidad, SIN ESTADO y repitiendo cada camino desde cero, TODOS los órdenes de eventos posibles hasta la profundidad pedida, con presupuestos de fallos, ausencias, muertes y gestos del usuario. Invariantes: I1 nunca POST antes del plazo ni de un swipe que el usuario canceló en esa misma instancia de la app o cuya cancelación ya estaba guardada (si la app muere antes de guardar la cancelación, la intención puede reaparecer al reabrir: se cuenta como «resurrección», observación aparte, y el usuario coherente la vuelve a cancelar); I2 nunca POST con la app ausente (ni desde una instancia muerta); I3 una sola identidad y el mismo payload por swipe en todos los POST, y como mucho una aplicación efectiva; I4 nunca CONFIRMADA sin una respuesta OK (o la lectura OMITIDA) entregada, ni RECHAZADA sin un rechazo o una lectura; I5 vivacidad: al final de cada camino, con la app en primer plano, el servidor respondiendo y un usuario que contesta a las preguntas con su decisión, toda intención no cancelada de la identidad A llega a CONFIRMADA o RECHAZADA en 120 s simulados (las guardadas con otro owner quedan con el suyo y las que nunca llegaron a guardarse antes de matar la app quedan fuera); I6 nunca se pierde una intención persistida (sigue en memoria o en el almacén hasta su final o su cancelación).
+// Descripción: Explorador de intercalaciones de COLA-AR (F05 §70.A; mandato de la consulta 10, AJ-F0507G9-01). Ejecuta la cola REAL (`ColaAccionRapida` y `manejarEstadoApp` del adaptador) dentro de un mundo simulado: reloj y temporizadores, almacén con lecturas y escrituras en una sola cola en orden (FIFO, como AsyncStorage) que pueden fallar, y escrituras que se pierden o se completan al matar la app, identidad servida (A, sin conexión u otro owner B), ejecutor de red cuyas respuestas llegan en cualquier orden (OK, respuesta perdida con o sin aplicación, rechazo) y un servidor idempotente por `intencion_id` (y «omitir» sin replay de éxito: 409 al repetir). AppState active / inactive / background, matar la app (con las escrituras pendientes perdidas o completadas) y reabrirla. Cada paso es un evento atómico tras el que se asientan todas las microtareas; los únicos puntos de elección son los eventos. Recorre en profundidad, SIN ESTADO y repitiendo cada camino desde cero, TODOS los órdenes de eventos posibles hasta la profundidad pedida, con presupuestos de fallos, ausencias, muertes y gestos del usuario. Invariantes: I1 nunca POST antes del plazo de Deshacer; I2 nunca POST con la app ausente (ni desde una instancia muerta); I3 una sola identidad y el mismo payload por swipe en todos los POST, y como mucho una aplicación efectiva; I4 nunca CONFIRMADA sin una respuesta OK (o la lectura OMITIDA) entregada, ni RECHAZADA sin un rechazo o una lectura; I5 vivacidad: al final de cada camino, con la app en primer plano, el servidor respondiendo y un usuario que contesta a las preguntas con su decisión, toda intención no cancelada de la identidad A llega a CONFIRMADA o RECHAZADA en 120 s simulados (las guardadas con otro owner quedan con el suyo y las que nunca llegaron a guardarse antes de matar la app quedan fuera); I6 nunca se pierde una intención persistida (sigue en memoria o en el almacén hasta su final o su cancelación); I7 ningún POST de una intención cuyo Deshacer (o Descartar) se pulsó, se haya guardado la cancelación o no; I8 una intención restaurada en una instancia nueva con un estado guardado sin enviar (EN_PLAZO, PENDIENTE_DE_ENVIO, NO_ENVIADA) no sale sin el gesto Enviar/Reintentar del usuario en esa instancia, y una pregunta solo existe en EN_PLAZO (ENVIADA guardada = «pudo salir»: se reconcilia, §70.A.4). Observación aparte (no es un POST): «reaparición de la pregunta» de una intención cancelada cuyo guardado se perdió al matar la app.
 // Versión: 0.1.0 (consulta 10, AJ-F0507G9-01)
+// Versión: 0.2.0 (consulta 11, AJ-F0507G10-01/03): oráculos explícitos I7 «ningún POST de una intención cuyo Deshacer (o Descartar) se pulsó», se haya guardado la cancelación o no, e I8 «una intención restaurada en una instancia nueva con un estado guardado sin enviar (EN_PLAZO, PENDIENTE_DE_ENVIO, NO_ENVIADA) no sale sin el gesto Enviar/Reintentar del usuario en esa instancia; ENVIADA guardada significa «pudo salir» y se reconcilia» (enmienda de §70.A.4). I1 queda solo para el plazo. La «resurrección» deja de ser una exención: se cuenta aparte como «reaparición de la pregunta» (una intención cancelada que vuelve a verse tras reabrir), que no es un POST.
 // Versión: 0.1.1 (consulta 10): en el cierre de vivacidad, la vuelta del usuario con su owner (A) se hace cuando ya se asentó un cambio de owner en curso (antes solo al empezar el cierre: a profundidad 6, con un cambio a B aún guardando, la intención de A se daba por parada aunque esperaba bien con su owner). Solo cambia el oráculo, no la cola. El cierre de vivacidad solo contesta a preguntas que la cola acepta (EN_PLAZO con pregunta o NO_ENVIADA): una pregunta en otro estado no se pulsa en bucle; y comprueba en cada paso la coherencia «pregunta solo en EN_PLAZO» (I1: una pregunta fuera de EN_PLAZO puede acabar enviándose sin preguntar).
 // ============================================================
 
@@ -22,8 +23,8 @@ import {
 } from '../../src/state/colaAccionRapida';
 import type { Respuesta } from '../../src/api/cliente';
 
-export type Invariante = 'I1' | 'I2' | 'I3' | 'I4' | 'I5' | 'I6';
-export const INVARIANTES: Invariante[] = ['I1', 'I2', 'I3', 'I4', 'I5', 'I6'];
+export type Invariante = 'I1' | 'I2' | 'I3' | 'I4' | 'I5' | 'I6' | 'I7' | 'I8';
+export const INVARIANTES: Invariante[] = ['I1', 'I2', 'I3', 'I4', 'I5', 'I6', 'I7', 'I8'];
 
 type Resp = Respuesta<unknown>;
 type AppEstado = 'active' | 'inactive' | 'background' | 'muerta';
@@ -68,10 +69,10 @@ export interface ResultadoConfig {
   maxRamificacion: number;
   violaciones: Record<Invariante, number>;
   /**
-   * Observación (no invariante): caminos en los que una cancelación aún no guardada se pierde al matar la app y, al
-   * reabrir, la intención reaparece y sale (ventana inherente al almacenamiento asíncrono; ver I1).
+   * Observación (no invariante): caminos en los que una intención cancelada (Deshacer/Descartar) cuyo guardado se perdió al
+   * matar la app REAPARECE al reabrir (como pregunta). No es un POST: un POST tras Deshacer es I7.
    */
-  resurrecciones: number;
+  reaparicionesPregunta: number;
   /** Caminos con violación por firma («invariante: detalle»), con el camino más corto de cada una. */
   firmas: Record<string, { caminos: number; masCorto: string[] }>;
   ejemplos: Violacion[];
@@ -86,7 +87,14 @@ interface Swipe {
   cancelada: boolean;
   /** Instancia (generación) en la que el usuario canceló, y si una escritura posterior ya la guardó sin la intención. */
   canceladaEn: number;
-  cancelacionGuardada: boolean;
+  /** Instancia en la que nació (0 = antes de la primera instancia: restaurada). */
+  creadaEn: number;
+  /** Instancias en las que hubo un POST de este swipe. */
+  postsEn: Set<number>;
+  /** Instancias en las que el usuario pulsó Enviar o Reintentar sobre ella. */
+  gestoEn: Set<number>;
+  /** Instancias que la restauraron con un estado guardado sin enviar (EN_PLAZO, PENDIENTE_DE_ENVIO, NO_ENVIADA): I8. */
+  exigeGestoEn: Set<number>;
   persistida: boolean;
   terminal: boolean;
 }
@@ -149,7 +157,7 @@ class Mundo {
   /** Identidad de cada POST → swipe al que pertenece (I3). */
   postDe = new Map<string, string>();
   violaciones: { invariante: Invariante; detalle: string }[] = [];
-  resurreccion = false;
+  reaparicion = false;
   gasto: Presupuesto = { fallos: 0, ausencias: 0, muertes: 0, usuario: 0, swipes: 0 };
   camino: string[] = [];
   private nIds = 0;
@@ -198,10 +206,13 @@ class Mundo {
     if (!s) return this.violar('I3', `POST con una identidad que no es de ningún swipe (${id})`);
     this.postDe.set(id, s.intencionId);
     if (this.t < s.vence) this.violar('I1', `POST en t=${this.t} antes del plazo (${s.vence})`);
-    // Cancelado en esta misma instancia o ya guardado como cancelado: nunca sale. Si la app murió antes de guardar la
-    // cancelación, la intención reaparece al reabrir: se cuenta aparte (resurrección), no es I1.
-    if (s.cancelada && (s.canceladaEn === gen || s.cancelacionGuardada)) this.violar('I1', 'POST de un swipe que el usuario canceló');
-    else if (s.cancelada) this.resurreccion = true;
+    // I7: ningún POST tras Deshacer/Descartar, se haya guardado o no la cancelación (la reaparición de la pregunta se cuenta aparte).
+    if (s.cancelada) this.violar('I7', `POST de un swipe cuyo Deshacer/Descartar se pulsó (en la instancia ${s.canceladaEn}; POST en la ${gen})`);
+    // I8 (enmienda de §70.A.4): restaurada en una instancia nueva y nunca enviada → solo sale con el gesto del usuario.
+    // Se juzga por lo que la app tenía guardado al abrir esta instancia: EN_PLAZO, PENDIENTE_DE_ENVIO o NO_ENVIADA (nunca
+    // llegó al POST). ENVIADA guardada significa «pudo salir»: se reconcilia (§70.A.4) y no exige gesto.
+    if (s.exigeGestoEn.has(gen) && !s.gestoEn.has(gen)) this.violar('I8', `POST sin gesto de una intención restaurada sin enviar (instancia ${gen})`);
+    s.postsEn.add(gen);
     if (gen !== this.gen || this.app !== 'active') this.violar('I2', `POST con la app ${gen !== this.gen ? 'muerta (instancia anterior)' : this.app}`);
     if (id !== s.intencionId) this.violar('I3', `POST con otra identidad para el mismo swipe (${id} ≠ ${s.intencionId})`);
     else if (JSON.stringify(i.payload) !== s.payload) this.violar('I3', 'POST con otro payload para el mismo swipe');
@@ -215,7 +226,8 @@ class Mundo {
       if (i.estado === 'RECHAZADA' && !this.rechazosEntregados.has(i.intencionId)) this.violar('I4', 'RECHAZADA sin rechazo ni lectura entregada');
       if (s && (i.estado === 'CONFIRMADA' || i.estado === 'RECHAZADA')) s.terminal = true;
       // Una pregunta solo existe en EN_PLAZO: fuera de él, la intención acabaría saliendo sin que el usuario contestara.
-      if (i.pregunta && i.estado !== 'EN_PLAZO') this.violar('I1', `pregunta en ${i.estado}: saldría sin que el usuario conteste`);
+      if (i.pregunta && i.estado !== 'EN_PLAZO') this.violar('I8', `pregunta en ${i.estado}: saldría sin que el usuario conteste`);
+      if (s && s.cancelada && this.gen > s.canceladaEn) this.reaparicion = true;
     }
     // I3: como mucho una aplicación efectiva por swipe (el servidor deduplica por identidad).
     for (const s of this.swipes.values()) {
@@ -249,6 +261,12 @@ class Mundo {
     this.gen += 1;
     this.app = 'active';
     const gen = this.gen;
+    for (const texto of this.almacen.values()) {
+      for (const g of JSON.parse(texto) as IntencionCola[]) {
+        const s = this.swipes.get(g.intencionId);
+        if (s && ['EN_PLAZO', 'PENDIENTE_DE_ENVIO', 'NO_ENVIADA'].includes(g.estado)) s.exigeGestoEn.add(gen);
+      }
+    }
     this.cola = new ColaAccionRapida(this.ejecutor(gen), this.almacenDe(gen), this.temporizadoresDe(gen));
     void this.cola.restaurar();
   }
@@ -258,7 +276,7 @@ class Mundo {
     const ok = this.cola!.lanzar({ clave: CLAVE, ruta: this.cfg.ruta, recursoId: CLAVE, textos: this.textos(), payload });
     if (ok) {
       const i = this.cola!.get(CLAVE)!;
-      this.swipes.set(intencionId, { clave: CLAVE, intencionId, payload: JSON.stringify(payload), vence: i.vence, cancelada: false, canceladaEn: 0, cancelacionGuardada: false, persistida: false, terminal: false });
+      this.swipes.set(intencionId, { clave: CLAVE, intencionId, payload: JSON.stringify(payload), vence: i.vence, cancelada: false, canceladaEn: 0, creadaEn: this.gen, postsEn: new Set(), gestoEn: new Set(), exigeGestoEn: new Set(), persistida: false, terminal: false });
     }
   }
 
@@ -275,7 +293,7 @@ class Mundo {
         pregunta: c.inicial === 'PREGUNTA', mensaje: estado === 'NO_ENVIADA' ? 'No se ha guardado · Reintentar' : null,
       };
       this.almacen.set(claveDe('A'), JSON.stringify([g]));
-      this.swipes.set(intencionId, { clave: CLAVE, intencionId, payload: JSON.stringify(payload), vence: g.vence, cancelada: false, canceladaEn: 0, cancelacionGuardada: false, persistida: true, terminal: false });
+      this.swipes.set(intencionId, { clave: CLAVE, intencionId, payload: JSON.stringify(payload), vence: g.vence, cancelada: false, canceladaEn: 0, creadaEn: 0, postsEn: new Set(g.envios > 0 ? [0] : []), gestoEn: new Set(), exigeGestoEn: new Set(), persistida: true, terminal: false });
       if (c.aplicada) {
         this.aplicadas.add(intencionId);
         if (c.ruta === 'NO_HUBO') this.prevision = 'OMITIDA';
@@ -417,7 +435,11 @@ class Mundo {
         if (i.pregunta || i.estado === 'NO_ENVIADA') {
           if (s && !s.cancelada) {
             ev.push({ etiqueta: i.pregunta ? 'usuario:enviar' : 'usuario:reintentar', coste: { usuario: 1 },
-              hacer: () => (i.pregunta ? this.cola!.enviarTrasAusencia(k) : this.cola!.reintentar(k)) });
+              hacer: () => {
+                this.gesto(s);
+                if (i.pregunta) this.cola!.enviarTrasAusencia(k);
+                else this.cola!.reintentar(k);
+              } });
           }
           ev.push({ etiqueta: 'usuario:descartar', coste: { usuario: 1 }, hacer: () => {
             this.cancelar(s);
@@ -452,8 +474,11 @@ class Mundo {
     const ids = new Set((JSON.parse(texto) as IntencionCola[]).map((g) => g.intencionId));
     for (const s of this.swipes.values()) {
       if (ids.has(s.intencionId)) s.persistida = true;
-      else if (s.cancelada && clave === claveDe('A')) s.cancelacionGuardada = true;
-    }
+      }
+  }
+
+  private gesto(s: Swipe | undefined) {
+    if (s) s.gestoEn.add(this.gen);
   }
 
   private cancelar(s: Swipe | undefined) {
@@ -517,7 +542,11 @@ class Mundo {
         if (!s || s.cancelada) {
           e = i.pregunta || i.estado === 'NO_ENVIADA' ? corto('usuario:descartar', () => cola.descartar(i.clave)) : corto('usuario:deshacer', () => cola.deshacer(i.clave));
         }
-        else e = corto(i.pregunta ? 'usuario:enviar' : 'usuario:reintentar', () => (i.pregunta ? cola.enviarTrasAusencia(i.clave) : cola.reintentar(i.clave)));
+        else e = corto(i.pregunta ? 'usuario:enviar' : 'usuario:reintentar', () => {
+          this.gesto(s);
+          if (i.pregunta) cola.enviarTrasAusencia(i.clave);
+          else cola.reintentar(i.clave);
+        });
       } else if (tm) {
         e = corto('reloj', () => {
           this.timers = this.timers.filter((x) => x !== tm);
@@ -558,7 +587,7 @@ export async function explorar(cfg: ConfigExploracion, opciones: { maxEjemplos?:
   const inicio = Date.now();
   const res: ResultadoConfig = {
     nombre: cfg.nombre, profundidad: cfg.profundidad, presupuesto: tope, caminos: 0, transiciones: 0, maxRamificacion: 0,
-    violaciones: { I1: 0, I2: 0, I3: 0, I4: 0, I5: 0, I6: 0 }, resurrecciones: 0, firmas: {}, ejemplos: [], ms: 0,
+    violaciones: { I1: 0, I2: 0, I3: 0, I4: 0, I5: 0, I6: 0, I7: 0, I8: 0 }, reaparicionesPregunta: 0, firmas: {}, ejemplos: [], ms: 0,
   };
   const maxEjemplos = opciones.maxEjemplos ?? 2;
   const elecciones: number[] = [];
@@ -580,7 +609,7 @@ export async function explorar(cfg: ConfigExploracion, opciones: { maxEjemplos?:
     const caminoExplorado = [...m.camino];
     await m.asentarVivo();
     res.caminos += 1;
-    if (m.resurreccion) res.resurrecciones += 1;
+    if (m.reaparicion) res.reaparicionesPregunta += 1;
     const vistas = new Set<Invariante>();
     const firmasVistas = new Set<string>();
     for (const v of m.violaciones) {

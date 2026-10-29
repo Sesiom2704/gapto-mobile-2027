@@ -5,6 +5,7 @@
 // Descripción: COLA-AR v1.0 (F05 §70.A.6; AJ-F0507G7-05): las 12 pruebas obligatorias sobre la cola de la app, deterministas (reloj y temporizadores simulados, almacén en memoria, servidor simulado que aplica la idempotencia por identidad como el real: un `intencion_id` = un hecho, un movimiento y una reducción), y las de la reconciliación por lectura de «No hubo» (decisión 1 de Moisés del 2026-10-29). Las de pantalla (desmontaje, navegación y ✓) están en `cola_ar_pantallas.test.tsx`; el oráculo físico, en `tests/api/test_224_f05_d056_cola_ar.py`.
 // Versión: 0.1.0 (F05-D056 paso 2)
 // Versión: 0.3.0 (pre-S2, AJ-F0507G8-13): la carrera del dictamen de la consulta 8 v1.1 reproducida con identidad y almacenamiento diferidos (sends_after_background = 0), reconciliación diferida e «inactive».
+// Versión: 0.5.0 (pre-S2, dictamen de la consulta 10, AJ-F0507G10-01; enmienda de §70.A.4): lo restaurado en una instancia nueva y sin enviar siempre pregunta: Deshacer no guardado + muerte + reapertura antes y después del vencimiento sin gesto (0 envíos), PENDIENTE_DE_ENVIO restaurada, «Enviar» con plazo vigente (cuenta atrás y nunca antes del plazo) y el retorno en la misma instancia sin cambio.
 // Versión: 0.4.0 (pre-S2, dictamen de la consulta 9, AJ-F0507G9-01): la reanudación de RESULTADO_DESCONOCIDO cuando la app vuelve antes de terminar una reconciliación en vuelo (vuelta antes de resolver la identidad y resolución tras vencer el temporizador de la vuelta; «inactive» y «background»; identidad y payload conservados; una sola aplicación efectiva) y los hallazgos del explorador de intercalaciones (lectura del almacén fallida al restaurar; swipe sobre la misma fila antes de cargar lo guardado; envío desplazado en vuelo; cambio de owner con un envío en curso). El arnés gana `Almacen.fallarLectura` y `Servidor.soltarPrimera()`.
 // Versión: 0.2.0 (pre-S2, AJ-F0507G8-01/02): el ejecutor da la identidad (`identidad()`) y el almacén guarda por clave de identidad; la cola se restaura con su identidad al montarse (como en la app). Las cuentas de lecturas de identidad se toman tras esa restauración. Pruebas nuevas al final.
 // ============================================================
@@ -978,5 +979,104 @@ describe('AJ-F0507G9-01 · cambio de owner con un envío en curso (explorador, p
     await reloj.avanzar(60000);
     expect(s.llamadas).toHaveLength(0); // nunca sale sin que el usuario conteste
     expect(cola.intenciones().map((i) => [i.clave, i.estado, i.pregunta])).toEqual([['d1', 'EN_PLAZO', true], ['d2', 'EN_PLAZO', true]]);
+  });
+});
+// ==================================================================
+// AJ-F0507G10-01: enmienda de §70.A.4 (decisión de Moisés del 2026-10-29): lo restaurado sin enviar siempre se pregunta
+// ==================================================================
+describe('AJ-F0507G10-01 · intención restaurada en una instancia nueva: siempre pregunta, nunca cuenta atrás ni envío solo', () => {
+  /** Swipe y su guardado; luego «Deshacer» cuya escritura se RETIENE (se pierde al morir la app). */
+  async function deshacerSinGuardar() {
+    const almacen = new Almacen();
+    const retenidas: (() => void)[] = [];
+    const ctl = { lento: false };
+    const base = almacen.escribir;
+    almacen.escribir = (k: string, t: string) => (ctl.lento ? new Promise<void>((res) => retenidas.push(() => void base(k, t).then(res))) : base(k, t));
+    const a = montar(new Servidor(), almacen);
+    await a.reloj.avanzar(0);
+    a.cola.lanzar(cobro());
+    await a.reloj.avanzar(1000);
+    expect((JSON.parse(almacen.texto!) as IntencionCola[]).map((g) => g.estado)).toEqual(['EN_PLAZO']); // guardada
+    ctl.lento = true;
+    a.cola.deshacer('d1'); // el usuario deshace…
+    await a.reloj.avanzar(0);
+    expect(a.cola.get('d1')).toBeUndefined();
+    expect(retenidas).toHaveLength(1); // …y la app muere antes de que se guarde la cancelación
+    expect((JSON.parse(almacen.texto!) as IntencionCola[]).map((g) => g.estado)).toEqual(['EN_PLAZO']);
+    return { almacen, t0: a.reloj.t };
+  }
+
+  test.each([
+    ['ANTES del vencimiento', 1000],
+    ['DESPUÉS del vencimiento', 3_600_000],
+  ])('Deshacer no guardado + muerte + reapertura %s, sin ningún gesto: 0 envíos; solo reaparece la pregunta', async (_c, despues) => {
+    const { almacen, t0 } = await deshacerSinGuardar();
+    const reloj = new Reloj();
+    reloj.t = t0 + (despues as number);
+    const b = montar(new Servidor(), almacen, reloj); // instancia nueva
+    await reloj.avanzar(0);
+    expect([b.cola.get('d1')!.estado, b.cola.get('d1')!.pregunta]).toEqual(['EN_PLAZO', true]);
+    expect(reloj.pendientes()).toBe(0); // ninguna cuenta atrás reanudada
+    await reloj.avanzar(120000);
+    expect(b.s.llamadas).toHaveLength(0);
+    expect(b.cola.get('d1')!.pregunta).toBe(true);
+    b.cola.descartar('d1'); // el usuario coherente vuelve a descartar
+    await reloj.avanzar(60000);
+    expect(b.s.llamadas).toHaveLength(0);
+  });
+
+  test('PENDIENTE_DE_ENVIO restaurada (nunca llegó al POST): pregunta, no resultado desconocido; sin gesto, 0 envíos', async () => {
+    const almacen = new Almacen();
+    const n0 = cobro();
+    const g: IntencionCola = { ...n0, intencionId: n0.payload.intencion_id, instante: 0, vence: PLAZO_DESHACER_MS, estado: 'PENDIENTE_DE_ENVIO',
+      envios: 0, intentos: 1, pregunta: false, mensaje: null };
+    almacen.texto = JSON.stringify([g]);
+    const reloj = new Reloj();
+    reloj.t = 3_600_000;
+    const { s, cola } = montar(new Servidor(), almacen, reloj);
+    await reloj.avanzar(0);
+    expect([cola.get('d1')!.estado, cola.get('d1')!.pregunta]).toEqual(['EN_PLAZO', true]);
+    await reloj.avanzar(120000);
+    expect(s.llamadas).toHaveLength(0);
+    cola.enviarTrasAusencia('d1'); // solo con el gesto
+    await reloj.avanzar(0);
+    expect(s.llamadas.map((l) => l.payload.intencion_id)).toEqual([g.intencionId]);
+  });
+
+  test('restaurada con plazo vigente: «Enviar» reanuda la cuenta atrás con Deshacer y sale al vencer, nunca antes', async () => {
+    const almacen = new Almacen();
+    const a = montar(new Servidor(), almacen);
+    await a.reloj.avanzar(0);
+    a.cola.lanzar(cobro());
+    await a.reloj.avanzar(1000); // la app muere aquí, con 4 s de plazo
+    const reloj = new Reloj();
+    reloj.t = a.reloj.t + 500;
+    const { s, cola } = montar(new Servidor(), almacen, reloj);
+    await reloj.avanzar(0);
+    expect(cola.get('d1')!.pregunta).toBe(true);
+    await reloj.avanzar(1000);
+    expect(s.llamadas).toHaveLength(0); // sin gesto, nada
+    cola.enviarTrasAusencia('d1');
+    await reloj.avanzar(0);
+    expect([cola.get('d1')!.estado, cola.get('d1')!.pregunta]).toEqual(['EN_PLAZO', false]); // cuenta atrás con Deshacer
+    await reloj.avanzar(cola.get('d1')!.vence - reloj.t - 1);
+    expect(s.llamadas).toHaveLength(0); // nunca antes del plazo
+    await reloj.avanzar(1);
+    expect(s.llamadas).toHaveLength(1);
+    expect(cola.get('d1')!.estado).toBe('CONFIRMADA');
+  });
+
+  test('retorno desde segundo plano en la MISMA instancia, con plazo: sigue la cuenta atrás (sin cambio)', async () => {
+    const { s, cola, reloj } = montar();
+    await reloj.avanzar(0);
+    cola.lanzar(cobro());
+    await reloj.avanzar(1000);
+    cola.alSegundoPlano();
+    await reloj.avanzar(1000);
+    cola.alPrimerPlano();
+    await reloj.avanzar(0);
+    expect([cola.get('d1')!.estado, cola.get('d1')!.pregunta]).toEqual(['EN_PLAZO', false]);
+    await reloj.avanzar(PLAZO_DESHACER_MS);
+    expect(s.llamadas).toHaveLength(1);
   });
 });
