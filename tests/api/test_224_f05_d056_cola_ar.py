@@ -16,11 +16,14 @@
 #       y la LECTURA de la prevision (GET /v1/previsiones/{id}) que hace la cola
 #       dice OMITIDA -> CONFIRMADA; si la prevision quedo en otro estado, la
 #       lectura lo dice (-> RECHAZADA). Concurrencia: un 200 y un 409, y la
-#       lectura posterior ve el resultado definitivo (omitir bloquea la
-#       prevision).
+#       lectura posterior ve el resultado definitivo (omitir -> _terminar ->
+#       _tocar -> tocar_prevision: UPDATE condicionado por row_version con
+#       bloqueo de fila; el perdedor espera y recibe 409 sin escribir).
 #     - La comprobacion de conexion previa al envio (GET /v1/yo) no escribe.
 #   La abono (F2) tiene su replay fisico en test_198::test_8.
 # Version: 0.1.0 (F05-D056 paso 2)
+# Version: 0.1.1 (pre-S2, AJ-F0507G8-16): solo comentario; recorrido real del servidor
+#   (_tocar/tocar_prevision, no bloquear_prevision).
 # ============================================================
 from __future__ import annotations
 
