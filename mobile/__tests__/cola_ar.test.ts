@@ -4,6 +4,7 @@
 // Ruta: mobile/__tests__/cola_ar.test.ts
 // Descripción: COLA-AR v1.0 (F05 §70.A.6; AJ-F0507G7-05): las 12 pruebas obligatorias sobre la cola de la app, deterministas (reloj y temporizadores simulados, almacén en memoria, servidor simulado que aplica la idempotencia por identidad como el real: un `intencion_id` = un hecho, un movimiento y una reducción), y las de la reconciliación por lectura de «No hubo» (decisión 1 de Moisés del 2026-10-29). Las de pantalla (desmontaje, navegación y ✓) están en `cola_ar_pantallas.test.tsx`; el oráculo físico, en `tests/api/test_224_f05_d056_cola_ar.py`.
 // Versión: 0.1.0 (F05-D056 paso 2)
+// Versión: 0.3.0 (pre-S2, AJ-F0507G8-13): la carrera del dictamen de la consulta 8 v1.1 reproducida con identidad y almacenamiento diferidos (sends_after_background = 0), reconciliación diferida e «inactive».
 // Versión: 0.2.0 (pre-S2, AJ-F0507G8-01/02): el ejecutor da la identidad (`identidad()`) y el almacén guarda por clave de identidad; la cola se restaura con su identidad al montarse (como en la app). Las cuentas de lecturas de identidad se toman tras esa restauración. Pruebas nuevas al final.
 // ============================================================
 
@@ -87,6 +88,14 @@ class Servidor {
   conexion = true;
   /** Identidad servida (URL base + owner); cambiarla simula otro owner detrás del mismo backend. */
   owner = 'A';
+  /** AJ-13: la lectura de identidad queda pendiente hasta `soltarIdentidad()` (reproduce la carrera del dictamen). */
+  diferirIdentidad = false;
+  private identidadesPendientes: (() => void)[] = [];
+  soltarIdentidad() {
+    const p = this.identidadesPendientes;
+    this.identidadesPendientes = [];
+    p.forEach((f) => f());
+  }
   /** Respuestas forzadas por llamada (antes de aplicar), p. ej. INDETERMINADO = la respuesta se pierde. */
   guion: (('APLICA_Y_PIERDE' | 'NO_LLEGA' | Resp))[] = [];
   lecturas: (string | null)[] = [];
@@ -106,6 +115,7 @@ class Servidor {
       },
       identidad: async () => {
         this.conexiones += 1;
+        if (this.diferirIdentidad) await new Promise<void>((res) => this.identidadesPendientes.push(res));
         return this.conexion ? this.owner : null;
       },
       estadoPrevision: async () => {
@@ -589,5 +599,172 @@ describe('AJ-F0507G8-02 · cola por identidad', () => {
     expect(cola.identidadActual()).toBe('B');
     expect(cola.intenciones()).toHaveLength(0);
     expect(almacen.datos.has(claveDe('A'))).toBe(true);
+  });
+});
+// ==================================================================
+// AJ-F0507G8-13 (BLOQUEANTE): ninguna operación que esté esperando sale después de una ausencia
+// ==================================================================
+describe('AJ-F0507G8-13 · carrera de ciclo de vida', () => {
+  /** Lanza un cobro y lleva el reloj hasta el vencimiento con la identidad DIFERIDA: enviar() queda esperándola. */
+  async function hastaEsperarIdentidad() {
+    const m = montar();
+    await m.reloj.avanzar(0); // identidad inicial resuelta (restauración)
+    m.s.diferirIdentidad = true;
+    m.cola.lanzar(cobro());
+    await m.reloj.avanzar(PLAZO_DESHACER_MS);
+    expect(m.cola.get('d1')!.estado).toBe('PENDIENTE_DE_ENVIO'); // esperando la identidad
+    return m;
+  }
+
+  test('reproducción exacta del dictamen: vence en primer plano → espera la identidad → segundo plano → llega la identidad → sends_after_background = 0', async () => {
+    const { s, cola, reloj } = await hastaEsperarIdentidad();
+    cola.alSegundoPlano();
+    const enviosAlIrse = s.llamadas.length;
+    s.soltarIdentidad();
+    await reloj.avanzar(60000);
+    const sendsAfterBackground = s.llamadas.length - enviosAlIrse;
+    expect(sendsAfterBackground).toBe(0);
+    expect(cola.get('d1')!.estado).toBe('EN_PLAZO'); // conservada…
+    expect(cola.get('d1')!.pregunta).toBe(true); // …y al volver se pregunta
+    s.diferirIdentidad = false;
+    cola.alPrimerPlano();
+    await reloj.avanzar(60000);
+    expect(s.llamadas).toHaveLength(0); // nunca envío automático al volver
+    cola.enviarTrasAusencia('d1');
+    await reloj.avanzar(0);
+    expect(s.llamadas).toHaveLength(1);
+    expect(cola.get('d1')!.estado).toBe('CONFIRMADA');
+  });
+
+  test('la ausencia prevalece sobre la falta de conexión: si la identidad no llega tras irse, se pregunta (no NO_ENVIADA)', async () => {
+    const { s, cola, reloj } = await hastaEsperarIdentidad();
+    s.conexion = false;
+    cola.alSegundoPlano();
+    s.soltarIdentidad();
+    await reloj.avanzar(60000);
+    expect(s.llamadas).toHaveLength(0);
+    expect([cola.get('d1')!.estado, cola.get('d1')!.pregunta]).toEqual(['EN_PLAZO', true]);
+  });
+
+  test('ausencia y vuelta ANTES de que llegue la identidad: tampoco sale; se pregunta', async () => {
+    const { s, cola, reloj } = await hastaEsperarIdentidad();
+    cola.alSegundoPlano();
+    cola.alPrimerPlano(); // «inactive» breve (centro de control) y vuelta
+    s.soltarIdentidad();
+    await reloj.avanzar(60000);
+    expect(s.llamadas).toHaveLength(0);
+    expect(cola.get('d1')!.pregunta).toBe(true);
+  });
+
+  /** Almacén cuyas escrituras se retienen a partir de `lento = true` (en orden), para cortar entre guardado y POST. */
+  function almacenRetenido() {
+    const almacen = new Almacen();
+    const retenidas: { estado: string; soltar: () => void }[] = [];
+    const ctl = { lento: false };
+    const escritos: string[] = []; // estado de d1 en CADA escritura, retenida o no
+    const base = almacen.escribir;
+    almacen.escribir = (k: string, t: string) => {
+      const e = (JSON.parse(t) as IntencionCola[]).find((x) => x.clave === 'd1')?.estado ?? '-';
+      escritos.push(e);
+      if (!ctl.lento) return base(k, t);
+      return new Promise<void>((res) => retenidas.push({ estado: e, soltar: () => void base(k, t).then(res) }));
+    };
+    return { almacen, retenidas, ctl, escritos };
+  }
+
+  test('segundo plano mientras se guarda PENDIENTE_DE_ENVIO: no sale', async () => {
+    const { almacen, retenidas, ctl, escritos } = almacenRetenido();
+    const { s, cola, reloj } = montar(new Servidor(), almacen);
+    await reloj.avanzar(0);
+    cola.lanzar(cobro());
+    await reloj.avanzar(1000);
+    ctl.lento = true;
+    await reloj.avanzar(PLAZO_DESHACER_MS);
+    expect(retenidas.map((r) => r.estado)).toEqual(['PENDIENTE_DE_ENVIO']);
+    cola.alSegundoPlano();
+    ctl.lento = false;
+    retenidas.forEach((r) => r.soltar());
+    await reloj.avanzar(60000);
+    expect(s.llamadas).toHaveLength(0);
+    expect(cola.get('d1')!.pregunta).toBe(true);
+    // Nunca se guarda ENVIADA tras la ausencia: si el sistema matara la app, al restaurar se reconciliaría (reenvío no confirmado).
+    expect(escritos).not.toContain('ENVIADA');
+    expect(JSON.parse(almacen.texto!).map((x: IntencionCola) => x.estado)).not.toContain('ENVIADA');
+  });
+
+  test('segundo plano mientras se guarda ENVIADA (justo antes del POST): no sale y no cuenta como enviado', async () => {
+    const { almacen, retenidas, ctl } = almacenRetenido();
+    const { s, cola, reloj } = montar(new Servidor(), almacen);
+    await reloj.avanzar(0);
+    cola.lanzar(cobro());
+    await reloj.avanzar(1000);
+    ctl.lento = true;
+    await reloj.avanzar(PLAZO_DESHACER_MS);
+    retenidas[0].soltar();
+    await reloj.avanzar(0);
+    expect(retenidas.map((r) => r.estado)).toEqual(['PENDIENTE_DE_ENVIO', 'ENVIADA']);
+    cola.alSegundoPlano();
+    ctl.lento = false;
+    retenidas[1].soltar();
+    await reloj.avanzar(60000);
+    expect(s.llamadas).toHaveLength(0);
+    expect(cola.get('d1')!.envios).toBe(0);
+    expect([cola.get('d1')!.estado, cola.get('d1')!.pregunta]).toEqual(['EN_PLAZO', true]);
+  });
+
+  test('reconciliación: si la app se va mientras espera la identidad, no reenvía; al volver sigue con la misma identidad', async () => {
+    const m = montar();
+    m.s.guion = ['APLICA_Y_PIERDE'];
+    await m.reloj.avanzar(0);
+    m.cola.lanzar(cobro());
+    await m.reloj.avanzar(PLAZO_DESHACER_MS);
+    expect(m.cola.get('d1')!.estado).toBe('RESULTADO_DESCONOCIDO');
+    m.s.diferirIdentidad = true;
+    await m.reloj.avanzar(ESPERAS_RECONCILIACION_MS[0]); // la reconciliación espera la identidad
+    m.cola.alSegundoPlano();
+    const antes = m.s.llamadas.length;
+    m.s.soltarIdentidad();
+    await m.reloj.avanzar(60000);
+    expect(m.s.llamadas.length - antes).toBe(0); // ningún reenvío en segundo plano
+    expect(m.cola.get('d1')!.estado).toBe('RESULTADO_DESCONOCIDO'); // ni éxito ni fallo
+    m.s.diferirIdentidad = false;
+    m.cola.alPrimerPlano();
+    await m.reloj.avanzar(ESPERAS_RECONCILIACION_MS[0]);
+    expect(m.cola.get('d1')!.estado).toBe('CONFIRMADA');
+    expect(new Set(m.s.llamadas.map((l) => l.payload.intencion_id)).size).toBe(1);
+    expect(m.s.hechos.size).toBe(1);
+  });
+});
+describe('AJ-F0507G8-13 · AppState «inactive» (iOS) cuenta como ausencia', () => {
+  test.each(['inactive', 'background'])('«%s» con el envío esperando la identidad: no sale; «active» no envía solo', async (estado) => {
+    const { manejarEstadoApp } = require('../src/components/ColaAccionRapida');
+    const m = montar();
+    await m.reloj.avanzar(0);
+    m.s.diferirIdentidad = true;
+    m.cola.lanzar(cobro());
+    await m.reloj.avanzar(PLAZO_DESHACER_MS);
+    manejarEstadoApp(m.cola, estado);
+    m.s.soltarIdentidad();
+    await m.reloj.avanzar(60000);
+    expect(m.s.llamadas).toHaveLength(0);
+    m.s.diferirIdentidad = false;
+    manejarEstadoApp(m.cola, 'active');
+    await m.reloj.avanzar(60000);
+    expect(m.s.llamadas).toHaveLength(0);
+    expect(m.cola.get('d1')!.pregunta).toBe(true);
+  });
+
+  test('«inactive» durante el plazo: al volver se pregunta y no se envía', async () => {
+    const { manejarEstadoApp } = require('../src/components/ColaAccionRapida');
+    const m = montar();
+    await m.reloj.avanzar(0);
+    m.cola.lanzar(cobro());
+    await m.reloj.avanzar(1000);
+    manejarEstadoApp(m.cola, 'inactive');
+    await m.reloj.avanzar(60000);
+    manejarEstadoApp(m.cola, 'active');
+    await m.reloj.avanzar(60000);
+    expect(m.s.llamadas).toHaveLength(0);
+    expect(m.cola.get('d1')!.pregunta).toBe(true);
   });
 });

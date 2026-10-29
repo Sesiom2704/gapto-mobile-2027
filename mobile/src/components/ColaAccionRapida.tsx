@@ -5,6 +5,7 @@
 // Descripción: COLA-AR v1.0 (F05 §70.A) en la app. `colaDe(cliente)` da la ÚNICA cola de la app para ese cliente (persistida con AsyncStorage, enganchada a AppState: en segundo plano no se envía nada; al volver se reanuda o se pregunta). `useAccionFinanciera` es lo que usan las pantallas con acciones rápidas financieras (F1 «Pendiente con», F2 «Recibido», F3 «Repetir hoy», F4/F5 previsiones de Inicio y Pendientes): al soltar compone la petición con una identidad nueva y la entrega a la cola; desmontar la pantalla no cancela ni adelanta nada. `AvisosCola` es el aviso global (A.4/A.5), visible en cualquier pantalla: «Cobrando… · Deshacer» con el tiempo restante; «Comprobando el cobro…» mientras se reconcilia; «No se ha guardado · Reintentar»; la pregunta «Enviar / Descartar» tras una ausencia; el motivo del servidor si se rechaza; y el ✓ con el resultado SOLO en CONFIRMADA. La raíz de la app monta un aviso global (`global`); si no hay ninguno montado (pruebas de una pantalla suelta), la pantalla pinta el suyo.
 // Versión: 0.1.0 (F05-D056 paso 2, COLA-AR v1.0)
 // Versión: 0.2.0 (pre-S2, AJ-F0507G8-02): el ejecutor da la IDENTIDAD de la cola, `<URL base>|<nombre del owner servido>` de `GET /v1/yo` (la misma lectura que antes hacía de comprobación de conexión; el servidor no expone otro identificador del owner), y el almacén guarda con la clave de esa identidad. Residuo documentado: dos owners con el mismo nombre en el mismo backend compartirían cola (la RLS sigue impidiendo escribir en el de otro).
+// Versión: 0.3.0 (pre-S2, AJ-F0507G8-13): `manejarEstadoApp` trata «inactive» de iOS como ausencia, igual que «background».
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -78,6 +79,15 @@ const temporizadoresApp: Temporizadores = {
 
 const colas = new WeakMap<ClienteApi, ColaAccionRapida>();
 
+/**
+ * AJ-F0507G8-13: el estado de la app que cuenta como ausencia. «background» y también «inactive» de iOS (centro de
+ * control, llamada, selector de apps): nada se envía y, al volver con el plazo vencido, se pregunta. «active» vuelve.
+ */
+export function manejarEstadoApp(cola: ColaAccionRapida, estado: string): void {
+  if (estado === 'background' || estado === 'inactive') cola.alSegundoPlano();
+  else if (estado === 'active') cola.alPrimerPlano();
+}
+
 /** La cola de la app para un cliente (una sola por cliente; la app tiene uno). */
 export function colaDe(cliente: ClienteApi): ColaAccionRapida {
   let cola = colas.get(cliente);
@@ -85,10 +95,7 @@ export function colaDe(cliente: ClienteApi): ColaAccionRapida {
     const nueva = new ColaAccionRapida(ejecutorDe(cliente), almacenApp, temporizadoresApp);
     cola = nueva;
     colas.set(cliente, nueva);
-    AppState.addEventListener?.('change', (e) => {
-      if (e === 'background') nueva.alSegundoPlano();
-      else if (e === 'active') nueva.alPrimerPlano();
-    });
+    AppState.addEventListener?.('change', (e) => manejarEstadoApp(nueva, e));
     void nueva.restaurar();
   }
   return cola;
