@@ -16,7 +16,8 @@
 // v0.12.0 (F05-07 G1, F05-D050 §64.1): «Registrar» y los accesos de plantilla de Inicio abren el ensayo G1 (`dev/g1`, solo `__DEV__`) y el cliente usa `g1Fetch(fetch)`, que fuera de `__DEV__` es el `fetch` sin envolver; sin cambios de navegación.
 // v0.13.0 (F05-D051 paso 9.1 · G1 v2): instrumentación por paso, solo `__DEV__`: `trazaG1` (= `g1Traza` en desarrollo, `undefined` en producción) llega por prop al registro y a la transferencia; hitos `hoja_tipos` y `tipo:<TIPO>` aquí, y teclado y AppState con `g1Suscribir` (sin suscripción fuera de `__DEV__`). Sin cambios de navegación ni de comportamiento.
 // v0.14.0 (F05-D052 paso 2 · C-03, §66.A.8): «Pendiente con…» recibe además el `entidad_id` del derecho elegido en el detalle del gasto y lo abre directamente.
-// Versión: 0.14.0
+// v0.15.0 (F05-D056 paso 2, COLA-AR v1.0, F05 §70.A.4): la raíz monta el aviso GLOBAL de la cola de acciones rápidas financieras (`AvisosCola global`), encima de cualquier pantalla o tarea: «Cobrando… · Deshacer» con el tiempo restante sigue visible al navegar. Sin cambios de navegación ni de los recorridos de registro.
+// Versión: 0.15.0
 // ============================================================
 
 import * as Crypto from 'expo-crypto';
@@ -29,6 +30,7 @@ import { ClienteApi, crearCliente } from './src/api/cliente';
 import { configApi } from './src/api/config';
 import { g1Abrir, g1Fetch, g1Suscribir, g1Traza } from './src/dev/g1';
 import { BarraInferior, Destino } from './src/components/BarraInferior';
+import { AvisosCola, colaDe } from './src/components/ColaAccionRapida';
 import { HojaTipos } from './src/components/HojaTipos';
 import type { TipoRegistro } from './src/domain/registro';
 import type { BaseCompartido } from './src/domain/reparto';
@@ -386,6 +388,8 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
             onCancelar={() => setHojaTipos(false)}
           />
         ) : null}
+        {/* COLA-AR: aviso global de las acciones rápidas financieras, encima de todo (§70.A.4). */}
+        <AvisosCola cola={colaDe(p.cliente)} global />
       </View>
       {tarea === null && devolucionDe === null && pendienteDe === null && corregirDe === null && corregirHecho === null && !pendientes && prevision === null && !hojaTipos && !(destino === 'MAS' && inmersivaMas) && !(destino === 'DIA' && inmersivaDia) ? <BarraInferior actual={destino} onCambiar={setDestino} /> : null}
     </View>

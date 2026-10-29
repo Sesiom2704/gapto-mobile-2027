@@ -18,6 +18,7 @@
 // Versión: 0.12.0 (F05-D052 paso 2 · C-03, §66.A.8): el detalle de un gasto con `posiciones_vinculadas` ACTIVAS ofrece «Pendiente con <quién>» por cada derecho (separadas de las partes del reparto, sin duplicar) y pasa su `entidad_id`.
 // Versión: 0.13.0 (F05-D056 §70.2, H-DIAG-02): el subtítulo del detalle usa `nombreTipoFila` (un cobro de posición ya no dice «Entre cuentas») y la cuenta de una liquidación se rotula por su papel («Cobrado en» / «Pagado con»).
 // Versión: 0.13.1 (F05-D056, decisión 2 de Moisés del 2026-10-29): los títulos de la lista, del detalle, de «Más» y del aviso de «Repetir hoy» salen de `domain/titulos_dia.ts` (`tituloFilaDia`, `nombreTipoFila`), módulo propio de Día a día; `actividad.ts` y `registro.ts` vuelven a ser los de 9c62d69.
+// Versión: 0.14.0 (F05-D056 paso 2, COLA-AR v1.0, F05 §70.A): «Recibido» (F2, abono) y «Repetir hoy» (F3) son acciones de la cola de la app (`useAccionFinanciera`): la petición se compone al soltar con la identidad del swipe y sobrevive a la navegación y a cerrar la app; el aviso dice «Registrando…» hasta el 2xx. Sin `nuevoId` no hay acción rápida (se retira el `?? (() => '')`, que habría enviado una identidad vacía).
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -29,7 +30,8 @@ import type { ClienteApi, DetalleActividad, EdicionHecho, FilaActividad, TipoAct
 import { AbonoHoja } from '../components/AbonoHoja';
 import { HojaAnularDuplicado, HojaCorregirCategoria, HojaMasHecho } from '../components/EdicionHecho';
 import { usarIntencion } from '../components/Prevision';
-import { accesibilidadLados, FilaDeslizable, propsScrollSwipe, propsZonaSwipe, useAccionRapida, type LadoSwipe } from '../components/AccionRapida';
+import { accesibilidadLados, FilaDeslizable, propsScrollSwipe, propsZonaSwipe, type LadoSwipe } from '../components/AccionRapida';
+import { useAccionFinanciera } from '../components/ColaAccionRapida';
 import { BotonPrimario, BotonTexto, Chip } from '../components/Basicos';
 import { Hoja } from '../components/HojasCategoria';
 import { BotonSecundario, CargaArbol, IconoCategoriaVista, SelectorCategorias } from '../components/SelectorCategorias';
@@ -52,13 +54,19 @@ import {
   textoTuParte,
   tituloTransferencia,
 } from '../domain/actividad';
+import { textosAbono, textosRepetir } from '../domain/textosCola';
 import { nombreTipoFila, tituloFilaDia } from '../domain/titulos_dia';
+
+/** Sin `nuevoId` la pantalla no ofrece acciones rápidas: nunca se compone una intención sin identidad. */
+const sinIdentidad = (): string => {
+  throw new Error('ActividadScreen sin nuevoId: no hay acción rápida');
+};
 import { construirArbol, elegible, motivoNoSeleccionable, visibleEnRegistro } from '../domain/categoria';
 import { nombreCorto, ofreceRegistrarAbono, ofreceRegistrarDevolucion, TEXTO_NETO, textoDevolucionDe } from '../domain/devolucion';
 import { ayer, ddmmaaaaAIso, diaMesAnioIso, diaMesIso, isoLocal, mesAnioIso, mesDesplazadoIso } from '../domain/fechas';
 import { formatearEur } from '../domain/importe';
 import { categoriaLista, componerAnulacion, componerCorreccionCategoria, TEXTO_ANULADO, TEXTO_CATEGORIA_CORREGIDA } from '../domain/edicion';
-import { componerRepetir, repetibleHoy, textoAvisoRepetir, type CapacidadesRepetir } from '../domain/repetir';
+import { componerRepetir, repetibleHoy, type CapacidadesRepetir } from '../domain/repetir';
 import type { RepartoDeHecho } from '../domain/reparto';
 import { filtrar } from '../domain/maestros';
 import { useTema } from '../theme/tema';
@@ -286,14 +294,17 @@ export function ActividadScreen(p: {
       vigente = false;
     };
   }, [origenesPendientes, p.cliente]);
-  const rapida = useAccionRapida({ nuevoId: p.nuevoId ?? (() => ''), onHecha: () => cargar() });
+  // COLA-AR (§70.A): sin `nuevoId` no hay acción rápida (nunca una identidad vacía); la pantalla lo recibe siempre de la app.
+  const rapida = useAccionFinanciera({ cliente: p.cliente, nuevoId: p.nuevoId ?? sinIdentidad, onHecha: () => cargar() });
   const deslizarAbono = (f: FilaActividad) => {
     const cuenta = f.devolucion_de ? compras[f.devolucion_de.hecho_id] : undefined;
-    if (!ofreceRegistrarAbono(f) || !f.devolucion_de || !f.importe_total || !cuenta) return abrirAbono(f, null);
+    if (!p.nuevoId || !ofreceRegistrarAbono(f) || !f.devolucion_de || !f.importe_total || !cuenta) return abrirAbono(f, null);
     rapida.lanzar({
       clave: f.id,
-      texto: `Abono de ${nombreCorto(f.devolucion_de)} recibido · ${formatearEur(f.importe_total)}`,
-      enviar: (id) => p.cliente.registrarAbono(f.id, { intencion_id: id, cuenta_id: cuenta.cuenta_id, fecha: hoyIso }),
+      ruta: 'ABONO',
+      recursoId: f.id,
+      textos: textosAbono(nombreCorto(f.devolucion_de), f.importe_total),
+      componer: (id) => ({ intencion_id: id, cuenta_id: cuenta.cuenta_id, fecha: hoyIso }),
     });
   };
   // «Repetir hoy»: el detalle y las capacidades de hoy se leen al soltar; tras el aviso no hay ninguna petición hasta los 5 s.
@@ -314,15 +325,13 @@ export function ActividadScreen(p: {
       const cap: CapacidadesRepetir = { pago, ingreso, origen, destino };
       // Comprobación previa con una identidad de prueba: el payload real se compone con la identidad de la intención.
       if (!d || !componerRepetir(f, d, cap, hoyIso, 'x')) return void abrirDetalle(f.id);
+      const ruta = componerRepetir(f, d, cap, hoyIso, 'x')!.ruta;
       rapida.lanzar({
         clave: `repetir-${f.id}`,
-        texto: textoAvisoRepetir(tituloTransferencia(f) ?? tituloFilaDia(f), f),
-        enviar: async (id) => {
-          const r = componerRepetir(f, d, cap, hoyIso, id)!;
-          if (r.ruta === 'GASTO') return p.cliente.registrarGastoPagado(r.payload as never);
-          if (r.ruta === 'INGRESO') return p.cliente.registrarIngresoCobrado(r.payload as never);
-          return p.cliente.registrarTransferencia(r.payload as never);
-        },
+        ruta: ruta === 'GASTO' ? 'GASTO' : ruta === 'INGRESO' ? 'INGRESO' : 'TRANSFERENCIA',
+        recursoId: null,
+        textos: textosRepetir(tituloTransferencia(f) ?? tituloFilaDia(f), f),
+        componer: (id) => componerRepetir(f, d, cap, hoyIso, id)!.payload as Record<string, unknown> & { intencion_id: string },
       });
     } finally {
       preparando.current.delete(f.id);

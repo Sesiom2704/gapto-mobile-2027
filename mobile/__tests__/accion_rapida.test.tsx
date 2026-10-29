@@ -6,9 +6,11 @@
 // Versión: 0.1.0 (F05-06 M5 SWIPE)
 // Versión: 0.3.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados invertidos — la acción principal se desliza a la IZQUIERDA y la alternativa a la DERECHA; acciones accesibles con el nombre de la dirección nueva.
 // Versión: 0.4.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
+// Versión: 0.5.0 (F05-D056 paso 2, COLA-AR v1.0, F05 §70.A): las acciones financieras de estas pantallas pasan por la cola de la app. Mensajes veraces (A.5): «Pagando…» / «Cobrando…» / «Confirmando…» / «Registrando el abono…» antes de la confirmación y el resultado con ✓ SOLO tras el 2xx; un rechazo deja el motivo en el aviso (con «Cerrar») y la fila vuelve; un resultado desconocido es «Comprobando el pago…» y se reconcilia con la MISMA identidad (la fila no admite otro swipe mientras tanto); desmontar la pantalla NO cancela (se envía al vencer el plazo, nunca antes); en segundo plano no se envía nada y al volver con el plazo vencido se pregunta «Enviar / Descartar». La persistencia (AsyncStorage) se vacía antes de cada prueba.
 // ============================================================
 
 import './tiempos_rn';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, fireEvent, render, screen, within } from '@testing-library/react-native';
 import React from 'react';
 import { AppState, StyleSheet } from 'react-native';
@@ -81,9 +83,9 @@ const esperar = async (ms: number) => {
     jest.advanceTimersByTime(ms);
   });
 };
-/** Deja que terminen las promesas pendientes (lecturas, envío y relectura). */
+/** Deja que terminen las promesas pendientes (lecturas, comprobación de conexión, envío y relectura). */
 const asentar = async () => {
-  for (let i = 0; i < 5; i++) await act(async () => undefined);
+  for (let i = 0; i < 10; i++) await act(async () => undefined);
 };
 /** Dos eventos que llegan antes de que React vuelva a pintar (la fila aún no ha salido): el segundo debe ignorarse. */
 const dosEventosSeguidos = (testID: string, nombre: string) => {
@@ -117,8 +119,9 @@ function deslizar(testID: string, dx: number): boolean {
 }
 const accion = (testID: string, nombre: string) => fireEvent(screen.getByTestId(testID), 'accessibilityAction', { nativeEvent: { actionName: nombre } });
 
-beforeEach(() => {
+beforeEach(async () => {
   n = 0;
+  await AsyncStorage.clear(); // la cola persiste: cada prueba empieza sin intenciones guardadas
   jest.useFakeTimers();
 });
 afterEach(() => {
@@ -172,7 +175,7 @@ async function montarHome(c: ClienteApi) {
 }
 
 describe('Inicio', () => {
-  test('gesto → aviso «Electricidad pagada · Deshacer» → el gasto sale a los 5 s con el bloque prevision de la hoja', async () => {
+  test('gesto → aviso «Pagando… · Electricidad · 74,00 € · Deshacer» → el gasto sale a los 5 s con el bloque prevision de la hoja; ✓ solo tras el 2xx', async () => {
     const c = cliente({ inicioPrevisiones: inicio([fila()]) });
     await montarHome(c);
     expect(c.cuentasPago).toHaveBeenCalledWith(HOY); // la capacidad se lee con la lista, no en el gesto
@@ -180,13 +183,16 @@ describe('Inicio', () => {
     accion('atencion-luz', 'izquierda');
     expect(screen.queryByTestId('atencion-luz')).toBeNull(); // la fila sale
     expect(screen.queryByTestId('hoja-swipe')).toBeNull(); // sin hoja
-    expect(screen.getByTestId('aviso-rapida-luz-texto')).toHaveTextContent('Electricidad pagada · 74,00 €');
+    expect(screen.getByTestId('aviso-rapida-luz-texto')).toHaveTextContent('Pagando… · Electricidad · 74,00 €');
     expect(screen.getByTestId('aviso-rapida-luz-deshacer')).toHaveTextContent('Deshacer');
+    expect(screen.queryByTestId('aviso-rapida-luz-ok')).toBeNull(); // ni ✓ ni resultado antes de confirmar
     await esperar(ESPERA_DESHACER_MS - 1);
     expect(c.registrarGastoPagado).not.toHaveBeenCalled();
     expect(llamadas(c)).toBe(antes); // durante la espera no se toca el servidor
     await esperar(1);
     await asentar();
+    expect(screen.getByTestId('aviso-rapida-luz-ok')).toBeTruthy();
+    expect(screen.getByTestId('aviso-rapida-luz-texto')).toHaveTextContent('Electricidad pagada · 74,00 €');
     expect(c.registrarGastoPagado).toHaveBeenCalledTimes(1);
     expect((c.registrarGastoPagado as jest.Mock).mock.calls[0][0]).toEqual({
       intencion_id: '00000000-0000-4000-8000-000000000001', importe: '74.00', moneda: 'EUR', fecha_hecho: HOY, cuenta_id: 'nomina',
@@ -231,12 +237,12 @@ describe('Inicio', () => {
     await asentar();
     expect(c.registrarGastoPagado).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('atencion-luz')).toBeTruthy(); // la fila vuelve
-    expect(screen.getByTestId('fallo-rapida-luz-texto')).toHaveTextContent(`No se ha guardado: Electricidad pagada · 74,00 €. ${mensaje}`);
-    expect(screen.queryByTestId('aviso-rapida-luz')).toBeNull();
-    expect(screen.queryByTestId('fallo-rapida-luz-reintentar')).toBeNull(); // un rechazo no se reintenta igual
+    expect(screen.getByTestId('aviso-rapida-luz-texto')).toHaveTextContent(mensaje); // el motivo del servidor
+    expect(screen.queryByTestId('aviso-rapida-luz-ok')).toBeNull();
+    expect(screen.queryByTestId('aviso-rapida-luz-reintentar')).toBeNull(); // un rechazo no se reintenta igual
     expect(c.inicioPrevisiones).toHaveBeenCalledTimes(1); // no relee como si se hubiera guardado
-    fireEvent.press(screen.getByTestId('fallo-rapida-luz-cerrar'));
-    expect(screen.queryByTestId('fallo-rapida-luz')).toBeNull();
+    fireEvent.press(screen.getByTestId('aviso-rapida-luz-cerrar'));
+    expect(screen.queryByTestId('aviso-rapida-luz')).toBeNull();
   });
 
   test('doble gesto → una sola intención y una sola petición', async () => {
@@ -250,7 +256,7 @@ describe('Inicio', () => {
     expect(n).toBe(1); // una sola identidad generada
   });
 
-  test('INDETERMINADO → «No sabemos si se guardó» y «Reintentar» con la MISMA identidad', async () => {
+  test('INDETERMINADO → «Comprobando el pago…» (ni éxito ni fallo) y reconciliación con la MISMA identidad', async () => {
     const registrar = jest.fn()
       .mockResolvedValueOnce({ tipo: 'INDETERMINADO', mensaje: 'No se ha podido confirmar el registro. Puedes reintentar: no se duplicará.' })
       .mockResolvedValue({ tipo: 'OK', datos: { intencion_id: 'x', hecho_id: 'x', idempotente: true } });
@@ -259,30 +265,38 @@ describe('Inicio', () => {
     accion('atencion-luz', 'izquierda');
     await esperar(ESPERA_DESHACER_MS);
     await asentar();
-    expect(screen.getByTestId('fallo-rapida-luz-texto')).toHaveTextContent(/No sabemos si se guardó: Electricidad pagada/);
-    expect(screen.getByTestId('atencion-luz')).toBeTruthy();
-    fireEvent.press(screen.getByTestId('fallo-rapida-luz-reintentar'));
+    expect(screen.getByTestId('aviso-rapida-luz-texto')).toHaveTextContent('Comprobando el pago…');
+    expect(screen.queryByTestId('aviso-rapida-luz-ok')).toBeNull();
+    expect(screen.queryByTestId('atencion-luz')).toBeNull(); // la fila no vuelve mientras no se sabe
+    await esperar(2000); // reconciliación automática en primer plano
     await asentar();
     expect(registrar).toHaveBeenCalledTimes(2);
     expect(registrar.mock.calls[1][0].intencion_id).toBe(registrar.mock.calls[0][0].intencion_id);
+    expect(screen.getByTestId('aviso-rapida-luz-ok')).toBeTruthy();
     expect(n).toBe(1);
   });
 
-  test('gesto nuevo tras un INDETERMINADO: misma identidad', async () => {
-    const registrar = jest.fn().mockResolvedValue({ tipo: 'INDETERMINADO', mensaje: 'sin red' });
+  test('mientras el resultado es desconocido no hay otro swipe: los reenvíos llevan siempre la misma identidad', async () => {
+    const registrar = jest.fn()
+      .mockResolvedValueOnce({ tipo: 'INDETERMINADO', mensaje: 'sin red' })
+      .mockResolvedValueOnce({ tipo: 'INDETERMINADO', mensaje: 'sin red' })
+      .mockResolvedValue({ tipo: 'OK', datos: { intencion_id: 'x', hecho_id: 'x', idempotente: true } });
     const c = cliente({ inicioPrevisiones: inicio([fila()]), registrarGastoPagado: registrar as any });
     await montarHome(c);
     accion('atencion-luz', 'izquierda');
     await esperar(ESPERA_DESHACER_MS);
     await asentar();
-    accion('atencion-luz', 'izquierda');
-    await esperar(ESPERA_DESHACER_MS);
+    expect(screen.queryByTestId('atencion-luz')).toBeNull();
+    await esperar(2000);
     await asentar();
-    expect(registrar).toHaveBeenCalledTimes(2);
-    expect(registrar.mock.calls[1][0].intencion_id).toBe(registrar.mock.calls[0][0].intencion_id);
+    await esperar(5000);
+    await asentar();
+    expect(registrar).toHaveBeenCalledTimes(3);
+    expect(new Set(registrar.mock.calls.map((x) => x[0].intencion_id)).size).toBe(1);
+    expect(n).toBe(1);
   });
 
-  test('la app pasa a segundo plano durante la espera → no se envía nada', async () => {
+  test('la app pasa a segundo plano durante la espera → no se envía nada; al volver con el plazo vencido pregunta «Enviar / Descartar»', async () => {
     let oyente: ((e: string) => void) | null = null;
     const espia = jest.spyOn(AppState, 'addEventListener').mockImplementation(((_: string, h: (e: string) => void) => {
       oyente = h;
@@ -297,19 +311,29 @@ describe('Inicio', () => {
       await esperar(ESPERA_DESHACER_MS * 2);
       await asentar();
       expect(c.registrarGastoPagado).not.toHaveBeenCalled();
+      await act(async () => oyente?.('active'));
+      await asentar();
+      expect(c.registrarGastoPagado).not.toHaveBeenCalled(); // nunca envío automático tras una ausencia
+      expect(screen.getByTestId('aviso-rapida-luz-texto')).toHaveTextContent('Pago pendiente: Electricidad · 74,00 €');
+      fireEvent.press(screen.getByTestId('aviso-rapida-luz-descartar'));
+      await asentar();
+      expect(c.registrarGastoPagado).not.toHaveBeenCalled();
       expect(screen.getByTestId('atencion-luz')).toBeTruthy();
     } finally {
       espia.mockRestore();
     }
   });
 
-  test('la pantalla se desmonta durante la espera → no se envía nada', async () => {
+  test('la pantalla se desmonta durante la espera → la intención sigue en la cola: nada antes del plazo, se envía al vencer', async () => {
     const c = cliente({ inicioPrevisiones: inicio([fila()]) });
     const r = await montarHome(c);
     accion('atencion-luz', 'izquierda');
     r.unmount();
-    await esperar(ESPERA_DESHACER_MS * 2);
+    await esperar(ESPERA_DESHACER_MS - 1);
     expect(c.registrarGastoPagado).not.toHaveBeenCalled();
+    await esperar(1);
+    await asentar();
+    expect(c.registrarGastoPagado).toHaveBeenCalledTimes(1);
   });
 
   test('gesto real: a medias a la izquierda enseña «Pagado» (nada se envía); tocarlo lo ejecuta; del todo lo ejecuta directamente', async () => {
@@ -324,16 +348,17 @@ describe('Inicio', () => {
     await esperar(ESPERA_DESHACER_MS * 2);
     expect(llamadas(c)).toBe(antes);
     fireEvent.press(screen.getByTestId('swipe-boton-atencion-luz-izquierda', OCULTOS));
-    expect(screen.getByTestId('aviso-rapida-luz-texto')).toHaveTextContent('Electricidad pagada · 74,00 €');
+    expect(screen.getByTestId('aviso-rapida-luz-texto')).toHaveTextContent('Pagando… · Electricidad · 74,00 €');
     fireEvent.press(screen.getByTestId('aviso-rapida-luz-deshacer'));
     // del todo
     expect(deslizar('fila-swipe-atencion-luz', -260)).toBe(true);
     await asentar();
-    expect(screen.getByTestId('aviso-rapida-luz-texto')).toHaveTextContent('Electricidad pagada · 74,00 €');
+    expect(screen.getByTestId('aviso-rapida-luz-texto')).toHaveTextContent('Pagando… · Electricidad · 74,00 €');
     await esperar(ESPERA_DESHACER_MS);
     await asentar();
     expect(c.registrarGastoPagado).toHaveBeenCalledTimes(1);
-    expect((c.registrarGastoPagado as jest.Mock).mock.calls[0][0].intencion_id).toBe('00000000-0000-4000-8000-000000000001');
+    // El primer swipe se deshizo (CANCELADA, nunca enviado); este es otro swipe con su propia identidad (A.2).
+    expect((c.registrarGastoPagado as jest.Mock).mock.calls[0][0].intencion_id).toBe('00000000-0000-4000-8000-000000000002');
   });
 
   test('gesto real a la derecha del todo: «No hubo este mes» (omitir sin motivo) a los 5 s; gris neutro, nunca rojo', async () => {
@@ -346,7 +371,7 @@ describe('Inicio', () => {
     expect(fondo).toBe(colores.light.surfaceSecondary);
     expect(within(screen.getByTestId('swipe-accion-atencion-luz-derecha', OCULTOS)).getByText('No hubo', OCULTOS)).toBeTruthy();
     fireEvent.press(screen.getByTestId('swipe-boton-atencion-luz-derecha', OCULTOS));
-    expect(screen.getByTestId('aviso-rapida-luz-texto')).toHaveTextContent('Electricidad · no hubo este mes');
+    expect(screen.getByTestId('aviso-rapida-luz-texto')).toHaveTextContent('Confirmando… · Electricidad · no hubo este mes');
     await esperar(ESPERA_DESHACER_MS - 1);
     expect(omitir).not.toHaveBeenCalled();
     await esperar(1);
@@ -398,7 +423,7 @@ describe('«Pendientes»', () => {
     accion(`pendiente-${NOMINA.id}`, 'izquierda');
     expect(screen.queryByTestId(`pendiente-${NOMINA.id}`)).toBeNull();
     expect(screen.getByTestId('pendiente-luz')).toBeTruthy(); // las demás filas siguen
-    expect(screen.getByTestId(`aviso-rapida-${NOMINA.id}-texto`)).toHaveTextContent('Nómina cobrada · 2.100,00 €');
+    expect(screen.getByTestId(`aviso-rapida-${NOMINA.id}-texto`)).toHaveTextContent('Cobrando… · Nómina · 2.100,00 €');
     await esperar(ESPERA_DESHACER_MS - 1);
     expect(c.registrarIngresoCobrado).not.toHaveBeenCalled();
     await esperar(1);
@@ -476,7 +501,7 @@ describe('Actividad', () => {
     accion('fila-dev', 'izquierda');
     expect(screen.queryByTestId('fila-dev')).toBeNull();
     expect(screen.queryByTestId('hoja-abono')).toBeNull();
-    expect(screen.getByTestId('aviso-rapida-dev-texto')).toHaveTextContent('Abono de Abrigo recibido · 40,00 €');
+    expect(screen.getByTestId('aviso-rapida-dev-texto')).toHaveTextContent('Registrando el abono… · Abrigo · 40,00 €');
     await esperar(ESPERA_DESHACER_MS - 1);
     expect(llamadas(c)).toBe(antes);
     await esperar(1);
@@ -516,7 +541,7 @@ describe('Actividad', () => {
     await esperar(ESPERA_DESHACER_MS);
     await asentar();
     expect(screen.getByTestId('fila-dev')).toBeTruthy();
-    expect(within(screen.getByTestId('fallo-rapida-dev')).getByText(new RegExp(mensaje))).toBeTruthy();
+    expect(screen.getByTestId('aviso-rapida-dev-texto')).toHaveTextContent(mensaje);
     expect(c.actividad).toHaveBeenCalledTimes(1);
   });
 

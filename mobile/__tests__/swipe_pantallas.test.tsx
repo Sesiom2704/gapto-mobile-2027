@@ -7,9 +7,11 @@
 // Versión: 0.2.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados invertidos — la acción principal se desliza a la IZQUIERDA y la alternativa a la DERECHA; acciones accesibles con el nombre de la dirección nueva.
 // Versión: 0.3.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // Versión: 0.4.0 (F05-D051 paso 2; F05 §65.4 contrato HTTP Q4/Q4-H2): fixtures wire con `apertura_indeterminada` (y `estado` en PosicionDeParte); sin cambios de aserciones.
+// Versión: 0.5.0 (F05-D056 paso 2, COLA-AR v1.0, F05 §70.A): «Pendiente con» (F1) y «Repetir hoy» (F3) por la cola de la app: aviso «Cobrando…» / «Registrando…» antes de la confirmación, «Saldado · no cuenta como ingreso» solo si el servidor deja el saldo conocido a cero, y el motivo de un rechazo en el propio aviso. Ajustes (N1–N3) sin cambios. La persistencia de la cola se vacía antes de cada prueba.
 // ============================================================
 
 import './tiempos_rn';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -53,12 +55,13 @@ const esperar = async (ms: number) => {
   });
 };
 const asentar = async () => {
-  for (let i = 0; i < 6; i++) await act(async () => undefined);
+  for (let i = 0; i < 10; i++) await act(async () => undefined);
 };
 const accion = (testID: string, nombre: string) => fireEvent(screen.getByTestId(testID), 'accessibilityAction', { nativeEvent: { actionName: nombre } });
 
-beforeEach(() => {
+beforeEach(async () => {
   n = 0;
+  await AsyncStorage.clear(); // la cola persiste: cada prueba empieza sin intenciones guardadas
   jest.useFakeTimers();
 });
 afterEach(() => {
@@ -116,12 +119,14 @@ describe('«Pendiente con <persona>»', () => {
     const antes = llamadas(c);
     accion('posicion-d1', 'izquierda');
     expect(screen.queryByTestId('posicion-d1')).toBeNull();
-    expect(screen.getByTestId('aviso-rapida-d1-texto')).toHaveTextContent('Cobrado de Tania · 15,00 €');
+    expect(screen.getByTestId('aviso-rapida-d1-texto')).toHaveTextContent('Cobrando… · Tania · 15,00 €');
     await esperar(ESPERA_DESHACER_MS - 1);
     expect(llamadas(c)).toBe(antes);
     await esperar(1);
     await asentar();
     expect(c.cobrarPosicion).toHaveBeenCalledWith('d1', { intencion_id: '00000000-0000-4000-8000-000000000001', importe: '15.00', cuenta_id: 'nomina', fecha: HOY });
+    // El servidor deja el saldo conocido a cero: solo entonces «Saldado» (A.5).
+    expect(screen.getByTestId('aviso-rapida-d1-texto')).toHaveTextContent('Saldado · no cuenta como ingreso');
     expect(c.perdonarPosicion).not.toHaveBeenCalled();
   });
 
@@ -169,7 +174,7 @@ describe('«Pendiente con <persona>»', () => {
     await esperar(ESPERA_DESHACER_MS);
     await asentar();
     expect(screen.getByTestId('posicion-d1')).toBeTruthy();
-    expect(screen.getByTestId('fallo-rapida-d1-texto').props.children).not.toMatch(/POSICION_CERRADA/);
+    expect(screen.getByTestId('aviso-rapida-d1-texto').props.children).not.toMatch(/POSICION_CERRADA/);
   });
 });
 
@@ -230,7 +235,7 @@ describe('Actividad · «Repetir hoy»', () => {
     expect(screen.getByTestId('fila-cena').props.accessibilityActions).toEqual([{ name: 'derecha', label: 'Más' }]); // con reparto no se ofrece
     accion('fila-cafe', 'izquierda');
     await asentar();
-    expect(screen.getByTestId('aviso-rapida-repetir-cafe-texto')).toHaveTextContent('Repetido hoy: Café · 2,40 €');
+    expect(screen.getByTestId('aviso-rapida-repetir-cafe-texto')).toHaveTextContent('Registrando… · Café · 2,40 €');
     expect(screen.getByTestId('fila-cafe')).toBeTruthy();
     const antes = llamadas(c);
     await esperar(ESPERA_DESHACER_MS - 1);
@@ -284,7 +289,7 @@ describe('Actividad · «Repetir hoy»', () => {
     await asentar();
     await esperar(ESPERA_DESHACER_MS);
     await asentar();
-    expect(screen.getByTestId('fallo-rapida-repetir-cafe-texto')).toHaveTextContent(/ya no puede pagar gastos/);
+    expect(screen.getByTestId('aviso-rapida-repetir-cafe-texto')).toHaveTextContent(/ya no puede pagar gastos/);
     expect(c.actividad).toHaveBeenCalledTimes(1);
   });
 });

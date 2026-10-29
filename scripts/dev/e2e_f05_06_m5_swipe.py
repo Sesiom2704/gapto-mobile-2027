@@ -58,6 +58,9 @@
 #   (antes e2e_f05_06_m5_swipe{,2,3}.py); importa los helpers de su propia carpeta.
 #   Uso: como e2e_f05_06_m5.py (--web, --api, --dist, --salida; API con CORS, base
 #   dev LOCAL recien recreada, GAPTO_DATABASE_URL, GAPTO_DEV_OWNER_USER_ID, GAPTO_DEV_TOKEN).
+# Version: 0.6.0 (F05-D056 paso 2, COLA-AR v1.0, F05 §70.A.5): mensajes veraces durante el
+#   plazo: P5a «Cobrando… · Nómina · 2.100,00 €» y P10 «Registrando… · … · 23,10 €» (antes
+#   «Nómina cobrada» y «Repetido hoy», que afirmaban el resultado antes del 2xx). El resto igual.
 # ============================================================
 
 from __future__ import annotations
@@ -297,7 +300,7 @@ def main() -> None:
             (salida / "diagnostico_p5a.json").write_text(json.dumps({"hoja_swipe": t("hoja-swipe").count(), "elegibles": caps,
                                                                      "nomina": nomina}, ensure_ascii=False, indent=1), encoding="utf-8")
             raise
-        comprobar(t(f"aviso-rapida-{ids['nomina']}-texto").inner_text() == "Nómina cobrada · 2.100,00 €", "P5a: texto del aviso")
+        comprobar(t(f"aviso-rapida-{ids['nomina']}-texto").inner_text() == "Cobrando… · Nómina · 2.100,00 €", "P5a: texto del aviso")
         comprobar(t(fila_n).count() == 0, "P5a: la fila sale")
         shot("P5a_aviso_deshacer")
         oscuro("P5a_aviso_deshacer")
@@ -433,7 +436,7 @@ def main() -> None:
         cuerpo10 = resp10.value.json()
         comprobar(resp10.value.status == 200, f"P10: HTTP {resp10.value.status} {cuerpo10.get('codigo')}")
         comprobar(espera10 >= 4.5, f"P10: el POST salio a los {espera10} s")
-        comprobar(texto10.startswith("Repetido hoy:") and "23,10" in texto10, f"P10: aviso {texto10}")
+        comprobar(texto10.startswith("Registrando…") and "23,10" in texto10, f"P10: aviso {texto10}")
         page.wait_for_timeout(1500)
         envios10 = [u for _, u in posts[n10:] if u.endswith("/v1/intenciones/gasto-pagado")]
         comprobar(len(envios10) == 1, f"P10: {len(envios10)} envios")

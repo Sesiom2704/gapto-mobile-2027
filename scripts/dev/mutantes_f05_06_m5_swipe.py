@@ -20,6 +20,12 @@
 #   (MS22-MS30); discriminante vacio = ROJO.
 # Version: 0.4.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): pasa de la evidencia a
 #   scripts/dev/; la raiz se deduce del propio fichero (sin --raiz).
+# Version: 0.5.0 (F05-D056 paso 2, COLA-AR v1.0, F05 §70.A.1): las acciones financieras de
+#   Inicio, Pendientes, Actividad y Pendiente con pasan a la cola de la app; useAccionRapida
+#   queda para las NO financieras de Ajustes (N1-N3). Las anclas no cambian; los
+#   discriminantes de MS01, MS02, MS04, MS05, MS07 y MS08 pasan a
+#   __tests__/accion_rapida_ajustes.test.tsx (JA) y MS10 al nombre nuevo del test de Inicio.
+#   Las guardas equivalentes de la cola tienen su propio arnes (COLA-AR, CA-M1..M6b).
 # ============================================================
 
 from __future__ import annotations
@@ -46,40 +52,41 @@ REP = "mobile/src/domain/repetir.ts"
 CAT = "mobile/src/screens/CategoriasAjustesScreen.tsx"
 TER = "mobile/src/screens/TercerosAjustesScreen.tsx"
 JDEV = "jest:__tests__/devolucion.test.tsx::"
+JA = "jest:__tests__/accion_rapida_ajustes.test.tsx::"
 
 MUTANTES = [
     ("MS01", "envio inmediato (sin esperar los 5 s)",
      [(AR, "    v.temporizador = setTimeout(() => void enviar(a.clave), ESPERA_DESHACER_MS);\n",
        "    void enviar(a.clave);\n")],
-     [J + "gesto → aviso «Electricidad pagada"], None),
+     [JA + "«Deshacer» → 0 peticiones"], None),
     ("MS02", "«Deshacer» que no cancela (la peticion sale igual)",
      [(AR, "    const v = vivas.current.get(clave);\n    if (!v || v.fase !== 'ESPERA') return;\n    if (v.temporizador)",
        "    const v = vivas.current.get(clave);\n    if (v) return;\n    if (v!.temporizador)")],
-     [J + "«Deshacer» → 0 peticiones"], None),
+     [JA + "«Deshacer» → 0 peticiones"], None),
     ("MS03", "swipe rapido con importe desconocido",
      [(DOM, "  if (f.importe_esperado === null) return null;\n  if (f.tipo !== 'GASTO'", "  if (false) return null;\n  if (f.tipo !== 'GASTO'")],
      [J + "si falta algo no hay acción rápida"], None),
     ("MS04", "dos intenciones por doble gesto (sin guarda de la fila viva)",
      [(AR, "    if (vivas.current.has(a.clave)) return false;\n", "    if (false) return false;\n")],
-     [J + "doble gesto"], None),
+     [JA + "doble gesto"], None),
     ("MS05", "identidad nueva en cada gesto (el reintento no es idempotente)",
      [(AR, "    const id = identidades.current.get(a.clave) ?? p.nuevoId();\n", "    const id = p.nuevoId();\n")],
-     [J + "gesto nuevo tras un INDETERMINADO"], None),
+     [JA + "gesto nuevo tras un INDETERMINADO"], None),
     ("MS06", "rechazo tratado como exito (exito falso)",
      [(AR, "    if (r.tipo === 'OK') {\n      identidades", "    if (r.tipo !== 'INDETERMINADO') {\n      identidades")],
      [J + "rechazo del servidor"], None),
     ("MS07", "segundo plano no cancela la espera",
      [(AR, "      if (e === 'background') cancelarTodas();\n", "      if (false) cancelarTodas();\n")],
-     [J + "segundo plano"], None),
+     [JA + "segundo plano"], None),
     ("MS08", "desmontar no cancela la espera",
      [(AR, "      for (const v of vivas.current.values()) if (v.fase === 'ESPERA' && v.temporizador) clearTimeout(v.temporizador);\n", "")],
-     [J + "se desmonta"], None),
+     [JA + "se desmonta"], None),
     ("MS09", "cuenta prevista sin la capacidad de hoy",
      [(DOM, "  if (!lista || !lista.some((x) => x.cuenta_id === cuenta.id)) return null;\n", "  if (!lista) return null;\n")],
      [J + "si falta algo no hay acción rápida", J + "datos incompletos"], None),
     ("MS10", "fecha prevista en lugar de hoy",
      [(DOM, "    importe: f.importe_esperado, fecha: hoy,", "    importe: f.importe_esperado, fecha: f.fecha_hasta ?? hoy,")],
-     [J + "acción rápida de un gasto", J + "gesto → aviso «Electricidad pagada"], None),
+     [J + "acción rápida de un gasto", J + "gesto → aviso «Pagando…"], None),
     ("MS11", "sin marcar la prevision como cubierta",
      [(DOM, "    conCategoria: !!f.categoria, propuestaSelf100: self100, marcar: true,\n", "    conCategoria: !!f.categoria, propuestaSelf100: self100, marcar: false,\n")],
      [J + "acción rápida de un gasto"], None),

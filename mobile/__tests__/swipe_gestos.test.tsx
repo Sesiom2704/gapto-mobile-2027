@@ -6,9 +6,11 @@
 // Versión: 0.1.0 (F05-06 M5 SWIPE3)
 // Versión: 0.2.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // Versión: 0.3.0 (F05-D051 paso 2; F05 §65.4 contrato HTTP Q4/Q4-H2): fixtures wire con `apertura_indeterminada` (y `estado` en PosicionDeParte); sin cambios de aserciones.
+// Versión: 0.4.0 (F05-D056 paso 2, COLA-AR v1.0, F05 §70.A): las acciones financieras van por la cola de la app; el aviso dice el verbo en curso («Pagando…», «Confirmando…», «Registrando…», «Cobrando…») hasta la confirmación. La persistencia de la cola se vacía antes de cada prueba. Los gestos, lados, tonos y vibración no cambian.
 // ============================================================
 
 import './tiempos_rn';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, fireEvent, render, screen, within } from '@testing-library/react-native';
 import * as Haptics from 'expo-haptics';
 import React from 'react';
@@ -54,7 +56,7 @@ const esperar = async (ms: number) => {
   });
 };
 const asentar = async () => {
-  for (let i = 0; i < 6; i++) await act(async () => undefined);
+  for (let i = 0; i < 10; i++) await act(async () => undefined);
 };
 
 /** Gesto real sobre el contenedor común: se toma con el primer valor y se mueve por los siguientes; suelta en el último. */
@@ -81,8 +83,9 @@ function arrastrar(testID: string, recorrido: number[]): boolean {
 const deslizar = (testID: string, dx: number) => arrastrar(testID, [dx / 3, dx]);
 const fondo = (testID: string) => StyleSheet.flatten(screen.getByTestId(testID).props.style).backgroundColor;
 
-beforeEach(() => {
+beforeEach(async () => {
   n = 0;
+  await AsyncStorage.clear(); // la cola persiste: cada prueba empieza sin intenciones guardadas
   jest.useFakeTimers();
   (Haptics.impactAsync as jest.Mock).mockClear();
   (Haptics.impactAsync as jest.Mock).mockImplementation(() => Promise.resolve());
@@ -150,13 +153,16 @@ describe('Pendientes: lados invertidos', () => {
     await asentar();
     // del todo a la izquierda: pago; del todo a la derecha en la nómina: no hubo
     deslizar('fila-swipe-pendiente-luz', -260);
-    expect(screen.getByTestId('aviso-rapida-luz-texto')).toHaveTextContent('Electricidad pagada · 74,00 €');
+    expect(screen.getByTestId('aviso-rapida-luz-texto')).toHaveTextContent('Pagando… · Electricidad · 74,00 €');
     deslizar(`fila-swipe-pendiente-${NOMINA.id}`, 260);
-    expect(screen.getByTestId(`aviso-rapida-${NOMINA.id}-texto`)).toHaveTextContent('Nómina · no hubo este mes');
+    expect(screen.getByTestId(`aviso-rapida-${NOMINA.id}-texto`)).toHaveTextContent('Confirmando… · Nómina · no hubo este mes');
     await esperar(ESPERA_DESHACER_MS);
     await asentar();
     expect(c.registrarGastoPagado).toHaveBeenCalledTimes(1);
     expect(c.omitirPrevision).toHaveBeenCalledWith(NOMINA.id, expect.objectContaining({ motivo: null }));
+    // COLA-AR: la fila confirmada sigue fuera mientras se ve su confirmación; el stub la vuelve a traer al releer.
+    await esperar(4000);
+    await asentar();
     expect(screen.getByTestId('pendiente-luz').props.accessibilityActions).toEqual([{ name: 'activate' }, { name: 'izquierda', label: 'Pagado' }, { name: 'derecha', label: 'No hubo' }]);
   });
 
@@ -191,7 +197,7 @@ describe('Pendientes: lados invertidos', () => {
     fireEvent(screen.getByTestId('pendientes'), 'touchStart');
     expect(abierta('luz')).toBe(true);
     fireEvent.press(boton);
-    expect(screen.getByTestId('aviso-rapida-luz-texto')).toHaveTextContent('Electricidad pagada · 74,00 €');
+    expect(screen.getByTestId('aviso-rapida-luz-texto')).toHaveTextContent('Pagando… · Electricidad · 74,00 €');
     fireEvent.press(screen.getByTestId('aviso-rapida-luz-deshacer'));
     // tocar la fila abierta abre su detalle y la cierra
     deslizar(`fila-swipe-pendiente-${NOMINA.id}`, -100);
@@ -262,7 +268,7 @@ test('Actividad: izquierda del todo = «Repetir hoy»; derecha del todo = «Más
   expect(c.registrarGastoPagado).not.toHaveBeenCalled();
   deslizar('fila-swipe-cafe', -260);
   await asentar();
-  expect(screen.getByTestId('aviso-rapida-repetir-cafe-texto')).toHaveTextContent('Repetido hoy: Café · 2,40 €');
+  expect(screen.getByTestId('aviso-rapida-repetir-cafe-texto')).toHaveTextContent('Registrando… · Café · 2,40 €');
   await esperar(ESPERA_DESHACER_MS);
   await asentar();
   expect(c.registrarGastoPagado).toHaveBeenCalledTimes(1);
@@ -288,7 +294,7 @@ test('«Pendiente con»: izquierda del todo cobra el saldo entero; derecha del t
   fireEvent.press(screen.getByTestId('posicion-atras'));
   await asentar();
   deslizar('fila-swipe-posicion-d1', -260);
-  expect(screen.getByTestId('aviso-rapida-d1-texto')).toHaveTextContent('Cobrado de Tania · 15,00 €');
+  expect(screen.getByTestId('aviso-rapida-d1-texto')).toHaveTextContent('Cobrando… · Tania · 15,00 €');
   await esperar(ESPERA_DESHACER_MS);
   await asentar();
   expect(c.cobrarPosicion).toHaveBeenCalledWith('d1', expect.objectContaining({ importe: '15.00', fecha: HOY }));

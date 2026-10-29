@@ -9,6 +9,7 @@
 // Versión: 0.4.0 (F05-D051 paso 8; lámina B D-F0507L-03): el texto de cada posición sale de `textoPosicion`. Tras cobrar, pagar o perdonar, una CERRADA dice «0,00 € · Saldado. Ya no queda nada pendiente.» y, si su importe inicial no se conoció, debajo «Importe inicial desconocido» (etiqueta accesible con el mismo texto); nunca «Sin determinar». La lista solo trae ACTIVAS: la pendiente con saldo desconocido sigue en «Sin determinar».
 // Versión: 0.5.0 (F05-D052 paso 3 · lámina B, F05 §66.2): «Saldo inicial desconocido» solo con `apertura_indeterminada` (vía `textoPosicion`); una ACTIVA con saldo desconocido ya no lo dice (se derivaba de `saldo === null`, herencia de M3): muestra su origen y «Sin determinar».
 // Versión: 0.6.0 (F05-D052 paso 2 · C-03 C4, F05 §66.2/§66.A.8; D-F0507L-06): `entidadId` abre directamente el derecho elegido (si la contraparte tiene varios, el cobro se aplica solo a ese). En el derecho de un gasto reembolsable («Pendiente de cobro · …») el origen es «<quién> · Pendiente de cobro · <categoría> · te debe X» y la explicación «No es un ingreso: solo salda lo que te deben. Tu Resultado no cambia.». «Registrar cobro» sigue deshabilitado hasta elegir cuenta. Tras cualquier cobro, el título es «Saldado · no cuenta como ingreso» solo si extingue el saldo conocido; si no, «Cobro registrado · quedan X €» (nunca «Saldado» con saldo indeterminado).
+// Versión: 0.7.0 (F05-D056 paso 2, COLA-AR v1.0, F05 §70.A; STOP-PA-A6-R): el swipe «Cobrado» / «Pagado» con una sola cuenta elegible (F1) es una acción de la cola de la app (`useAccionFinanciera`): la intención sobrevive a salir de la pantalla y a cerrar la app, el aviso dice «Cobrando…» / «Pagando…» hasta el 2xx del servidor y solo entonces «Cobro registrado» o, si el servidor deja el saldo conocido a cero, «Saldado · no cuenta como ingreso». Nunca ✓ antes de la confirmación.
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -16,7 +17,9 @@ import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput,
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ClienteApi, CuentaElegible } from '../api/cliente';
-import { FilaDeslizable, accesibilidadLados, propsScrollSwipe, propsZonaSwipe, useAccionRapida, type LadoSwipe } from '../components/AccionRapida';
+import { FilaDeslizable, accesibilidadLados, propsScrollSwipe, propsZonaSwipe, type LadoSwipe } from '../components/AccionRapida';
+import { useAccionFinanciera } from '../components/ColaAccionRapida';
+import { textosCobroPago } from '../domain/textosCola';
 import { BotonPrimario, BotonTexto, Chip, EstadoDato } from '../components/Basicos';
 import { Aviso, CabeceraTarea, Campo, Inicial, s } from '../components/Reparto';
 import { ayer, ddmmaaaaAIso, diaMesIso, fechaCortaIso, isoADdmmaaaa, isoLocal } from '../domain/fechas';
@@ -186,7 +189,7 @@ export function PendienteConScreen(p: {
       vigente = false;
     };
   }, [claveActivas, hoyIso]);
-  const rapida = useAccionRapida({ nuevoId: p.nuevoId, onHecha: async () => { setCambios(true); await cargar(); } });
+  const rapida = useAccionFinanciera({ cliente: p.cliente, nuevoId: p.nuevoId, onHecha: async () => { setCambios(true); await cargar(); } });
   const saldar = (x: PosicionPendiente) => {
     const derecho = x.tipo === 'DERECHO_COBRO';
     const lista = derecho ? cuentasHoy?.cobro : cuentasHoy?.pago;
@@ -196,13 +199,13 @@ export function PendienteConScreen(p: {
     }
     const saldo = x.saldo;
     const cuenta = lista[0].cuenta_id;
+    // COLA-AR (§70.A): la petición se compone al soltar; el motivo de un rechazo lo traduce la cola (motivoRechazoPosicion).
     rapida.lanzar({
       clave: x.entidad_id,
-      texto: `${derecho ? `Cobrado de ${nombre}` : `Pagado a ${nombre}`} · ${formatearEur(saldo)}`,
-      enviar: async (id) => {
-        const r = await (derecho ? p.cliente.cobrarPosicion : p.cliente.pagarPosicion)(x.entidad_id, { intencion_id: id, importe: saldo, cuenta_id: cuenta, fecha: hoyIso });
-        return r.tipo === 'RECHAZADO' ? { ...r, mensaje: motivoRechazoPosicion(r.codigo) } : r;
-      },
+      ruta: derecho ? 'COBRO_POSICION' : 'PAGO_POSICION',
+      recursoId: x.entidad_id,
+      textos: textosCobroPago(derecho, nombre, saldo),
+      componer: (id) => ({ intencion_id: id, importe: saldo, cuenta_id: cuenta, fecha: hoyIso }),
     });
   };
   const ladosPosicion = (x: PosicionPendiente): { principal: LadoSwipe; alternativa: LadoSwipe } => ({

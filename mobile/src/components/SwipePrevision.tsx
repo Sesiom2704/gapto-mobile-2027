@@ -7,6 +7,7 @@
 // Versión: 0.2.0 (F05-06 M5 SWIPE; regla de Moisés del 2026-10-22, sustituye a DAY-RULE-03 y D-PREV-08/12 en lo que contradigan): el swipe es una acción rápida de un solo gesto cuando `planRapidoPrevision` lo admite (esperado conocido, EUR, una sola cuenta prevista con la capacidad de hoy, sin realidad previa): la fila sale, el aviso «<Nombre> pagada/cobrada · Deshacer» dura 5 s y después se registra el esperado en la cuenta prevista con fecha de hoy y `marcar_realizada = true`, por la misma ruta y el mismo bloque `prevision` que la hoja (useAccionRapida). Las capacidades se leen al cargar las filas, para que el gesto y «Deshacer» no toquen el servidor. Si falta algo o no se pudieron leer, el gesto abre la hoja de siempre.
 // Versión: 0.4.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): `lados` devuelve `principal` y `alternativa` (la dirección la pone el componente común: principal a la izquierda).
 // Versión: 0.3.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2): `lados(fila)` da los dos lados de la fila. Derecha «Pagado» / «Cobrado» (transferencia: «Hecha»): acción rápida si no hay dudas; si las hay, la hoja (esperado y cuenta conocidos) o el formulario completo ya rellenado (importe desconocido, pago parcial, transferencia). Izquierda «No hubo» solo sin pagos enlazados (`admiteNoHubo`): omite con motivo vacío y la misma identidad que la hoja de omitir, tras el aviso de 5 s.
+// Versión: 0.5.0 (F05-D056 paso 2, COLA-AR v1.0, F05 §70.A): «Pagado» / «Cobrado» (F4) y «No hubo» (F5) son acciones de la cola de la app (`useAccionFinanciera`): la petición se compone al soltar con la identidad del swipe, sobrevive a la navegación y a cerrar la app, y el aviso dice «Pagando…» / «Confirmando…» hasta la confirmación del servidor. «No hubo» se reconcilia leyendo la previsión (decisión 1 de Moisés del 2026-10-29). La hoja y el formulario no cambian.
 // ============================================================
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -20,13 +21,13 @@ import {
   componerRegistro,
   importeFormulario,
   planRapidoPrevision,
-  textoAvisoNoHubo,
-  textoAvisoRapido,
   textoEditable,
   verboSwipe,
   type CapacidadesHoy,
 } from '../domain/prevision';
-import { useAccionRapida, type LadoSwipe } from './AccionRapida';
+import { textosNoHubo, textosPrevision } from '../domain/textosCola';
+import { type LadoSwipe } from './AccionRapida';
+import { useAccionFinanciera } from './ColaAccionRapida';
 import { HojaSwipe, usarIntencion } from './Prevision';
 
 export function useSwipePrevision(p: {
@@ -45,7 +46,7 @@ export function useSwipePrevision(p: {
   const intencion = usarIntencion(p.nuevoId);
   const hoy = isoLocal(p.ahora());
   const [capacidades, setCapacidades] = useState<CapacidadesHoy | null>(null);
-  const rapida = useAccionRapida({ nuevoId: p.nuevoId, onHecha: () => p.onRegistrado() });
+  const rapida = useAccionFinanciera({ cliente: p.cliente, nuevoId: p.nuevoId, onHecha: () => p.onRegistrado() });
 
   // Capacidades de hoy de las cuentas previstas, leídas con las filas (nunca en el gesto ni en «Deshacer»).
   const conGesto = p.filas.filter(admiteSwipe);
@@ -82,15 +83,15 @@ export function useSwipePrevision(p: {
   /** Derecha (gesto o acción accesible): acción rápida si es inequívoca; si no, la hoja o el formulario rellenado. */
   const deslizar = (f: FilaPrevision) => {
     const plan = planRapidoPrevision(f, capacidades, hoy);
-    if (!plan) return admiteSwipe(f) ? abrir(f) : p.onFormularioCompleto(f, importeFormulario(f));
+    // Comprobación previa con una identidad de prueba: la petición real se compone con la identidad del swipe.
+    const prueba = plan ? componerRegistro(f, plan, 'x') : null;
+    if (!plan || !prueba) return admiteSwipe(f) ? abrir(f) : p.onFormularioCompleto(f, importeFormulario(f));
     rapida.lanzar({
       clave: f.id,
-      texto: textoAvisoRapido(f),
-      enviar: async (id) => {
-        const r = componerRegistro(f, plan, id);
-        if (!r) return { tipo: 'RECHAZADO', codigo: 'INCOMPLETO', mensaje: 'Faltan datos: ábrelo y regístralo desde el formulario.' };
-        return r.ruta === 'INGRESO' ? p.cliente.registrarIngresoCobrado(r.payload as never) : p.cliente.registrarGastoPagado(r.payload as never);
-      },
+      ruta: prueba.ruta === 'INGRESO' ? 'INGRESO' : 'GASTO',
+      recursoId: null,
+      textos: textosPrevision(f),
+      componer: (id) => componerRegistro(f, plan, id)!.payload as Record<string, unknown> & { intencion_id: string },
     });
   };
 
@@ -99,8 +100,10 @@ export function useSwipePrevision(p: {
     if (!admiteNoHubo(f)) return;
     rapida.lanzar({
       clave: f.id,
-      texto: textoAvisoNoHubo(f),
-      enviar: (id) => p.cliente.omitirPrevision(f.id, { intencion_id: id, row_version: f.row_version, motivo: null }),
+      ruta: 'NO_HUBO',
+      recursoId: f.id,
+      textos: textosNoHubo(f),
+      componer: (id) => ({ intencion_id: id, row_version: f.row_version, motivo: null }),
     });
   };
 
