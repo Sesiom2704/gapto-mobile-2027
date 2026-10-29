@@ -4,6 +4,7 @@
 // Ruta: mobile/src/components/ColaAccionRapida.tsx
 // Descripción: COLA-AR v1.0 (F05 §70.A) en la app. `colaDe(cliente)` da la ÚNICA cola de la app para ese cliente (persistida con AsyncStorage, enganchada a AppState: en segundo plano no se envía nada; al volver se reanuda o se pregunta). `useAccionFinanciera` es lo que usan las pantallas con acciones rápidas financieras (F1 «Pendiente con», F2 «Recibido», F3 «Repetir hoy», F4/F5 previsiones de Inicio y Pendientes): al soltar compone la petición con una identidad nueva y la entrega a la cola; desmontar la pantalla no cancela ni adelanta nada. `AvisosCola` es el aviso global (A.4/A.5), visible en cualquier pantalla: «Cobrando… · Deshacer» con el tiempo restante; «Comprobando el cobro…» mientras se reconcilia; «No se ha guardado · Reintentar»; la pregunta «Enviar / Descartar» tras una ausencia; el motivo del servidor si se rechaza; y el ✓ con el resultado SOLO en CONFIRMADA. La raíz de la app monta un aviso global (`global`); si no hay ninguno montado (pruebas de una pantalla suelta), la pantalla pinta el suyo.
 // Versión: 0.1.0 (F05-D056 paso 2, COLA-AR v1.0)
+// Versión: 0.2.0 (pre-S2, AJ-F0507G8-02): el ejecutor da la IDENTIDAD de la cola, `<URL base>|<nombre del owner servido>` de `GET /v1/yo` (la misma lectura que antes hacía de comprobación de conexión; el servidor no expone otro identificador del owner), y el almacén guarda con la clave de esa identidad. Residuo documentado: dos owners con el mismo nombre en el mismo backend compartirían cola (la RLS sigue impidiendo escribir en el de otro).
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -12,9 +13,9 @@ import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore }
 import { AccessibilityInfo, Animated, AppState, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { ClienteApi, Respuesta } from '../api/cliente';
+import { configApi } from '../api/config';
 import { motivoRechazoPosicion } from '../domain/reparto';
 import {
-  CLAVE_ALMACEN,
   ColaAccionRapida,
   type AlmacenCola,
   type EjecutorCola,
@@ -29,7 +30,7 @@ import { espacio, radio, TACTIL_MIN, tipo } from '../theme/tokens';
 
 // ---------------------------------------------------------------- cola de la app
 /** Ejecutor de la cola con el cliente de la app: una ruta por acción financiera. */
-export function ejecutorDe(cliente: ClienteApi): EjecutorCola {
+export function ejecutorDe(cliente: ClienteApi, base: string = configApi.baseUrl): EjecutorCola {
   return {
     enviar: async (i: IntencionCola): Promise<Respuesta<unknown>> => {
       const p = i.payload as never;
@@ -54,7 +55,10 @@ export function ejecutorDe(cliente: ClienteApi): EjecutorCola {
           return { tipo: 'RECHAZADO', codigo: 'RUTA_DESCONOCIDA', mensaje: 'Esta acción no se puede enviar.' };
       }
     },
-    comprobarConexion: async () => (await cliente.yo()).tipo !== 'INDETERMINADO',
+    identidad: async () => {
+      const r = await cliente.yo();
+      return r.tipo === 'OK' ? `${base}|${r.datos.nombre ?? ''}` : null;
+    },
     estadoPrevision: async (id: string) => {
       const r = await cliente.detallePrevision(id);
       return r.tipo === 'OK' ? r.datos.estado : null;
@@ -63,8 +67,8 @@ export function ejecutorDe(cliente: ClienteApi): EjecutorCola {
 }
 
 const almacenApp: AlmacenCola = {
-  leer: () => AsyncStorage.getItem(CLAVE_ALMACEN),
-  escribir: (t) => AsyncStorage.setItem(CLAVE_ALMACEN, t),
+  leer: (clave) => AsyncStorage.getItem(clave),
+  escribir: (clave, t) => AsyncStorage.setItem(clave, t),
 };
 const temporizadoresApp: Temporizadores = {
   ahora: () => Date.now(),

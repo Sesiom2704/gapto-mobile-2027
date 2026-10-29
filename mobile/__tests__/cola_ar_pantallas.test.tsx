@@ -4,6 +4,7 @@
 // Ruta: mobile/__tests__/cola_ar_pantallas.test.tsx
 // Descripción: COLA-AR v1.0 (F05 §70.A) en pantalla, con el caso de S1 (STOP-PA-A6-R: «Pendiente con» con una sola cuenta elegible). El aviso GLOBAL (el que monta la raíz) sigue visible y con «Deshacer» al salir de la pantalla; desmontar no cancela ni adelanta el envío; al volver, la fila sigue fuera y hay un solo aviso; ni ✓ ni «Saldado» antes del 2xx (también mientras la petición está en vuelo); cerrar y reabrir la app pregunta «Enviar / Descartar» con la misma identidad.
 // Versión: 0.1.0 (F05-D056 paso 2)
+// Versión: 0.2.0 (pre-S2, AJ-F0507G8-02): la cola lee la identidad (`GET /v1/yo`) al montarse; «Deshacer» no añade ninguna lectura ni escritura.
 // ============================================================
 
 import './tiempos_rn';
@@ -133,11 +134,12 @@ test('«Deshacer» desde el aviso global después de salir de la pantalla: nada 
   accion('posicion-d1', 'izquierda');
   r.rerender(<App c={c} abierta={false} />);
   await asentar();
+  const lecturasYo = (c.yo as jest.Mock).mock.calls.length; // la de la identidad al montarse
   fireEvent.press(screen.getByTestId('aviso-rapida-d1-deshacer'));
   await esperar(PLAZO_DESHACER_MS * 3);
   await asentar();
   expect(c.cobrarPosicion).not.toHaveBeenCalled();
-  expect(c.yo).not.toHaveBeenCalled();
+  expect(c.yo).toHaveBeenCalledTimes(lecturasYo); // ninguna lectura más por un swipe deshecho
   expect(screen.queryByTestId('aviso-rapida-d1')).toBeNull();
 });
 

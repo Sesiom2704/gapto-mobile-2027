@@ -4,6 +4,7 @@
 // Ruta: mobile/__tests__/cola_ar.test.ts
 // Descripción: COLA-AR v1.0 (F05 §70.A.6; AJ-F0507G7-05): las 12 pruebas obligatorias sobre la cola de la app, deterministas (reloj y temporizadores simulados, almacén en memoria, servidor simulado que aplica la idempotencia por identidad como el real: un `intencion_id` = un hecho, un movimiento y una reducción), y las de la reconciliación por lectura de «No hubo» (decisión 1 de Moisés del 2026-10-29). Las de pantalla (desmontaje, navegación y ✓) están en `cola_ar_pantallas.test.tsx`; el oráculo físico, en `tests/api/test_224_f05_d056_cola_ar.py`.
 // Versión: 0.1.0 (F05-D056 paso 2)
+// Versión: 0.2.0 (pre-S2, AJ-F0507G8-01/02): el ejecutor da la identidad (`identidad()`) y el almacén guarda por clave de identidad; la cola se restaura con su identidad al montarse (como en la app). Las cuentas de lecturas de identidad se toman tras esa restauración. Pruebas nuevas al final.
 // ============================================================
 
 import type { Respuesta } from '../src/api/cliente';
@@ -17,6 +18,7 @@ import {
   type IntencionCola,
   type NuevaIntencion,
   type Temporizadores,
+  claveDe,
 } from '../src/state/colaAccionRapida';
 import { textosCobroPago, textosNoHubo } from '../src/domain/textosCola';
 
@@ -56,11 +58,23 @@ const asentar = async () => {
 };
 
 class Almacen implements AlmacenCola {
-  texto: string | null = null;
-  leer = async () => this.texto;
-  escribir = async (t: string) => {
-    this.texto = t;
+  datos = new Map<string, string>();
+  fallar = false;
+  escrituras = 0;
+  leer = async (k: string) => this.datos.get(k) ?? null;
+  escribir = async (k: string, t: string) => {
+    this.escrituras += 1;
+    if (this.fallar) throw new Error('almacén lleno');
+    this.datos.set(k, t);
   };
+  /** Lo guardado para una identidad (por defecto la del servidor simulado). */
+  get texto(): string | null {
+    return this.datos.get(claveDe('A')) ?? null;
+  }
+  set texto(t: string | null) {
+    if (t === null) this.datos.delete(claveDe('A'));
+    else this.datos.set(claveDe('A'), t);
+  }
 }
 
 type Resp = Respuesta<unknown>;
@@ -71,6 +85,8 @@ class Servidor {
   reducciones = 0;
   prevision = { estado: 'ABIERTA', row_version: 1 };
   conexion = true;
+  /** Identidad servida (URL base + owner); cambiarla simula otro owner detrás del mismo backend. */
+  owner = 'A';
   /** Respuestas forzadas por llamada (antes de aplicar), p. ej. INDETERMINADO = la respuesta se pierde. */
   guion: (('APLICA_Y_PIERDE' | 'NO_LLEGA' | Resp))[] = [];
   lecturas: (string | null)[] = [];
@@ -88,9 +104,9 @@ class Servidor {
         const r = this.aplicar(i);
         return paso === 'APLICA_Y_PIERDE' ? { tipo: 'INDETERMINADO', mensaje: '' } : r;
       },
-      comprobarConexion: async () => {
+      identidad: async () => {
         this.conexiones += 1;
-        return this.conexion;
+        return this.conexion ? this.owner : null;
       },
       estadoPrevision: async () => {
         this.leidas += 1;
@@ -129,7 +145,9 @@ function noHubo(): NuevaIntencion {
     payload: { intencion_id: nuevoId(), row_version: 1, motivo: null } };
 }
 function montar(s = new Servidor(), almacen = new Almacen(), reloj = new Reloj()) {
-  return { s, almacen, reloj, cola: new ColaAccionRapida(s.ejecutor(), almacen, reloj) };
+  const cola = new ColaAccionRapida(s.ejecutor(), almacen, reloj);
+  void cola.restaurar(); // como colaDe en la app: la identidad se fija al montarse
+  return { s, almacen, reloj, cola };
 }
 const estado = (c: ColaAccionRapida, k = 'd1') => c.get(k)?.estado;
 
@@ -149,7 +167,7 @@ test('1. Deshacer antes del plazo: CANCELADA, nunca se envía (ni la comprobaci�
   expect(cola.get('d1')).toBeUndefined();
   await reloj.avanzar(60000);
   expect(s.llamadas).toHaveLength(0);
-  expect(s.conexiones).toBe(0);
+  expect(s.conexiones).toBe(1); // solo la lectura de identidad al montarse: ninguna por el swipe deshecho
   expect(cola.oculta('d1')).toBe(false);
 });
 
@@ -158,7 +176,7 @@ test('2. Vencimiento sin cancelar: se envía al cumplirse el plazo, nunca antes,
   cola.lanzar(cobro());
   await reloj.avanzar(PLAZO_DESHACER_MS - 1);
   expect(s.llamadas).toHaveLength(0);
-  expect(s.conexiones).toBe(0);
+  expect(s.conexiones).toBe(1); // solo la de la restauración: durante el plazo no se lee nada
   await reloj.avanzar(1);
   expect(s.llamadas).toHaveLength(1);
   expect(estado(cola)).toBe('CONFIRMADA');
@@ -285,7 +303,7 @@ test('7. Red desconectada: NO_ENVIADA sin intentar la escritura; «Reintentar» 
   expect(s.llamadas).toHaveLength(0);
   await reloj.avanzar(10 * 60000);
   expect(s.llamadas).toHaveLength(0);
-  expect(s.conexiones).toBe(1);
+  expect(s.conexiones).toBe(2); // restauración + el único intento (sin reintento automático)
   s.conexion = true;
   const id = cola.get('d1')!.intencionId;
   cola.reintentar('d1');
@@ -463,5 +481,113 @@ describe('«No hubo» (omitir sin replay de éxito)', () => {
     // «Reintentar» es un reintento: su 409 se reconcilia leyendo (OMITIDA → CONFIRMADA).
     expect(s.leidas).toBe(1);
     expect(estado(cola, 'luz')).toBe('CONFIRMADA');
+  });
+});
+
+// ==================================================================
+// AJ-F0507G8-01: la persistencia se espera antes de enviar
+// ==================================================================
+describe('AJ-F0507G8-01 · persistencia antes del envío', () => {
+  test('si no se puede guardar, NO_ENVIADA y la escritura nunca se intenta', async () => {
+    const { s, almacen, cola, reloj } = montar();
+    await reloj.avanzar(0);
+    cola.lanzar(cobro());
+    almacen.fallar = true;
+    await reloj.avanzar(PLAZO_DESHACER_MS);
+    expect(estado(cola)).toBe('NO_ENVIADA');
+    expect(s.llamadas).toHaveLength(0);
+  });
+
+  test('el envío no sale hasta que PENDIENTE_DE_ENVIO y después ENVIADA están guardadas (en ese orden)', async () => {
+    const s = new Servidor();
+    const almacen = new Almacen();
+    const pendientes: { estado: string; resolver: () => void }[] = [];
+    let lento = false;
+    const base = almacen.escribir;
+    almacen.escribir = (k: string, t: string) => {
+      if (!lento) return base(k, t);
+      const e = (JSON.parse(t) as IntencionCola[]).find((x) => x.clave === 'd1')?.estado ?? '-';
+      return new Promise<void>((res) => pendientes.push({ estado: e, resolver: () => void base(k, t).then(res) }));
+    };
+    let guardadoAlEnviar: string | undefined;
+    const ej = s.ejecutor();
+    const ejecutor = { ...ej, enviar: async (i: IntencionCola) => {
+      guardadoAlEnviar = (JSON.parse(almacen.texto ?? '[]') as IntencionCola[]).find((x) => x.clave === 'd1')?.estado;
+      return ej.enviar(i);
+    } };
+    const reloj = new Reloj();
+    const cola = new ColaAccionRapida(ejecutor, almacen, reloj);
+    void cola.restaurar();
+    await reloj.avanzar(0);
+    cola.lanzar(cobro());
+    await reloj.avanzar(1000);
+    lento = true;
+    await reloj.avanzar(PLAZO_DESHACER_MS - 1000);
+    expect(pendientes.map((p) => p.estado)).toEqual(['PENDIENTE_DE_ENVIO']); // espera a guardarla antes de seguir
+    expect(s.llamadas).toHaveLength(0);
+    pendientes[0].resolver();
+    await reloj.avanzar(0);
+    expect(pendientes.map((p) => p.estado)).toEqual(['PENDIENTE_DE_ENVIO', 'ENVIADA']);
+    expect(s.llamadas).toHaveLength(0); // ENVIADA aún no está guardada: no se envía
+    lento = false;
+    pendientes[1].resolver();
+    await reloj.avanzar(0);
+    expect(s.llamadas).toHaveLength(1);
+    expect(guardadoAlEnviar).toBe('ENVIADA'); // si la app muere ahora, al reabrir es un resultado desconocido, no EN_PLAZO
+  });
+});
+
+// ==================================================================
+// AJ-F0507G8-02: una cola por identidad (URL base + owner servido)
+// ==================================================================
+describe('AJ-F0507G8-02 · cola por identidad', () => {
+  test('al reabrir con OTRO owner no se restaura nada; con el mismo, sí (como pregunta tras la ausencia)', async () => {
+    const almacen = new Almacen();
+    const a = montar(new Servidor(), almacen);
+    await a.reloj.avanzar(0);
+    a.cola.lanzar(cobro());
+    await a.reloj.avanzar(1000); // se cierra la app
+    const sb = new Servidor();
+    sb.owner = 'B';
+    const rb = new Reloj();
+    rb.t = 3_600_000;
+    const b = montar(sb, almacen, rb);
+    await rb.avanzar(60000);
+    expect(b.cola.intenciones()).toHaveLength(0);
+    expect(sb.llamadas).toHaveLength(0);
+    const rc = new Reloj();
+    rc.t = 3_600_000;
+    const c = montar(new Servidor(), almacen, rc);
+    await rc.avanzar(0);
+    expect(c.cola.get('d1')?.pregunta).toBe(true);
+  });
+
+  test('si al enviar sirve otro owner, no se envía como él: la intención queda guardada con el suyo como pregunta', async () => {
+    const { s, almacen, cola, reloj } = montar();
+    await reloj.avanzar(0);
+    cola.lanzar(cobro());
+    await reloj.avanzar(2000);
+    s.owner = 'B'; // -Fase Ronda: el backend pasa a servir otro owner
+    await reloj.avanzar(PLAZO_DESHACER_MS);
+    expect(s.llamadas).toHaveLength(0);
+    expect(cola.get('d1')).toBeUndefined();
+    expect(cola.identidadActual()).toBe('B');
+    const guardada = (JSON.parse(almacen.texto!) as IntencionCola[]).find((x) => x.clave === 'd1')!;
+    expect([guardada.estado, guardada.pregunta]).toEqual(['EN_PLAZO', true]);
+  });
+
+  test('al volver a primer plano con otro owner servido se cambia de cola; ningún envío cruzado', async () => {
+    const { s, almacen, cola, reloj } = montar();
+    await reloj.avanzar(0);
+    cola.lanzar(cobro());
+    await reloj.avanzar(1000);
+    cola.alSegundoPlano();
+    s.owner = 'B';
+    cola.alPrimerPlano();
+    await reloj.avanzar(60000);
+    expect(s.llamadas).toHaveLength(0);
+    expect(cola.identidadActual()).toBe('B');
+    expect(cola.intenciones()).toHaveLength(0);
+    expect(almacen.datos.has(claveDe('A'))).toBe(true);
   });
 });

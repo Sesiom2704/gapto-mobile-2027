@@ -4,6 +4,7 @@
 // Ruta: mobile/src/state/colaAccionRapida.ts
 // Descripción: COLA-AR v1.0 (F05 §70.A; AJ-F0507G7-01..06): cola de las acciones rápidas FINANCIERAS a nivel de app, fuera de cualquier componente. Una intención nace al soltar el swipe con un `intencion_id` único que se persiste y se reutiliza en todo reenvío y reconciliación; nunca se genera otro para el mismo swipe (A.2). Estados de A.3: EN_PLAZO (0–5 s, se puede deshacer), CANCELADA (nunca se envía), PENDIENTE_DE_ENVIO, ENVIADA, CONFIRMADA (2xx: la API responde tras el COMMIT), RECHAZADA (4xx definitivo con su motivo), NO_ENVIADA (la comprobación de conexión previa a la escritura falló: la escritura no se intentó) y RESULTADO_DESCONOCIDO (se envió y no hubo respuesta). Ciclo de vida de A.4: desmontar o navegar en EN_PLAZO no cancela ni adelanta nada (la intención vive aquí); NUNCA se envía antes del plazo; en segundo plano no se envía nada y, al volver o al reabrir, si el plazo no ha vencido sigue la cuenta atrás y si ha vencido se PREGUNTA «Enviar / Descartar» (nunca envío automático tras una ausencia); RESULTADO_DESCONOCIDO se reconcilia con la misma identidad, en primer plano, por reenvío idempotente, y nunca se presenta como éxito ni como fallo antes de reconciliar; NO_ENVIADA ofrece «Reintentar» con la misma identidad, sin reintento automático. «No hubo» (omitir, decisión 1 de Moisés del 2026-10-29, sin tocar el servidor): el servidor no tiene replay de éxito, así que ante un 409 de un reintento (o del reenvío de una reconciliación) se LEE la previsión: OMITIDA → CONFIRMADA; cualquier otro estado → RECHAZADA con su motivo; si la lectura no responde, sigue en RESULTADO_DESCONOCIDO. Como `omitir` bloquea la previsión, la lectura que sigue a la respuesta del reenvío ve el resultado definitivo de cualquier envío anterior aún en vuelo. Persistencia mínima en el dispositivo (A.4): tipo, ids, importe, cuenta, payload de la petición, `intencion_id`, instante y estado; nunca tokens ni secretos.
 // Versión: 0.1.0 (F05-D056 paso 2, COLA-AR v1.0)
+// Versión: 0.2.0 (pre-S2, AJ-F0507G8-01/02, cumplimiento de §70.A): (1) la persistencia de PENDIENTE_DE_ENVIO y de ENVIADA se ESPERA antes de enviar; si no se puede guardar, NO_ENVIADA y no se envía (antes se escribía sin esperar y un cierre justo tras el POST podía dejar EN_PLAZO guardado). (2) La cola es POR IDENTIDAD: `ejecutor.identidad()` (URL base + owner servido, de `GET /v1/yo`) sustituye a la comprobación de conexión y da la clave de almacén `gapto.cola_ar.v2:<identidad>`; nunca se restaura ni se envía una intención de otra identidad. Si la identidad servida cambia (al enviar, al reconciliar o al volver a primer plano), las intenciones vivas se guardan con la suya (las aún no enviadas, como pregunta «Enviar / Descartar») y se cargan las de la nueva. Sin identidad no se restaura nada ni se envía.
 // ============================================================
 
 import type { Respuesta } from '../api/cliente';
@@ -12,8 +13,9 @@ import type { Respuesta } from '../api/cliente';
 export const PLAZO_DESHACER_MS = 5000;
 /** Esperas entre reconciliaciones de un resultado desconocido (en primer plano). */
 export const ESPERAS_RECONCILIACION_MS = [2000, 5000, 15000, 30000];
-/** Clave de la persistencia en el dispositivo. */
-export const CLAVE_ALMACEN = 'gapto.cola_ar.v1';
+/** Prefijo de la clave de la persistencia en el dispositivo; la clave lleva la identidad (AJ-F0507G8-02). */
+export const CLAVE_ALMACEN = 'gapto.cola_ar.v2';
+export const claveDe = (identidad: string) => `${CLAVE_ALMACEN}:${identidad}`;
 
 export type EstadoCola =
   | 'EN_PLAZO'
@@ -70,15 +72,18 @@ export interface IntencionCola extends NuevaIntencion {
 /** Envía cada ruta con el cliente de la app. */
 export interface EjecutorCola {
   enviar(i: IntencionCola): Promise<Respuesta<unknown>>;
-  /** Lectura sin escritura previa al envío: si falla, la escritura no se intenta (NO_ENVIADA). */
-  comprobarConexion(): Promise<boolean>;
+  /**
+   * Identidad servida (URL base + owner), con una lectura sin escritura. null si no hay conexión o no se sabe: entonces la
+   * escritura no se intenta (NO_ENVIADA) y no se restaura nada.
+   */
+  identidad(): Promise<string | null>;
   /** Estado actual de una previsión (reconciliación de «No hubo»); null si no se pudo leer. */
   estadoPrevision(previsionId: string): Promise<string | null>;
 }
 
 export interface AlmacenCola {
-  leer(): Promise<string | null>;
-  escribir(texto: string): Promise<void>;
+  leer(clave: string): Promise<string | null>;
+  escribir(clave: string, texto: string): Promise<void>;
 }
 
 export interface Temporizadores {
@@ -123,7 +128,8 @@ export class ColaAccionRapida {
   private oyentes = new Set<Oyente>();
   private alConfirmar = new Set<OyenteConfirmada>();
   private primerPlano = true;
-  private restaurada: Promise<void> | null = null;
+  /** Identidad cuyas intenciones están en memoria y con la que se guarda (AJ-F0507G8-02). */
+  private identidad: string | null = null;
 
   constructor(
     private ejecutor: EjecutorCola,
@@ -221,28 +227,52 @@ export class ColaAccionRapida {
     this.primerPlano = true;
     for (const i of this.lista.values()) this.reanudar(i);
     this.cambio();
+    void this.revisarIdentidad(); // si al volver sirve otro owner, se cambia de cola
   }
 
-  /** Al abrir la app: lo persistido vuelve con la misma identidad. */
-  restaurar(): Promise<void> {
-    if (!this.restaurada) this.restaurada = this.leerAlmacen();
-    return this.restaurada;
+  /** Al abrir la app: con la identidad servida se cargan SOLO sus intenciones. Devuelve si se conoce la identidad. */
+  async restaurar(): Promise<boolean> {
+    return this.revisarIdentidad();
   }
 
-  private async leerAlmacen(): Promise<void> {
+  /** Identidad actual (pruebas y diagnóstico). */
+  identidadActual(): string | null {
+    return this.identidad;
+  }
+
+  private async leerIdentidad(): Promise<string | null> {
+    try {
+      return await this.ejecutor.identidad();
+    } catch {
+      return null;
+    }
+  }
+
+  /** Lee la identidad servida y, si es otra que la de la memoria, cambia de cola. */
+  private async revisarIdentidad(): Promise<boolean> {
+    const id = await this.leerIdentidad();
+    if (!id) return this.identidad !== null;
+    if (this.identidad === null) await this.adoptar(id);
+    else if (id !== this.identidad) await this.cambiarIdentidad(id);
+    return true;
+  }
+
+  /** Fija la identidad y carga sus intenciones guardadas (nunca las de otra). */
+  private async adoptar(id: string): Promise<void> {
+    this.identidad = id;
     let texto: string | null = null;
     try {
-      texto = await this.almacen.leer();
+      texto = await this.almacen.leer(claveDe(id));
     } catch {
       texto = null;
     }
-    if (!texto) return;
     let guardadas: IntencionCola[] = [];
     try {
-      guardadas = JSON.parse(texto) as IntencionCola[];
+      guardadas = texto ? (JSON.parse(texto) as IntencionCola[]) : [];
     } catch {
-      return;
+      guardadas = [];
     }
+    if (this.identidad !== id) return;
     for (const g of guardadas) {
       if (this.lista.has(g.clave) || !ACTIVOS.includes(g.estado)) continue;
       // La app se cerró durante el envío: no se sabe si se guardó.
@@ -251,6 +281,27 @@ export class ColaAccionRapida {
       if (this.primerPlano) this.reanudar(g);
     }
     this.cambio();
+  }
+
+  /**
+   * La identidad servida cambió: las intenciones vivas se guardan con la suya (la que aún no se envió, como pregunta
+   * «Enviar / Descartar», nunca como enviada) y salen de la memoria; después se cargan las de la nueva.
+   */
+  private async cambiarIdentidad(id: string): Promise<void> {
+    for (const c of [...this.plazos.keys()]) this.cancelarPlazo(c);
+    for (const c of [...this.reconciliaciones.keys()]) this.cancelarReconciliacion(c);
+    for (const i of this.lista.values()) {
+      if (i.estado === 'PENDIENTE_DE_ENVIO' || (i.estado === 'EN_PLAZO')) {
+        i.estado = 'EN_PLAZO';
+        i.pregunta = true;
+      }
+    }
+    await this.persistir();
+    this.lista.clear();
+    this.enVuelo.clear();
+    this.identidad = null;
+    this.notificar();
+    await this.adoptar(id);
   }
 
   private reanudar(i: IntencionCola): void {
@@ -291,26 +342,32 @@ export class ColaAccionRapida {
       i.intentos += 1;
       i.estado = 'PENDIENTE_DE_ENVIO';
       i.mensaje = null;
-      this.cambio();
-      let conexion = false;
-      try {
-        conexion = await this.ejecutor.comprobarConexion();
-      } catch {
-        conexion = false;
-      }
-      if (!conexion) {
-        i.estado = 'NO_ENVIADA';
-        i.mensaje = MENSAJE_NO_ENVIADA;
-        return this.cambio();
-      }
+      this.notificar();
+      // Lectura sin escritura: identidad servida (y, con ella, conexión). Sin ella, la escritura no se intenta.
+      const id = await this.leerIdentidad();
+      if (!id) return this.noEnviada(i);
+      if (this.identidad === null) await this.adoptar(id);
+      else if (id !== this.identidad) return void (await this.cambiarIdentidad(id)); // es de otro owner: queda con el suyo
+      // AJ-F0507G8-01: PENDIENTE_DE_ENVIO y ENVIADA se guardan ANTES de enviar; si no se puede, no se envía.
+      if (!(await this.persistir())) return this.noEnviada(i);
       i.estado = 'ENVIADA';
       i.envios += 1;
-      this.cambio(); // persistido ANTES de enviar: si la app se cierra ahora, al volver se reconcilia
+      this.notificar();
+      if (!(await this.persistir())) {
+        i.envios -= 1;
+        return this.noEnviada(i);
+      }
       const r = await this.enviarSeguro(i);
       await this.resolver(i, r);
     } finally {
       this.enVuelo.delete(clave);
     }
+  }
+
+  private noEnviada(i: IntencionCola): void {
+    i.estado = 'NO_ENVIADA';
+    i.mensaje = MENSAJE_NO_ENVIADA;
+    this.cambio();
   }
 
   private async enviarSeguro(i: IntencionCola): Promise<Respuesta<unknown>> {
@@ -380,6 +437,17 @@ export class ColaAccionRapida {
     if (!i || i.estado !== 'RESULTADO_DESCONOCIDO' || this.enVuelo.has(clave) || !this.primerPlano) return;
     this.enVuelo.add(clave);
     try {
+      // Antes de reenviar: la identidad servida debe ser la de la intención (AJ-F0507G8-02).
+      const id = await this.leerIdentidad();
+      if (this.lista.get(clave) !== i) return;
+      if (!id) {
+        this.cambio();
+        return this.programarReconciliacion(i, paso + 1);
+      }
+      if (id !== this.identidad) {
+        this.enVuelo.delete(clave);
+        return void (await this.cambiarIdentidad(id));
+      }
       // Reenvío con la MISMA identidad: idempotente en F1–F4; en «No hubo», su 409 lleva a la lectura.
       i.envios += 1;
       this.cambio();
@@ -407,10 +475,27 @@ export class ColaAccionRapida {
     this.reconciliaciones.delete(clave);
   }
 
-  private cambio(): void {
+  /** Guarda las intenciones vivas con la identidad actual; false si no hay identidad o la escritura falla. */
+  private async persistir(): Promise<boolean> {
+    const id = this.identidad;
+    if (!id) return false;
     const vivas = [...this.lista.values()].filter((i) => ACTIVOS.includes(i.estado));
-    void this.almacen.escribir(JSON.stringify(vivas)).catch(() => undefined);
+    try {
+      await this.almacen.escribir(claveDe(id), JSON.stringify(vivas));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private notificar(): void {
     const l = this.intenciones();
     for (const o of [...this.oyentes]) o(l);
+  }
+
+  /** Cambio sin envío detrás: se avisa y se guarda sin esperar (el envío es el único que exige la escritura hecha). */
+  private cambio(): void {
+    void this.persistir();
+    this.notificar();
   }
 }
