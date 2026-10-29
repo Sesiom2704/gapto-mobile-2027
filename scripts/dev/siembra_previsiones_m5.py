@@ -27,13 +27,23 @@
 #     solo existen como fixtures de tests (M6 pospuesto).
 #   Uso: python scripts/dev/siembra_previsiones_m5.py --dsn-env GAPTO_DATABASE_URL --owner <uuid>
 #        [--manifiesto <ruta>] [--rol-runtime gapto_runtime] [--cuenta-nomina <uuid>] [--cuenta-ahorro <uuid>]
-#   Sin cuentas explicitas: la primera CORRIENTE y la primera AHORRO habilitadas en EUR (por nombre).
+#   Sin cuentas explicitas: la UNICA CORRIENTE y la UNICA AHORRO habilitadas en EUR del owner.
 #   El DSN se lee de la variable indicada y nunca se imprime.
 # Version: 0.1.0 (F05-06 M5 §C1 / Fase 3)
 # Version: 0.2.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): siembra entre dias. Antes el
 #   uuid5 dependia solo del fixture y las fechas de hoy: otro dia chocaba con la
 #   prevision del dia anterior (IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION, R2 de M5
 #   SWIPE). Ahora el juego de cada dia tiene su propia identidad.
+# Version: 0.3.0 (F05-D056 paso 4, F05 §70.3, H-S1-01, AJ-F0507G7-08): defensa
+#   doble. (1) Rol: siempre gapto_runtime con la GUC del owner (UnidadDeTrabajo);
+#   cualquier otro --rol-runtime aborta ANTES de conectar y, ya conectado, se
+#   exige current_user = gapto_runtime sin BYPASSRLS ni superusuario. Sin
+#   fallback a superusuario. (2) Filtro explicito: las cuentas se leen con
+#   owner_user_id = owner aunque la RLS ya filtre; una cuenta explicita que no
+#   existe, es de otro owner, no esta habilitada en EUR o no es del tipo del
+#   papel aborta; sin cuentas explicitas, cero o varias candidatas del tipo
+#   aborta (ambigua). Antes se tomaba la primera por nombre de TODOS los owners
+#   visibles (con superusuario, la de otro owner).
 # ============================================================
 
 from __future__ import annotations
@@ -63,10 +73,24 @@ PERMITIDOS = {
     "m5_siembra": set(range(5460, 5470)),
 }
 ESPACIO = uuid.UUID("6f0e2c1a-5d7b-4c39-9b8e-0a1f5e4d3c21")
+ROL_RUNTIME = "gapto_runtime"
+#: papel del fixture -> tipo de cuenta exigido
+PAPELES = {"nomina": "CORRIENTE", "ahorro": "AHORRO"}
 
 
 class DestinoNoPermitido(SystemExit):
     pass
+
+
+class CuentaNoValida(SystemExit):
+    pass
+
+
+def exigir_rol(rol_runtime: str | None) -> str:
+    """Sin conectar: solo gapto_runtime (con RLS). Sin fallback a superusuario."""
+    if rol_runtime != ROL_RUNTIME:
+        raise SystemExit(f"rol no permitido: {rol_runtime!r}; la siembra solo corre como {ROL_RUNTIME} (RLS)")
+    return rol_runtime
 
 
 def exigir_destino(dsn: str) -> dict:
@@ -127,20 +151,45 @@ def _unidad(dsn: str, rol_runtime: str | None):
     return UnidadDeTrabajo(abrir, rol_runtime=rol_runtime)
 
 
-def _cuentas(unidad, ctx) -> dict[str, uuid.UUID | None]:
-    """Lectura: «nomina» = primera cuenta CORRIENTE habilitada en EUR; «ahorro» = primera AHORRO."""
+def _cuentas(unidad, ctx, owner: uuid.UUID, explicitas: dict[str, uuid.UUID] | None = None) -> dict[str, uuid.UUID]:
+    """Lectura con defensa doble: rol runtime sin BYPASSRLS y filtro explicito por owner.
+    «nomina» = la CORRIENTE y «ahorro» = la AHORRO del owner, habilitadas en EUR; si se
+    pasan explicitas, cada una debe ser del owner y del tipo de su papel."""
+    explicitas = explicitas or {}
+
     def leer(s):
+        usuario, bypass, super_ = s.conexion.execute(
+            "SELECT current_user, r.rolbypassrls, r.rolsuper FROM pg_roles r WHERE r.rolname = current_user").fetchone()
+        rol = (usuario, bypass, super_)
         filas = s.conexion.execute(
-            "SELECT id, tipo FROM gapto.cuentas WHERE enabled AND moneda = 'EUR' AND tipo IN ('CORRIENTE', 'AHORRO') "
-            "ORDER BY tipo, nombre, id").fetchall()
-        return {"nomina": next((f[0] for f in filas if f[1] == "CORRIENTE"), None),
-                "ahorro": next((f[0] for f in filas if f[1] == "AHORRO"), None)}
-    return unidad.ejecutar(ctx, leer, nombre="siembra M5 cuentas")
+            "SELECT id, tipo FROM gapto.cuentas WHERE owner_user_id = %s AND enabled AND moneda = 'EUR' "
+            "AND tipo IN ('CORRIENTE', 'AHORRO') ORDER BY tipo, nombre, id", (owner,)).fetchall()
+        return rol, filas
+
+    # Los abortos se lanzan FUERA de la unidad (dentro, la unidad los clasifica como INTERNO).
+    (usuario, bypass, super_), filas = unidad.ejecutar(ctx, leer, nombre="siembra M5 cuentas")
+    if usuario != ROL_RUNTIME or bypass or super_:
+        raise SystemExit(f"rol efectivo no permitido: {usuario} (bypassrls={bypass}, superusuario={super_})")
+    out = {}
+    for papel, tipo in PAPELES.items():
+        del_tipo = [f[0] for f in filas if f[1] == tipo]
+        if papel in explicitas:
+            if explicitas[papel] not in del_tipo:
+                raise CuentaNoValida(f"cuenta {papel} {explicitas[papel]}: no existe para el owner, es de otro owner "
+                                     f"o no es {tipo} habilitada en EUR")
+            out[papel] = explicitas[papel]
+        elif len(del_tipo) != 1:
+            raise CuentaNoValida(f"cuenta {papel}: {len(del_tipo)} {tipo} habilitadas en EUR del owner "
+                                 f"({'inexistente' if not del_tipo else 'ambigua'}); pasa --cuenta-{papel}")
+        else:
+            out[papel] = del_tipo[0]
+    return out
 
 
-def sembrar(dsn: str, owner: uuid.UUID, *, rol_runtime: str | None = None, hoy: dt.date | None = None,
+def sembrar(dsn: str, owner: uuid.UUID, *, rol_runtime: str | None = ROL_RUNTIME, hoy: dt.date | None = None,
             cuentas: dict[str, uuid.UUID] | None = None) -> list[dict]:
     destino = exigir_destino(dsn)
+    exigir_rol(rol_runtime)
     from app.core.contexto import ContextoOperacion
     from app.core.modelos_prevision import DatosPrevisionManual
     from app.services.previsiones_service import PrevisionesService
@@ -149,7 +198,7 @@ def sembrar(dsn: str, owner: uuid.UUID, *, rol_runtime: str | None = None, hoy: 
     hoy = hoy or dt.datetime.now(ZoneInfo("Europe/Madrid")).date()
     ctx = lambda: ContextoOperacion.de_usuario(owner, request_id=uuid.uuid4())  # noqa: E731
     unidad = _unidad(dsn, rol_runtime)
-    cuentas = {**_cuentas(unidad, ctx()), **(cuentas or {})}
+    cuentas = _cuentas(unidad, ctx(), owner, cuentas)
     registro: list[dict] = []
     ahora = dt.datetime.now(dt.timezone.utc).isoformat()
 
@@ -233,7 +282,7 @@ def main() -> None:
     ap.add_argument("--dsn-env", default="GAPTO_DATABASE_URL")
     ap.add_argument("--owner", required=True, type=uuid.UUID)
     ap.add_argument("--manifiesto", default="siembra_m5_manifest.json")
-    ap.add_argument("--rol-runtime", default=None)
+    ap.add_argument("--rol-runtime", default=ROL_RUNTIME, choices=[ROL_RUNTIME])
     ap.add_argument("--cuenta-nomina", type=uuid.UUID)
     ap.add_argument("--cuenta-ahorro", type=uuid.UUID)
     a = ap.parse_args()
@@ -241,6 +290,7 @@ def main() -> None:
     if not dsn:
         raise SystemExit(f"Falta la variable {a.dsn_env}.")
     exigir_destino(dsn)  # antes de conectar
+    exigir_rol(a.rol_runtime)
     explicitas = {k: v for k, v in (("nomina", a.cuenta_nomina), ("ahorro", a.cuenta_ahorro)) if v is not None}
     registro = sembrar(dsn, a.owner, rol_runtime=a.rol_runtime, cuentas=explicitas)
     pathlib.Path(a.manifiesto).write_text(json.dumps(registro, indent=1, ensure_ascii=False), encoding="utf-8")
