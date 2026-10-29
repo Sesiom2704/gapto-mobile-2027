@@ -16,6 +16,7 @@
 // Versión: 0.11.0 (F05-06 M1 v1.1; Q9 opción (a)): en un registro de V3, «Más › Corregir categoría» (solo si el servidor trae la acción): hoja con lo que no cambia, categoría actual → nueva (selector del registro con la naturaleza del efecto), motivo y «Guardar categoría». Al guardar, «Categoría corregida» y la lista vuelve a leer; «Ver registro» reabre el detalle. Un reintento tras un fallo de conexión usa la MISMA intención. Corregir y anular de V3 siguen atenuados con su motivo.
 // Versión: 0.11.1 (F05-07 G1 SDK 58, decisión de Moisés del 2026-10-25): la ref del scroll se tipa con `ScrollViewInstance` (RN 0.88). Solo tipos; nada más cambia.
 // Versión: 0.12.0 (F05-D052 paso 2 · C-03, §66.A.8): el detalle de un gasto con `posiciones_vinculadas` ACTIVAS ofrece «Pendiente con <quién>» por cada derecho (separadas de las partes del reparto, sin duplicar) y pasa su `entidad_id`.
+// Versión: 0.13.0 (F05-D056 §70.2, H-DIAG-02): el subtítulo del detalle usa `nombreTipoFila` (un cobro de posición ya no dice «Entre cuentas») y la cuenta de una liquidación se rotula por su papel («Cobrado en» / «Pagado con»).
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -41,6 +42,7 @@ import {
   marcaReparto,
   mesDelPeriodo,
   NOMBRE_FILTRO_TIPO,
+  nombreTipoFila,
   Periodo,
   secundariaFila,
   SIN_FILTROS,
@@ -801,7 +803,7 @@ function IconoFila({ f, testID }: { f: FilaActividad; testID: string }) {
 function DetalleVista({ d, onAbrir }: { d: DetalleActividad; onAbrir: (id: string) => void }) {
   const { c } = useTema();
   const kv: [string, string][] = [];
-  const nombreTipo = d.devolucion_de ? 'Devolución' : d.tipo === 'GASTO' ? 'Gasto' : d.tipo === 'INGRESO' ? 'Ingreso' : 'Entre cuentas';
+  const nombreTipo = d.devolucion_de ? 'Devolución' : nombreTipoFila(d);
   if (d.devolucion_de) {
     // A4: lo devuelto, el abono, la categoría y tu parte (sin signo: no es un ingreso).
     kv.push(['Devuelto', formatearEur(d.importe_total ?? '0')]);
@@ -816,7 +818,7 @@ function DetalleVista({ d, onAbrir }: { d: DetalleActividad; onAbrir: (id: strin
   } else {
     kv.push(['Total del hecho', `${d.tipo === 'INGRESO' ? '+' : ''}${formatearEur(d.importe_total ?? '0')}`]);
     kv.push(['Tu parte', textoTuParte(d)]);
-    kv.push([d.tipo === 'INGRESO' ? 'Cobrado en' : 'Pagado con', d.cuentas[0]?.nombre ?? '—']);
+    kv.push([d.tipo === 'INGRESO' || (d.tipo !== 'GASTO' && d.cuentas[0]?.rol === 'COBRO') ? 'Cobrado en' : 'Pagado con', d.cuentas[0]?.nombre ?? '—']);
     kv.push(['Categoría', d.varias ? 'Varias' : d.categoria ? `${d.categoria.ruta}${d.categoria.enabled ? '' : ' (desactivada)'}` : 'Sin categoría']);
     if (d.tercero) kv.push([d.tipo === 'INGRESO' ? 'De' : 'Tercero', `${d.tercero.nombre}${d.tercero.enabled ? '' : ' (desactivado)'}`]);
     if (d.contexto) kv.push(['Contexto', `${d.contexto.nombre}${d.contexto.enabled ? '' : ' (desactivado)'}`]);

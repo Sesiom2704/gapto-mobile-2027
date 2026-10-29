@@ -5,13 +5,14 @@
 // Descripción: Lógica pura de la Actividad v0 de Día a día (F05 §49.4 A7, §49.5 R11/R12; P-ACT-01..03; F09 DAY-Q01..Q05, Q08, Q09; lámina SRCH-ACT-AFI v0.2 B1–B13, C4). Periodo (este mes, mes anterior, otro mes, entre fechas, todo el historial) en mes natural → consulta [desde, hasta); filtros (tipo, categoría con subcategorías, cuenta, tercero, contexto) con su recuento de GRUPOS («Filtros · 2»); búsqueda: si lo escrito es un importe («48,72» o «48.72») se busca el importe exacto, si no, el texto. Fila: título calculado (`tituloRegistro`, una sola implementación) en la línea principal; la secundaria dice lo que el título no dice (tercero, categoría, cuenta, contexto; maestro desactivado marcado); importe con signo y color solo si describen la magnitud (gasto «−», ingreso «+» neutro, transferencia sin signo, DAY-Q04, P-ACT-02); «Total · reparto sin indicar» o «Total · reparto parcial» cuando el importe es el total del hecho y no tu parte (P-ACT-03, R12). Agrupación por día («Hoy · 10 oct 2026», «Ayer · …») en el periodo y por mes en la búsqueda. Sin hora: `fecha_hecho` es una fecha.
 // Versión: 0.1.0 (F05-05 K3 §2.6)
 // Versión: 0.2.0 (F05-06 M2-B §B1; lámina DEV B1, D-DEV-07, P-DEV-03): una devolución se titula «Devolución · <compra>», su línea secundaria dice el tercero de la compra y la categoría, el importe va sin «+» ni «−» y bajo él «Devolución» o «Abono pendiente» (nunca la marca de reparto). Nada más cambia.
+// Versión: 0.3.0 (F05-D056 §70.2, H-DIAG-02): `nombreTipoFila` da nombre propio a cada tipo de hecho que trae la lista: la liquidación de una posición (REEMBOLSO) es «Cobro» o «Pago» según el movimiento y «Liquidación» sin él, la condonación es «Perdón» y los demás tipos del catálogo tienen el suyo; un tipo desconocido usa el fallback explícito. Un cobro de derecho nunca se llama «Ingreso» ni «Entre cuentas». El título de la fila lo usa.
 // ============================================================
 
 import type { ConsultaActividad, FilaActividad, TipoActividad } from '../api/cliente';
 import { diaMesAnioIso, limitesMesIso, mesAnioIso, mesDesplazadoIso } from './fechas';
 import { formatearEur, parsearImporte } from './importe';
 import { esDevolucion, etiquetaDevolucion, importeDevolucion, tituloDevolucion } from './devolucion';
-import { tituloRegistro } from './registro';
+import { NOMBRE_TIPO, NOMBRE_TIPO_DESCONOCIDO, tituloRegistro } from './registro';
 
 export type Periodo =
   | { tipo: 'ESTE_MES' }
@@ -120,6 +121,29 @@ export function consulta(p: Periodo, f: Filtros, hoyIso: string, busqueda: strin
   };
 }
 
+/** Nombre de los tipos de hecho del catálogo que no son de registro (0150, 0350), salvo REEMBOLSO, que depende del movimiento. */
+const NOMBRE_OTROS_TIPOS: Record<string, string> = {
+  CONDONACION: 'Perdón',
+  GENERACION_DERECHO_OBLIGACION: 'Derecho u obligación',
+  COMPRA_FINANCIADA: 'Compra financiada',
+  APORTACION_INVERSION: 'Aportación a inversión',
+};
+
+/**
+ * Nombre del tipo de una fila (H-DIAG-02, F05 §70.2). Gasto, ingreso, movimiento entre cuentas y liquidación siguen
+ * diferenciados: la liquidación de una posición (REEMBOLSO) es «Cobro» si el dinero entra, «Pago» si sale y
+ * «Liquidación» sin movimiento; nunca «Ingreso». Un tipo desconocido usa `NOMBRE_TIPO_DESCONOCIDO`.
+ */
+export function nombreTipoFila(r: Pick<FilaActividad, 'tipo' | 'cuentas'>): string {
+  const t: string = r.tipo;
+  if (t === 'GASTO' || t === 'INGRESO' || t === 'TRANSFERENCIA') return NOMBRE_TIPO[t];
+  if (t === 'REEMBOLSO') {
+    const rol = r.cuentas[0]?.rol;
+    return rol === 'COBRO' ? 'Cobro' : rol === 'PAGO' ? 'Pago' : 'Liquidación';
+  }
+  return NOMBRE_OTROS_TIPOS[t] ?? NOMBRE_TIPO_DESCONOCIDO;
+}
+
 /** Título calculado de la fila (P-ACT-01). */
 export function tituloFila(r: FilaActividad): string {
   const devolucion = tituloDevolucion(r);
@@ -130,6 +154,7 @@ export function tituloFila(r: FilaActividad): string {
     nota: r.nota,
     tercero: r.tercero?.nombre ?? null,
     categoria: r.varias ? 'Varias' : r.categoria?.nombre ?? null,
+    nombreTipo: nombreTipoFila(r),
   });
 }
 
