@@ -5,7 +5,6 @@
 // Descripción: Lógica pura del registro por tipo de F05-04 (J2 §2.2/§2.3/§2.7; F05 §46.3 A1/A4/A8; lámina REG-DYN / SET-TH / SET-CTX v0.1 T01, T02, X01, N01, N02). (1) Hoja «¿Qué quieres registrar?» con los tres tipos, sin preselección. (2) Cambio de tipo ANTES del primer envío: conserva importe y fecha y QUITA, con aviso, lo que no encaja en el nuevo tipo (categoría de otro ámbito, cuenta sin la capacidad del nuevo tipo y, hacia «Entre cuentas», todo lo que no tiene). (3) Nota canónica: omitida, vacía o solo espacios → null (A8). (4) Título calculado, nunca persistido: nota o concepto histórico > «Tercero · Categoría» > categoría > tercero > «Tipo · importe»; nunca vacío ni «null».
 // Versión: 0.1.0 (F05-03/F05-04 J2 §2)
 // Versión: 0.2.0 (F05-03/F05-04 J2 §2.4): plantilla en el registro: aplica categoría, tercero y contexto propuestos SOLO a los campos no tocados (la categoría, si existe y admite el tipo), avisos R04 de lo que no aplica, «Quitar» que retira lo que puso; cambio de tipo Gasto ↔ Ingreso sobre el borrador.
-// Versión: 0.3.0 (F05-D056 §70.2, H-DIAG-02): el título calculado admite el nombre del tipo que da quien llama (`nombreTipo`) y, si el tipo no tiene nombre, usa el fallback explícito `NOMBRE_TIPO_DESCONOCIDO`: nunca «undefined».
 // ============================================================
 
 import { Arbol, CategoriaNodo, elegible, magnitudesPedibles, rutaTexto } from './categoria';
@@ -26,8 +25,6 @@ export const TEXTO_ENTRE_CUENTAS = 'No es un gasto ni un ingreso: tu dinero camb
 
 export const TITULO_TAREA: Record<TipoRegistro, string> = { GASTO: 'Nuevo gasto', INGRESO: 'Nuevo ingreso', TRANSFERENCIA: 'Entre cuentas' };
 export const NOMBRE_TIPO: Record<TipoRegistro, string> = { GASTO: 'Gasto', INGRESO: 'Ingreso', TRANSFERENCIA: 'Entre cuentas' };
-/** Fallback explícito del nombre de un tipo sin nombre conocido (H-DIAG-02, F05 §70.2): nunca «undefined». */
-export const NOMBRE_TIPO_DESCONOCIDO = 'Registro';
 const NOMBRE_TIPO_MIN: Record<TipoRegistro, string> = { GASTO: 'gasto', INGRESO: 'ingreso', TRANSFERENCIA: 'movimiento entre cuentas' };
 
 /** Ámbitos de categoría admitidos por tipo (A12; matriz C02). */
@@ -98,8 +95,6 @@ export function tituloRegistro(r: {
   concepto?: string | null;
   tercero?: string | null;
   categoria?: string | null;
-  /** Nombre del tipo para el último recurso («Cobro · 20,00 €»); si falta, el del registro o el fallback. */
-  nombreTipo?: string | null;
 }): string {
   const texto = notaCanonica(r.nota) ?? notaCanonica(r.concepto);
   if (texto) return texto;
@@ -108,7 +103,7 @@ export function tituloRegistro(r: {
   if (tercero && categoria) return `${tercero} · ${categoria}`;
   if (categoria) return categoria;
   if (tercero) return tercero;
-  return `${r.nombreTipo ?? NOMBRE_TIPO[r.tipo] ?? NOMBRE_TIPO_DESCONOCIDO} · ${formatearEur(r.importe)}`;
+  return `${NOMBRE_TIPO[r.tipo]} · ${formatearEur(r.importe)}`;
 }
 
 /** Título de la pantalla de éxito («Gasto registrado», «Ingreso registrado», «Movimiento registrado»). */

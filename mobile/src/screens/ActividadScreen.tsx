@@ -17,6 +17,7 @@
 // Versión: 0.11.1 (F05-07 G1 SDK 58, decisión de Moisés del 2026-10-25): la ref del scroll se tipa con `ScrollViewInstance` (RN 0.88). Solo tipos; nada más cambia.
 // Versión: 0.12.0 (F05-D052 paso 2 · C-03, §66.A.8): el detalle de un gasto con `posiciones_vinculadas` ACTIVAS ofrece «Pendiente con <quién>» por cada derecho (separadas de las partes del reparto, sin duplicar) y pasa su `entidad_id`.
 // Versión: 0.13.0 (F05-D056 §70.2, H-DIAG-02): el subtítulo del detalle usa `nombreTipoFila` (un cobro de posición ya no dice «Entre cuentas») y la cuenta de una liquidación se rotula por su papel («Cobrado en» / «Pagado con»).
+// Versión: 0.13.1 (F05-D056, decisión 2 de Moisés del 2026-10-29): los títulos de la lista, del detalle, de «Más» y del aviso de «Repetir hoy» salen de `domain/titulos_dia.ts` (`tituloFilaDia`, `nombreTipoFila`), módulo propio de Día a día; `actividad.ts` y `registro.ts` vuelven a ser los de 9c62d69.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -42,7 +43,6 @@ import {
   marcaReparto,
   mesDelPeriodo,
   NOMBRE_FILTRO_TIPO,
-  nombreTipoFila,
   Periodo,
   secundariaFila,
   SIN_FILTROS,
@@ -50,9 +50,9 @@ import {
   textoCoincidencia,
   textoPeriodo,
   textoTuParte,
-  tituloFila,
   tituloTransferencia,
 } from '../domain/actividad';
+import { nombreTipoFila, tituloFilaDia } from '../domain/titulos_dia';
 import { construirArbol, elegible, motivoNoSeleccionable, visibleEnRegistro } from '../domain/categoria';
 import { nombreCorto, ofreceRegistrarAbono, ofreceRegistrarDevolucion, TEXTO_NETO, textoDevolucionDe } from '../domain/devolucion';
 import { ayer, ddmmaaaaAIso, diaMesAnioIso, diaMesIso, isoLocal, mesAnioIso, mesDesplazadoIso } from '../domain/fechas';
@@ -316,7 +316,7 @@ export function ActividadScreen(p: {
       if (!d || !componerRepetir(f, d, cap, hoyIso, 'x')) return void abrirDetalle(f.id);
       rapida.lanzar({
         clave: `repetir-${f.id}`,
-        texto: textoAvisoRepetir(tituloTransferencia(f) ?? tituloFila(f), f),
+        texto: textoAvisoRepetir(tituloTransferencia(f) ?? tituloFilaDia(f), f),
         enviar: async (id) => {
           const r = componerRepetir(f, d, cap, hoyIso, id)!;
           if (r.ruta === 'GASTO') return p.cliente.registrarGastoPagado(r.payload as never);
@@ -346,7 +346,7 @@ export function ActividadScreen(p: {
     const r = await p.cliente.edicionHecho(d.id);
     if (r.tipo !== 'OK') return setMas({ cargando: false, error: true });
     setMas({ cargando: false, error: false });
-    setHoja({ h: 'MAS', id: d.id, titulo: tituloTransferencia(d) ?? tituloFila(d), e: r.datos });
+    setHoja({ h: 'MAS', id: d.id, titulo: tituloTransferencia(d) ?? tituloFilaDia(d), e: r.datos });
   };
   const confirmarAnular = async (h: { id: string; titulo: string; e: EdicionHecho }) => {
     if (!anular.declarado || !anular.motivo.trim() || anular.enviando) return;
@@ -644,7 +644,7 @@ export function ActividadScreen(p: {
       ) : null}
 
       {hoja?.h === 'DETALLE' ? (
-        <Hoja titulo={detalle.fase === 'OK' ? tituloTransferencia(detalle.d) ?? tituloFila(detalle.d) : 'Detalle'} testID="hoja-detalle">
+        <Hoja titulo={detalle.fase === 'OK' ? tituloTransferencia(detalle.d) ?? tituloFilaDia(detalle.d) : 'Detalle'} testID="hoja-detalle">
           <ScrollView style={{ maxHeight: 420 }} testID="detalle-scroll">
             {detalle.fase === 'CARGANDO' ? <View style={[s.barra, { backgroundColor: c.surfaceSecondary }]} /> : null}
             {detalle.fase === 'ERROR' ? (
@@ -755,7 +755,7 @@ export const TEXTO_FRANJA_COBRADO = 'Recibido';
 function FilaVista(p: { f: FilaActividad; conFecha: boolean; onPress: () => void; principal?: LadoSwipe; alternativa?: LadoSwipe }) {
   const { c } = useTema();
   const f = p.f;
-  const titulo = tituloTransferencia(f) ?? tituloFila(f);
+  const titulo = tituloTransferencia(f) ?? tituloFilaDia(f);
   const secundaria = textoCoincidencia(f) ?? secundariaFila(f);
   const marca = marcaReparto(f);
   const a11y = accesibilidadLados(p.principal, p.alternativa);
