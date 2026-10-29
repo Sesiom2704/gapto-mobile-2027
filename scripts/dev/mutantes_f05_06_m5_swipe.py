@@ -26,6 +26,8 @@
 #   discriminantes de MS01, MS02, MS04, MS05, MS07 y MS08 pasan a
 #   __tests__/accion_rapida_ajustes.test.tsx (JA), MS06 al rechazo de Ajustes › Plantillas (JP)
 #   y MS10 al nombre nuevo del test de Inicio.
+# Version: 0.5.1 (F05-D056 paso 6): MS06 discrimina con el rechazo de Ajustes › Plantillas (el de
+#   Inicio va por la cola); 30/30 muertos sobre el candidato v2.
 #   Las guardas equivalentes de la cola tienen su propio arnes (COLA-AR, CA-M1..M6b).
 # ============================================================
 
