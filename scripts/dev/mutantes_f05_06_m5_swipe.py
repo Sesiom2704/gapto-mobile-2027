@@ -24,7 +24,8 @@
 #   Inicio, Pendientes, Actividad y Pendiente con pasan a la cola de la app; useAccionRapida
 #   queda para las NO financieras de Ajustes (N1-N3). Las anclas no cambian; los
 #   discriminantes de MS01, MS02, MS04, MS05, MS07 y MS08 pasan a
-#   __tests__/accion_rapida_ajustes.test.tsx (JA) y MS10 al nombre nuevo del test de Inicio.
+#   __tests__/accion_rapida_ajustes.test.tsx (JA), MS06 al rechazo de Ajustes › Plantillas (JP)
+#   y MS10 al nombre nuevo del test de Inicio.
 #   Las guardas equivalentes de la cola tienen su propio arnes (COLA-AR, CA-M1..M6b).
 # ============================================================
 
@@ -74,7 +75,7 @@ MUTANTES = [
      [JA + "gesto nuevo tras un INDETERMINADO"], None),
     ("MS06", "rechazo tratado como exito (exito falso)",
      [(AR, "    if (r.tipo === 'OK') {\n      identidades", "    if (r.tipo !== 'INDETERMINADO') {\n      identidades")],
-     [J + "rechazo del servidor"], None),
+     [JP + "plantillas: «Desactivar» por su ruta"], None),
     ("MS07", "segundo plano no cancela la espera",
      [(AR, "      if (e === 'background') cancelarTodas();\n", "      if (false) cancelarTodas();\n")],
      [JA + "segundo plano"], None),
