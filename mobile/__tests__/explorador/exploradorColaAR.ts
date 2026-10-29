@@ -4,6 +4,7 @@
 // Ruta: mobile/__tests__/explorador/exploradorColaAR.ts
 // Descripción: Explorador de intercalaciones de COLA-AR (F05 §70.A; mandato de la consulta 10, AJ-F0507G9-01). Ejecuta la cola REAL (`ColaAccionRapida` y `manejarEstadoApp` del adaptador) dentro de un mundo simulado: reloj y temporizadores, almacén con lecturas y escrituras en una sola cola en orden (FIFO, como AsyncStorage) que pueden fallar, y escrituras que se pierden o se completan al matar la app, identidad servida (A, sin conexión u otro owner B), ejecutor de red cuyas respuestas llegan en cualquier orden (OK, respuesta perdida con o sin aplicación, rechazo) y un servidor idempotente por `intencion_id` (y «omitir» sin replay de éxito: 409 al repetir). AppState active / inactive / background, matar la app (con las escrituras pendientes perdidas o completadas) y reabrirla. Cada paso es un evento atómico tras el que se asientan todas las microtareas; los únicos puntos de elección son los eventos. Recorre en profundidad, SIN ESTADO y repitiendo cada camino desde cero, TODOS los órdenes de eventos posibles hasta la profundidad pedida, con presupuestos de fallos, ausencias, muertes y gestos del usuario. Invariantes: I1 nunca POST antes del plazo ni de un swipe que el usuario canceló en esa misma instancia de la app o cuya cancelación ya estaba guardada (si la app muere antes de guardar la cancelación, la intención puede reaparecer al reabrir: se cuenta como «resurrección», observación aparte, y el usuario coherente la vuelve a cancelar); I2 nunca POST con la app ausente (ni desde una instancia muerta); I3 una sola identidad y el mismo payload por swipe en todos los POST, y como mucho una aplicación efectiva; I4 nunca CONFIRMADA sin una respuesta OK (o la lectura OMITIDA) entregada, ni RECHAZADA sin un rechazo o una lectura; I5 vivacidad: al final de cada camino, con la app en primer plano, el servidor respondiendo y un usuario que contesta a las preguntas con su decisión, toda intención no cancelada de la identidad A llega a CONFIRMADA o RECHAZADA en 120 s simulados (las guardadas con otro owner quedan con el suyo y las que nunca llegaron a guardarse antes de matar la app quedan fuera); I6 nunca se pierde una intención persistida (sigue en memoria o en el almacén hasta su final o su cancelación).
 // Versión: 0.1.0 (consulta 10, AJ-F0507G9-01)
+// Versión: 0.1.1 (consulta 10): en el cierre de vivacidad, la vuelta del usuario con su owner (A) se hace cuando ya se asentó un cambio de owner en curso (antes solo al empezar el cierre: a profundidad 6, con un cambio a B aún guardando, la intención de A se daba por parada aunque esperaba bien con su owner). Solo cambia el oráculo, no la cola. El cierre de vivacidad solo contesta a preguntas que la cola acepta (EN_PLAZO con pregunta o NO_ENVIADA): una pregunta en otro estado no se pulsa en bucle; y comprueba en cada paso la coherencia «pregunta solo en EN_PLAZO» (I1: una pregunta fuera de EN_PLAZO puede acabar enviándose sin preguntar).
 // ============================================================
 
 import { manejarEstadoApp } from '../../src/components/ColaAccionRapida';
@@ -213,6 +214,8 @@ class Mundo {
       if (i.estado === 'CONFIRMADA' && !this.okEntregados.has(i.intencionId)) this.violar('I4', 'CONFIRMADA sin respuesta OK ni lectura OMITIDA entregada');
       if (i.estado === 'RECHAZADA' && !this.rechazosEntregados.has(i.intencionId)) this.violar('I4', 'RECHAZADA sin rechazo ni lectura entregada');
       if (s && (i.estado === 'CONFIRMADA' || i.estado === 'RECHAZADA')) s.terminal = true;
+      // Una pregunta solo existe en EN_PLAZO: fuera de él, la intención acabaría saliendo sin que el usuario contestara.
+      if (i.pregunta && i.estado !== 'EN_PLAZO') this.violar('I1', `pregunta en ${i.estado}: saldría sin que el usuario conteste`);
     }
     // I3: como mucho una aplicación efectiva por swipe (el servidor deduplica por identidad).
     for (const s of this.swipes.values()) {
@@ -494,17 +497,13 @@ class Mundo {
     const corto = (etiqueta: string, hacer: () => void): Evento => ({ etiqueta: `[vivo] ${etiqueta}`, hacer });
     if (this.app === 'muerta') await this.aplicar(corto('abrir', () => this.abrir()));
     else if (this.app !== 'active') await this.aplicar(corto('app:active', () => this.estadoApp('active')));
-    if (this.cola && this.cola.identidadActual() !== 'A') {
-      // Otro owner servido durante el camino: el usuario vuelve a la app con el suyo.
-      await this.aplicar(corto('app:background', () => this.estadoApp('background')));
-      await this.aplicar(corto('app:active', () => this.estadoApp('active')));
-    }
     const t0 = this.t;
+    let vueltas = 0;
     for (let paso = 0; paso < 400 && this.t - t0 <= 120000; paso++) {
       const op = this.ops.filter((x) => x.gen === this.gen).sort((a, b) => a.n - b.n)[0];
       const w = this.escrituras.find((x) => x.gen === this.gen);
       const cola = this.cola!;
-      const preguntas = cola.intenciones().filter((i) => i.pregunta || i.estado === 'NO_ENVIADA'
+      const preguntas = cola.intenciones().filter((i) => (i.estado === 'EN_PLAZO' && i.pregunta) || i.estado === 'NO_ENVIADA'
         || (i.estado === 'EN_PLAZO' && this.swipes.get(i.intencionId)?.cancelada));
       const tm = this.timers.filter((x) => x.gen === this.gen).sort((a, b) => a.en - b.en || a.id - b.id)[0];
       let e: Evento | undefined;
@@ -525,6 +524,12 @@ class Mundo {
           this.t = Math.max(this.t, tm.en);
           tm.fn();
         });
+      }
+      if (!e && this.cola!.identidadActual() !== 'A' && vueltas < 2) {
+        // Otro owner servido durante el camino (ya asentado el cambio): el usuario vuelve a la app con el suyo.
+        vueltas += 1;
+        await this.aplicar(corto('app:background', () => this.estadoApp('background')));
+        e = corto('app:active', () => this.estadoApp('active'));
       }
       if (!e) break;
       await this.aplicar(e);

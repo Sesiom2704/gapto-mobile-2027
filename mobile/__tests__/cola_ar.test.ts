@@ -5,7 +5,7 @@
 // Descripción: COLA-AR v1.0 (F05 §70.A.6; AJ-F0507G7-05): las 12 pruebas obligatorias sobre la cola de la app, deterministas (reloj y temporizadores simulados, almacén en memoria, servidor simulado que aplica la idempotencia por identidad como el real: un `intencion_id` = un hecho, un movimiento y una reducción), y las de la reconciliación por lectura de «No hubo» (decisión 1 de Moisés del 2026-10-29). Las de pantalla (desmontaje, navegación y ✓) están en `cola_ar_pantallas.test.tsx`; el oráculo físico, en `tests/api/test_224_f05_d056_cola_ar.py`.
 // Versión: 0.1.0 (F05-D056 paso 2)
 // Versión: 0.3.0 (pre-S2, AJ-F0507G8-13): la carrera del dictamen de la consulta 8 v1.1 reproducida con identidad y almacenamiento diferidos (sends_after_background = 0), reconciliación diferida e «inactive».
-// Versión: 0.4.0 (pre-S2, dictamen de la consulta 9, AJ-F0507G9-01): la reanudación de RESULTADO_DESCONOCIDO cuando la app vuelve antes de terminar una reconciliación en vuelo (vuelta antes de resolver la identidad y resolución tras vencer el temporizador de la vuelta; «inactive» y «background»; identidad y payload conservados; una sola aplicación efectiva) y los hallazgos del explorador de intercalaciones (lectura del almacén fallida al restaurar; swipe sobre la misma fila antes de cargar lo guardado; envío desplazado en vuelo). El arnés gana `Almacen.fallarLectura` y `Servidor.soltarPrimera()`.
+// Versión: 0.4.0 (pre-S2, dictamen de la consulta 9, AJ-F0507G9-01): la reanudación de RESULTADO_DESCONOCIDO cuando la app vuelve antes de terminar una reconciliación en vuelo (vuelta antes de resolver la identidad y resolución tras vencer el temporizador de la vuelta; «inactive» y «background»; identidad y payload conservados; una sola aplicación efectiva) y los hallazgos del explorador de intercalaciones (lectura del almacén fallida al restaurar; swipe sobre la misma fila antes de cargar lo guardado; envío desplazado en vuelo; cambio de owner con un envío en curso). El arnés gana `Almacen.fallarLectura` y `Servidor.soltarPrimera()`.
 // Versión: 0.2.0 (pre-S2, AJ-F0507G8-01/02): el ejecutor da la identidad (`identidad()`) y el almacén guarda por clave de identidad; la cola se restaura con su identidad al montarse (como en la app). Las cuentas de lecturas de identidad se toman tras esa restauración. Pruebas nuevas al final.
 // ============================================================
 
@@ -942,5 +942,41 @@ describe('AJ-F0507G9-01 · hallazgos del explorador de intercalaciones', () => {
     await reloj.avanzar(60000);
     expect(s.llamadas.map((l) => l.payload.intencion_id)).not.toContain(desplazada);
     expect(s.hechos.size).toBe(1);
+  });
+});
+
+describe('AJ-F0507G9-01 · cambio de owner con un envío en curso (explorador, profundidad 6)', () => {
+  test('si otro owner aparece mientras un envío espera su guardado, no sale: queda como pregunta (nunca ENVIADA) y al volver se pregunta', async () => {
+    const almacen = new Almacen();
+    const retenidas: (() => void)[] = [];
+    const ctl = { lento: false };
+    const base = almacen.escribir;
+    almacen.escribir = (k: string, t: string) => (ctl.lento ? new Promise<void>((res) => retenidas.push(() => void base(k, t).then(res))) : base(k, t));
+    const { s, cola, reloj } = montar(new Servidor(), almacen);
+    await reloj.avanzar(0);
+    cola.lanzar(cobro('d1'));
+    await reloj.avanzar(1000);
+    cola.lanzar(cobro('d2'));
+    ctl.lento = true;
+    await reloj.avanzar(PLAZO_DESHACER_MS - 1000); // d1 vence: su envío espera el guardado de PENDIENTE_DE_ENVIO
+    expect(cola.get('d1')!.estado).toBe('PENDIENTE_DE_ENVIO');
+    s.owner = 'B';
+    await reloj.avanzar(1000); // d2 vence y su envío ve otro owner: cambio de cola con el de d1 a medias
+    ctl.lento = false;
+    while (retenidas.length) {
+      retenidas.shift()!();
+      await reloj.avanzar(0);
+    }
+    await reloj.avanzar(60000);
+    expect(s.llamadas).toHaveLength(0);
+    const guardadas = JSON.parse(almacen.texto!) as IntencionCola[];
+    expect(guardadas.map((g) => [g.clave, g.estado, g.pregunta, g.envios])).toEqual([['d1', 'EN_PLAZO', true, 0], ['d2', 'EN_PLAZO', true, 0]]);
+    s.owner = 'A';
+    cola.alSegundoPlano();
+    cola.alPrimerPlano();
+    await reloj.avanzar(0);
+    await reloj.avanzar(60000);
+    expect(s.llamadas).toHaveLength(0); // nunca sale sin que el usuario conteste
+    expect(cola.intenciones().map((i) => [i.clave, i.estado, i.pregunta])).toEqual([['d1', 'EN_PLAZO', true], ['d2', 'EN_PLAZO', true]]);
   });
 });
