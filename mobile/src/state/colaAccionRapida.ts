@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-D056 paso 2, COLA-AR v1.0)
 // Versión: 0.2.0 (pre-S2, AJ-F0507G8-01/02, cumplimiento de §70.A): (1) la persistencia de PENDIENTE_DE_ENVIO y de ENVIADA se ESPERA antes de enviar; si no se puede guardar, NO_ENVIADA y no se envía (antes se escribía sin esperar y un cierre justo tras el POST podía dejar EN_PLAZO guardado). (2) La cola es POR IDENTIDAD: `ejecutor.identidad()` (URL base + owner servido, de `GET /v1/yo`) sustituye a la comprobación de conexión y da la clave de almacén `gapto.cola_ar.v2:<identidad>`; nunca se restaura ni se envía una intención de otra identidad. Si la identidad servida cambia (al enviar, al reconciliar o al volver a primer plano), las intenciones vivas se guardan con la suya (las aún no enviadas, como pregunta «Enviar / Descartar») y se cargan las de la nueva. Sin identidad no se restaura nada ni se envía.
 // Versión: 0.3.1 (pre-S2, AJ-F0507G8-16): solo comentario; la justificación de la lectura de «No hubo» se ajusta al recorrido real del servidor (`_tocar`/`tocar_prevision`, no `bloquear_prevision`).
+// Versión: 0.4.0 (pre-S2, dictamen de la consulta 9, AJ-F0507G9-01, BLOQUEANTE; hallazgos del explorador de intercalaciones de la consulta 10): (1) una reconciliación nunca se queda sin temporizador: si la app volvió durante una espera, el temporizador que programó `alPrimerPlano()` podía vencer con la reconciliación anterior aún en vuelo y perderse; ahora, al terminar cada `reconciliar()`, si la intención sigue en RESULTADO_DESCONOCIDO con la app delante, sin temporizador y sin nada en vuelo, se vuelve a programar (`seguirSiParada`). (2) La identidad se adopta SOLO tras leer lo guardado: si la lectura falla no se adopta (antes se tomaba por lista vacía y la siguiente escritura borraba lo guardado), y mientras se lee no se escribe nada con esa identidad. (3) Al cargar lo guardado, una intención viva guardada prevalece sobre una de la misma fila lanzada antes de la carga y aún sin enviar (antes se saltaba la guardada y la siguiente escritura la borraba). (4) «En vuelo» es por intención, no por fila: un envío de la intención desplazada en (3) que aún espera no bloquea el plazo, la pregunta ni la reconciliación de la guardada (nunca sale: su guarda previa al POST ve que ya no es la vigente).
 // Versión: 0.3.0 (pre-S2, dictamen de la consulta 8 v1.1, AJ-F0507G8-13, BLOQUEANTE; cumplimiento de §70.A.4): corrige la carrera reproducida por la revisora (vence el plazo en primer plano → `enviar()` espera la identidad → la app pasa a segundo plano → la identidad llega → se enviaba igual). Ahora se cuentan las ausencias (`alSegundoPlano`, también «inactive» de iOS en el adaptador) y, tras CADA espera (identidad, guardado de PENDIENTE_DE_ENVIO, guardado de ENVIADA) y justo ANTES del POST, se recomprueban primer plano, que no haya habido ausencia desde que empezó el envío, la vigencia de la intención y la identidad. Si hubo ausencia antes de enviar, la intención se conserva y queda como pregunta «Enviar / Descartar» al volver; nunca se envía en segundo plano. La reconciliación hace lo mismo antes de cada reenvío y, si hubo ausencia, espera a volver a primer plano.
 // ============================================================
 
@@ -126,7 +127,8 @@ export class ColaAccionRapida {
   private lista = new Map<string, IntencionCola>();
   private plazos = new Map<string, unknown>();
   private reconciliaciones = new Map<string, unknown>();
-  private enVuelo = new Set<string>();
+  /** Intenciones con un envío o una reconciliación en curso (por intención, no por fila: AJ-F0507G9-01). */
+  private enVuelo = new Set<IntencionCola>();
   private oyentes = new Set<Oyente>();
   private alConfirmar = new Set<OyenteConfirmada>();
   private primerPlano = true;
@@ -257,19 +259,22 @@ export class ColaAccionRapida {
   private async revisarIdentidad(): Promise<boolean> {
     const id = await this.leerIdentidad();
     if (!id) return this.identidad !== null;
-    if (this.identidad === null) await this.adoptar(id);
-    else if (id !== this.identidad) await this.cambiarIdentidad(id);
+    if (this.identidad === null) return this.adoptar(id);
+    if (id !== this.identidad) await this.cambiarIdentidad(id);
     return true;
   }
 
-  /** Fija la identidad y carga sus intenciones guardadas (nunca las de otra). */
-  private async adoptar(id: string): Promise<void> {
-    this.identidad = id;
+  /**
+   * Carga las intenciones guardadas de la identidad y, SOLO entonces, la fija (nunca las de otra). AJ-F0507G9-01: si la
+   * lectura falla no se adopta (sin identidad no se guarda nada, así que lo guardado no se pisa); se reintenta en la
+   * siguiente lectura de identidad. Devuelve si la identidad quedó adoptada.
+   */
+  private async adoptar(id: string): Promise<boolean> {
     let texto: string | null = null;
     try {
       texto = await this.almacen.leer(claveDe(id));
     } catch {
-      texto = null;
+      return false;
     }
     let guardadas: IntencionCola[] = [];
     try {
@@ -277,15 +282,23 @@ export class ColaAccionRapida {
     } catch {
       guardadas = [];
     }
-    if (this.identidad !== id) return;
+    if (this.identidad !== null) return this.identidad === id; // otra llamada ya la adoptó (o adoptó otra)
+    this.identidad = id;
     for (const g of guardadas) {
-      if (this.lista.has(g.clave) || !ACTIVOS.includes(g.estado)) continue;
+      if (!ACTIVOS.includes(g.estado)) continue;
+      const enMemoria = this.lista.get(g.clave);
+      if (enMemoria) {
+        // Swipe sobre la misma fila antes de la carga: nunca salió (sin identidad no se envía); prevalece la guardada.
+        if (enMemoria.envios > 0) continue;
+        this.cancelarPlazo(g.clave);
+      }
       // La app se cerró durante el envío: no se sabe si se guardó.
       if (g.estado === 'PENDIENTE_DE_ENVIO' || g.estado === 'ENVIADA') g.estado = 'RESULTADO_DESCONOCIDO';
       this.lista.set(g.clave, g);
       if (this.primerPlano) this.reanudar(g);
     }
     this.cambio();
+    return true;
   }
 
   /**
@@ -340,9 +353,9 @@ export class ColaAccionRapida {
 
   private async enviar(clave: string): Promise<void> {
     const i = this.lista.get(clave);
-    if (!i || this.enVuelo.has(clave)) return;
+    if (!i || this.enVuelo.has(i)) return;
     if (i.estado === 'EN_PLAZO' && this.t.ahora() < i.vence) return; // nunca antes del plazo
-    this.enVuelo.add(clave);
+    this.enVuelo.add(i);
     const ausencias0 = this.ausencias;
     try {
       i.intentos += 1;
@@ -373,7 +386,7 @@ export class ColaAccionRapida {
       const r = await this.enviarSeguro(i);
       await this.resolver(i, r);
     } finally {
-      this.enVuelo.delete(clave);
+      this.enVuelo.delete(i);
     }
   }
 
@@ -465,8 +478,8 @@ export class ColaAccionRapida {
   private async reconciliar(clave: string, paso: number): Promise<void> {
     this.reconciliaciones.delete(clave);
     const i = this.lista.get(clave);
-    if (!i || i.estado !== 'RESULTADO_DESCONOCIDO' || this.enVuelo.has(clave) || !this.primerPlano) return;
-    this.enVuelo.add(clave);
+    if (!i || i.estado !== 'RESULTADO_DESCONOCIDO' || this.enVuelo.has(i) || !this.primerPlano) return;
+    this.enVuelo.add(i);
     const ausencias0 = this.ausencias;
     try {
       // Antes de reenviar: la identidad servida debe ser la de la intención (AJ-F0507G8-02).
@@ -479,7 +492,7 @@ export class ColaAccionRapida {
         return this.programarReconciliacion(i, paso + 1);
       }
       if (id !== this.identidad) {
-        this.enVuelo.delete(clave);
+        this.enVuelo.delete(i);
         return void (await this.cambiarIdentidad(id));
       }
       // Reenvío con la MISMA identidad: idempotente en F1–F4; en «No hubo», su 409 lleva a la lectura.
@@ -493,8 +506,20 @@ export class ColaAccionRapida {
       }
       await this.resolver(i, r);
     } finally {
-      this.enVuelo.delete(clave);
+      this.enVuelo.delete(i);
+      this.seguirSiParada(i, paso);
     }
+  }
+
+  /**
+   * AJ-F0507G9-01: tras liberar `enVuelo`, un resultado desconocido con la app delante nunca se queda sin reconciliación.
+   * Cubre el temporizador que venció mientras la reconciliación anterior seguía en vuelo y se descartó. No envía
+   * nada: solo programa; en segundo plano no programa (lo hará `alPrimerPlano()`).
+   */
+  private seguirSiParada(i: IntencionCola, paso: number): void {
+    if (this.lista.get(i.clave) !== i || i.estado !== 'RESULTADO_DESCONOCIDO' || !this.primerPlano) return;
+    if (this.enVuelo.has(i) || this.reconciliaciones.has(i.clave)) return;
+    this.programarReconciliacion(i, paso);
   }
 
   // ---------------------------------------------------------------- internos

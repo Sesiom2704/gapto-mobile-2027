@@ -5,6 +5,7 @@
 // Descripción: COLA-AR v1.0 (F05 §70.A.6; AJ-F0507G7-05): las 12 pruebas obligatorias sobre la cola de la app, deterministas (reloj y temporizadores simulados, almacén en memoria, servidor simulado que aplica la idempotencia por identidad como el real: un `intencion_id` = un hecho, un movimiento y una reducción), y las de la reconciliación por lectura de «No hubo» (decisión 1 de Moisés del 2026-10-29). Las de pantalla (desmontaje, navegación y ✓) están en `cola_ar_pantallas.test.tsx`; el oráculo físico, en `tests/api/test_224_f05_d056_cola_ar.py`.
 // Versión: 0.1.0 (F05-D056 paso 2)
 // Versión: 0.3.0 (pre-S2, AJ-F0507G8-13): la carrera del dictamen de la consulta 8 v1.1 reproducida con identidad y almacenamiento diferidos (sends_after_background = 0), reconciliación diferida e «inactive».
+// Versión: 0.4.0 (pre-S2, dictamen de la consulta 9, AJ-F0507G9-01): la reanudación de RESULTADO_DESCONOCIDO cuando la app vuelve antes de terminar una reconciliación en vuelo (vuelta antes de resolver la identidad y resolución tras vencer el temporizador de la vuelta; «inactive» y «background»; identidad y payload conservados; una sola aplicación efectiva) y los hallazgos del explorador de intercalaciones (lectura del almacén fallida al restaurar; swipe sobre la misma fila antes de cargar lo guardado; envío desplazado en vuelo). El arnés gana `Almacen.fallarLectura` y `Servidor.soltarPrimera()`.
 // Versión: 0.2.0 (pre-S2, AJ-F0507G8-01/02): el ejecutor da la identidad (`identidad()`) y el almacén guarda por clave de identidad; la cola se restaura con su identidad al montarse (como en la app). Las cuentas de lecturas de identidad se toman tras esa restauración. Pruebas nuevas al final.
 // ============================================================
 
@@ -61,8 +62,13 @@ const asentar = async () => {
 class Almacen implements AlmacenCola {
   datos = new Map<string, string>();
   fallar = false;
+  /** AJ-F0507G9-01: la lectura del almacén falla (al restaurar). */
+  fallarLectura = false;
   escrituras = 0;
-  leer = async (k: string) => this.datos.get(k) ?? null;
+  leer = async (k: string) => {
+    if (this.fallarLectura) throw new Error('lectura');
+    return this.datos.get(k) ?? null;
+  };
   escribir = async (k: string, t: string) => {
     this.escrituras += 1;
     if (this.fallar) throw new Error('almacén lleno');
@@ -95,6 +101,10 @@ class Servidor {
     const p = this.identidadesPendientes;
     this.identidadesPendientes = [];
     p.forEach((f) => f());
+  }
+  /** Suelta solo la lectura de identidad más antigua. */
+  soltarPrimera() {
+    this.identidadesPendientes.shift()?.();
   }
   /** Respuestas forzadas por llamada (antes de aplicar), p. ej. INDETERMINADO = la respuesta se pierde. */
   guion: (('APLICA_Y_PIERDE' | 'NO_LLEGA' | Resp))[] = [];
@@ -766,5 +776,171 @@ describe('AJ-F0507G8-13 · AppState «inactive» (iOS) cuenta como ausencia', ()
     await m.reloj.avanzar(60000);
     expect(m.s.llamadas).toHaveLength(0);
     expect(m.cola.get('d1')!.pregunta).toBe(true);
+  });
+});
+// ==================================================================
+// AJ-F0507G9-01 (BLOQUEANTE): RESULTADO_DESCONOCIDO nunca se queda sin reconciliación
+// ==================================================================
+describe('AJ-F0507G9-01 · reanudación de RESULTADO_DESCONOCIDO tras volver durante una espera', () => {
+  /** Respuesta perdida tras aplicar: RESULTADO_DESCONOCIDO en memoria, con la identidad DIFERIDA a partir de aquí. */
+  async function desconocidoConIdentidadDiferida() {
+    const m = montar();
+    m.s.guion = ['APLICA_Y_PIERDE'];
+    await m.reloj.avanzar(0);
+    m.cola.lanzar(cobro());
+    await m.reloj.avanzar(PLAZO_DESHACER_MS);
+    expect(m.cola.get('d1')!.estado).toBe('RESULTADO_DESCONOCIDO');
+    expect(m.s.hechos.size).toBe(1); // el servidor la aplicó
+    m.s.diferirIdentidad = true;
+    return m;
+  }
+
+  test.each(['inactive', 'background'])(
+    'recorrido del dictamen con «%s»: vuelve ANTES de resolver la identidad, el temporizador de la vuelta vence con la anterior en vuelo y la identidad llega DESPUÉS → sigue reconciliando y confirma una sola vez',
+    async (estado) => {
+      const { manejarEstadoApp } = require('../src/components/ColaAccionRapida');
+      const { s, cola, reloj } = await desconocidoConIdentidadDiferida();
+      const intencionId = cola.get('d1')!.intencionId;
+      const payload = JSON.stringify(cola.get('d1')!.payload);
+      await reloj.avanzar(ESPERAS_RECONCILIACION_MS[0]); // (2) vence la reconciliación y espera identidad()
+      const enviosAntes = s.llamadas.length;
+      manejarEstadoApp(cola, estado); // (3) la app se va…
+      expect(s.llamadas.length).toBe(enviosAntes);
+      manejarEstadoApp(cola, 'active'); // …y vuelve antes de resolverse
+      await reloj.avanzar(ESPERAS_RECONCILIACION_MS[0]); // (4)-(5) vence el temporizador de la vuelta con la anterior en vuelo
+      s.diferirIdentidad = false;
+      s.soltarIdentidad(); // (6) se resuelve la identidad anterior: detecta la ausencia y no reenvía…
+      await reloj.avanzar(0);
+      expect(s.llamadas.length).toBe(enviosAntes); // …sin envío inmediato tras la ausencia
+      expect(cola.get('d1')!.estado).toBe('RESULTADO_DESCONOCIDO'); // ni éxito ni fallo todavía
+      // Discriminación de la pérdida de reprogramación: al liberar el vuelo queda un reintento programado.
+      expect(reloj.pendientes()).toBeGreaterThan(0);
+      await reloj.avanzar(120000);
+      expect(cola.get('d1')!.estado).toBe('CONFIRMADA');
+      expect(new Set(s.llamadas.map((l) => l.payload.intencion_id))).toEqual(new Set([intencionId]));
+      expect(new Set(s.llamadas.map((l) => JSON.stringify(l.payload)))).toEqual(new Set([payload]));
+      expect(s.hechos.size).toBe(1); // una sola aplicación efectiva
+      expect(s.movimientos).toBe(1);
+      expect(s.reducciones).toBe(1);
+    },
+  );
+
+  test('si la app sigue fuera cuando llega la identidad: nada se programa ni se envía en segundo plano; al volver, reconcilia', async () => {
+    const { s, cola, reloj } = await desconocidoConIdentidadDiferida();
+    await reloj.avanzar(ESPERAS_RECONCILIACION_MS[0]);
+    cola.alSegundoPlano();
+    cola.alPrimerPlano();
+    await reloj.avanzar(ESPERAS_RECONCILIACION_MS[0]);
+    cola.alSegundoPlano(); // se vuelve a ir antes de que llegue la identidad
+    const antes = s.llamadas.length;
+    s.diferirIdentidad = false;
+    s.soltarIdentidad();
+    await reloj.avanzar(120000);
+    expect(s.llamadas.length).toBe(antes);
+    expect(reloj.pendientes()).toBe(0);
+    expect(cola.get('d1')!.estado).toBe('RESULTADO_DESCONOCIDO');
+    cola.alPrimerPlano();
+    await reloj.avanzar(120000);
+    expect(cola.get('d1')!.estado).toBe('CONFIRMADA');
+    expect(s.hechos.size).toBe(1);
+  });
+});
+
+describe('AJ-F0507G9-01 · hallazgos del explorador de intercalaciones', () => {
+  /** Una intención guardada para la identidad A: RESULTADO_DESCONOCIDO ya aplicada, o pregunta sin enviar. */
+  function guardada(s: Servidor, almacen: Almacen, estado: 'RESULTADO_DESCONOCIDO' | 'EN_PLAZO' = 'RESULTADO_DESCONOCIDO') {
+    const n0 = cobro();
+    const g: IntencionCola = { ...n0, intencionId: n0.payload.intencion_id, instante: 0, vence: PLAZO_DESHACER_MS, estado,
+      envios: estado === 'EN_PLAZO' ? 0 : 1, intentos: 1, pregunta: estado === 'EN_PLAZO', mensaje: null };
+    if (estado !== 'EN_PLAZO') s.hechos.set(g.intencionId, { ruta: g.ruta, importe: g.payload.importe });
+    almacen.texto = JSON.stringify([g]);
+    return g;
+  }
+
+  test('si la lectura del almacén falla al restaurar, no se adopta la identidad y lo guardado no se pisa; al volver se restaura y reconcilia', async () => {
+    const s = new Servidor();
+    const almacen = new Almacen();
+    const g = guardada(s, almacen);
+    almacen.fallarLectura = true;
+    const reloj = new Reloj();
+    reloj.t = 3_600_000;
+    const { cola } = montar(s, almacen, reloj);
+    await reloj.avanzar(0);
+    expect(cola.identidadActual()).toBeNull();
+    cola.lanzar(cobro('d2')); // un cambio cualquiera: antes escribía la lista sin la guardada
+    cola.alSegundoPlano();
+    cola.alPrimerPlano();
+    await reloj.avanzar(0);
+    expect((JSON.parse(almacen.texto!) as IntencionCola[]).map((x) => x.intencionId)).toContain(g.intencionId);
+    almacen.fallarLectura = false;
+    cola.alSegundoPlano();
+    cola.alPrimerPlano(); // al volver se lee de nuevo
+    await reloj.avanzar(0);
+    await reloj.avanzar(ESPERAS_RECONCILIACION_MS[0]);
+    expect(cola.get('d1')!.intencionId).toBe(g.intencionId);
+    expect(cola.get('d1')!.estado).toBe('CONFIRMADA');
+    expect(s.hechos.size).toBe(1);
+  });
+
+  test('swipe sobre la misma fila antes de cargar lo guardado: prevalece la guardada (misma identidad) y el swipe desplazado nunca sale', async () => {
+    const s = new Servidor();
+    const almacen = new Almacen();
+    const g = guardada(s, almacen);
+    s.diferirIdentidad = true;
+    const reloj = new Reloj();
+    reloj.t = 3_600_000;
+    const { cola } = montar(s, almacen, reloj);
+    expect(cola.lanzar(cobro('d1'))).toBe(true); // la fila aún está a la vista
+    const desplazada = cola.get('d1')!.intencionId;
+    s.diferirIdentidad = false;
+    s.soltarIdentidad();
+    await reloj.avanzar(0);
+    expect(cola.get('d1')!.intencionId).toBe(g.intencionId);
+    await reloj.avanzar(60000);
+    expect(cola.get('d1')!.estado).toBe('CONFIRMADA');
+    expect(s.llamadas.map((l) => l.payload.intencion_id)).not.toContain(desplazada);
+    expect(s.hechos.size).toBe(1);
+  });
+
+  test('la guardada que prevalece es una pregunta: el plazo del swipe desplazado no la envía sola', async () => {
+    const s = new Servidor();
+    const almacen = new Almacen();
+    guardada(s, almacen, 'EN_PLAZO');
+    s.diferirIdentidad = true;
+    const reloj = new Reloj();
+    reloj.t = 3_600_000;
+    const { cola } = montar(s, almacen, reloj);
+    cola.lanzar(cobro('d1'));
+    await reloj.avanzar(1000);
+    s.diferirIdentidad = false;
+    s.soltarIdentidad();
+    await reloj.avanzar(0); // la carga prevalece ANTES de que venza el plazo del desplazado
+    expect(cola.get('d1')!.pregunta).toBe(true);
+    await reloj.avanzar(60000); // vence el plazo del desplazado: no debe quedar su temporizador
+    expect(s.llamadas).toHaveLength(0);
+    expect([cola.get('d1')!.estado, cola.get('d1')!.pregunta]).toEqual(['EN_PLAZO', true]);
+  });
+
+  test('el envío del swipe desplazado que sigue esperando no bloquea la reconciliación de la guardada (en vuelo por intención, no por fila)', async () => {
+    const s = new Servidor();
+    const almacen = new Almacen();
+    const g = guardada(s, almacen);
+    s.diferirIdentidad = true;
+    const reloj = new Reloj();
+    reloj.t = 3_600_000;
+    const { cola } = montar(s, almacen, reloj);
+    cola.lanzar(cobro('d1'));
+    const desplazada = cola.get('d1')!.intencionId;
+    await reloj.avanzar(PLAZO_DESHACER_MS); // el desplazado vence y su envío espera la identidad
+    s.soltarPrimera(); // la de la restauración: se carga la guardada, que prevalece
+    s.diferirIdentidad = false;
+    await reloj.avanzar(0);
+    expect(cola.get('d1')!.intencionId).toBe(g.intencionId);
+    await reloj.avanzar(ESPERAS_RECONCILIACION_MS[0]); // reconcilia con el desplazado aún en vuelo
+    expect(cola.get('d1')!.estado).toBe('CONFIRMADA');
+    s.soltarIdentidad(); // por fin llega la del desplazado: no sale
+    await reloj.avanzar(60000);
+    expect(s.llamadas.map((l) => l.payload.intencion_id)).not.toContain(desplazada);
+    expect(s.hechos.size).toBe(1);
   });
 });
