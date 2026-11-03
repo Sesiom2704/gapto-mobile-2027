@@ -74,6 +74,8 @@
 #   viewport o recortado por un ancestro fallan. El inventario por momento se
 #   exporta en REGCAT_<run>_inventario_layout.json y en el manifest
 #   (layout_inventario; sustituye a truncados_elipsis).
+# Version: 0.4.3 (MANT-PRE-BATERIA A): espera el formulario real y la propuesta
+#   de categoria antes de desactivarla; no depende de financiacion sin cuenta.
 # ============================================================
 
 from __future__ import annotations
@@ -301,8 +303,18 @@ def main() -> None:
                 """Abre el gasto y escribe importe y nota; devuelve cuántas intenciones había (para su UUID)."""
                 cargar_app("accion-registrar")
                 page.get_by_test_id("accion-registrar").click()  # F05-04 §2.2: hoja de tipos
-                page.get_by_test_id("tipo-GASTO").click()
-                page.get_by_test_id("financiacion").wait_for(timeout=15000)
+                # La pantalla se monta antes de resolver cuentas, arbol y propuesta.
+                # Esperar sus respuestas evita hacer clic mientras cambia el layout.
+                with page.expect_response(lambda r: r.request.method == "GET" and "/v1/vs01/cuentas-pago?" in r.url) as cuentas_iniciales, \
+                     page.expect_response(lambda r: r.request.method == "GET" and "/v1/preferencias/propuesta?" in r.url
+                                          and "categoria_id=" not in r.url) as propuesta_inicial, \
+                     page.expect_response(lambda r: r.request.method == "GET"
+                                          and urllib.parse.urlsplit(r.url).path == "/v1/categorias") as arbol_inicial:
+                    page.get_by_test_id("tipo-GASTO").click()
+                for carga in (cuentas_iniciales, propuesta_inicial, arbol_inicial):
+                    comprobar(carga.value.status == 200, f"carga inicial: {carga.value.status} {urllib.parse.urlsplit(carga.value.url).path}")
+                    carga.value.finished()
+                page.get_by_test_id("campo-importe").wait_for(timeout=15000)
                 page.get_by_test_id("campo-importe").fill(importe)
                 page.get_by_test_id("abrir-mas-detalles").click()  # F05-04 §2.7: nota opcional
                 page.get_by_test_id("campo-nota").fill(nota)
@@ -434,7 +446,16 @@ def main() -> None:
             concepto_c = f"E2E rechazo {run[-6:]}"
             abrir_formulario(concepto_c, "23,40")  # n_antes se toma justo antes de registrar
             page.get_by_test_id("campo-categoria").click()
-            page.get_by_test_id(f"cat-{cat_c}").click()
+            # El escenario desactiva DESPUES de cargar y proponer la categoria.
+            # Si no se espera, el propio test puede provocar un 409 en el GET
+            # de propuesta: no es el rechazo de registro que este caso mide.
+            with page.expect_response(lambda r: r.request.method == "GET"
+                                      and urllib.parse.urlsplit(r.url).path == "/v1/preferencias/propuesta"
+                                      and urllib.parse.parse_qs(urllib.parse.urlsplit(r.url).query).get("categoria_id") == [cat_c]) as propuesta_c:
+                page.get_by_test_id(f"cat-{cat_c}").click()
+            comprobar(propuesta_c.value.status == 200,
+                      f"(c) propuesta previa a desactivar: {propuesta_c.value.status}")
+            propuesta_c.value.finished()
             arbol = api(a.api, "GET", "/v1/categorias")["categorias"]
             rv = next(c["row_version"] for c in arbol if c["id"] == cat_c)
             api(a.api, "POST", f"/v1/categorias/{cat_c}/desactivar", {"modo": "SOLO_SI_SIN_HIJOS_ACTIVOS", "row_version": rv})
