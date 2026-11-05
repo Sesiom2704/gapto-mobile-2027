@@ -13,6 +13,8 @@
 #              S1. P5b-S1: auditoria R-F04-015 sobre el dataset S1. Fail-closed: hash S1 distinto, delta distinto
 #              del contrato o dataset no determinista -> STOP.
 # Versión: 0.1.0
+# Versión: 0.1.1  -- F06-01 B0 v0.3 (PB0I-03, AJ-B0I-05): P5b 0.2.0 exige head explicito; S1 declara
+#     head='0330' y conserva su comportamiento historico (deuda R-RV3-016 para decidir S1 sobre 0351).
 # ============================================================
 from __future__ import annotations
 
@@ -174,7 +176,9 @@ def main(argv=None) -> int:
         ev["s1_sin_disposicion"] = sin
         if sin:
             raise StopS1("S8_S1_SIN_DISPOSICION", json.dumps(sin))
-        ev["p5b"] = {k: v for k, v in P5B.auditar(ds).items() if k != "detalle"}
+        # P5b 0.2.0 (PB0I-03): head explicito. S1 es la validacion historica sobre 0330..0350; se conserva su
+        # comportamiento. Ejecutar S1 contra 0351 exige decidirlo (deuda R-RV3-016).
+        ev["p5b"] = {k: v for k, v in P5B.auditar(ds, head="0330").items() if k != "detalle"}
         if a.dsn_import:  # validacion fisica S1 en laboratorio nuevo (P6-S1)
             P6 = _mod("rv3_p6_carga", "rv3_p6_carga.py")
             ev["carga_fisica"] = P6.ejecutar(P5, ds, a.dsn_import, a.commit, a.dsn_auditoria)

@@ -9,6 +9,7 @@
 #              carga identica -> YA_APLICADA_SIN_CAMBIOS sin xid, carga distinta o parcial -> S7_CONFLICTO_REPLAY.
 #              Los casos de laboratorio usan el laboratorio de REFERENCIA dentro de transacciones revertidas.
 # Versión: 0.1.0
+# Versión: 0.1.1  -- F06-01 B0 (F06-D002): la sonda ACL de P9 se juzga contra el contrato de su head.
 # ============================================================
 from __future__ import annotations
 
@@ -144,7 +145,10 @@ def test_p9_rls_tenant_ajeno_y_acl(cargado):
     r = P9.sonda_rls(c, ds.owner)
     assert r["por_contexto"]["ajeno"]["visibles"] == 0 and r["por_contexto"]["propio"]["visibles"] == r["filas_tenant_reales"]
     assert r["escritura_owner_ajeno"]["resultado"] == "RECHAZADA"
-    assert P9.sonda_acl(c)["resultado"] == "PASS"
+    # F06-D002 / 0351: contrato ACL declarado por head (DELETE 41 en 0351).
+    head = "0351" if c.execute("SELECT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'gapto.hecho_efectos'::regclass "
+        "AND attname = 'causa_valor_activo' AND NOT attisdropped)").fetchone()[0] else "0330"
+    assert P9.sonda_acl(c, head)["resultado"] == "PASS"
 
 
 @lab

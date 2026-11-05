@@ -7,6 +7,8 @@
 #              gapto_backup (BYPASSRLS + SELECT=79, sin escritura), PUBLIC
 #              revocado, y 7 guard triggers append-only que bloquean
 #              UPDATE/DELETE incluso con RLS fuera de juego (BYPASSRLS).
+# Versión: 0.1.9  -- F06-01 B0 (F06-D002): 0351 revoca DELETE en siete tablas; el conjunto finito
+#     de baselines admite 41. La propiedad (catalogos y auditoria sin DELETE) no cambia.
 # Versión: 0.1.8  -- SUCESORA 0320 / D-183. El reparto del Bucket A de B18 lleva
 #                   DELETE de 36 a 48. Se conserva el conjunto tolerante de D-073
 #                   refinado por D-187: la afirmacion de B14 es la PROPIEDAD
@@ -104,9 +106,10 @@ def test_b14_runtime_delete_on_tenant_tables(db: psycopg.Connection) -> None:
     posteriores legítimos. Mismo criterio que D-073.
     """
     concedidas = _grant_count(db, "gapto_runtime", "DELETE")
-    assert concedidas in (36, 48, 50, 67), (
-        f"DELETE esperado 67 (pre-B18), 50 (post-B18), 36 (post-B21) "
-        f"o 48 (post-0320/D-183); encontrado {concedidas}"
+    # F06-D002 / 0351 (PB0-09 opcion B): siete tablas pierden DELETE. 48 - 7 = 41.
+    assert concedidas in (36, 41, 48, 50, 67), (
+        f"DELETE esperado 67 (pre-B18), 50 (post-B18), 36 (post-B21), "
+        f"48 (post-0320/D-183) o 41 (post-0351/F06-D002); encontrado {concedidas}"
     )
     for catalogo in ("paises", "regiones", "localidades", "tipos_hecho", "metricas_definicion"):
         assert _has_table_priv(db, "gapto_runtime", catalogo, "DELETE") is False, (

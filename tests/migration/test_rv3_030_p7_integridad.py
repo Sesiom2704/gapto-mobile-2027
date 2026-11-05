@@ -16,6 +16,7 @@
 #                   del catalogo (CONDONACION presente o ausente, como
 #                   test_017); el recuento esperado sale de P7 y una semilla de
 #                   mas o de menos sigue siendo violacion.
+# Versión: 0.2.1  -- F06-01 B0 (F06-D002): head 0351 (13 semillas) en el conjunto finito por head.
 # ============================================================
 from __future__ import annotations
 
@@ -154,9 +155,11 @@ def test_polimorficos_y_trazabilidad_detectan_defectos(cx):
 
 def test_sin_cambios_detecta_fila_posterior(cx):
     condonacion = cx.execute("SELECT count(*) FROM gapto.tipos_hecho WHERE codigo = 'CONDONACION'").fetchone()[0]
-    head = "0350" if condonacion else "0340"
+    # F06-D002 / 0351: el head se identifica por su seed propio, no por el recuento.
+    patrimonial = cx.execute("SELECT count(*) FROM gapto.tipos_hecho WHERE codigo = 'ADQUISICION_PATRIMONIAL'").fetchone()[0]
+    head = "0351" if patrimonial else ("0350" if condonacion else "0340")
     base = P7.check_sin_cambios(cx, "gapto", 10 ** 9, head)  # BD de referencia: solo semillas
-    assert not base["violaciones"] and base["semillas_0330"] == {"0340": 10, "0350": 11}[head]
+    assert not base["violaciones"] and base["semillas_0330"] == {"0340": 10, "0350": 11, "0351": 13}[head]
     xid_antes = int(cx.execute("SELECT pg_snapshot_xmax(pg_current_snapshot())::text").fetchone()[0]) - 1
     _replica(cx)
     cx.execute("INSERT INTO gapto.entidades (id, owner_user_id, tipo_entidad, nombre) VALUES (%s, %s, 'CONTEXTO', 'y')",

@@ -15,6 +15,22 @@
 #   operacion y reintentar no la hara posible". Fusionarlos haria que la UX
 #   reintentase indefinidamente algo imposible, o que abandonase algo que solo
 #   necesitaba otro intento.
+# Version: 0.24.0
+#   0.24.0 (F06-01 B0 v0.3, F06-D002; dictamen B0 implementacion PB0I-06,
+#   AJ-B0I-01): `CORRECCION_CONVERSION_VALOR_ACTIVO_NO_ADMITIDA`. OP-21 rechaza,
+#   antes de cualquier escritura, la conversion LOGICA hacia o desde
+#   VALOR_ACTIVO por retirada y alta de efectos en la misma correccion (y el
+#   cambio de causa por reemplazo). Ningun codigo existente cambia de
+#   significado: el de UPDATE de tipo sigue siendo
+#   CORRECCION_TIPO_EFECTO_VALOR_ACTIVO_NO_ADMITIDA.
+# Version: 0.23.0
+#   0.23.0 (F06-01 B0, F06-D002; reapertura acotada de F04 para OP-04/OP-21/
+#   OP-22): `CAUSA_VALOR_ACTIVO_REQUERIDA` y `CAUSA_VALOR_ACTIVO_NO_ADMITIDA`
+#   (guarda de escritura de `hecho_efectos.causa_valor_activo`, 0351) y
+#   `CORRECCION_TIPO_EFECTO_VALOR_ACTIVO_NO_ADMITIDA` (OP-21 no convierte
+#   hacia ni desde VALOR_ACTIVO en B0; PB0-04). Ningun codigo existente cambia
+#   de significado: VALOR_ACTIVO_SIN_ACONTECIMIENTO sigue siendo el rechazo de
+#   entrada de OP-04.
 # Version: 0.22.0
 #   0.22.0 (F04-D065, M5-B de F05-06; AJ-M5BM1-03): `PREVISION_SIN_REALIDAD_ACTIVA`.
 #   `dar_por_realizada` ("Dar por cubierta") rechaza una prevision ABIERTA sin
@@ -173,6 +189,16 @@ class CodigoError(str, enum.Enum):
     DELTA_CERO = "DELTA_CERO"
     NATURALEZA_INVALIDA = "NATURALEZA_INVALIDA"
     VALOR_ACTIVO_SIN_ACONTECIMIENTO = "VALOR_ACTIVO_SIN_ACONTECIMIENTO"
+
+    # --- F06-D002 (B0): causa persistida de VALOR_ACTIVO -------------------
+    CAUSA_VALOR_ACTIVO_REQUERIDA = "CAUSA_VALOR_ACTIVO_REQUERIDA"
+    CAUSA_VALOR_ACTIVO_NO_ADMITIDA = "CAUSA_VALOR_ACTIVO_NO_ADMITIDA"
+    CORRECCION_TIPO_EFECTO_VALOR_ACTIVO_NO_ADMITIDA = (
+        "CORRECCION_TIPO_EFECTO_VALOR_ACTIVO_NO_ADMITIDA"
+    )
+    CORRECCION_CONVERSION_VALOR_ACTIVO_NO_ADMITIDA = (
+        "CORRECCION_CONVERSION_VALOR_ACTIVO_NO_ADMITIDA"
+    )
 
     # --- OP-05 ------------------------------------------------------------
     SUMA_NO_CUADRA = "SUMA_NO_CUADRA"

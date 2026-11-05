@@ -11,6 +11,8 @@
 #              P7-C huerfanos (FK + referencias uuid sin FK); P7-D destinos polimorficos; P7-E trazabilidad de
 #              importacion. Fail-closed: cualquier violacion o deriva -> veredicto NO_SUPERADO. Parametrizable por
 #              esquema para poder discriminarse con esquemas sinteticos en tests.
+# Versión: 0.3.1  -- F06-01 B0 (F06-D002) / 0351. SEMILLAS_SISTEMA_POR_HEAD declara 0351: 13
+#     (10 tipos_hecho + 3 metricas). Ningun otro head cambia.
 # Versión: 0.2.0  -- F03-05 / D-197 (condicional a Q-2). main() admite --head para
 #                   comparar R25 contra la referencia D-111 de otro head declarado en
 #                   run_clean_room.py (p. ej. 0340). Por defecto "0330": el
@@ -252,7 +254,9 @@ SEMILLAS_0330 = {"tipos_hecho": None, "metricas_definicion": ("AHORRO_NETO_PYL",
                                                           "TRANSFERENCIA_AHORRO_NETA")}
 # Recuento EXACTO de semillas de sistema (tipos_hecho + metricas_definicion contractuales) por head. Conjunto
 # cerrado: un head ausente falla cerrado (D-201; mismo criterio que run_clean_room con heads no declarados).
-SEMILLAS_SISTEMA_POR_HEAD = {"0330": 10, "0340": 10, "0350": 11}
+SEMILLAS_SISTEMA_POR_HEAD = {"0330": 10, "0340": 10, "0350": 11,
+                             # F06-D002 / 0351: + ADQUISICION_PATRIMONIAL y MEJORA_PATRIMONIAL.
+                             "0351": 13}
 
 
 def check_sin_cambios(c, esq, xid_carga: int, head: str = "0330") -> dict:

@@ -12,6 +12,7 @@
 #              Matriz resultante: SELECT 79 / INSERT 73 / UPDATE 67 / DELETE 36.
 #
 # PRECONDICIÓN: requiere 0190 (B16) para poder asumir gapto_runtime.
+# Versión: 0.1.3  -- F06-01 B0 (F06-D002): DELETE finito por head, 48 hasta 0350 y 41 en 0351.
 # Versión: 0.1.2  -- SUCESORA 0320 / D-183: la matriz pasa a DELETE 48. Los dos
 #                   buckets propios de B21 (versionado e identidad) NO se tocan:
 #                   0320 opera unicamente dentro del Bucket A de B18.
@@ -139,6 +140,15 @@ def test_b21_esas_tres_siguen_sin_ciclo_de_vida(db: psycopg.Connection) -> None:
     )
 
 
+def _head_0351(db: psycopg.Connection) -> bool:
+    """F06-D002: 0351 aplicada (marca: hecho_efectos.causa_valor_activo)."""
+    return db.execute(
+        "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_attribute WHERE attrelid = "
+        "'gapto.hecho_efectos'::regclass AND attname = 'causa_valor_activo' "
+        "AND NOT attisdropped)"
+    ).fetchone()[0]
+
+
 def test_b21_matriz_efectiva_de_runtime(db: psycopg.Connection) -> None:
     """SELECT 79 / INSERT 73 / UPDATE 67 / DELETE 36."""
     # SUCESORA 0286 / D-146: efecto_cuentas entra en el bucket A de D-093
@@ -149,7 +159,8 @@ def test_b21_matriz_efectiva_de_runtime(db: psycopg.Connection) -> None:
     assert _cuenta(db, "gapto_runtime", "UPDATE") == 68
     # SUCESORA 0320 / D-183: once hijas/puentes del Bucket A de B18 mas
     # efecto_cuentas recuperan DELETE. 36 + 12 = 48. Ninguna tabla de B21 cambia.
-    assert _cuenta(db, "gapto_runtime", "DELETE") == 48
+    # F06-D002 / 0351 (PB0-09 opcion B): siete tablas mas sin DELETE. 48 - 7 = 41.
+    assert _cuenta(db, "gapto_runtime", "DELETE") == (41 if _head_0351(db) else 48)
 
 
 def test_b21_delete_real_denegado(db: psycopg.Connection) -> None:

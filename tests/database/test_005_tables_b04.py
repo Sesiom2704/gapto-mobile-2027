@@ -12,6 +12,8 @@
 #                   propiedad/baseline. El layering se sigue verificando a
 #                   nivel de fichero de migration, que es donde es cierto de
 #                   forma permanente, y no contra el estado acumulado de la BD.
+# Versión: 0.1.2  -- F06-01 B0 (F06-D002): el catalogo cerrado de CHECK de B04 admite, en head 0351
+#     Y SOLO EN EL, los dos CHECK de causa de VALOR_ACTIVO.
 # ============================================================
 
 from __future__ import annotations
@@ -99,6 +101,19 @@ def test_b04_baseline_45_tables_remain_materialized(db: psycopg.Connection) -> N
     assert actual == B04_BASELINE_TABLES
 
 
+# F06-D002 / 0351: dos CHECK nuevos en hecho_efectos. Conjunto finito por head.
+CHECKS_0351 = {
+    "ck_hecho_efectos__causa_valor_activo_dominio", "ck_hecho_efectos__causa_solo_valor_activo",
+}
+def _head_0351(db: psycopg.Connection) -> bool:
+    """F06-D002: 0351 aplicada (marca: hecho_efectos.causa_valor_activo)."""
+    return db.execute(
+        "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_attribute WHERE attrelid = "
+        "'gapto.hecho_efectos'::regclass AND attname = 'causa_valor_activo' "
+        "AND NOT attisdropped)"
+    ).fetchone()[0]
+
+
 def test_b04_local_checks_are_materialized(db: psycopg.Connection) -> None:
     with db.cursor() as cursor:
         cursor.execute("""
@@ -107,7 +122,8 @@ def test_b04_local_checks_are_materialized(db: psycopg.Connection) -> None:
              WHERE n.nspname='gapto' AND c.relname = ANY(%s) AND con.contype='c'
         """, (sorted(B04_TABLES),))
         names = {r[0] for r in cursor.fetchall()}
-    assert names == EXPECTED_CHECKS
+    # F06-D002: el catalogo cerrado de B04 crece SOLO con los dos CHECK de 0351.
+    assert names == (EXPECTED_CHECKS | CHECKS_0351 if _head_0351(db) else EXPECTED_CHECKS)
 
 
 def test_b04_primary_keys_and_uuid_defaults(db: psycopg.Connection) -> None:

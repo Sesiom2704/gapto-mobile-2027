@@ -31,6 +31,8 @@
 #              y bajo FORCE ROW LEVEL SECURITY. Si el rol de conexión del arnés
 #              no puede asumir gapto_runtime, esos tests SE SALTAN con mensaje
 #              explícito, nunca en silencio (mismo criterio que test_038).
+# Versión: 0.1.4  -- F06-01 B0 (F06-D002): matriz DELETE finita por head (41 en 0351) y recuento
+#     global de columnas 781 en 0351. DEVUELTO_POR_0320 sin cambios.
 # Versión: 0.1.3  -- F03-05 / D-197 / 0340: el conjunto finito de columnas
 #                   autorizadas incorpora el estado 778 (icon_key de 0340). La
 #                   afirmacion de 0320 sigue siendo que ELLA no crea columnas.
@@ -335,6 +337,15 @@ def test_0320_los_cuatro_validadores_que_si_cubren_delete(db: psycopg.Connection
 # Bloque 6 — matriz efectiva y contrato no movido
 # ------------------------------------------------------------
 
+def _head_0351(db: psycopg.Connection) -> bool:
+    """F06-D002: 0351 aplicada (marca: hecho_efectos.causa_valor_activo)."""
+    return db.execute(
+        "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_attribute WHERE attrelid = "
+        "'gapto.hecho_efectos'::regclass AND attname = 'causa_valor_activo' "
+        "AND NOT attisdropped)"
+    ).fetchone()[0]
+
+
 def test_0320_matriz_efectiva_de_runtime(db: psycopg.Connection) -> None:
     """SELECT 80 / INSERT 74 / UPDATE 68 / DELETE 48.
 
@@ -344,7 +355,9 @@ def test_0320_matriz_efectiva_de_runtime(db: psycopg.Connection) -> None:
     assert _cuenta(db, "gapto_runtime", "SELECT") == 80
     assert _cuenta(db, "gapto_runtime", "INSERT") == 74
     assert _cuenta(db, "gapto_runtime", "UPDATE") == 68
-    assert _cuenta(db, "gapto_runtime", "DELETE") == 48
+    # F06-D002 / 0351 (PB0-09 opcion B): 48 - 7 = 41. Las doce de 0320 siguen
+    # con DELETE (test_0320_*_conserva / DEVUELTO_POR_0320).
+    assert _cuenta(db, "gapto_runtime", "DELETE") == (41 if _head_0351(db) else 48)
 
 
 # Estados autorizados de los dos recuentos GLOBALES que una migration
@@ -353,7 +366,8 @@ def test_0320_matriz_efectiva_de_runtime(db: psycopg.Connection) -> None:
 # ELLA no crea columnas ni indices, no que el schema se congele en 772/285.
 #   columnas 772 estado de 0320 / 777 con las cinco de 0330 / 778 con icon_key de 0340
 #   indices  285 estado de 0320 / 287 con los dos parciales de 0330
-COLUMNAS_AUTORIZADAS = (772, 777, 778)
+# F06-D002 / 0351: +3 columnas (causa_valor_activo, habitacion, modo_reparto).
+COLUMNAS_AUTORIZADAS = (772, 777, 778, 781)
 INDICES_AUTORIZADOS = (285, 287)
 
 

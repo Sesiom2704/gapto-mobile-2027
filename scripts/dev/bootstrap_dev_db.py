@@ -57,6 +57,10 @@
 #     python scripts/dev/bootstrap_dev_db.py --seed-categorias \
 #       --dev-dsn "host=127.0.0.1 port=5434 dbname=gapto2027_dev user=<rol>" \
 #       --api-url http://192.168.1.10:8027
+# Version: 0.9.0  -- F06-01 B0 N1 (LOTE9 C7; autorizacion de Moises del
+#                   2026-11-05 y dictamen de reconsulta N1-12/N1-I):
+#                   HEAD_AUTORIZADO_ENVDEV pasa de "0350" a "0351". Autorizar
+#                   no aplica: 0351 se aplica en ENV-DEV con el plan v0.3.
 # Version: 0.8.0  -- F05-03/F05-04 J2 §1.0 (F05-D032 C1): la cuenta CORRIENTE
 #                   sintetica nace con sus capacidades EXPLICITAS (PAGAR_GASTO,
 #                   RECIBIR_INGRESO, TRANSFERIR_SALIDA, TRANSFERIR_ENTRADA; matriz de
@@ -129,7 +133,7 @@ HOSTS_LOCALES = {"localhost", "127.0.0.1", "::1"}
 
 # Head maximo que ENV-DEV puede materializar. Cambiarlo es una decision
 # revisada (commit propio), nunca un efecto lateral de publicar migrations.
-HEAD_AUTORIZADO_ENVDEV = "0350"
+HEAD_AUTORIZADO_ENVDEV = "0351"
 PATRON_MIGRATION = re.compile(r"^(\d{4})_[a-z0-9_]+\.sql$")
 
 

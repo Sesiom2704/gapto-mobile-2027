@@ -16,6 +16,12 @@
 #   fisicamente un actor solo puede tener UNA fila por efecto. Eso encaja con el
 #   contrato de OP-05, donde enriquecer significa anadir actores todavia no
 #   declarados y nunca reescribir el importe de uno ya materializado.
+# Version: 0.2.0
+#   0.2.0 (F06-01 B0, F06-D002; AJ-B0-03): `insertar_efecto_si_no_existe`
+#   escribe `causa_valor_activo` (0351). El parametro es OBLIGATORIO y sin
+#   default: cada camino que inserta efectos declara su causa, y la guarda
+#   `exigir_causa_valor_activo` se evalua aqui, antes del INSERT, en el unico
+#   punto de escritura de efectos. El snapshot de auditoria NO cambia de forma.
 # Version: 0.1.0
 # ============================================================
 
@@ -26,6 +32,7 @@ from typing import Any
 
 from psycopg import sql
 
+from app.core.modelos_efectos import exigir_causa_valor_activo
 from app.core.unidad_trabajo import SesionMotor
 
 TABLA_EFECTOS = "hecho_efectos"
@@ -90,20 +97,24 @@ def insertar_efecto_si_no_existe(
     estado_atribucion: str,
     categoria_id: uuid.UUID | None,
     descripcion: str | None,
+    causa_valor_activo: str | None,
 ) -> tuple[str, str] | None:
     """INSERT idempotente por identidad reservada.
 
     Devuelve (estado_atribucion, snapshot_json) si se creo aqui; None si el
     UUID ya estaba ocupado. `ON CONFLICT DO NOTHING` no necesita leer la fila en
     conflicto, de modo que funciona tambien cuando pertenece a otro tenant.
+
+    F06-D002: la causa se valida ANTES de escribir; un rechazo no deja nada.
     """
+    exigir_causa_valor_activo(tipo_efecto, causa_valor_activo)
     consulta = sql.SQL(
         """
         INSERT INTO gapto.hecho_efectos (
             id, hecho_id, tipo_efecto, importe_delta, categoria_id,
-            estado_atribucion, descripcion)
+            estado_atribucion, descripcion, causa_valor_activo)
         VALUES (%s::uuid, %s::uuid, %s::varchar, %s::numeric, %s::uuid,
-                %s::varchar, %s::varchar)
+                %s::varchar, %s::varchar, %s::varchar)
         ON CONFLICT (id) DO NOTHING
         RETURNING estado_atribucion, ({})::text
         """
@@ -120,6 +131,7 @@ def insertar_efecto_si_no_existe(
                 categoria_id,
                 estado_atribucion,
                 descripcion,
+                causa_valor_activo,
             ),
         )
         fila = cursor.fetchone()

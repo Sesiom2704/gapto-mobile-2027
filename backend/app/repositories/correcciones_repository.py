@@ -33,6 +33,15 @@
 #   retira su ORIGEN (`AND hecho_origen_id = <raiz>`). Nunca hay una lectura
 #   previa separada que autorice: 0 filas = no es del hecho. `leer_relacion`
 #   relee SIN lock solo para elegir el codigo del rechazo.
+# Version: 0.4.0
+#   0.4.0 (F06-01 B0 v0.3, F06-D002; PB0I-06, AJ-B0I-01):
+#   `naturaleza_de_efectos`, lectura SIN escritura del tipo y la causa de los
+#   efectos que una correccion retira, para que OP-21 rechace la conversion
+#   logica hacia o desde VALOR_ACTIVO antes de la primera escritura.
+# Version: 0.3.0
+#   0.3.0 (F06-01 B0, F06-D002; PB0-04): `cuenta_efectos_valor_activo`,
+#   lectura SIN escritura para que OP-21 rechace convertir desde VALOR_ACTIVO
+#   antes de cualquier UPDATE. `actualizar_efecto` y los snapshots no cambian.
 # Version: 0.2.0
 #   0.2.0 (F04-D039): superficie de atribuciones. UPDATE, DELETE y lectura
 #   del estado final de los efectos tocados, para que OP-21 pueda alcanzar
@@ -254,6 +263,50 @@ def efectos_del_hecho(sesion: SesionMotor, hecho_id: uuid.UUID) -> int:
         (hecho_id,),
     )
     return 0 if fila is None else fila[0]
+
+
+def cuenta_efectos_valor_activo(
+    sesion: SesionMotor, hecho_id: uuid.UUID, efecto_ids: list[uuid.UUID]
+) -> int:
+    """F06-D002 (PB0-04): cuantos de esos efectos del hecho son VALOR_ACTIVO.
+
+    Solo lectura. La pertenencia al hecho va en el WHERE, como en
+    `actualizar_efecto`; un efecto ajeno o invisible simplemente no cuenta y
+    lo rechaza despues el propio UPDATE (AGREGADO_NO_ENCONTRADO).
+    """
+    fila = sesion.uno(
+        """
+        SELECT count(*) FROM gapto.hecho_efectos e
+         WHERE e.hecho_id = %s::uuid
+           AND e.id = ANY(%s::uuid[])
+           AND e.tipo_efecto = 'VALOR_ACTIVO'
+        """,
+        (hecho_id, efecto_ids),
+    )
+    return 0 if fila is None else fila[0]
+
+
+def naturaleza_de_efectos(
+    sesion: SesionMotor, hecho_id: uuid.UUID, efecto_ids: list[uuid.UUID]
+) -> list[tuple[str, str | None]]:
+    """F06-D002 (PB0I-06): (tipo_efecto, causa_valor_activo) de esos efectos.
+
+    Solo lectura, bajo la raiz ya bloqueada por OP-21. La pertenencia al hecho
+    va en el WHERE, como en `cuenta_efectos_valor_activo`: un efecto ajeno o
+    invisible no aparece y lo rechaza despues el propio DELETE
+    (AGREGADO_NO_ENCONTRADO).
+    """
+    with sesion.conexion.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT e.tipo_efecto, e.causa_valor_activo
+              FROM gapto.hecho_efectos e
+             WHERE e.hecho_id = %s::uuid
+               AND e.id = ANY(%s::uuid[])
+            """,
+            (hecho_id, efecto_ids),
+        )
+        return [(f[0], f[1]) for f in cursor.fetchall()]
 
 
 def tipo_de_hecho(sesion: SesionMotor, hecho_id: uuid.UUID) -> str | None:

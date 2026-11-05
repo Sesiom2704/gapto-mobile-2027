@@ -43,6 +43,12 @@
 #   Se juzga por ARQUETIPO del hecho, antes de la frontera territorial, con
 #   codigos propios. GENERACION_DERECHO_OBLIGACION (historico/migrado) no se
 #   toca. Los helpers viven aqui y OP-21 los reutiliza.
+# Version: 0.6.0
+#   0.6.0 (F06-01 B0, F06-D002; AJ-B0-03): OP-04 persiste la causa de VALOR_ACTIVO: pasa
+#   `efecto.causa_valor_activo` (el acontecimiento declarado) al INSERT, cuya
+#   guarda aplica CAUSA_VALOR_ACTIVO_REQUERIDA / _NO_ADMITIDA. La validacion
+#   de entrada (VALOR_ACTIVO_SIN_ACONTECIMIENTO, ENTRADA_INVALIDA) no cambia y
+#   `auditoria.motivo` conserva `VALOR_ACTIVO:<CODIGO>` (F04-D005).
 # Version: 0.5.0
 #   0.5.0 (F04-D052 enmienda E1): guardas I1 e I6 en OP-04 por arquetipo, y
 #   helpers `exigir_creacion_e1`, `exigir_mutacion_e1` y
@@ -362,6 +368,7 @@ class EfectosService:
                     estado_atribucion=efecto.estado_atribucion,
                     categoria_id=efecto.categoria_id,
                     descripcion=efecto.descripcion,
+                    causa_valor_activo=efecto.causa_valor_activo,
                 )
                 if creado is None:
                     # El UUID existe pero no era visible: otro tenant o carrera.

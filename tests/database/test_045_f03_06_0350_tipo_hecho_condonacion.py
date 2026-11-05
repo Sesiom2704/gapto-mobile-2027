@@ -48,6 +48,8 @@
 #              presente es equivalente (el reaplicado aborta antes del INSERT);
 #              sin precheck lo cubre M1.
 # Versión: 0.1.0  -- F03-06 / D-201 / 0350 (B1, Fase A).
+# Versión: 0.1.1  -- F06-01 B0 (F06-D002): en head 0351 hay diez tipos (los ocho de 0350 mas
+#     los dos patrimoniales) y la simulacion del estado 0340 retira tambien esos dos.
 # ============================================================
 
 from __future__ import annotations
@@ -67,6 +69,8 @@ SEED_0150 = {
     "GASTO", "INGRESO", "TRANSFERENCIA", "COMPRA_FINANCIADA",
     "REEMBOLSO", "APORTACION_INVERSION", "GENERACION_DERECHO_OBLIGACION",
 }
+#: F06-D002 / 0351: arquetipos patrimoniales sembrados despues de 0350.
+SEED_0351 = {"ADQUISICION_PATRIMONIAL", "MEJORA_PATRIMONIAL"}
 #: Rol con el que se simula el head 0340 (borrado de la fila) y se crean y
 #: leen los datos preexistentes: propietario de las tablas.
 ROL_SIMULACION = "gapto_owner"
@@ -101,6 +105,9 @@ def transaccion(db: psycopg.Connection):
 def _simular_0340(db: psycopg.Connection) -> None:
     db.execute(f"SET LOCAL ROLE {ROL_SIMULACION}")
     db.execute("DELETE FROM gapto.tipos_hecho WHERE id = %s", (ID_CONDONACION,))
+    # F06-D002 / 0351: en head 0351 el estado «0340» tampoco tiene los dos
+    # arquetipos patrimoniales (transaccion del test, siempre ROLLBACK).
+    db.execute("DELETE FROM gapto.tipos_hecho WHERE codigo = ANY(%s)", (sorted(SEED_0351),))
     db.execute("RESET ROLE")
 
 
@@ -122,7 +129,9 @@ def test_0350_exactamente_ocho_tipos(db: psycopg.Connection) -> None:
     with db.cursor() as cursor:
         cursor.execute("SELECT codigo FROM gapto.tipos_hecho")
         codigos = sorted(r[0] for r in cursor.fetchall())
-    assert codigos == sorted(SEED_0150 | {"CONDONACION"})
+    # F06-D002 / 0351: conjunto finito por head; 0351 solo anade sus dos.
+    assert codigos in (sorted(SEED_0150 | {"CONDONACION"}),
+                       sorted(SEED_0150 | {"CONDONACION"} | SEED_0351))
 
 
 def test_0350_estructura_sin_ddl(db: psycopg.Connection) -> None:

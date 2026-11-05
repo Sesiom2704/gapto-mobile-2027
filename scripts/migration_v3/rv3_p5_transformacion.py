@@ -159,6 +159,11 @@
 #   RV3_IMPORT (rol login no superusuario -> gapto_migrator -> gapto_owner),
 #   fuerza los diferidos con SET CONSTRAINTS ALL IMMEDIATE y hace ROLLBACK.
 #   No es P6 (P6 hace COMMIT real).
+# Versión: 0.37.0  -- F06-01 B0 (F06-D002, PB0-08): D10-K fija modo_reparto =
+#                    'FIJO' en la unica fila de contrato_servicios que crea P5
+#                    (siempre repercutible y con porcentaje), exigido por
+#                    ck_contrato_servicios__repercusion_coherente de 0351.
+#                    P6 no cambia: inserta las claves del dict.
 # Versión: 0.36.0
 # ============================================================
 from __future__ import annotations
@@ -2200,6 +2205,7 @@ def dominio_10_contratos(ds: Dataset, fuente: dict, ctx: dict) -> None:
                                           "incluido_en_renta": False, "repercutible": True,
                                           "actor_repercusion_id": _actor_persona_v3(ds, ao, ak),
                                           "porcentaje_repercutible": srv["porcentaje"],
+                                          "modo_reparto": "FIJO",  # F06-D002 (0351)
                                           "vigente_desde": inicio, "vigente_hasta": None})
             for t_, i_ in (("entidades", sid), ("servicios", sid), ("contrato_servicios", csid)):
                 ds.mapear(cc, ck, t_, i_, f"servicio.{srv['clave']}", tipo="DIVIDIDO", confianza="VALIDADA",
