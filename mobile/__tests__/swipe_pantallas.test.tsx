@@ -8,6 +8,7 @@
 // Versión: 0.3.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // Versión: 0.4.0 (F05-D051 paso 2; F05 §65.4 contrato HTTP Q4/Q4-H2): fixtures wire con `apertura_indeterminada` (y `estado` en PosicionDeParte); sin cambios de aserciones.
 // Versión: 0.5.0 (F05-D056 paso 2, COLA-AR v1.0, F05 §70.A): «Pendiente con» (F1) y «Repetir hoy» (F3) por la cola de la app: aviso «Cobrando…» / «Registrando…» antes de la confirmación, «Saldado · no cuenta como ingreso» solo si el servidor deja el saldo conocido a cero, y el motivo de un rechazo en el propio aviso. Ajustes (N1–N3) sin cambios. La persistencia de la cola se vacía antes de cada prueba.
+// Versión: 0.6.0 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): la etiqueta del swipe usa `accentText` / `warningText` y la exclusión del rojo se amplía a `criticalText` (trazabilidad en el comentario del test).
 // ============================================================
 
 import './tiempos_rn';
@@ -71,13 +72,16 @@ afterEach(() => {
 // ==================================================================
 // Tonos: nunca rojo
 // ==================================================================
+// Trazabilidad (F06-M1, PT-05): antes la etiqueta era `etiqueta: c.accent` (confirmar) y `etiqueta: c.warning` (aviso), y la
+// exclusion del rojo solo miraba `c.critical`. Con V1 la etiqueta es texto y lleva el token de rol (accentText / warningText);
+// el circulo conserva el relleno. SWIPE-RULE no cambia y la exclusion del rojo se amplia a `criticalText`.
 test('tonos del swipe: confirmar verde, neutro gris y aviso naranja; nunca el rojo `critical` (claro y oscuro)', () => {
   for (const esquema of ['light', 'dark'] as const) {
     const c = colores[esquema];
-    expect(coloresTono(c, 'confirmar')).toEqual({ fondo: c.accentSurface, circulo: c.accent, sobreCirculo: c.onAccent, etiqueta: c.accent });
+    expect(coloresTono(c, 'confirmar')).toEqual({ fondo: c.accentSurface, circulo: c.accent, sobreCirculo: c.onAccent, etiqueta: c.accentText });
     expect(coloresTono(c, 'neutro')).toEqual({ fondo: c.surfaceSecondary, circulo: c.textSecondary, sobreCirculo: c.background, etiqueta: c.textSecondary });
-    expect(coloresTono(c, 'aviso')).toEqual({ fondo: c.partialSurface, circulo: c.warning, sobreCirculo: c.onAccent, etiqueta: c.warning });
-    for (const t of ['confirmar', 'neutro', 'aviso'] as TonoSwipe[]) expect(Object.values(coloresTono(c, t))).not.toContain(c.critical);
+    expect(coloresTono(c, 'aviso')).toEqual({ fondo: c.partialSurface, circulo: c.warning, sobreCirculo: c.onAccent, etiqueta: c.warningText });
+    for (const t of ['confirmar', 'neutro', 'aviso'] as TonoSwipe[]) { expect(Object.values(coloresTono(c, t))).not.toContain(c.critical); expect(Object.values(coloresTono(c, t))).not.toContain(c.criticalText); }
   }
 });
 

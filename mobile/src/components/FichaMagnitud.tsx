@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-01 S7-MAG UI, hito 1: bloque de la asociación)
 // Versión: 0.2.0 (F05-01 S7-MAG UI, hito 2): `BloqueMagnitud` (M13), bloque global «Magnitud · afecta a todas sus categorías»: unidad, decimales y estado; nota de que unidad y decimales no se editan (R17); «Usada en» con la ruta de cada categoría, «esta categoría» marcada y su obligatoriedad en texto; «Aparece en N registros históricos.»; acciones Renombrar y Deshabilitar (crítica) o Rehabilitar, con la microcopy de renombrar. Estados de carga y error del catálogo distintos.
 // Versión: 0.3.0 (F05-01 S7-MAG UI correctivo AJ-S7MAGUI-02): la ficha pinta arriba el aviso de estado sin comprobar (con «Reintentar») cuando la recarga tras un comando falla.
+// Versión: 0.3.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -70,7 +71,7 @@ export function Accion(p: { testID: string; titulo: string; critica?: boolean; o
       onPress={p.onPress}
       style={({ pressed }) => [s.fila, { borderBottomColor: c.separator, opacity: pressed ? 0.7 : 1 }]}
     >
-      <Text style={[tipo.body, { color: p.critica ? c.critical : c.textPrimary, flex: 1 }]}>{p.titulo}</Text>
+      <Text style={[tipo.body, { color: p.critica ? c.criticalText : c.textPrimary, flex: 1 }]}>{p.titulo}</Text>
       {p.critica ? null : <Ionicons name="chevron-forward" size={18} color={c.textSecondary} />}
     </Pressable>
   );

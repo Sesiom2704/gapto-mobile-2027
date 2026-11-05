@@ -4,6 +4,7 @@
 // Ruta: mobile/src/components/NuevaMagnitud.tsx
 // Descripción: Alta rápida de una magnitud con su asociación a la categoría en un solo paso (F09 §12.97.10; lámina SET-MAG v0.1 M07–M08; F05-D020 D-MAG-01/05/09). Tarea inmersiva «Cancelar · Nueva magnitud»: nombre, unidad, decimales 0..6 (segmentado SIN preselección), nota de que unidad y decimales no se podrán cambiar, «En <categoría>: Obligatoria / Opcional» sin preselección y «Crear y añadir a <categoría>» desactivada hasta completar, con el texto «Para crear falta: …». La validación es la del servidor (1..80 y 1..20 visibles tras NFKC/recorte/colapso). Colisión de nombre (M08): aviso junto al nombre con la existente y «Usar “<nombre>” en <categoría>» o, si está deshabilitada, «Rehabilitar “<nombre>” y usarla»; sin `detalle` (colisión física residual) mensaje genérico y «Recargar catálogo». Nunca se crea una segunda ni se rehabilita sin acción explícita. Identidad: el formulario guarda un `magnitud_id` que se REUTILIZA en el reintento (red o indeterminado) y solo se renueva cuando el usuario modifica algún dato. Solo presentación: el controlador envía y trata los rechazos.
 // Versión: 0.1.0 (F05-01 S7-MAG UI, hito 2)
+// Versión: 0.1.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -82,7 +83,7 @@ export function NuevaMagnitud(p: {
         <ScrollView contentContainerStyle={[s.cuerpo, { paddingBottom: inset.bottom + espacio.xl }]}>
           {p.aviso ? (
             <View testID="nuevamag-aviso" accessibilityRole="alert" style={[s.aviso, { backgroundColor: c.partialSurface }]}>
-              <Ionicons name="alert-circle-outline" size={18} color={c.warning} />
+              <Ionicons name="alert-circle-outline" size={18} color={c.warningText} />
               <Text style={[tipo.subheadline, { color: c.textPrimary, flexShrink: 1 }]}>{p.aviso}</Text>
             </View>
           ) : null}
@@ -96,10 +97,10 @@ export function NuevaMagnitud(p: {
             maxLength={400}
             style={[tipo.body, s.input, { color: c.textPrimary, backgroundColor: c.surfacePrimary, borderColor: p.colision || v.errorNombre ? c.warning : c.borderStandard }]}
           />
-          {v.errorNombre ? <Text testID="nuevamag-error-nombre" style={[tipo.footnote, { color: c.critical }]}>{v.errorNombre}</Text> : null}
+          {v.errorNombre ? <Text testID="nuevamag-error-nombre" style={[tipo.footnote, { color: c.criticalText }]}>{v.errorNombre}</Text> : null}
           {existente ? (
             <View testID="nuevamag-colision" accessibilityRole="alert" style={[s.aviso, { backgroundColor: c.partialSurface }]}>
-              <Ionicons name="information-circle-outline" size={18} color={c.warning} />
+              <Ionicons name="information-circle-outline" size={18} color={c.warningText} />
               <View style={{ flex: 1, gap: espacio.s }}>
                 <Text style={[tipo.subheadline, { color: c.textPrimary, fontWeight: '600' }]}>
                   {existente.enabled ? `Ya existe «${existente.nombre}»` : `Ya existe «${existente.nombre}» (deshabilitada)`}
@@ -132,7 +133,7 @@ export function NuevaMagnitud(p: {
           ) : null}
           {p.colision?.tipo === 'SIN_DETALLE' ? (
             <View testID="nuevamag-colision-generica" accessibilityRole="alert" style={[s.aviso, { backgroundColor: c.partialSurface }]}>
-              <Ionicons name="information-circle-outline" size={18} color={c.warning} />
+              <Ionicons name="information-circle-outline" size={18} color={c.warningText} />
               <View style={{ flex: 1, gap: espacio.s }}>
                 <Text style={[tipo.subheadline, { color: c.textPrimary }]}>{COLISION_GENERICA}</Text>
                 <BotonSecundario testID="nuevamag-recargar" titulo="Recargar catálogo" onPress={p.onRecargarCatalogo} />
@@ -149,7 +150,7 @@ export function NuevaMagnitud(p: {
             maxLength={100}
             style={[tipo.body, s.input, { color: c.textPrimary, backgroundColor: c.surfacePrimary, borderColor: v.errorUnidad ? c.critical : c.borderStandard }]}
           />
-          {v.errorUnidad ? <Text testID="nuevamag-error-unidad" style={[tipo.footnote, { color: c.critical }]}>{v.errorUnidad}</Text> : null}
+          {v.errorUnidad ? <Text testID="nuevamag-error-unidad" style={[tipo.footnote, { color: c.criticalText }]}>{v.errorUnidad}</Text> : null}
           <Text style={[tipo.footnote, { color: c.textSecondary }]}>Decimales</Text>
           <Segmentado<string>
             testIDBase="nuevamag-decimales"

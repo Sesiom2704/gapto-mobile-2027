@@ -11,7 +11,8 @@
 // v0.7.0 (F05-06 M5 SWIPE; regla de Moisés del 2026-10-22): el swipe de «Requiere atención» es una acción rápida con «Deshacer» cuando es inequívoca (useSwipePrevision › useAccionRapida); la fila sale mientras espera y el aviso va sobre la pantalla, fuera del scroll (hermano del ScrollView). Si falta algo, abre la hoja.
 // v0.8.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2): las filas de «Requiere atención» van en tarjeta con los dos lados de la SWIPE-RULE (derecha «Pagado» / «Cobrado», izquierda «No hubo» sin pagos enlazados).
 // v0.9.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): la raíz y el scroll cierran la fila abierta a medias (patrón iOS); los lados los decide el componente común (principal a la izquierda).
-// Versión: 0.9.0
+// v0.10.0 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): «Resultado» del mes usa `positiveText` / `criticalText` (sobre `surfacePrimary`, PT-04) y el icono de «Registrar» `accentText`.
+// Versión: 0.10.0
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -179,7 +180,7 @@ export function HomeScreen(p: {
         <View style={s.fila}>
           <Pressable testID="accion-registrar" accessibilityRole="button" accessibilityLabel="Registrar. Nuevo" onPress={p.onRegistrar} style={s.accion}>
             <View style={[s.circulo, { backgroundColor: c.accentSurface }]}>
-              <Ionicons name="add" size={26} color={c.accent} />
+              <Ionicons name="add" size={26} color={c.accentText} />
             </View>
             <Text style={[tipo.subheadline, { color: c.textPrimary, fontWeight: '600' }]}>Registrar</Text>
             <Text style={[tipo.caption, { color: c.textSecondary }]}>Nuevo</Text>
@@ -327,7 +328,7 @@ function CeldaMes({ lectura, campo, onReintentar }: { lectura: LecturaMes; campo
   const d = lectura.datos;
   if (campo === 'resultado') {
     const r = resultadoDelMes(d.resultado);
-    const color = r.tono === 'positive' ? c.positive : r.tono === 'critical' ? c.critical : c.textPrimary;
+    const color = r.tono === 'positive' ? c.positiveText : r.tono === 'critical' ? c.criticalText : c.textPrimary;
     return (
       <Text testID="mes-resultado" style={[importe.secondary, { color, fontVariant: ['tabular-nums'] }]} adjustsFontSizeToFit numberOfLines={1}>
         {r.texto}

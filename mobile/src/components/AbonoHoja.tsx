@@ -5,6 +5,7 @@
 // Descripción: «Registrar abono» de una devolución pendiente (F05-06 M2-B §B1; lámina DEV B2, D-DEV-07, P-DEV-04; DAY-RULE-03). Hoja «¿Llegó el abono?» con la devolución y su importe, la cuenta (propuesta la cuenta original demostrable de la compra, P-DEV-02 con M2-D; «Otra cuenta» con las que pueden recibir dinero, RECIBIR_INGRESO) y la fecha (Hoy · Ayer · Otra fecha, nunca futura): siempre con confirmación consciente de cuenta y fecha, también desde el swipe «Cobrado». El importe es el de la devolución: «¿Llegó otro importe o en varias veces? Abrir el formulario completo» explica que eso no es este abono (no se cambia la devolución aquí). Mismo ciclo de envío que el registro (UUID sellado, doble toque ignorado, INDETERMINADO reintenta la MISMA identidad; YA_CONCILIADO y CUENTA_SIN_CAPACIDAD con el mensaje del servidor).
 // Versión: 0.1.0 (F05-06 M2-B §B1)
 // Versión: 0.2.0 (F05-06 M2-D §2; decisión R-M2A-02 opción b): la propuesta es la cuenta ORIGINAL demostrable de la compra solo cuando `cuenta_compra` no es null (el servidor la admite sin capacidad); «Otra cuenta» lista las que pueden recibir dinero (operación INGRESO = RECIBIR_INGRESO, nunca «ingreso» en el texto) y una recarga de la lista no quita la original. CUENTA_SIN_CAPACIDAD sigue mostrando el mensaje del servidor, que nombra la capacidad del detalle.
+// Versión: 0.2.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -151,7 +152,7 @@ export function AbonoHoja(p: {
         <BotonTexto testID="abono-formulario-completo" titulo="¿Llegó otro importe o en varias veces? Abrir el formulario completo" onPress={() => setCompleto(true)} />
       )}
       {estado.fase === 'RECHAZADO' ? (
-        <Text testID="abono-error" accessibilityRole="alert" style={[tipo.subheadline, { color: c.critical }]}>{estado.mensaje}</Text>
+        <Text testID="abono-error" accessibilityRole="alert" style={[tipo.subheadline, { color: c.criticalText }]}>{estado.mensaje}</Text>
       ) : null}
       {estado.fase === 'INDETERMINADO' ? (
         <Text testID="abono-indeterminado" accessibilityRole="alert" style={[tipo.subheadline, { color: c.textPrimary }]}>{estado.mensaje}</Text>

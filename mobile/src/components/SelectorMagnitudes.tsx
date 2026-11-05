@@ -4,6 +4,7 @@
 // Ruta: mobile/src/components/SelectorMagnitudes.tsx
 // Descripción: Selector del catálogo de magnitudes del owner para añadir una a la categoría (F09 §12.97.10; lámina SET-MAG v0.1 M06; GET /v1/magnitudes). Tarea inmersiva «Cancelar · Añadir magnitud a <categoría>» con búsqueda por nombre y tres secciones: «Disponibles», «Deshabilitadas» (marcadas en texto) y «Ya en <categoría>» (atenuadas, con check y su obligatoriedad, no elegibles). Subtítulo «unidad · decimales · usada en …» / «sin categorías». Error de carga distinto de «sin resultados». Al pie, «Nueva magnitud» cuando el llamador la ofrece (alta rápida, M07). Solo presentación: elegir entrega la magnitud al controlador. Consume solo tokens semánticos.
 // Versión: 0.1.0 (F05-01 S7-MAG UI, hito 1)
+// Versión: 0.1.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -103,7 +104,7 @@ export function SelectorMagnitudes(p: {
               <Text style={[tipo.body, { color: c.textSecondary }]}>{a.nombre}</Text>
               <Text style={[tipo.caption, { color: c.textSecondary }]}>{a.obligatoria ? 'Obligatoria' : 'Opcional'}</Text>
             </View>
-            <Ionicons name="checkmark" size={18} color={c.accent} />
+            <Ionicons name="checkmark" size={18} color={c.accentText} />
           </View>
         ))}
       </ScrollView>

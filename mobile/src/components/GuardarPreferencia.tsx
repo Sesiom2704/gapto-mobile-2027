@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-02 B2)
 // Versión: 0.2.0 (F05-03/F05-04 J2 §1.5; F05 §46.5 E3): la preferencia de la categoría lleva el tipo GASTO que informa la lista (`tipos.GASTO`).
 // Versión: 0.3.0 (F05-03/F05-04 J2 §2.4; lámina REG-DYN N01): con `ambitos` (registro por tipo) la tarjeta pregunta «¿Recordarlo para la próxima vez?» y ofrece «Para <tercero>» / «Para <categoría>» (uno solo: nunca ambos); la preferencia lleva el tipo del registro (GASTO o INGRESO) y la clave del ámbito elegido. En ingresos, «Cobrado en». Sin `ambitos`, el comportamiento de F05-02 no cambia.
+// Versión: 0.3.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // ============================================================
 
 import React, { useRef, useState } from 'react';
@@ -105,7 +106,7 @@ export function GuardarPreferencia(p: {
       <View style={{ gap: espacio.s }}>
         <View testID="pref-error" accessibilityRole="alert" style={[s.caja, { backgroundColor: c.partialSurface, borderColor: c.warning }]}>
           <Text style={[tipo.footnote, { color: c.textPrimary }]}>
-            <Text style={{ fontWeight: '600', color: c.warning }}>No se pudo guardar la preferencia.</Text> {tipoReg === 'INGRESO' ? 'El ingreso' : 'El gasto'} sí está registrado. Puedes
+            <Text style={{ fontWeight: '600', color: c.warningText }}>No se pudo guardar la preferencia.</Text> {tipoReg === 'INGRESO' ? 'El ingreso' : 'El gasto'} sí está registrado. Puedes
             reintentarlo o crearla luego en Ajustes › Preferencias.
           </Text>
         </View>

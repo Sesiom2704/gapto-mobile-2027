@@ -7,6 +7,7 @@
 // Versión: 0.2.0 (F05-01 S7-MAG UI, hito 2): renombrar la magnitud (microcopy de M13; colisión junto al nombre), deshabilitar con impacto calculado por el servidor bajo lock (M14) y «El impacto ha cambiado» con la lista nueva (M15), y rehabilitar con confirmación simple.
 // Versión: 0.3.0 (F05-01 S7-MAG UI, D59 aprobada por Moisés): deshabilitar SIN impacto pide una confirmación simple «¿Deshabilitar «X»?» antes de enviar.
 // Versión: 0.4.0 (F05-01 S7-MAG UI correctivo AJ-S7MAGUI-01/03): el aviso al añadir una magnitud deshabilitada depende de la obligatoriedad elegida (texto neutro sin elección; OBLIGATORIA: la categoría no podrá utilizarse; OPCIONAL: no impide utilizarla); M15 distingue un conjunto que AÑADE categorías (texto de la lámina) de uno que se reduce o queda vacío (texto neutro, D67). AJ-S7MAGUI-08: hoja «“X” ya está rehabilitada, pero no se ha podido añadir a <cat>.» con «Añadir a <cat>» y «Ahora no».
+// Versión: 0.5.0 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): `Pildora` separa el texto (rol: `accentText` / `warningText`) del borde (relleno: `accent` / `warning`); los errores usan `criticalText`.
 // ============================================================
 
 import React, { useState } from 'react';
@@ -49,10 +50,12 @@ export type TonoPildora = 'OBLIGATORIA' | 'OPCIONAL' | 'DESHABILITADA';
 /** Píldora de estado: borde y texto (el texto lleva el significado; el color solo acompaña). */
 export function Pildora(p: { texto: string; tono: TonoPildora; testID?: string }) {
   const { c } = useTema();
-  const color = p.tono === 'OBLIGATORIA' ? c.accent : p.tono === 'DESHABILITADA' ? c.warning : c.textSecondary;
+  // Texto con token de rol; el borde conserva el relleno semantico (F06-M1, V1 con anillo).
+  const color = p.tono === 'OBLIGATORIA' ? c.accentText : p.tono === 'DESHABILITADA' ? c.warningText : c.textSecondary;
+  const borde = p.tono === 'OBLIGATORIA' ? c.accent : p.tono === 'DESHABILITADA' ? c.warning : c.textSecondary;
   const fondo = p.tono === 'DESHABILITADA' ? c.partialSurface : c.surfacePrimary;
   return (
-    <View testID={p.testID} style={[s.pildora, { borderColor: color, backgroundColor: fondo }]}>
+    <View testID={p.testID} style={[s.pildora, { borderColor: borde, backgroundColor: fondo }]}>
       <Text style={[tipo.caption, { color }]}>{p.texto}</Text>
     </View>
   );
@@ -169,7 +172,7 @@ export function HojaRenombrarMagnitud(p: {
         maxLength={400}
         style={[tipo.body, s.input, { color: c.textPrimary, backgroundColor: c.surfacePrimary, borderColor: p.errorNombre ? c.critical : c.borderStandard }]}
       />
-      {p.errorNombre ? <Text testID="renmag-error" accessibilityRole="alert" style={[tipo.footnote, { color: c.critical }]}>{p.errorNombre}</Text> : null}
+      {p.errorNombre ? <Text testID="renmag-error" accessibilityRole="alert" style={[tipo.footnote, { color: c.criticalText }]}>{p.errorNombre}</Text> : null}
       <Text style={[tipo.footnote, { color: c.textSecondary }]}>{MICROCOPY_RENOMBRAR_MAGNITUD}</Text>
       <BotonPrimario
         testID="renmag-guardar"

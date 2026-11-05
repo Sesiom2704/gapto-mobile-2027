@@ -5,7 +5,8 @@
 // Descripción: Tests de dominio del cliente: importe, contraste de tokens DS-01 y clasificación de respuestas HTTP.
 // v0.2.0 (F05-D003): payload con financiación; conversión de fechas dd/mm/aaaa.
 // v0.3.0 (F05-01 S6-WIRE+UI (este mandato)): el payload de prueba lleva el estado categorial obligatorio (S6-WIRE).
-// Versión: 0.3.0
+// v0.4.0 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el test de `warning` claro pasa a «relleno >= 3:1; el texto usa warningText >= 4,5:1» (aserción anterior `< 4.5` deja de ser cierta con V1: 4,58:1; trazabilidad en el comentario del test).
+// Versión: 0.4.0
 // ============================================================
 
 import { crearCliente } from '../src/api/cliente';
@@ -44,9 +45,14 @@ test.each(['light', 'dark'] as const)('contraste de texto AA en %s', (e) => {
   expect(contraste(c.critical, c.surfacePrimary)).toBeGreaterThanOrEqual(4.5);
 });
 
-test('warning claro NO es apto para texto (3,19:1): solo iconografía/superficie', () => {
-  expect(contraste(colores.light.warning, colores.light.surfacePrimary)).toBeLessThan(4.5);
+// Trazabilidad (F06-M1, PT-05): antes «warning claro NO es apto para texto (3,19:1): solo iconografía/superficie», con
+// expect(contraste(warning, surfacePrimary)).toBeLessThan(4.5) y .toBeGreaterThanOrEqual(3). Con V1 warning claro da 4,58:1 y la
+// cota < 4.5 deja de ser cierta; la regla «warning no es color de texto» pasa a expresarse con warningText (>= 4,5:1). Se conserva
+// la cota de 3:1 del relleno y se añade la de los cuatro tokens de rol en los dos temas.
+test('warning es relleno de iconografía/superficie (>= 3:1); el texto de aviso usa warningText (>= 4,5:1)', () => {
   expect(contraste(colores.light.warning, colores.light.surfacePrimary)).toBeGreaterThanOrEqual(3);
+  for (const e of ['light', 'dark'] as const) for (const t of ['accentText', 'criticalText', 'positiveText', 'warningText'] as const)
+    expect(contraste(colores[e][t], colores[e].surfacePrimary)).toBeGreaterThanOrEqual(4.5);
 });
 
 const P = { intencion_id: 'x', concepto: 'c', importe: '1.00', moneda: 'EUR' as const, fecha_hecho: '2026-09-24', cuenta_id: 'k', presupuestable: true, atribucion: 'SOLO_MIO' as const, financiacion: { estado: 'NO_DETERMINADA' as const }, categoria: { estado: 'SIN_CATEGORIA' as const } };

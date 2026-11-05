@@ -4,6 +4,7 @@
 // Ruta: mobile/src/screens/NuevaCategoriaScreen.tsx
 // Descripción: Alta de categoría CREATE-M (F09 §12.97.4 y §12.97.6; lámina SET-CAT v1.0 S02/I03). Tarea inmersiva (sin barra inferior): nombre; icono opcional (selector de iconos); ubicación (raíz o padre con ruta visible, elegida con el selector jerárquico en modo AJUSTES restringido a padres habilitados con toda su cadena habilitada, AJ-S4-03); ámbito Gasto / Ingreso / Ambos SIN preselección; «¿Cuenta para el presupuesto por defecto?» Sí/No SIN preselección, con microcopy de que no rellena el registro; acción principal desactivada hasta completar, indicando lo que falta. Aviso D-198 en lenguaje potencial SOLO con padre, no modal (F05-01-R10). El `id` lo genera la app y se SELLA con la petición en el primer envío: ante INDETERMINADO se reintenta la MISMA petición con el MISMO id (idempotencia del alta AJ-S4-05) y el formulario queda bloqueado; un rechazo definitivo libera la edición y el siguiente envío usa id nuevo. Códigos: CATEGORIA_NOMBRE_DUPLICADO junto al nombre; CATEGORIA_PADRE_DESHABILITADO / CATEGORIA_PADRE_NO_VALIDO recargan el árbol y piden otra ubicación; ICONO_CATEGORIA_NO_VALIDO se explica y recarga.
 // Versión: 0.1.0 (F05-01 S6-WIRE+UI (este mandato))
+// Versión: 0.1.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -165,7 +166,7 @@ export function NuevaCategoriaScreen(p: {
 
         {aviso ? (
           <View testID="alta-aviso" accessibilityRole="alert" style={[s.aviso, { backgroundColor: c.partialSurface }]}>
-            <Ionicons name="alert-circle-outline" size={18} color={c.warning} />
+            <Ionicons name="alert-circle-outline" size={18} color={c.warningText} />
             <Text style={[tipo.subheadline, { color: c.textPrimary, flexShrink: 1 }]}>{aviso}</Text>
           </View>
         ) : null}
@@ -231,7 +232,7 @@ function Campo({ etiqueta, error, children }: { etiqueta: string; error?: string
     <View style={{ gap: espacio.s }}>
       <Text style={[tipo.footnote, { color: c.textSecondary, fontWeight: '600' }]}>{etiqueta}</Text>
       {children}
-      {error ? <Text testID="alta-error-nombre" accessibilityRole="alert" style={[tipo.footnote, { color: c.critical }]}>{error}</Text> : null}
+      {error ? <Text testID="alta-error-nombre" accessibilityRole="alert" style={[tipo.footnote, { color: c.criticalText }]}>{error}</Text> : null}
     </View>
   );
 }

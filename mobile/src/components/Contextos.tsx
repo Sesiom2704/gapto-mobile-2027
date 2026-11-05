@@ -4,6 +4,7 @@
 // Ruta: mobile/src/components/Contextos.tsx
 // Descripción: Formulario y selector de contexto (F05-03 J2 §2.3/§2.5; F05 §46.3 A6; lámina REG-DYN / SET-TH / SET-CTX v0.1 C01, G03, S03). Formulario C01: Nombre, Tipo (Viaje, Reforma, Evento, Social, Proyecto, Otro; NINGUNO marcado al empezar) y «Fechas opcional» Desde — Hasta (dd/mm/aaaa). Alta con UUID sellado al abrir (el reintento reutiliza el MISMO) y edición con row_version. En el registro, «Crear y usar» devuelve el contexto creado y el registro lo usa; la escritura del contexto es independiente del registro. El selector (G03) lista solo los contextos ACTIVOS, «Sin contexto» y «Nuevo contexto».
 // Versión: 0.1.0 (F05-03/F05-04 J2 §2.3/§2.5)
+// Versión: 0.1.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -175,7 +176,7 @@ export function SelectorContexto(p: {
       <ScrollView style={{ maxHeight: 320 }} keyboardShouldPersistTaps="handled">
         <Pressable testID="contexto-ninguno" accessibilityRole="button" onPress={() => p.onElegir(null)} style={[s.fila, { borderColor: c.borderDefault }]}>
           <Text style={[tipo.body, { color: c.textPrimary, flex: 1 }]}>Sin contexto</Text>
-          {p.seleccionadoId === null ? <Ionicons name="checkmark" size={18} color={c.accent} /> : null}
+          {p.seleccionadoId === null ? <Ionicons name="checkmark" size={18} color={c.accentText} /> : null}
         </Pressable>
         {visibles.map((x) => (
           <Pressable key={x.id} testID={`contexto-${x.id}`} accessibilityRole="button" accessibilityLabel={`${x.nombre}. ${detalleContexto(x)}`}
@@ -184,12 +185,12 @@ export function SelectorContexto(p: {
               <Text style={[tipo.body, { color: c.textPrimary }]}>{x.nombre}</Text>
               <Text style={[tipo.caption, { color: c.textSecondary }]}>{detalleContexto(x)}</Text>
             </View>
-            {p.seleccionadoId === x.id ? <Ionicons name="checkmark" size={18} color={c.accent} /> : null}
+            {p.seleccionadoId === x.id ? <Ionicons name="checkmark" size={18} color={c.accentText} /> : null}
           </Pressable>
         ))}
         <Pressable testID="contexto-nuevo" accessibilityRole="button" onPress={p.onNuevo} style={[s.fila, { borderColor: c.borderDefault }]}>
-          <Ionicons name="add" size={18} color={c.accent} />
-          <Text style={[tipo.body, { color: c.accent, flex: 1 }]}>Nuevo contexto</Text>
+          <Ionicons name="add" size={18} color={c.accentText} />
+          <Text style={[tipo.body, { color: c.accentText, flex: 1 }]}>Nuevo contexto</Text>
         </Pressable>
       </ScrollView>
       <BotonSecundario testID="contexto-cerrar" titulo="Cerrar" onPress={p.onCerrar} />

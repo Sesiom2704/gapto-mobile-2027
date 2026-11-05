@@ -4,6 +4,7 @@
 // Ruta: mobile/__tests__/ds_conformidad.test.ts
 // Descripción: Guardas de conformidad con el Design System F09 (F05 — VS-01 · Alineación visual, condición A1 de la revisión): ningún color físico fuera de tokens.ts (DS-RULE-12) y conjunto de tokens de color cerrado respecto de DS-01 v1.0 + los derivados ya registrados (deuda F05-D003 §16.8).
 // Versión: 0.1.0
+// Versión: 0.2.0 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el conjunto cerrado de tokens pasa a 21 por tema con los 4 de rol (aserción anterior: 17 tokens «sin tokens nuevos sin decisión F09»; trazabilidad en el comentario del test).
 // ============================================================
 
 import { colores } from '../src/theme/tokens';
@@ -31,11 +32,15 @@ test('DS-RULE-12: ningún color físico fuera de tokens.ts', () => {
   expect(infractores).toEqual([]);
 });
 
-test('conjunto cerrado de tokens de color (sin tokens nuevos sin decisión F09)', () => {
+// Trazabilidad (F06-M1, PT-05): antes «conjunto cerrado de tokens de color (sin tokens nuevos sin decisión F09)» con
+// 17 tokens por tema (accent, accentSurface, background, borderDefault, borderStandard, critical, info, onAccent,
+// partialSurface, positive, separator, surfacePrimary, surfaceSecondary, textPrimary, textSecondary, unknownSurface, warning).
+// Ahora 21: se añaden accentText, criticalText, positiveText y warningText (F06-D003; dictamen PT-01). El conjunto sigue cerrado.
+test('conjunto cerrado de tokens de color (DS-01 + 4 tokens de rol de texto, decisión F09 propuesta en F06-M1)', () => {
   const esperado = [
-    'accent', 'accentSurface', 'background', 'borderDefault', 'borderStandard', 'critical', 'info', 'onAccent',
-    'partialSurface', 'positive', 'separator', 'surfacePrimary', 'surfaceSecondary', 'textPrimary', 'textSecondary',
-    'unknownSurface', 'warning',
+    'accent', 'accentSurface', 'accentText', 'background', 'borderDefault', 'borderStandard', 'critical', 'criticalText',
+    'info', 'onAccent', 'partialSurface', 'positive', 'positiveText', 'separator', 'surfacePrimary', 'surfaceSecondary',
+    'textPrimary', 'textSecondary', 'unknownSurface', 'warning', 'warningText',
   ];
   expect(Object.keys(colores.light).sort()).toEqual(esperado);
   expect(Object.keys(colores.dark).sort()).toEqual(esperado);

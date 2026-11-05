@@ -8,6 +8,7 @@
 // Versión: 0.4.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): los lados son `principal` (confirma) y `alternativa` («No hubo»); hacia dónde se desliza cada uno lo decide el componente común.
 // Versión: 0.3.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2): la fila recibe los dos lados (`derecha` / `izquierda`) y va en tarjeta; las acciones accesibles «derecha» / «izquierda» llevan la etiqueta de cada lado. «Próximos» sigue siendo una lista de solo lectura, sin tarjeta ni gesto.
 // Versión: 0.5.0 (F05-06 M5-B; F04-D065, F05-D047; contrato M5-B §5): HojaDarPorCubierta (Esperado / Registrado / Queda sin cubrir ±X €, motivo con sugerencias y texto, confirmación explícita), HojaMas («Reabrir», atenuada con su motivo) y HojaReabrir (motivo obligatorio; avisa de que se retira el sucesor sin realidad). Ninguna tiene swipe. AvisoEstadoActual ya no dice que deshacer una omisión no exista: remite a «Reabrir» en «Más».
+// Versión: 0.5.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -68,7 +69,7 @@ export function FilaPrevisionVista(p: {
     >
       <View style={{ flex: 1, gap: 2 }}>
         <Text testID={`${p.testID}-concepto`} numberOfLines={1} style={[tipo.body, { color: c.textPrimary, fontWeight: '600' }]}>{f.concepto}</Text>
-        <Text testID={`${p.testID}-linea`} style={[tipo.caption, { color: f.vencida ? c.warning : c.textSecondary }]}>{lineaFila(f, p.enProximos)}</Text>
+        <Text testID={`${p.testID}-linea`} style={[tipo.caption, { color: f.vencida ? c.warningText : c.textSecondary }]}>{lineaFila(f, p.enProximos)}</Text>
       </View>
       <Text testID={`${p.testID}-importe`} style={[estiloImporte.secondary, s.importeFila, { color: c.textPrimary, fontVariant: ['tabular-nums'] }]}>
         {importeFila(f, p.usarQueda)}
@@ -164,7 +165,7 @@ export function HojaSwipe(p: {
       </View>
       <Dato etiqueta="Cuenta y fecha" valor={`${p.cuenta?.nombre ?? 'Sin cuenta'} · ${p.fechaTexto}`} testID="swipe-cuenta" />
       <BotonTexto testID="swipe-formulario-completo" titulo="¿Otro tercero, varios pagos o varias cuentas? Abrir el formulario completo" onPress={p.onFormularioCompleto} />
-      {p.error ? <Text testID="swipe-error" accessibilityRole="alert" style={[tipo.footnote, { color: c.critical }]}>{p.error}</Text> : null}
+      {p.error ? <Text testID="swipe-error" accessibilityRole="alert" style={[tipo.footnote, { color: c.criticalText }]}>{p.error}</Text> : null}
       <BotonPrimario testID="swipe-confirmar" titulo={f.tipo === 'INGRESO' ? 'Confirmar cobro y cubrir' : 'Confirmar pago y cubrir'}
         onPress={p.onConfirmar} cargando={p.enviando} deshabilitado={!p.cuenta} />
     </HojaBase>
@@ -199,7 +200,7 @@ export function HojaOmitir(p: {
         maxLength={200}
         style={[tipo.body, s.input, { color: c.textPrimary, borderColor: c.borderStandard, backgroundColor: c.surfacePrimary }]}
       />
-      {p.error ? <Text testID="omitir-error" accessibilityRole="alert" style={[tipo.footnote, { color: c.critical }]}>{p.error}</Text> : null}
+      {p.error ? <Text testID="omitir-error" accessibilityRole="alert" style={[tipo.footnote, { color: c.criticalText }]}>{p.error}</Text> : null}
       <BotonPrimario testID="omitir-confirmar" titulo="No hubo este mes" onPress={p.onConfirmar} cargando={p.enviando} />
       <BotonTexto testID="omitir-cancelar" titulo="Cancelar" onPress={p.onCerrar} />
     </HojaBase>
@@ -273,7 +274,7 @@ export function HojaDarPorCubierta(p: {
       <Dato etiqueta="Queda sin cubrir" valor={quedaSinCubrirTexto(d)} testID="dar-queda" />
       <Text style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_DAR_POR_CUBIERTA}</Text>
       <MotivoConSugerencias testIDBase="dar" sugerencias={MOTIVOS_DAR_POR_CUBIERTA} motivo={p.motivo} onMotivo={p.onMotivo} />
-      {p.error ? <Text testID="dar-error" accessibilityRole="alert" style={[tipo.footnote, { color: c.critical }]}>{p.error}</Text> : null}
+      {p.error ? <Text testID="dar-error" accessibilityRole="alert" style={[tipo.footnote, { color: c.criticalText }]}>{p.error}</Text> : null}
       <BotonPrimario testID="dar-confirmar" titulo="Dar por cubierta" onPress={p.onConfirmar} cargando={p.enviando} deshabilitado={!p.motivo.trim()} />
       <BotonTexto testID="dar-cancelar" titulo="Cancelar" onPress={p.onCerrar} />
     </HojaBase>
@@ -313,7 +314,7 @@ export function HojaReabrir(p: {
         <Text testID="reabrir-sucesor" style={[tipo.footnote, { color: c.textSecondary }]}>La siguiente previsión de la serie, aún sin nada registrado, se retira para que no haya dos pendientes.</Text>
       ) : null}
       <MotivoConSugerencias testIDBase="reabrir" sugerencias={MOTIVOS_REABRIR} motivo={p.motivo} onMotivo={p.onMotivo} />
-      {p.error ? <Text testID="reabrir-error" accessibilityRole="alert" style={[tipo.footnote, { color: c.critical }]}>{p.error}</Text> : null}
+      {p.error ? <Text testID="reabrir-error" accessibilityRole="alert" style={[tipo.footnote, { color: c.criticalText }]}>{p.error}</Text> : null}
       <BotonPrimario testID="reabrir-confirmar" titulo="Reabrir" onPress={p.onConfirmar} cargando={p.enviando} deshabilitado={!p.motivo.trim()} />
       <BotonTexto testID="reabrir-cancelar" titulo="Cancelar" onPress={p.onCerrar} />
     </HojaBase>
@@ -353,7 +354,7 @@ export function AccionPrevision(p: { testID: string; titulo: string; disponible:
           onPress={p.disponible ? p.onPress : undefined}
           style={[s.secundario, { borderColor: c.borderStandard, opacity: p.disponible ? 1 : 0.5 }]}
         >
-          <Text style={[tipo.bodyEmphasis, { color: p.disponible ? c.accent : c.textSecondary }]}>{p.titulo}</Text>
+          <Text style={[tipo.bodyEmphasis, { color: p.disponible ? c.accentText : c.textSecondary }]}>{p.titulo}</Text>
         </Pressable>
       )}
       {!p.disponible && p.motivo ? <Text testID={`${p.testID}-motivo`} style={[tipo.caption, { color: c.textSecondary }]}>{p.motivo}</Text> : null}

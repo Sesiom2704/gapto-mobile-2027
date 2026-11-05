@@ -5,6 +5,7 @@
 // Descripción: Barra inferior con los cinco destinos estables de F09 BLOQUE A (Inicio, Día a día, Mes, Patrimonio, Más). Silenciosa (HOME-01 §6). Se oculta en tareas CREATE/EDIT: la oculta App, no este componente.
 // Versión: 0.1.0
 // Versión: 0.2.0 (F05-05 K3 §2.8; F05 §49.4 A12): el icono de «Mes» se alinea con HOME-01 v0.3 (calendario: `calendar-outline` / `calendar`) en lugar de `stats-chart`.
+// Versión: 0.3.0 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el destino activo (icono y texto) usa `accentText`; el subrayado de la pestaña conserva `accent`.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -35,7 +36,7 @@ export function BarraInferior({ actual, onCambiar }: { actual: Destino; onCambia
     >
       {DESTINOS.map((d) => {
         const sel = d.id === actual;
-        const color = sel ? c.accent : c.textSecondary;
+        const color = sel ? c.accentText : c.textSecondary;
         return (
           <Pressable
             key={d.id}

@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-D056 paso 2, COLA-AR v1.0)
 // Versión: 0.2.0 (pre-S2, AJ-F0507G8-02): el ejecutor da la IDENTIDAD de la cola, `<URL base>|<nombre del owner servido>` de `GET /v1/yo` (la misma lectura que antes hacía de comprobación de conexión; el servidor no expone otro identificador del owner), y el almacén guarda con la clave de esa identidad. Residuo documentado: dos owners con el mismo nombre en el mismo backend compartirían cola (la RLS sigue impidiendo escribir en el de otro).
 // Versión: 0.3.0 (pre-S2, AJ-F0507G8-13): `manejarEstadoApp` trata «inactive» de iOS como ausencia, igual que «background».
+// Versión: 0.4.0 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el ✓ del aviso flotante lleva un anillo de 2 px `onAccent` (opción C), igual que en AccionRapida.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -197,7 +198,7 @@ export function AvisosCola(p: { cola: ColaAccionRapida; global?: boolean }) {
             style={[final || i.pregunta || i.estado === 'NO_ENVIADA' ? s.caja : s.pildora, { backgroundColor: c.textPrimary }]}>
             <View style={s.fila}>
               {confirmada ? (
-                <View testID={`aviso-rapida-${k}-ok`} style={[s.ok, { backgroundColor: c.accent }]}>
+                <View testID={`aviso-rapida-${k}-ok`} style={[s.ok, { backgroundColor: c.accent, borderWidth: 2, borderColor: c.onAccent }]}>
                   <Ionicons name="checkmark" size={15} color={c.onAccent} />
                 </View>
               ) : null}

@@ -5,6 +5,7 @@
 // Descripción: Piezas comunes de las pantallas de reparto y posiciones (F05-06 M3; lámina REP v0.2). `SelectorPersona` (E7, P-REP-05): solo terceros ACTIVOS de tipo persona, con filtro local, «Recientes» por uso y alta en el momento («+ Crear persona «texto»», naturaleza PERSONA, UUID generado al iniciar el alta y reutilizado en el reintento). `OpcionAtenuada`: lo que esta versión no hace se ve atenuado y con su motivo en lenguaje llano (§57.1.1). `Campo`, `FilaRevision`, `CabeceraTarea` y `Aviso` siguen el patrón de la devolución (DEV v0.1).
 // Versión: 0.1.0 (F05-06 M3 §B1)
 // Versión: 0.2.0 (F05-D052 paso 2 · C-03, F05 §66.A.3): `SelectorPersona` admite `naturalezas` (por defecto solo PERSONA: el reparto no cambia). Con PERSONA y EMPRESA («Quién te lo debe» de C-03) lista ambas con su tipo, busca «persona o empresa», ofrece crear persona o empresa y su nota es la de C-03; ORGANISMO, OTRO y sin naturaleza nunca aparecen (DEU-C03-NATURALEZAS). `excluir` sigue quitando, p. ej., el comercio del gasto.
+// Versión: 0.2.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -92,7 +93,7 @@ export function Inicial({ nombre }: { nombre: string }) {
   const { c } = useTema();
   return (
     <View style={[s.inicial, { backgroundColor: c.accentSurface }]} accessibilityElementsHidden importantForAccessibility="no">
-      <Text style={[tipo.subheadline, { color: c.accent, fontWeight: '600' }]}>{(nombre.trim()[0] ?? '·').toUpperCase()}</Text>
+      <Text style={[tipo.subheadline, { color: c.accentText, fontWeight: '600' }]}>{(nombre.trim()[0] ?? '·').toUpperCase()}</Text>
     </View>
   );
 }
@@ -190,12 +191,12 @@ export function SelectorPersona(p: {
         ) : null}
         {nombreNuevo && !existeIgual ? (
           <Pressable testID="selector-persona-crear" accessibilityRole="button" onPress={() => void crear('PERSONA')} style={[s.fila, { backgroundColor: c.surfacePrimary }]}>
-            <Text style={[tipo.body, { color: c.accent }]}>{alta.fase === 'ENVIANDO' ? 'Creando…' : `+ Crear persona «${nombreNuevo}»`}</Text>
+            <Text style={[tipo.body, { color: c.accentText }]}>{alta.fase === 'ENVIANDO' ? 'Creando…' : `+ Crear persona «${nombreNuevo}»`}</Text>
           </Pressable>
         ) : null}
         {conEmpresas && nombreNuevo && !existeIgual && alta.fase !== 'ENVIANDO' ? (
           <Pressable testID="selector-persona-crear-empresa" accessibilityRole="button" onPress={() => void crear('EMPRESA')} style={[s.fila, { backgroundColor: c.surfacePrimary }]}>
-            <Text style={[tipo.body, { color: c.accent }]}>{`+ Crear empresa «${nombreNuevo}»`}</Text>
+            <Text style={[tipo.body, { color: c.accentText }]}>{`+ Crear empresa «${nombreNuevo}»`}</Text>
           </Pressable>
         ) : null}
         {alta.fase === 'ERROR' ? <Aviso testID="selector-persona-alta-error" texto={alta.mensaje} critico /> : null}

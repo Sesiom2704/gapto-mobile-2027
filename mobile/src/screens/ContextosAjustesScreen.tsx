@@ -4,6 +4,7 @@
 // Ruta: mobile/src/screens/ContextosAjustesScreen.tsx
 // Descripción: Ajustes › Contextos (F05-03 J2 §2.5; F05 §46.3 A6; lámina REG-DYN / SET-TH / SET-CTX v0.1 S03, C01). Lista con el texto de la lámina, filas «Finde Cartagena» / «Viaje · 10–12 oct» y, desactivados, «Evento · Desactivado». Alta y edición con el formulario C01 (FormularioContexto); desactivar / reactivar con row_version y sin borrado. VERSION_DESFASADA → recarga y aviso, sin reintento automático.
 // Versión: 0.1.0 (F05-03/F05-04 J2 §2.5)
+// Versión: 0.1.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -114,7 +115,7 @@ export function ContextosAjustesScreen(p: { cliente: ClienteApi; nuevoId: () => 
         testIDAtras="ajctx-atras"
         derecha={
           <Pressable testID="ajctx-nuevo" accessibilityRole="button" accessibilityLabel="Nuevo contexto" hitSlop={8} onPress={() => setVista({ v: 'NUEVO' })} style={ef.mas}>
-            <Ionicons name="add" size={24} color={c.accent} />
+            <Ionicons name="add" size={24} color={c.accentText} />
           </Pressable>
         }
       />

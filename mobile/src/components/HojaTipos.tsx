@@ -4,6 +4,7 @@
 // Ruta: mobile/src/components/HojaTipos.tsx
 // Descripción: Hoja «¿Qué quieres registrar?» (F05-04 J2 §2.2; F05 §46.3 A1; lámina REG-DYN T01): Gasto, Ingreso y Entre cuentas, SIN preselección; nota de devolución y «Cancelar». La abre «Registrar» de Inicio y el botón «Tipo» del formulario antes del primer envío.
 // Versión: 0.1.0 (F05-03/F05-04 J2 §2.2)
+// Versión: 0.1.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -42,7 +43,7 @@ export function HojaTipos(p: { actual?: TipoRegistro | null; onElegir: (t: TipoR
               onPress={() => p.onElegir(t.tipo)}
               style={({ pressed }) => [s.fila, { backgroundColor: c.surfacePrimary, borderColor: c.borderDefault, opacity: pressed ? 0.8 : 1 }]}
             >
-              <Ionicons name={ICONO[t.tipo]} size={26} color={c.accent} />
+              <Ionicons name={ICONO[t.tipo]} size={26} color={c.accentText} />
               <View style={{ flex: 1 }}>
                 <Text style={[tipo.bodyEmphasis, { color: c.textPrimary }]}>{t.titulo}</Text>
                 <Text style={[tipo.footnote, { color: c.textSecondary }]}>{t.subtitulo}</Text>

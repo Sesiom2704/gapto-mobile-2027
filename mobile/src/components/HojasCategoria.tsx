@@ -5,6 +5,7 @@
 // Descripción: Hojas inferiores de las acciones EDIT-* de Ajustes › Categorías (F09 §12.97.4; lámina SET-CAT v1.0 S04 «Cambiar ámbito», S05 «Desactivar con subcategorías»; mandato F05-01 S6-WIRE+UI §5). Solo presentación: no llaman al cliente; la pantalla decide el comando y trata los rechazos. Renombrar (con la microcopy de que corrige la etiqueta también en la historia y el error de colisión junto al nombre), Cambiar ámbito (uso por naturaleza visible antes de confirmar; si el servidor devuelve un uso distinto, la hoja muestra el nuevo y pide confirmar otra vez), Desactivar (con subcategorías activas: «Desactivar también sus N subcategorías» o Cancelar; sin ellas, confirmación simple) y Reactivar (sin cascada). Velo con tokens y opacidad (sin rgba). Consume solo tokens semánticos.
 // Versión: 0.1.0 (F05-01 S6-WIRE+UI (este mandato))
 // Versión: 0.2.0 (F05-01 S7-MAG UI): `Hoja`, `Aviso` y `BotonCritico` se exportan para reutilizarlos en las hojas de magnitudes (HojasMagnitud.tsx); sin cambios de presentación.
+// Versión: 0.2.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -57,7 +58,7 @@ export function Aviso(p: { texto: string; testID: string }) {
   const { c } = useTema();
   return (
     <View testID={p.testID} accessibilityRole="alert" style={[s.aviso, { backgroundColor: c.partialSurface }]}>
-      <Ionicons name="alert-circle-outline" size={18} color={c.warning} />
+      <Ionicons name="alert-circle-outline" size={18} color={c.warningText} />
       <Text style={[tipo.subheadline, { color: c.textPrimary, flexShrink: 1 }]}>{p.texto}</Text>
     </View>
   );
@@ -106,7 +107,7 @@ export function HojaRenombrar(p: {
         style={[tipo.body, s.input, { color: c.textPrimary, backgroundColor: c.surfacePrimary, borderColor: p.errorNombre ? c.critical : c.borderStandard }]}
       />
       {p.errorNombre ? (
-        <Text testID="renombrar-error" accessibilityRole="alert" style={[tipo.footnote, { color: c.critical }]}>{p.errorNombre}</Text>
+        <Text testID="renombrar-error" accessibilityRole="alert" style={[tipo.footnote, { color: c.criticalText }]}>{p.errorNombre}</Text>
       ) : null}
       <Text testID="renombrar-microcopy" style={[tipo.footnote, { color: c.textSecondary }]}>{MICROCOPY_RENOMBRAR}</Text>
       <BotonPrimario

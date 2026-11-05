@@ -4,6 +4,7 @@
 // Ruta: mobile/src/components/SelectorIconos.tsx
 // Descripción: Selector de icono de categoría (F09 §12.97.9 I02/I04; lámina SET-CAT v1.0). Hoja de altura completa «Icono de <nombre> · Cerrar» con vista previa de la categoría con el icono elegido, opción «Sin icono» (→ null: la app usa el icono de reserva, que nunca se persiste) y las claves ACTIVAS de la biblioteca v1 agrupadas con su etiqueta visible. La elegida se marca con check Y texto («Elegido»), nunca solo con color. La acción principal la decide el llamador («Guardar icono» en el detalle; «Usar este icono» en el alta). Solo claves publicadas: el cliente nunca inventa ni recorta claves.
 // Versión: 0.1.0 (F05-01 S6-WIRE+UI (este mandato))
+// Versión: 0.1.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -65,7 +66,7 @@ export function SelectorIconos(p: {
         ))}
 
         {p.aviso ? (
-          <Text testID="iconos-aviso" accessibilityRole="alert" style={[tipo.footnote, { color: c.critical }]}>{p.aviso}</Text>
+          <Text testID="iconos-aviso" accessibilityRole="alert" style={[tipo.footnote, { color: c.criticalText }]}>{p.aviso}</Text>
         ) : null}
         <BotonPrimario
           testID="iconos-accion"
@@ -92,10 +93,10 @@ function CeldaIcono(p: { testID: string; glifo: React.ComponentProps<typeof Ioni
       style={[s.celda, { borderColor: p.elegida ? c.accent : 'transparent', backgroundColor: p.elegida ? c.accentSurface : undefined }]}
     >
       <View style={[s.glifo, { backgroundColor: c.surfaceSecondary }]}>
-        <Ionicons name={p.glifo} size={20} color={p.elegida ? c.accent : c.textSecondary} />
+        <Ionicons name={p.glifo} size={20} color={p.elegida ? c.accentText : c.textSecondary} />
       </View>
       <Text numberOfLines={1} style={[tipo.caption, { color: c.textPrimary }]}>{p.etiqueta}</Text>
-      {p.elegida ? <Text style={[tipo.caption, { color: c.accent, fontWeight: '600' }]}>✓ Elegido</Text> : null}
+      {p.elegida ? <Text style={[tipo.caption, { color: c.accentText, fontWeight: '600' }]}>✓ Elegido</Text> : null}
     </Pressable>
   );
 }

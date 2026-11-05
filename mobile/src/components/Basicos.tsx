@@ -6,7 +6,8 @@
 // v0.2.0 (F05 — VS-01 · Alineación visual, A1/A2): «Seccion» deja de ser tarjeta (sin superficie propia ni radio): se asienta sobre el fondo y se separa con una única línea estructural `separator` (F09 §6 «pocas tarjetas y pocos bordes»; sin HEX ni tokens nuevos). «BotonPrimario» declara `disabled` nativo y acepta `ayuda` (accessibilityHint) para decir qué falta (REG-SPEC-01 SPEC-08).
 // v0.3.0 (F05-01 S6-WIRE+UI (este mandato)): «Velo» de las hojas modales (láminas REG-CAT R07 y SET-CAT S04/S05) como TRATAMIENTO de tokens existentes (tono oscuro del tema con opacidad), sin color físico ni token nuevo (DS-RULE-12, ds_conformidad). «CabeceraNavegacion» de pantallas de lista (‹ Atrás · título · acción), con «Atrás» al nivel anterior real (lámina SET-CAT S01/S03).
 // v0.4.0 (F05-05 K3 §2.2; F05 §49.4 A2 bis, D-SRCH-11): `ChipAccion`, chip de ACCIÓN (rol botón, sin estado ni «✓»): un toque ejecuta la acción; nunca representa una selección vigente. Lo usan los chips de sugerencias bajo «Categoría».
-// Versión: 0.4.0
+// v0.4.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
+// Versión: 0.4.1
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -51,8 +52,8 @@ export function CabeceraNavegacion(p: {
       <View style={s.cabLado}>
         {p.atras ? (
           <Pressable testID={p.testIDAtras ?? 'atras'} accessibilityRole="button" accessibilityLabel={`Atrás: ${p.atras.etiqueta}`} onPress={p.atras.onPress} hitSlop={8} style={s.atras}>
-            <Ionicons name="chevron-back" size={18} color={c.accent} />
-            <Text numberOfLines={1} style={[tipo.body, { color: c.accent, flexShrink: 1 }]}>{p.atras.etiqueta}</Text>
+            <Ionicons name="chevron-back" size={18} color={c.accentText} />
+            <Text numberOfLines={1} style={[tipo.body, { color: c.accentText, flexShrink: 1 }]}>{p.atras.etiqueta}</Text>
           </Pressable>
         ) : null}
       </View>
@@ -72,7 +73,7 @@ export function BotonTexto(p: { titulo: string; onPress: () => void; testID?: st
   const { c } = useTema();
   return (
     <Pressable testID={p.testID} accessibilityRole="button" onPress={p.onPress} hitSlop={8} style={s.texto}>
-      <Text style={[tipo.body, { color: p.critico ? c.critical : c.accent, fontWeight: '600' }]}>{p.titulo}</Text>
+      <Text style={[tipo.body, { color: p.critico ? c.criticalText : c.accentText, fontWeight: '600' }]}>{p.titulo}</Text>
     </Pressable>
   );
 }
@@ -124,7 +125,7 @@ export function Chip(p: { etiqueta: string; seleccionado: boolean; onPress: () =
       onPress={p.onPress}
       style={[s.chip, { borderColor: p.seleccionado ? c.accent : c.borderStandard, backgroundColor: p.seleccionado ? c.accentSurface : c.surfacePrimary }]}
     >
-      <Text style={[tipo.subheadline, { color: p.seleccionado ? c.accent : c.textPrimary, fontWeight: p.seleccionado ? '600' : '400' }]}>
+      <Text style={[tipo.subheadline, { color: p.seleccionado ? c.accentText : c.textPrimary, fontWeight: p.seleccionado ? '600' : '400' }]}>
         {p.seleccionado ? '✓ ' : ''}
         {p.etiqueta}
       </Text>
@@ -171,7 +172,7 @@ export function Segmentado<T extends string | boolean>(p: {
             onPress={() => p.onCambiar(o.valor)}
             style={[s.segmento, sel && { backgroundColor: c.surfacePrimary, borderColor: c.accent, borderWidth: 1.5 }]}
           >
-            <Text style={[tipo.body, { color: sel ? c.accent : c.textPrimary, fontWeight: sel ? '600' : '400' }]}>{o.etiqueta}</Text>
+            <Text style={[tipo.body, { color: sel ? c.accentText : c.textPrimary, fontWeight: sel ? '600' : '400' }]}>{o.etiqueta}</Text>
           </Pressable>
         );
       })}

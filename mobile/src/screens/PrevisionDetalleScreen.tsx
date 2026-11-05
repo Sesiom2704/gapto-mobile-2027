@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-06 M5 §B1)
 // Versión: 0.2.0 (F05-06 M5-B; F04-D065, F05-D047; contrato M5-B §5): «Dar por cubierta» en una PARCIAL (hoja con Esperado / Registrado / Queda sin cubrir ±X €, motivo con sugerencias y confirmación explícita) y «Más» › «Reabrir» en REALIZADA, REALIZADA_SIN_REALIDAD_ACTIVA y OMITIDA (motivo obligatorio; envía la versión del sucesor cuando la lectura lo trae). Sin swipe. PREVISION_SIN_REALIDAD_ACTIVA y TRAMO_RODANTE_REQUIERE_REVISION se explican en la hoja con el texto del servidor (el primero informa de «No hubo este mes» sin ejecutarlo) y se relee el detalle; 409 de estado o versión y el reintento incierto acaban en el estado actual, como «No hubo». Un reintento tras un fallo de conexión usa la MISMA identidad.
 // Versión: 0.3.0 (F05-06 M1, ajuste de M5-B para las pruebas del iPhone): tras «No hubo este mes», «Dar por cubierta» o «Reabrir» el detalle NO se cierra: relee y enseña el estado nuevo con su confirmación, de modo que «Más › Reabrir» es alcanzable (las terminales no están en ninguna lista, DEU-M5-PREV-REVISION). «Atrás» cierra con cambios y las listas vuelven a leer.
+// Versión: 0.3.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // ============================================================
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -212,7 +213,7 @@ export function PrevisionDetalleScreen(p: {
       <CabeceraNavegacion titulo="Previsión" atras={{ etiqueta: p.etiquetaAtras ?? 'Inicio', onPress: cerrar }} testIDAtras="prevision-detalle-atras"
         derecha={ofreceMas(d) ? (
           <Pressable testID="prevision-mas" accessibilityRole="button" accessibilityLabel="Más" hitSlop={8} onPress={() => setMas(true)} style={s.mas}>
-            <Ionicons name="ellipsis-horizontal" size={22} color={c.accent} />
+            <Ionicons name="ellipsis-horizontal" size={22} color={c.accentText} />
           </Pressable>
         ) : null} />
       <ScrollView contentContainerStyle={estilosFormulario.cuerpo}>
@@ -372,7 +373,7 @@ function YaLoRegistre(p: { cliente: ClienteApi; nuevoId: () => string; detalle: 
         ) : null}
         {elegido ? <QuedaCubierta valor={marcar} onCambiar={setMarcar} testIDBase="ya-cubierta" /> : null}
         <Text style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_SOLO_ENLAZA}</Text>
-        {envio.fase === 'ERROR' ? <Text testID="ya-error" accessibilityRole="alert" style={[tipo.footnote, { color: c.critical }]}>{envio.mensaje}</Text> : null}
+        {envio.fase === 'ERROR' ? <Text testID="ya-error" accessibilityRole="alert" style={[tipo.footnote, { color: c.criticalText }]}>{envio.mensaje}</Text> : null}
         {envio.fase === 'ERROR' && (envio.codigo === 'VERSION_DESFASADA' || envio.codigo === 'ESTADO_PREVISION_INCOMPATIBLE') ? (
           <BotonTexto testID="ya-volver-prevision" titulo="Ver la previsión de nuevo" onPress={() => p.onVolver(false)} />
         ) : null}

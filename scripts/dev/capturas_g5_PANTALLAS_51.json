@@ -1,0 +1,257 @@
+[
+ {
+  "fila": "G5-01",
+  "pantalla": "Inicio: cabecera, accesos, Resultado, campana",
+  "fuente": "HomeScreen.tsx"
+ },
+ {
+  "fila": "G5-02",
+  "pantalla": "Hoja de tipos y navegacion inferior",
+  "fuente": "HojaTipos.tsx; BarraInferior.tsx"
+ },
+ {
+  "fila": "G5-03",
+  "pantalla": "Registro de gasto: captura y exito",
+  "fuente": "RegistroGastoScreen.tsx"
+ },
+ {
+  "fila": "G5-04",
+  "pantalla": "Registro de ingreso: captura y exito",
+  "fuente": "RegistroGastoScreen.tsx"
+ },
+ {
+  "fila": "G5-05",
+  "pantalla": "Transferencia: captura y exito",
+  "fuente": "TransferenciaScreen.tsx"
+ },
+ {
+  "fila": "G5-06",
+  "pantalla": "Registro desde plantilla y quitar plantilla",
+  "fuente": "RegistroGastoScreen.tsx"
+ },
+ {
+  "fila": "G5-07",
+  "pantalla": "A′: magnitud, Hecho, No lo se y cambio de categoria",
+  "fuente": "RegistroGastoScreen.tsx; SeccionMagnitudes.tsx"
+ },
+ {
+  "fila": "G5-08",
+  "pantalla": "Selector de categorias: jerarquia, busqueda, bloqueada, Sin categoria",
+  "fuente": "SelectorCategorias.tsx"
+ },
+ {
+  "fila": "G5-09",
+  "pantalla": "Selector de tercero: recientes, busqueda, alta y sin tercero",
+  "fuente": "SelectorTercero.tsx"
+ },
+ {
+  "fila": "G5-10",
+  "pantalla": "Selector y alta de contexto desde registro",
+  "fuente": "Contextos.tsx"
+ },
+ {
+  "fila": "G5-11",
+  "pantalla": "Guardar preferencia y recordar afinidad",
+  "fuente": "GuardarPreferencia.tsx; RecordarAfinidad.tsx"
+ },
+ {
+  "fila": "G5-12",
+  "pantalla": "Guardar plantilla desde registro",
+  "fuente": "GuardarPlantilla.tsx"
+ },
+ {
+  "fila": "G5-13",
+  "pantalla": "C-03 C1: eleccion del reparto",
+  "fuente": "Reembolso.tsx; RegistroGastoScreen.tsx"
+ },
+ {
+  "fila": "G5-14",
+  "pantalla": "C-03 C2: persona/empresa, total/parcial, validacion",
+  "fuente": "Reembolso.tsx"
+ },
+ {
+  "fila": "G5-15",
+  "pantalla": "C-03 C3: exito y detalle con derecho independiente",
+  "fuente": "RegistroGastoScreen.tsx; ActividadScreen.tsx"
+ },
+ {
+  "fila": "G5-16",
+  "pantalla": "C-03 C4: cobro parcial y total, seleccion del derecho",
+  "fuente": "PendienteConScreen.tsx"
+ },
+ {
+  "fila": "G5-17",
+  "pantalla": "Gasto compartido: pagador y reparto, R6",
+  "fuente": "GastoCompartidoScreen.tsx; Reparto.tsx"
+ },
+ {
+  "fila": "G5-18",
+  "pantalla": "Gasto compartido: revision y exito",
+  "fuente": "GastoCompartidoScreen.tsx"
+ },
+ {
+  "fila": "G5-19",
+  "pantalla": "Pendiente con: derechos, obligaciones, saldo y neto desconocidos",
+  "fuente": "PendienteConScreen.tsx"
+ },
+ {
+  "fila": "G5-20",
+  "pantalla": "Posiciones: cobro, pago y perdon",
+  "fuente": "PendienteConScreen.tsx"
+ },
+ {
+  "fila": "G5-21",
+  "pantalla": "Corregir reparto: motivo, revision y bloqueo",
+  "fuente": "CorregirRepartoScreen.tsx"
+ },
+ {
+  "fila": "G5-22",
+  "pantalla": "Lamina B: saldado y apertura desconocida sintetica",
+  "fuente": "ActividadScreen.tsx; PendienteConScreen.tsx"
+ },
+ {
+  "fila": "G5-23",
+  "pantalla": "Dia a dia: lista, periodo, filtros, busqueda y cargar mas",
+  "fuente": "ActividadScreen.tsx"
+ },
+ {
+  "fila": "G5-24",
+  "pantalla": "Dia a dia: detalle, atribucion y posiciones vinculadas",
+  "fuente": "ActividadScreen.tsx"
+ },
+ {
+  "fila": "G5-25",
+  "pantalla": "Corregir hecho: elegibilidad, formulario y conflicto",
+  "fuente": "CorregirHechoScreen.tsx"
+ },
+ {
+  "fila": "G5-26",
+  "pantalla": "Anular hecho: motivo, confirmacion y bloqueo C-03",
+  "fuente": "EdicionHecho.tsx; ActividadScreen.tsx"
+ },
+ {
+  "fila": "G5-27",
+  "pantalla": "Devolucion: origen, categoria, importe y revision",
+  "fuente": "DevolucionScreen.tsx"
+ },
+ {
+  "fila": "G5-28",
+  "pantalla": "Abono: inmediato o posterior y cuenta",
+  "fuente": "AbonoHoja.tsx"
+ },
+ {
+  "fila": "G5-30",
+  "pantalla": "Prevision: detalle, revision, omitir y reabrir",
+  "fuente": "PrevisionDetalleScreen.tsx"
+ },
+ {
+  "fila": "G5-31",
+  "pantalla": "Prevision: registrar, confirmar y Ya lo registre",
+  "fuente": "PrevisionRegistroScreen.tsx"
+ },
+ {
+  "fila": "G5-32",
+  "pantalla": "Swipe: ambos lados, deshacer, cierre al scroll",
+  "fuente": "SwipePrevision.tsx"
+ },
+ {
+  "fila": "G5-29",
+  "pantalla": "Pendientes y Resueltas este mes: lista y filtros",
+  "fuente": "PendientesScreen.tsx"
+ },
+ {
+  "fila": "G5-33",
+  "pantalla": "Mas y Ajustes: navegacion de secciones",
+  "fuente": "MasScreen.tsx; App.tsx (Ajustes)"
+ },
+ {
+  "fila": "G5-34",
+  "pantalla": "Categorias: lista, detalle, estado y busqueda",
+  "fuente": "CategoriasAjustesScreen.tsx"
+ },
+ {
+  "fila": "G5-35",
+  "pantalla": "Nueva categoria e iconos",
+  "fuente": "NuevaCategoriaScreen.tsx; SelectorIconos.tsx"
+ },
+ {
+  "fila": "G5-36",
+  "pantalla": "Categorias: mover, ambito, desactivar/reactivar e impacto",
+  "fuente": "HojasCategoria.tsx"
+ },
+ {
+  "fila": "G5-37",
+  "pantalla": "Categorias: editar orden",
+  "fuente": "EditarOrdenScreen.tsx"
+ },
+ {
+  "fila": "G5-38",
+  "pantalla": "Magnitudes de categoria: asociar, obligatoria/opcional y orden",
+  "fuente": "MagnitudesCategoria.tsx; EditarOrdenMagnitudes.tsx"
+ },
+ {
+  "fila": "G5-39",
+  "pantalla": "Magnitudes: selector, alta y ficha",
+  "fuente": "SelectorMagnitudes.tsx; NuevaMagnitud.tsx; FichaMagnitud.tsx"
+ },
+ {
+  "fila": "G5-40",
+  "pantalla": "Magnitudes: editar, deshabilitar y confirmar impacto",
+  "fuente": "HojasMagnitud.tsx"
+ },
+ {
+  "fila": "G5-41",
+  "pantalla": "Onboarding: sugeridas y empezar desde cero",
+  "fuente": "OnboardingCategorias.tsx"
+ },
+ {
+  "fila": "G5-42",
+  "pantalla": "Preferencias: lista, alta, detalle y habilitacion",
+  "fuente": "PreferenciasAjustesScreen.tsx"
+ },
+ {
+  "fila": "G5-43",
+  "pantalla": "Plantillas: lista, alta, editar, accesos Inicio",
+  "fuente": "PlantillasAjustesScreen.tsx"
+ },
+ {
+  "fila": "G5-44",
+  "pantalla": "Terceros: lista, ficha, alta, editar y duplicados",
+  "fuente": "TercerosAjustesScreen.tsx"
+ },
+ {
+  "fila": "G5-45",
+  "pantalla": "Terceros: desactivar/reactivar y registros del tercero",
+  "fuente": "TercerosAjustesScreen.tsx; ActividadScreen.tsx"
+ },
+ {
+  "fila": "G5-46",
+  "pantalla": "Contextos: lista, alta, editar y estado",
+  "fuente": "ContextosAjustesScreen.tsx"
+ },
+ {
+  "fila": "G5-47",
+  "pantalla": "Cuentas: sin configurar, capacidades e historial",
+  "fuente": "CuentasCapacidadesScreen.tsx; FaltaCuenta.tsx"
+ },
+ {
+  "fila": "G5-48",
+  "pantalla": "Campo de texto de fecha (v2.3, §70.5): Hoy, Ayer y Otra fecha; **entrada** (borrar y teclear), **validación** (fecha imposible o futura, con su mensaje) y **conservación** (el valor tecleado no se pierde al cerrar el teclado, cambiar de campo o volver de un selector)",
+  "fuente": "Formulario.tsx; RegistroGastoScreen.tsx"
+ },
+ {
+  "fila": "G5-49",
+  "pantalla": "Descartar: formulario cambiado y cancelar",
+  "fuente": "RegistroGastoScreen.tsx; Formulario.tsx"
+ },
+ {
+  "fila": "G5-50",
+  "pantalla": "Estados de carga, error, modo avion y reintento",
+  "fuente": "Basicos.tsx; pantallas anteriores"
+ },
+ {
+  "fila": "G5-51",
+  "pantalla": "V3: categoria, elegibilidad, posiciones y cuentas sin capacidades",
+  "fuente": "ActividadScreen.tsx; CorregirHechoScreen.tsx"
+ }
+]

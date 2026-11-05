@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-03/F05-04 J2 §2.5)
 // Versión: 0.4.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2 S9; SWIPE-RULE): cada plantilla va en tarjeta; deslizar a la izquierda una plantilla ACTIVA es «Desactivar» (tono de aviso, nunca rojo): aviso «<Nombre> desactivada · Deshacer» y, a los 5 s, la misma ruta que «Desactivar» del detalle. Se puede reactivar después.
 // Versión: 0.5.0 (swipe (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados `principal` / `alternativa` del componente común (principal a la izquierda); la raíz y el scroll cierran la fila abierta a medias (`propsZonaSwipe`, `propsScrollSwipe`).)
+// Versión: 0.5.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -530,7 +531,7 @@ export function PlantillasAjustesScreen(p: {
         testIDAtras="ajplt-atras"
         derecha={
           <Pressable testID="ajplt-nueva" accessibilityRole="button" accessibilityLabel="Nueva plantilla" hitSlop={8} onPress={() => d && abrirForm(null)} style={ef.mas}>
-            <Ionicons name="add" size={24} color={c.accent} />
+            <Ionicons name="add" size={24} color={c.accentText} />
           </Pressable>
         }
       />
@@ -571,7 +572,7 @@ function EtiquetaNoDisponible({ testID }: { testID?: string }) {
   const { c } = useTema();
   return (
     <View testID={testID} style={[s.etiqueta, { backgroundColor: c.partialSurface, borderColor: c.warning }]}>
-      <Text style={[tipo.caption, { color: c.warning }]}>{TEXTO_NO_DISPONIBLE}</Text>
+      <Text style={[tipo.caption, { color: c.warningText }]}>{TEXTO_NO_DISPONIBLE}</Text>
     </View>
   );
 }

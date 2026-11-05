@@ -5,6 +5,7 @@
 // Descripción: Sección plegable «Magnitudes · N» del detalle de categoría de Ajustes › Categorías, entre la fila «Icono» y «Acciones» (F09 §12.97.10; lámina SET-MAG v0.1 M01–M05, M16). Plegada: total y resumen «N obligatorias, M opcionales» (y «No usable en registros nuevos» si alguna obligatoria está deshabilitada). Desplegada: asociaciones en su `orden` con «unidad · decimales» y píldoras de TEXTO (Obligatoria / Opcional / Deshabilitada); tocar una fila abre su ficha; «+ Añadir magnitud» (y «Editar orden» si se ofrece y hay más de una); nota de alcance; estado «No usable en registros nuevos» con su motivo y las tres salidas (M03); vacío (M04) distinto del error de carga (M05, «Reintentar», «Nada se ha cambiado»). Disponible también en categorías desactivadas (P1). Aviso de conflicto con recarga (M16). Solo presentación. Consume solo tokens semánticos.
 // Versión: 0.1.0 (F05-01 S7-MAG UI, hito 1)
 // Versión: 0.2.0 (F05-01 S7-MAG UI correctivo AJ-S7MAGUI-02): el aviso se extrae a `AvisoMagnitudes` (también lo pinta la ficha) y, si es de estado sin comprobar, ofrece «Reintentar», que relanza solo las lecturas.
+// Versión: 0.2.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -135,7 +136,7 @@ export function SeccionMagnitudes(p: {
             ) : null}
             {p.fase === 'OK' && bloqueantes.length ? (
               <View testID="magnitudes-no-usable" accessibilityRole="alert" style={[s.aviso, s.avisoInterno, { backgroundColor: c.partialSurface }]}>
-                <Ionicons name="warning-outline" size={18} color={c.warning} />
+                <Ionicons name="warning-outline" size={18} color={c.warningText} />
                 <View style={{ flex: 1, gap: 2 }}>
                   <Text style={[tipo.subheadline, { color: c.textPrimary, fontWeight: '600' }]}>{TITULO_NO_USABLE}</Text>
                   <Text style={[tipo.footnote, { color: c.textPrimary }]}>{textoNoUsable(bloqueantes.map((b) => b.nombre))}</Text>

@@ -16,7 +16,8 @@
 // v0.12.0 (F05-D052 paso 3 · A′, D-F0507L-07; lámina F05-07 v0.3 A′1/A′2): SOLO en los campos de magnitud. Al elegir una categoría con magnitudes obligatorias, el foco y el teclado se abren en la primera obligatoria sin valor ni «No lo sé» (justo debajo de la categoría, mismo orden en que se pide). El teclado lleva «Hecho» (iOS: barra sobre el teclado decimal, VoiceOver «Hecho, siguiente campo»; Android y web: tecla de envío) que pasa a la siguiente obligatoria y, tras la última, cierra el teclado y sube hasta «¿Cuenta para el presupuesto?». Cambio de categoría: se conservan las comunes y las demás ni se ven ni se envían (sin cambios en `conservarMagnitudes` ni en el sellado). Cerrar el teclado tocando fuera conserva el valor (campo controlado; ningún manejador de blur lo toca). Presupuesto y cuenta siguen sin marcar (D-F0507L-02). Traza G1: `magnitud_foco` y `magnitud_hecho` (sin valores).
 // v0.13.0 (F05-D052 paso 2 · C-03, F05 §66 y §66.A; lámina F05-07 v0.3 C1–C3; D-F0507L-04/05): «¿De quién es este gasto?» ofrece «Mío, pero me lo reembolsan» (solo en gastos y antes del primer envío), que abre «Me lo reembolsan» (ReembolsoHoja) ENCIMA del formulario, que conserva lo escrito; «Hecho» vuelve con quién y cuánto y el resumen «Te debe <quién> · <importe>» (tocar lo reabre; «Quitar» lo retira; «Solo mío» también). Con reembolso no se ofrecen «Repartir» ni «Otra persona». El envío va a POST /v1/intenciones/gasto-reembolsable (mismo ciclo y mismas reglas que el gasto pagado; `validar` lo comprueba también). Éxito C3: el gasto que cuenta en tu Resultado y lo que te deben, por separado. Rechazos de C-03 explicados en lenguaje llano. Cambiar a Ingreso quita el reembolso con aviso.
 // v0.14.0 (F05-D053 §67.2 · O3, opción 1; sin cambio de servidor): si la propuesta (GET /v1/preferencias/propuesta o /v1/registro/propuesta) de la categoría elegida responde CATEGORIA_NO_ELEGIBLE, la categoría se marca no válida en el acto («Esta categoría ya no está disponible. Elige otra categoría.»), se recarga el árbol y se conservan la cuenta y el presupuesto mostrados: no se aplica SIN_PROPUESTA. Mientras no se elija otra, «Registrar» sigue desactivado (la misma `validar`). Una respuesta de una categoría que ya no es la elegida no toca nada. El servidor conserva sus validaciones y sus 409.
-// Versión: 0.14.0
+// v0.14.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
+// Versión: 0.14.1
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -911,7 +912,7 @@ export function RegistroGastoScreen(p: {
             </View>
           ) : null}
           {categoriaInvalida ? (
-            <Text testID="categoria-invalida" accessibilityRole="alert" style={[tipo.footnote, { color: c.critical }]}>
+            <Text testID="categoria-invalida" accessibilityRole="alert" style={[tipo.footnote, { color: c.criticalText }]}>
               {categoriaInvalida.codigo === CODIGO_CATEGORIA_NO_DISPONIBLE
                 ? TEXTO_CATEGORIA_NO_DISPONIBLE
                 : categoriaInvalida.codigo === 'CATEGORIA_NO_ELEGIBLE'
@@ -959,7 +960,7 @@ export function RegistroGastoScreen(p: {
                     />
                     <Text style={[tipo.body, { color: c.textSecondary }]}>{m.unidad_default}</Text>
                   </View>
-                  {err ? <Text accessibilityRole="alert" style={[tipo.footnote, { color: c.critical }]}>{err}</Text> : null}
+                  {err ? <Text accessibilityRole="alert" style={[tipo.footnote, { color: c.criticalText }]}>{err}</Text> : null}
                   {m.obligatoria ? (
                     <Chip
                       testID={`no-lo-se-${m.magnitud_id}`}
@@ -1028,7 +1029,7 @@ export function RegistroGastoScreen(p: {
               {!bloqueado && !enviado ? <BotonTexto testID="reembolso-quitar" titulo="Quitar" onPress={() => cambiar({ reembolso: null })} /> : null}
             </View>
           ) : null}
-          {visibles.reembolso ? <Text testID="reembolso-error" accessibilityRole="alert" style={[tipo.footnote, { color: c.critical }]}>{visibles.reembolso}</Text> : null}
+          {visibles.reembolso ? <Text testID="reembolso-error" accessibilityRole="alert" style={[tipo.footnote, { color: c.criticalText }]}>{visibles.reembolso}</Text> : null}
           <Text testID="origen-atribucion" style={[tipo.footnote, { color: c.textSecondary }]}>
             {esIngreso
               ? b.soloMio ? 'Decisión tuya: el ingreso es 100 % tuyo.' : 'Sin indicar: se guardará sin reparto.'
@@ -1212,7 +1213,7 @@ export function RegistroGastoScreen(p: {
               hitSlop={8}
               style={{ minHeight: TACTIL_MIN, justifyContent: 'center', paddingHorizontal: espacio.m }}
             >
-              <Text style={[tipo.bodyEmphasis, { color: c.accent }]}>{TEXTO_HECHO}</Text>
+              <Text style={[tipo.bodyEmphasis, { color: c.accentText }]}>{TEXTO_HECHO}</Text>
             </Pressable>
           </View>
         </InputAccessoryView>
@@ -1365,7 +1366,7 @@ function Campo({ etiqueta, error, opcional, children }: { etiqueta: string; erro
       </Text>
       {children}
       {error ? (
-        <Text accessibilityRole="alert" style={[tipo.footnote, { color: c.critical }]}>
+        <Text accessibilityRole="alert" style={[tipo.footnote, { color: c.criticalText }]}>
           {error}
         </Text>
       ) : null}

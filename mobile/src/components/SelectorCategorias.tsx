@@ -9,6 +9,7 @@
 // Versión: 0.4.0 (F05-03/F05-04 J2 §2.3/§2.5): prop opcional `naturaleza` (GASTO por defecto: el comportamiento anterior) para el registro y los ajustes de ingresos; `usables` la usa en lugar de GASTO fijo. Sin imports nuevos.
 // Versión: 0.5.0 (F05-05 K3 §2.1; F05 §49.4 A1/A2/A3, D-SRCH-01..03; lámina SRCH-ACT-AFI A1, A2, A6, C2): sección «Sugeridas» (prop opcional `sugeridas`, hasta 3, con ruta y motivo) encima del árbol en la raíz; tocar una sugerida invoca el MISMO `onElegir` que el árbol (R1: misma intención) y solo se muestra si el nodo existe y es seleccionable (nada preseleccionado, C01). Búsqueda opcional (`buscar`) sobre todo el árbol con la normalización C06 (`normalizarNombre`: sin mayúsculas ni acentos): resultados con ruta en el orden del árbol (sin reordenar, I13c); lo no seleccionable se ve atenuado con su motivo y no se puede elegir. Imports nuevos declarados en I13a: TextInput, normalizarNombre y el tipo SugeridaCategoria.
 // Versión: 0.6.0 (F05-D051 paso 9.1 · G1 v2): prop opcional `traza` (solo la pasa el registro, y solo en `__DEV__`): `selector_nivel` {n: profundidad} al entrar en un nivel, `selector_miga` al volver por las migas, `selector_busqueda` al empezar a escribir, `selector_cerrado` y `categoria_elegida` {via: arbol | sugerida | busqueda | sin_categoria, n: niveles}. Sin la prop no se llama a nada; ningún import nuevo y la navegación, la elegibilidad y el orden no cambian.
+// Versión: 0.6.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -130,7 +131,7 @@ export function SelectorCategorias(p: {
         <View testID="selector-error" style={[s.cuerpo, { flex: 1, justifyContent: 'space-between', paddingBottom: inset.bottom + espacio.l }]}>
           <View style={{ gap: espacio.m }}>
             <View accessibilityRole="alert" style={[s.aviso, { backgroundColor: c.partialSurface }]}>
-              <Ionicons name="alert-circle-outline" size={18} color={c.warning} />
+              <Ionicons name="alert-circle-outline" size={18} color={c.warningText} />
               <Text style={[tipo.subheadline, { color: c.textPrimary, flexShrink: 1 }]}>No hemos podido cargar tus categorías.</Text>
             </View>
             {p.onReintentar ? <BotonSecundario testID="selector-reintentar" titulo="Reintentar" onPress={p.onReintentar} /> : null}
@@ -227,14 +228,14 @@ export function SelectorCategorias(p: {
           {nivel !== null ? (
             <View testID="selector-migas" style={[s.migas, { borderBottomColor: c.separator }]}>
               <Pressable testID="selector-miga-todas" accessibilityRole="link" onPress={() => { p.traza?.('selector_miga', { n: 0 }); setNivel(null); }} hitSlop={8}>
-                <Text style={[tipo.footnote, { color: c.accent }]}>Todas</Text>
+                <Text style={[tipo.footnote, { color: c.accentText }]}>Todas</Text>
               </Pressable>
               {migas.map((m, i) => (
                 <React.Fragment key={m.id}>
                   <Text style={[tipo.footnote, { color: c.textSecondary }]}> › </Text>
                   {i < migas.length - 1 ? (
                     <Pressable testID={`selector-miga-${m.id}`} accessibilityRole="link" onPress={() => { p.traza?.('selector_miga', { n: i + 1 }); setNivel(m.id); }} hitSlop={8}>
-                      <Text style={[tipo.footnote, { color: c.accent }]}>{m.nombre}</Text>
+                      <Text style={[tipo.footnote, { color: c.accentText }]}>{m.nombre}</Text>
                     </Pressable>
                   ) : (
                     <Text style={[tipo.footnote, { color: c.textPrimary }]}>{m.nombre}</Text>
@@ -341,16 +342,16 @@ function FilaSelector(p: {
     >
       <IconoCategoriaVista iconKey={p.iconKey} />
       <View style={{ flex: 1, gap: 2 }}>
-        <Text style={[tipo.body, { color: p.enfasis ? c.accent : p.apagada ? c.textSecondary : c.textPrimary, fontWeight: p.enfasis ? '600' : '400' }]}>
+        <Text style={[tipo.body, { color: p.enfasis ? c.accentText : p.apagada ? c.textSecondary : c.textPrimary, fontWeight: p.enfasis ? '600' : '400' }]}>
           {p.titulo}
         </Text>
         {p.subtitulo ? <Text style={[tipo.caption, { color: c.textSecondary }]}>{p.subtitulo}</Text> : null}
-        {p.detalle ? <Text style={[tipo.caption, { color: c.accent }]}>{p.detalle}</Text> : null}
+        {p.detalle ? <Text style={[tipo.caption, { color: c.accentText }]}>{p.detalle}</Text> : null}
       </View>
       {p.elegida ? (
         <View style={s.elegida}>
-          <Ionicons name="checkmark" size={16} color={c.accent} />
-          <Text style={[tipo.footnote, { color: c.accent, fontWeight: '600' }]}>Elegida</Text>
+          <Ionicons name="checkmark" size={16} color={c.accentText} />
+          <Text style={[tipo.footnote, { color: c.accentText, fontWeight: '600' }]}>Elegida</Text>
         </View>
       ) : null}
       {p.chevron ? <Ionicons name="chevron-forward" size={18} color={c.textSecondary} /> : null}
@@ -369,7 +370,7 @@ export function BotonSecundario(p: { titulo: string; onPress: () => void; testID
       onPress={p.onPress}
       style={({ pressed }) => [s.secundario, { borderColor: c.borderStandard, backgroundColor: c.surfacePrimary, opacity: pressed ? 0.85 : 1 }]}
     >
-      <Text style={[tipo.bodyEmphasis, { color: p.critico ? c.critical : c.accent }]}>{p.titulo}</Text>
+      <Text style={[tipo.bodyEmphasis, { color: p.critico ? c.criticalText : c.accentText }]}>{p.titulo}</Text>
     </Pressable>
   );
 }

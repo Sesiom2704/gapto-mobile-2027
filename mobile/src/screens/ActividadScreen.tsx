@@ -19,6 +19,7 @@
 // Versión: 0.13.0 (F05-D056 §70.2, H-DIAG-02): el subtítulo del detalle usa `nombreTipoFila` (un cobro de posición ya no dice «Entre cuentas») y la cuenta de una liquidación se rotula por su papel («Cobrado en» / «Pagado con»).
 // Versión: 0.13.1 (F05-D056, decisión 2 de Moisés del 2026-10-29): los títulos de la lista, del detalle, de «Más» y del aviso de «Repetir hoy» salen de `domain/titulos_dia.ts` (`tituloFilaDia`, `nombreTipoFila`), módulo propio de Día a día; `actividad.ts` y `registro.ts` vuelven a ser los de 9c62d69.
 // Versión: 0.14.0 (F05-D056 paso 2, COLA-AR v1.0, F05 §70.A): «Recibido» (F2, abono) y «Repetir hoy» (F3) son acciones de la cola de la app (`useAccionFinanciera`): la petición se compone al soltar con la identidad del swipe y sobrevive a la navegación y a cerrar la app; el aviso dice «Registrando…» hasta el 2xx. Sin `nuevoId` no hay acción rápida (se retira el `?? (() => '')`, que habría enviado una identidad vacía).
+// Versión: 0.14.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -420,7 +421,7 @@ export function ActividadScreen(p: {
             <Text accessibilityRole="header" style={[tipo.titleLarge, { color: c.textPrimary }]}>Día a día</Text>
             <View style={s.pestanas}>
               <View testID="pestana-actividad" accessibilityRole="tab" accessibilityState={{ selected: true }} style={[s.pestana, { borderBottomColor: c.accent }]}>
-                <Text style={[tipo.subheadline, { color: c.accent, fontWeight: '600' }]}>Actividad</Text>
+                <Text style={[tipo.subheadline, { color: c.accentText, fontWeight: '600' }]}>Actividad</Text>
               </View>
               <View testID="pestana-estadisticas" accessibilityRole="tab" accessibilityState={{ disabled: true, selected: false }} style={s.pestana}>
                 <Text style={[tipo.subheadline, { color: c.textSecondary }]}>Estadísticas · Próximamente</Text>
@@ -456,7 +457,7 @@ export function ActividadScreen(p: {
                 </Pressable>
               )}
               <Pressable testID="actividad-filtros" accessibilityRole="button" onPress={() => void abrirFiltros()} hitSlop={8}>
-                <Text style={[tipo.subheadline, { color: nGrupos > 0 ? c.accent : c.textPrimary, fontWeight: nGrupos > 0 ? '600' : '400' }]}>
+                <Text style={[tipo.subheadline, { color: nGrupos > 0 ? c.accentText : c.textPrimary, fontWeight: nGrupos > 0 ? '600' : '400' }]}>
                   {nGrupos + (p.tercero ? 1 : 0) > 0 ? `Filtros · ${nGrupos + (p.tercero ? 1 : 0)}` : 'Filtros'}
                 </Text>
               </Pressable>
@@ -587,7 +588,7 @@ export function ActividadScreen(p: {
             return (
               <>
                 {hoja.desde.length >= 10 && hoja.hasta.length >= 10 && !ok ? (
-                  <Text testID="entre-error" style={[tipo.footnote, { color: c.critical }]}>Revisa las fechas: «desde» no puede ser posterior a «hasta».</Text>
+                  <Text testID="entre-error" style={[tipo.footnote, { color: c.criticalText }]}>Revisa las fechas: «desde» no puede ser posterior a «hasta».</Text>
                 ) : null}
                 <BotonPrimario testID="entre-usar" titulo="Ver estas fechas" deshabilitado={!ok}
                   onPress={() => { if (ok) { setPeriodo({ tipo: 'ENTRE_FECHAS', desde: d!, hasta: h! }); setHoja(null); } }} />
@@ -691,7 +692,7 @@ export function ActividadScreen(p: {
           {detalle.fase === 'OK' && p.onCorregirHecho && p.nuevoId ? (
             <>
               <BotonSecundario testID="detalle-mas" titulo={mas.cargando ? 'Cargando…' : 'Más'} onPress={() => void abrirMas(detalle.d)} />
-              {mas.error ? <Text testID="detalle-mas-error" style={[tipo.caption, { color: c.critical }]}>No se han podido cargar las acciones. Vuelve a intentarlo.</Text> : null}
+              {mas.error ? <Text testID="detalle-mas-error" style={[tipo.caption, { color: c.criticalText }]}>No se han podido cargar las acciones. Vuelve a intentarlo.</Text> : null}
             </>
           ) : (
             <Text style={[tipo.caption, { color: c.textSecondary }]}>{TEXTO_EDICION}</Text>
@@ -854,7 +855,7 @@ function DetalleVista({ d, onAbrir }: { d: DetalleActividad; onAbrir: (id: strin
         <Pressable testID="detalle-devolucion-de" accessibilityRole="link" accessibilityLabel={`Devolución de ${textoDevolucionDe(origen)}`}
           onPress={() => onAbrir(origen.hecho_id)} style={s.kv}>
           <Text style={[tipo.subheadline, { color: c.textSecondary }]}>Devolución de</Text>
-          <Text style={[tipo.subheadline, { color: c.accent }]}>{`${nombreCorto(origen)} · ${diaMesIso(origen.fecha_hecho)} ›`}</Text>
+          <Text style={[tipo.subheadline, { color: c.accentText }]}>{`${nombreCorto(origen)} · ${diaMesIso(origen.fecha_hecho)} ›`}</Text>
         </Pressable>
       ) : null}
       {devs ? (
@@ -862,7 +863,7 @@ function DetalleVista({ d, onAbrir }: { d: DetalleActividad; onAbrir: (id: strin
           {devs.items.map((x) => (
             <Pressable key={x.hecho_id} testID={`detalle-devolucion-${x.hecho_id}`} accessibilityRole="link" onPress={() => onAbrir(x.hecho_id)} style={s.kv}>
               <Text style={[tipo.subheadline, { color: c.textSecondary }]}>Devolución</Text>
-              <Text style={[tipo.subheadline, { color: c.accent }]}>
+              <Text style={[tipo.subheadline, { color: c.accentText }]}>
                 {`${formatearEur(x.importe)} · ${diaMesIso(x.fecha_hecho)}${x.abono === 'PENDIENTE' ? ' · abono pendiente' : ''} ›`}
               </Text>
             </Pressable>
@@ -883,7 +884,7 @@ function Opcion(p: { testID: string; titulo: string; detalle?: string; radio?: b
   return (
     <Pressable testID={p.testID} accessibilityRole="radio" accessibilityState={{ checked: !!p.seleccionada }} onPress={p.onPress}
       style={[s.opcion, { borderBottomColor: c.separator }]}>
-      <Ionicons name={p.seleccionada ? 'radio-button-on' : 'radio-button-off'} size={20} color={p.seleccionada ? c.accent : c.textSecondary} />
+      <Ionicons name={p.seleccionada ? 'radio-button-on' : 'radio-button-off'} size={20} color={p.seleccionada ? c.accentText : c.textSecondary} />
       <Text style={[tipo.body, { color: c.textPrimary, flex: 1 }]}>{p.titulo}</Text>
       {p.detalle ? <Text style={[tipo.footnote, { color: c.textSecondary }]}>{p.detalle}</Text> : null}
       {p.chevron ? <Ionicons name="chevron-forward" size={18} color={c.textSecondary} /> : null}

@@ -4,6 +4,7 @@
 // Ruta: mobile/src/components/FaltaCuenta.tsx
 // Descripción: Aviso B2 «¿Falta una cuenta? N sin configurar ›» al final de «Pagado con», «Cobrado en», «Desde» y «A» (F05-06 M4 §3; lámina CAP B2; D-CAP-06). Solo aparece si N > 0; N lo da el servidor (GET /v1/cuentas/sin-configurar, cuentas activas sin ninguna capacidad del registro). Abre la lista A1 encima del formulario (que sigue montado y conserva lo escrito); al volver, el formulario recarga sus cuentas y el número.
 // Versión: 0.1.0 (F05-06 M4 F2)
+// Versión: 0.1.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // ============================================================
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -33,7 +34,7 @@ export function AvisoFaltaCuenta(p: { n: number; onPress: () => void; testID: st
   if (!texto) return null;
   return (
     <Pressable testID={p.testID} accessibilityRole="link" accessibilityLabel={texto} onPress={p.onPress} hitSlop={4} style={({ pressed }) => [s.aviso, { opacity: pressed ? 0.7 : 1 }]}>
-      <Text style={[tipo.footnote, { color: c.accent, fontWeight: '600' }]}>{`${texto} ›`}</Text>
+      <Text style={[tipo.footnote, { color: c.accentText, fontWeight: '600' }]}>{`${texto} ›`}</Text>
     </Pressable>
   );
 }

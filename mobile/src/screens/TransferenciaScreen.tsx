@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-03/F05-04 J2 §2.3)
 // Versión: 0.2.0 (F05-06 M4 §3; lámina CAP B2/B3; D-CAP-06/08): al final de «Desde» y de «A», «¿Falta una cuenta? N sin configurar ›» (solo si N > 0) abre la lista de Cuentas encima del formulario, que conserva lo escrito; al volver se recargan ambas listas y el número. CUENTA_SIN_CAPACIDAD al guardar: mensaje del servidor y «El resto del formulario se conserva.»; se recargan las listas y la cuenta que perdió la capacidad deja de estar elegida (sin preselección).
 // Versión: 0.3.0 (F05-D051 paso 9.1 · G1 v2): prop opcional `traza` (solo `__DEV__`, desde App.tsx): `form_montado`, `cuentas_ok`/`cuentas_error`, importe (primer y último cambio, sin valor), `cuenta_desde_elegida` / `cuenta_a_elegida`, `tipo:<TIPO>` y `registrar_pulsado`. Sin la prop no se llama a nada; sin cambios de comportamiento.
+// Versión: 0.3.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -201,7 +202,7 @@ export function TransferenciaScreen(p: {
         </View>
       ) : null}
       {sel && otra && sel === otra ? (
-        <Text testID={`${prefijo}-misma`} accessibilityRole="alert" style={[tipo.footnote, { color: c.critical }]}>{TEXTO_MISMA_CUENTA}</Text>
+        <Text testID={`${prefijo}-misma`} accessibilityRole="alert" style={[tipo.footnote, { color: c.criticalText }]}>{TEXTO_MISMA_CUENTA}</Text>
       ) : null}
       {!bloqueado ? <AvisoFaltaCuenta testID={`${prefijo}-falta-cuenta`} n={sinConfigurar.n} onPress={() => setPanelCuentas(true)} /> : null}
     </>

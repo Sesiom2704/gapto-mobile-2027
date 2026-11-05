@@ -5,6 +5,7 @@
 // Descripción: Hojas de «Más» del detalle de un hecho (F05-06 M1; lámina EDIT-HECHO v0.1 D-EDIT-01, 06, 07; CONTRATO_M1 v0.1 §2). HojaMasHecho: «Corregir» y «Anular por duplicado»; lo que el servidor no admite aparece atenuado con su motivo (nunca se oculta en silencio) y no se puede pulsar. HojaAnularDuplicado (B1): qué hace y qué no (anular no borra; deja de contar en el saldo y en el Resultado; no se deshace; si hubo devolución, otra vía), declaración explícita de duplicado SIN marcar al entrar, motivo con opciones fijas más «Otro…» y «Anular registro» en rojo, que solo se habilita con la declaración y el motivo. Sin swipe (SWIPE-RULE: nunca anular ni corregir por gesto).
 // Versión: 0.1.0 (F05-06 M1)
 // Versión: 0.2.0 (F05-06 M1 v1.1; Q9 opción (a)): en un registro de V3, «Más» ofrece además «Corregir categoría» (solo si el servidor trae la acción; atenuada con su motivo si no se admite). HojaCorregirCategoria: lo que NO cambia (importe, fecha, cuenta y descripción), la categoría actual → la nueva (se elige con el selector del registro), motivo con opciones fijas más «Otro…» y «Guardar categoría», que solo se habilita con una categoría distinta y el motivo.
+// Versión: 0.2.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // ============================================================
 
 import React from 'react';
@@ -26,7 +27,7 @@ function AccionMas(p: { testID: string; titulo: string; accion: AccionEdicionWir
       <Pressable testID={p.testID} accessibilityRole="button" accessibilityLabel={p.titulo} accessibilityState={{ disabled: !ok }}
         disabled={!ok} onPress={ok ? p.onPress : undefined}
         style={[s.accion, { borderColor: c.borderStandard, backgroundColor: c.surfacePrimary, opacity: ok ? 1 : 0.5 }]}>
-        <Text style={[tipo.bodyEmphasis, { color: !ok ? c.textSecondary : p.critico ? c.critical : c.accent }]}>{p.titulo}</Text>
+        <Text style={[tipo.bodyEmphasis, { color: !ok ? c.textSecondary : p.critico ? c.criticalText : c.accentText }]}>{p.titulo}</Text>
       </Pressable>
       {!ok && p.accion.motivo ? <Text testID={`${p.testID}-motivo`} style={[tipo.caption, { color: c.textSecondary }]}>{p.accion.motivo}</Text> : null}
     </View>
@@ -90,7 +91,7 @@ export function HojaAnularDuplicado(p: {
         <TextInput testID="anular-motivo-texto" accessibilityLabel="Motivo" value={p.motivo} onChangeText={(t) => p.onMotivo(t, true)} maxLength={200}
           style={[tipo.body, s.input, { color: c.textPrimary, borderColor: c.borderStandard, backgroundColor: c.surfacePrimary }]} />
       ) : null}
-      {p.error ? <Text testID="anular-error" accessibilityRole="alert" style={[tipo.footnote, { color: c.critical }]}>{p.error}</Text> : null}
+      {p.error ? <Text testID="anular-error" accessibilityRole="alert" style={[tipo.footnote, { color: c.criticalText }]}>{p.error}</Text> : null}
       <Pressable testID="anular-confirmar" accessibilityRole="button" accessibilityLabel="Anular registro" accessibilityState={{ disabled: !listo, busy: p.enviando }}
         disabled={!listo} onPress={listo ? p.onConfirmar : undefined}
         style={[s.critico, { backgroundColor: c.critical, opacity: listo ? 1 : 0.4 }]}>
@@ -123,7 +124,7 @@ export function HojaCorregirCategoria(p: {
       <Text testID="categoria-actual" style={[tipo.footnote, { color: c.textSecondary }]}>{`Ahora: ${p.actual ?? 'Sin categoría'}`}</Text>
       <Pressable testID="categoria-elegir" accessibilityRole="button" accessibilityLabel="Elegir categoría" onPress={p.onElegir}
         style={[s.accion, { borderColor: c.borderStandard, backgroundColor: c.surfacePrimary }]}>
-        <Text style={[tipo.bodyEmphasis, { color: p.nueva ? c.textPrimary : c.accent }]}>{p.nueva ? `Nueva: ${p.nueva}` : 'Elegir categoría'}</Text>
+        <Text style={[tipo.bodyEmphasis, { color: p.nueva ? c.textPrimary : c.accentText }]}>{p.nueva ? `Nueva: ${p.nueva}` : 'Elegir categoría'}</Text>
       </Pressable>
       <Text style={[tipo.footnote, { color: c.textSecondary, fontWeight: '600' }]}>Motivo obligatorio</Text>
       <View style={s.chips}>
@@ -136,7 +137,7 @@ export function HojaCorregirCategoria(p: {
         <TextInput testID="categoria-motivo-texto" accessibilityLabel="Motivo" value={p.motivo} onChangeText={(t) => p.onMotivo(t, true)} maxLength={200}
           style={[tipo.body, s.input, { color: c.textPrimary, borderColor: c.borderStandard, backgroundColor: c.surfacePrimary }]} />
       ) : null}
-      {p.error ? <Text testID="categoria-error" accessibilityRole="alert" style={[tipo.footnote, { color: c.critical }]}>{p.error}</Text> : null}
+      {p.error ? <Text testID="categoria-error" accessibilityRole="alert" style={[tipo.footnote, { color: c.criticalText }]}>{p.error}</Text> : null}
       <BotonPrimario testID="categoria-guardar" titulo={p.enviando ? 'Guardando…' : 'Guardar categoría'} deshabilitado={!puede} onPress={() => { if (puede) p.onGuardar(); }} />
       <BotonTexto testID="categoria-cancelar" titulo="Cancelar" onPress={p.onCerrar} />
     </Hoja>

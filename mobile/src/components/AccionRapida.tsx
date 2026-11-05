@@ -7,6 +7,7 @@
 // Versión: 0.2.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2, estilo C; SWIPE-RULE): dos lados. A la DERECHA la acción principal y positiva (tono «confirmar»: círculo de 46 px de acento con etiqueta sobre `accentSurface`); a la IZQUIERDA la alternativa («No hubo» y «Más» en tono neutro; «Desactivar» en tono de aviso). Nunca el rojo (`critical`): `coloresTono` es el único mapa de tonos. Deslizar a medias deja el botón visible (tocarlo lo ejecuta); deslizar del todo lo ejecuta, con vibración ligera al pasar el umbral. Filas en tarjeta. Aviso flotante translúcido con ✓ en círculo (hasta dos líneas: el importe nunca se corta) y «Deshacer» con un anillo que se vacía en 5 s. Acciones accesibles «derecha» / «izquierda» con la etiqueta de cada lado (`accesibilidadLados`), la misma función que el gesto.
 // Versión: 0.4.0 (F05-D056 paso 2, COLA-AR v1.0, F05 §70.A.1): las acciones rápidas FINANCIERAS (F1–F5) pasan a la cola de la app (`ColaAccionRapida.tsx`, `useAccionFinanciera`). `useAccionRapida` queda solo para las no financieras de Ajustes (N1–N3: desactivar categoría, plantilla y tercero), que conservan su comportamiento. El gesto (`FilaDeslizable`) y los lados no cambian. Sin cambios de código en este fichero.
 // Versión: 0.3.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3; pasada de Moisés en el iPhone): lados INVERTIDOS. La acción principal (verde) se descubre deslizando a la IZQUIERDA (pulgar derecho) y la alternativa a la DERECHA; lo decide solo `PRINCIPAL_SE_DESLIZA` y las pantallas dan `principal` / `alternativa`. El círculo aparece en el lado que se descubre; las acciones accesibles se llaman por su dirección. Fila abierta a medias: tocarla abre su detalle; se cierra sola al abrir otra, al hacer scroll (`propsScrollSwipe`) o al tocar fuera de su botón (`propsZonaSwipe` en la raíz de la pantalla). Vibración (KO en el iPhone): se disparaba dentro del actualizador de estado, con el impacto más ligero y con los errores tragados; ahora `vibrarUmbral` vibra una vez al cruzar el umbral, con impacto medio, avisa en consola si falla y usa `Vibration` de reserva.
+// Versión: 0.5.0 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): `coloresTono` lleva el rol en su origen: la etiqueta usa `accentText` / `warningText` (el círculo conserva el relleno); el ✓ del aviso flotante lleva un anillo de 2 px `onAccent` (opción C).
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -47,8 +48,8 @@ export interface LadoSwipe {
 
 /** Colores de un tono con tokens del DS (lámina: --soft/--ac, --s2/--t2, --ps/--warn). Nunca `critical`. */
 export function coloresTono(c: Colores, tono: TonoSwipe): { fondo: string; circulo: string; sobreCirculo: string; etiqueta: string } {
-  if (tono === 'confirmar') return { fondo: c.accentSurface, circulo: c.accent, sobreCirculo: c.onAccent, etiqueta: c.accent };
-  if (tono === 'aviso') return { fondo: c.partialSurface, circulo: c.warning, sobreCirculo: c.onAccent, etiqueta: c.warning };
+  if (tono === 'confirmar') return { fondo: c.accentSurface, circulo: c.accent, sobreCirculo: c.onAccent, etiqueta: c.accentText };
+  if (tono === 'aviso') return { fondo: c.partialSurface, circulo: c.warning, sobreCirculo: c.onAccent, etiqueta: c.warningText };
   return { fondo: c.surfaceSecondary, circulo: c.textSecondary, sobreCirculo: c.background, etiqueta: c.textSecondary };
 }
 
@@ -417,7 +418,7 @@ function AvisosAccionRapida(p: {
       {p.vivas.map((v) => (
         <View key={v.a.clave} testID={`aviso-rapida-${v.a.clave}`} style={s.pildora}>
           {capa}
-          <View style={[s.ok, { backgroundColor: c.accent }]}>
+          <View style={[s.ok, { backgroundColor: c.accent, borderWidth: 2, borderColor: c.onAccent }]}>
             <Ionicons name="checkmark" size={15} color={c.onAccent} />
           </View>
           <Text testID={`aviso-rapida-${v.a.clave}-texto`} numberOfLines={2} style={texto}>{v.fase === 'ESPERA' ? v.a.texto : `Guardando: ${v.a.texto}…`}</Text>

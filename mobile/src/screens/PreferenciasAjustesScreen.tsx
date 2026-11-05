@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-02 B3)
 // Versión: 0.2.0 (F05-03/F05-04 J2 §1.5; F05 §46.5 E3): las preferencias nuevas llevan SIEMPRE el tipo GASTO (`tipos.GASTO` de la lista); el ámbito «Todos los gastos» es el tipo GASTO sin categoría.
 // Versión: 0.3.0 (F05-03/F05-04 J2 §2.5; F05 §46.4 R6; lámina REG-DYN / SET-TH / SET-CTX v0.1 S04): cuatro ámbitos «Todos los gastos», «Todos los ingresos», «Una categoría» y «Un tercero»; los dos últimos con tipo Gasto/Ingreso (Gasto marcado al elegir el ámbito: el de F05-02) y SIEMPRE enviado. El selector de categoría filtra por el tipo (el de REG-01 para gastos, el de ingresos para ingresos); el de tercero es el del registro (activos, alta mínima con duplicados). «Proponer cuenta» ofrece las cuentas del registro de ese tipo (cuentas-pago para gastos; GET /v1/cuentas/elegibles?operacion=INGRESO para ingresos). Grupo «Por tercero» en la lista.
+// Versión: 0.3.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -470,7 +471,7 @@ export function PreferenciasAjustesScreen(p: {
             <>
               <View testID="ajpref-existente" accessibilityRole="alert" style={[s.caja, { backgroundColor: c.partialSurface, borderColor: c.warning }]}>
                 <Text style={[tipo.footnote, { color: c.textPrimary }]}>
-                  <Text style={{ fontWeight: '600', color: c.warning }}>{`Ya existe una preferencia para ${paraDe(existente)}`}</Text>
+                  <Text style={{ fontWeight: '600', color: c.warningText }}>{`Ya existe una preferencia para ${paraDe(existente)}`}</Text>
                   {` que propone ${proponeCorto(existente)}. Edítala en lugar de crear otra.`}
                 </Text>
               </View>
@@ -575,7 +576,7 @@ export function PreferenciasAjustesScreen(p: {
         testIDAtras="ajpref-atras"
         derecha={
           <Pressable testID="ajpref-nueva" accessibilityRole="button" accessibilityLabel="Nueva preferencia" hitSlop={8} onPress={abrirNueva} style={s.mas}>
-            <Ionicons name="add" size={24} color={c.accent} />
+            <Ionicons name="add" size={24} color={c.accentText} />
           </Pressable>
         }
       />
@@ -647,7 +648,7 @@ function EtiquetaNoDisponible({ testID }: { testID?: string }) {
   const { c } = useTema();
   return (
     <View testID={testID} style={[s.etiqueta, { backgroundColor: c.partialSurface, borderColor: c.warning }]}>
-      <Text style={[tipo.caption, { color: c.warning }]}>{TEXTO_NO_DISPONIBLE}</Text>
+      <Text style={[tipo.caption, { color: c.warningText }]}>{TEXTO_NO_DISPONIBLE}</Text>
     </View>
   );
 }

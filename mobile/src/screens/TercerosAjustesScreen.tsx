@@ -8,6 +8,7 @@
 // Versión: 0.3.0 (F05-06 M3 §B1; lámina REP v0.2 E5, P-REP-03): en la ficha de una persona, encima de «Ver sus registros», «Pendiente con <persona> · Te debe X · Le debes Y ›» (GET /v1/terceros/{id}/pendiente, solo si la raíz pasa `onPendienteCon`); solo aparece si hay algo pendiente. Con un saldo desconocido dice «Sin determinar», nunca 0,00 €.
 // Versión: 0.4.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2 S9; SWIPE-RULE): cada tercero va en tarjeta; deslizar a la izquierda un tercero ACTIVO es «Desactivar» (tono de aviso, nunca rojo): aviso «<Nombre> desactivado · Deshacer» y, a los 5 s, la misma ruta que el botón «Desactivar» del detalle. Se puede reactivar después; nunca borra registros.
 // Versión: 0.5.0 (swipe (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados `principal` / `alternativa` del componente común (principal a la izquierda); la raíz y el scroll cierran la fila abierta a medias (`propsZonaSwipe`, `propsScrollSwipe`).)
+// Versión: 0.5.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -292,7 +293,7 @@ export function TercerosAjustesScreen(p: {
               {pendiente && pendiente.tercero_id === actual.id && hayPendiente(pendiente) && p.onPendienteCon ? (
                 <Pressable testID="ajter-pendiente" accessibilityRole="link" onPress={() => p.onPendienteCon?.({ terceroId: actual.id, nombre: actual.nombre })}
                   style={{ minHeight: TACTIL_MIN, justifyContent: 'center' }}>
-                  <Text style={[tipo.body, { color: c.accent }]}>{`Pendiente con ${actual.nombre} ›`}</Text>
+                  <Text style={[tipo.body, { color: c.accentText }]}>{`Pendiente con ${actual.nombre} ›`}</Text>
                   <Text testID="ajter-pendiente-texto" style={[tipo.footnote, { color: c.textSecondary }]}>
                     {`Te debe ${textoSaldo(pendiente.te_debe)} · Le debes ${textoSaldo(pendiente.le_debes)}`}
                   </Text>
@@ -301,7 +302,7 @@ export function TercerosAjustesScreen(p: {
               {p.onVerRegistros ? (
                 <Pressable testID="ajter-ver-registros" accessibilityRole="link" onPress={() => p.onVerRegistros?.({ id: actual.id, nombre: actual.nombre })}
                   style={{ minHeight: TACTIL_MIN, justifyContent: 'center' }}>
-                  <Text style={[tipo.body, { color: c.accent }]}>Ver sus registros ›</Text>
+                  <Text style={[tipo.body, { color: c.accentText }]}>Ver sus registros ›</Text>
                 </Pressable>
               ) : null}
             </View>
@@ -329,17 +330,17 @@ export function TercerosAjustesScreen(p: {
                           {g.disponible ? (
                             <Pressable testID={`habitual-quitar-${g.categoria_id}`} accessibilityRole="button" accessibilityLabel={`Quitar ${g.nombre}`}
                               onPress={() => setQuitar({ id: g.id, nombre: g.nombre })} style={{ minHeight: TACTIL_MIN, justifyContent: 'center' }}>
-                              <Text style={[tipo.subheadline, { color: c.critical }]}>Quitar</Text>
+                              <Text style={[tipo.subheadline, { color: c.criticalText }]}>Quitar</Text>
                             </Pressable>
                           ) : (
-                            <Text testID={`habitual-no-disponible-${g.categoria_id}`} style={[tipo.caption, { color: c.warning }]}>No disponible</Text>
+                            <Text testID={`habitual-no-disponible-${g.categoria_id}`} style={[tipo.caption, { color: c.warningText }]}>No disponible</Text>
                           )}
                         </View>
                       ))}
                     </Tarjeta>
                   ) : null}
                   <Pressable testID="ajter-anadir-categoria" accessibilityRole="button" onPress={() => void abrirAnadir()} style={{ minHeight: TACTIL_MIN, justifyContent: 'center' }}>
-                    <Text style={[tipo.body, { color: c.accent }]}>+ Añadir categoría</Text>
+                    <Text style={[tipo.body, { color: c.accentText }]}>+ Añadir categoría</Text>
                   </Pressable>
                   {afinidades.d.segun_historial.length > 0 ? (
                     <View testID="ajter-historial" style={{ gap: espacio.xs }}>
@@ -354,7 +355,7 @@ export function TercerosAjustesScreen(p: {
                           </View>
                           <Pressable testID={`historial-guardar-${h.categoria_id}`} accessibilityRole="button" accessibilityLabel={`Guardar ${h.nombre}`}
                             onPress={() => void guardarAfinidad(h.categoria_id)} style={{ minHeight: TACTIL_MIN, justifyContent: 'center' }}>
-                            <Text style={[tipo.subheadline, { color: c.accent }]}>Guardar</Text>
+                            <Text style={[tipo.subheadline, { color: c.accentText }]}>Guardar</Text>
                           </Pressable>
                         </View>
                       ))}
@@ -401,7 +402,7 @@ export function TercerosAjustesScreen(p: {
         testIDAtras="ajter-atras"
         derecha={
           <Pressable testID="ajter-nuevo" accessibilityRole="button" accessibilityLabel="Nuevo tercero" hitSlop={8} onPress={abrirNuevo} style={ef.mas}>
-            <Ionicons name="add" size={24} color={c.accent} />
+            <Ionicons name="add" size={24} color={c.accentText} />
           </Pressable>
         }
       />

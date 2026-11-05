@@ -5,6 +5,7 @@
 // Descripción: Selector de tercero del registro y de Ajustes (F05-04 J2 §2.3; F05 §46.3 A5, §46.4 R5; lámina REG-DYN P01/P02). Lista solo los terceros ACTIVOS con filtro local por nombre (normalización C06; no es la búsqueda de F05-05), «Sin tercero» y «+ Crear «texto»». Antes de crear consulta los posibles duplicados al servidor (misma normalización, incluidos los inactivos) y, si los hay, muestra P02: «Ya tienes un tercero con ese nombre. ¿Es el mismo?» con «Usar el existente» (activo), «Reactivar» (inactivo) o «Crear otro «nombre»» (homónimos válidos, sin fusión). El alta es mínima (solo nombre, naturaleza «No lo sé») y escritura INDEPENDIENTE del registro, con UUID generado al iniciar el alta (el reintento reutiliza el MISMO). Un fallo del registro no deshace el alta.
 // Versión: 0.1.0 (F05-03/F05-04 J2 §2.3)
 // Versión: 0.2.0 (F05-05 K3 §2.3; F05 §49.4 A4, D-SRCH-04; lámina SRCH-ACT-AFI A3, A4, A8): «Recientes» (GET /v1/senales/terceros con el tipo y la fecha del registro; motivo «Usado hace N días» o «Frecuente en tus gastos | ingresos»); campo «Buscar o crear tercero»: con 2 o más caracteres consulta al servidor (ILIKE sobre nombre y nombre legal, sensible a acentos en v1) tras una pausa, con los inactivos marcados y «Reactivar» en línea (lo reactiva y lo elige, M-D05); con menos, el filtro local de siempre sobre los activos y «Todos · N terceros». Homónimos con segunda línea de datos reales: naturaleza, registros y último uso. Alta y duplicados (P02) sin cambios.
+// Versión: 0.2.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -179,7 +180,7 @@ export function SelectorTercero(p: {
                   <Text style={[tipo.body, { color: c.textPrimary }]}>{t.nombre}</Text>
                   <Text style={[tipo.caption, { color: c.textSecondary }]}>{textoReciente(t, p.fecha ?? t.ultimo_uso, p.tipo ?? 'GASTO')}</Text>
                 </View>
-                {p.seleccionadoId === t.tercero_id ? <Ionicons name="checkmark" size={18} color={c.accent} /> : null}
+                {p.seleccionadoId === t.tercero_id ? <Ionicons name="checkmark" size={18} color={c.accentText} /> : null}
               </Pressable>
             ))}
           </View>
@@ -188,7 +189,7 @@ export function SelectorTercero(p: {
           <>
             <Pressable testID="tercero-ninguno" accessibilityRole="button" onPress={() => p.onElegir(null)} style={[s.fila, { borderColor: c.borderDefault }]}>
               <Text style={[tipo.body, { color: c.textPrimary, flex: 1 }]}>Sin tercero</Text>
-              {p.seleccionadoId === null ? <Ionicons name="checkmark" size={18} color={c.accent} /> : null}
+              {p.seleccionadoId === null ? <Ionicons name="checkmark" size={18} color={c.accentText} /> : null}
             </Pressable>
             {nombre === '' && carga.fase === 'OK' ? (
               <Text testID="terceros-todos" style={[tipo.footnote, s.seccion, { color: c.textSecondary }]}>
@@ -202,7 +203,7 @@ export function SelectorTercero(p: {
                   <Text style={[tipo.body, { color: c.textPrimary }]}>{t.nombre}</Text>
                   {detalleTercero(t) ? <Text style={[tipo.caption, { color: c.textSecondary }]}>{detalleTercero(t)}</Text> : null}
                 </View>
-                {p.seleccionadoId === t.id ? <Ionicons name="checkmark" size={18} color={c.accent} /> : null}
+                {p.seleccionadoId === t.id ? <Ionicons name="checkmark" size={18} color={c.accentText} /> : null}
               </Pressable>
             ))}
           </>
@@ -222,7 +223,7 @@ export function SelectorTercero(p: {
                     <Text style={[tipo.body, { color: c.textPrimary }]}>{t.nombre}</Text>
                     {detalleUso(t) ? <Text style={[tipo.caption, { color: c.textSecondary }]}>{detalleUso(t)}</Text> : null}
                   </View>
-                  {p.seleccionadoId === t.id ? <Ionicons name="checkmark" size={18} color={c.accent} /> : null}
+                  {p.seleccionadoId === t.id ? <Ionicons name="checkmark" size={18} color={c.accentText} /> : null}
                 </Pressable>
               ) : (
                 <View key={t.id} testID={`tercero-inactivo-${t.id}`} style={[s.fila, { borderColor: c.borderDefault }]}>
@@ -240,8 +241,8 @@ export function SelectorTercero(p: {
         ) : null}
         {nombre ? (
           <Pressable testID="tercero-crear" accessibilityRole="button" disabled={ocupado} onPress={() => void crear(false)} style={[s.fila, { borderColor: c.borderDefault }]}>
-            <Ionicons name="add" size={18} color={c.accent} />
-            <Text style={[tipo.body, { color: c.accent, flex: 1 }]}>{`Crear «${nombre}»`}</Text>
+            <Ionicons name="add" size={18} color={c.accentText} />
+            <Text style={[tipo.body, { color: c.accentText, flex: 1 }]}>{`Crear «${nombre}»`}</Text>
           </Pressable>
         ) : null}
       </ScrollView>

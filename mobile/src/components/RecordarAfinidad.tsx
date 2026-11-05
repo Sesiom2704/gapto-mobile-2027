@@ -4,6 +4,7 @@
 // Ruta: mobile/src/components/RecordarAfinidad.tsx
 // Descripción: Tarjeta «¿Recordar <categoría> para <tercero>?» de la pantalla de éxito (F05 §49.4 A5, D-SRCH-05; lámina SRCH-ACT-AFI A5). Aparece solo si el registro tiene tercero y categoría y esa pareja aún no está guardada (lo consulta al servidor; si la consulta falla, no se ofrece). Es una escritura INDEPENDIENTE del hecho: si falla, el gasto ya está guardado. El UUID de la afinidad se fija al montar: el reintento y el doble toque reutilizan el MISMO (idempotente; con el par ya guardado, AFINIDAD_YA_EXISTE también es éxito). Nunca elige la categoría: solo se sugerirá primero (C01).
 // Versión: 0.1.0 (F05-05 K3 §2.4)
+// Versión: 0.1.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -66,7 +67,7 @@ export function RecordarAfinidad(p: {
             {`Se sugerirá primero cuando elijas ${p.tercero.nombre}. Nunca se elegirá sola.`}
           </Text>
           {typeof estado === 'object' ? (
-            <Text testID="recordar-error" accessibilityRole="alert" style={[tipo.footnote, { color: c.critical }]}>{estado.error}</Text>
+            <Text testID="recordar-error" accessibilityRole="alert" style={[tipo.footnote, { color: c.criticalText }]}>{estado.error}</Text>
           ) : null}
           <BotonTexto testID="recordar" titulo={estado === 'GUARDANDO' ? 'Guardando…' : 'Recordar'} onPress={() => void recordar()} />
         </>

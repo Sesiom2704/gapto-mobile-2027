@@ -4,6 +4,7 @@
 // Ruta: mobile/src/screens/CorregirHechoScreen.tsx
 // Descripción: «Corregir» un registro (F05-06 M1; lámina EDIT-HECHO v0.1 A2, A3, B3, B4; D-EDIT-02..05, 07, 08; P-EDIT-03, 05; CONTRATO_M1 v0.1 §2; F05 §61.2). Solo para datos que nunca fueron ciertos (INV-07): la línea fija lo dice arriba. Formulario precargado con lo registrado: importe, fecha y cuenta de un pago simple, o importe, fecha y cuentas de una transferencia (el importe se corrige siempre con su movimiento, P-EDIT-03); cada campo cambiado lleva «Editado» y conserva el valor anterior a la vista. «Revisar cambios» enseña cada cambio antes → después y lo que arrastra (movimiento de la cuenta y, en un gasto, el Resultado del mes), con motivo obligatorio (opciones fijas más «Otro…») y «Guardar cambios». Un conflicto de versión (B3) no pisa nada: «Este registro ha cambiado mientras lo corregías» con lo que hay ahora, «Recargar y volver a corregir» o «Descartar». Sin respuesta del servidor, el reintento usa la MISMA intención (el motor no corrige dos veces). Si el registro no se puede corregir, se dice por qué (la elegibilidad viene del servidor, que además revalida al guardar).
 // Versión: 0.1.0 (F05-06 M1)
+// Versión: 0.1.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -235,7 +236,7 @@ export function CorregirHechoScreen(p: {
   const editado = (campo: CambioEdicion['campo']) => cambios.find((x) => x.campo === campo);
   const Editado = ({ campo }: { campo: CambioEdicion['campo'] }) => {
     const x = editado(campo);
-    return x ? <Text testID={`corregir-hecho-editado-${campo}`} style={[tipo.caption, { color: c.accent }]}>{`Editado · antes ${valorCambio(x, x.antes)}`}</Text> : null;
+    return x ? <Text testID={`corregir-hecho-editado-${campo}`} style={[tipo.caption, { color: c.accentText }]}>{`Editado · antes ${valorCambio(x, x.antes)}`}</Text> : null;
   };
   const selector = (testBase: string, lista: CuentaElegible[], actual: string | null, elegir: (id: string) => void, original: string | null) => {
     const ids = new Map(lista.map((x) => [x.cuenta_id, x.nombre]));

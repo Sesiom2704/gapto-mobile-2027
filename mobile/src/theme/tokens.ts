@@ -4,7 +4,8 @@
 // Ruta: mobile/src/theme/tokens.ts
 // Descripción: Tokens del Design System F09 (DS-01 color, DS-02 tipografía, DS-03 geometría). Capa física -> semántica; los componentes consumen solo semántica (DS-RULE-12). HEX extraídos de la lámina DS-01 v1.0 y verificados por contraste en __tests__/dominio.test.ts antes de usarse (F09 §12.92.8). 'accentSurface' es DERIVADO (tinte del hero HOME-01), no figura en DS-01.
 // v0.1.1: corrección editorial de la referencia al test de contraste (dominio.test.ts); sin cambio de valores.
-// Versión: 0.1.1
+// v0.2.0 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): cuatro tokens de rol de texto e icono por tema (`accentText`, `criticalText`, `positiveText`, `warningText`; 21 tokens por tema) y ajustes V1 de `textSecondary`, `borderDefault`, `borderStandard`, `accent`, `warning` y `critical` (claro) y de `textSecondary` y `borderStandard` (oscuro). `positiveText` claro solo sobre `background` y `surfacePrimary` (PT-04; control en __tests__/ds_rol_superficies.test.tsx).
+// Versión: 0.2.0
 // ============================================================
 
 import { TextStyle } from 'react-native';
@@ -22,6 +23,13 @@ export interface Colores {
   borderStandard: string;
   separator: string;
   accent: string;
+  // Tokens de rol (F06-M1, F06-D003): texto e iconos con significado. Los rellenos semanticos
+  // (accent, critical, positive, warning) solo rellenan, bordean o marcan; nunca son color de texto o icono (PT-01.4).
+  accentText: string;
+  criticalText: string;
+  // positiveText claro solo sobre background y surfacePrimary (PT-04): ds_rol_superficies.test.tsx lo comprueba.
+  positiveText: string;
+  warningText: string;
   onAccent: string;
   positive: string;
   warning: string;
@@ -39,15 +47,19 @@ export const colores: Record<Esquema, Colores> = {
     surfaceSecondary: '#F4F5F4',
     accentSurface: '#F0F5F1',
     textPrimary: '#1A1A1A',
-    textSecondary: '#69707D',
-    borderDefault: '#E6E8E5',
-    borderStandard: '#D1D5DB',
+    textSecondary: '#363940',
+    borderDefault: '#E3E6E2',
+    borderStandard: '#848E9F',
     separator: '#F1F3F4',
-    accent: '#1F6F49',
+    accent: '#1E6D48',
     onAccent: '#FFFFFF',
+    accentText: '#13432C',
+    criticalText: '#8D1717',
+    positiveText: '#12843C',
+    warningText: '#552F02',
     positive: '#16A34A',
-    warning: '#D97706',
-    critical: '#DC2626',
+    warning: '#B16105',
+    critical: '#CA2121',
     info: '#3B82F6',
     unknownSurface: '#F3F4F3',
     partialSurface: '#FDF3E6',
@@ -58,12 +70,16 @@ export const colores: Record<Esquema, Colores> = {
     surfaceSecondary: '#232A27',
     accentSurface: '#1C2B24',
     textPrimary: '#F4F6F5',
-    textSecondary: '#A7B1AC',
+    textSecondary: '#AAB3AF',
     borderDefault: '#33413B',
-    borderStandard: '#3F4D46',
+    borderStandard: '#60766B',
     separator: '#232A27',
     accent: '#34D399',
     onAccent: '#0F1412',
+    accentText: '#34D399',
+    criticalText: '#F98C8C',
+    positiveText: '#4ADE80',
+    warningText: '#FBBF24',
     positive: '#4ADE80',
     warning: '#FBBF24',
     critical: '#F87171',

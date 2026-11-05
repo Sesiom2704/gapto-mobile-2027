@@ -3,7 +3,8 @@
 // Fichero: GastoCompartidoScreen.tsx
 // Ruta: mobile/src/screens/GastoCompartidoScreen.tsx
 // Descripción: Gasto con reparto o pagado por otra persona (F05-06 M3; lámina REP v0.2 A1, A2, B1–B4, D1, E7, E8). Parte del registro, que conserva lo común (importe, fecha, comercio, categoría, presupuesto y nota) y se muestra fijo arriba con «Cambiar» para volver. A1: «Pagado con» admite «Otra persona» (D-REP-01): se pregunta quién pagó y «¿Le debes este dinero a X?» con «Sí, le debo X €» / «No» / «No lo sé» (D-REP-02; solo el «Sí» crea la obligación, INV-04; «No lo sé» no la crea, P-REP-01). B1/B2: «Repartir» abre el reparto por personas con importes (D-REP-03): el total nunca cambia, «Repartido» y «Falta por repartir» a la vista, lo vacío queda sin indicar (PARCIAL, G3) y nunca se completa solo; «A partes iguales» es un botón y el céntimo sobrante va a la última fila (D-REP-04). B3: «¿Te deben su parte?» persona a persona («Sí, me lo debe» / «No, invitado»; D-REP-05). A2/B4: revisión en cuatro bloques (D-REP-06): el gasto y su total, tu parte, el dinero (movimiento real o «No sale dinero de tus cuentas») y quién debe a quién. Se guarda en una sola operación (OP-22). Ciclo de envío del registro: UUID y payload sellados antes de enviar; doble toque ignorado; INDETERMINADO reintenta con la MISMA identidad; un rechazo definitivo libera la edición. Éxito con «Pendiente con <persona>» (P-REP-03).
-// Versión: 0.1.0 (F05-06 M3 §B1)
+// v0.1.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
+// Versión: 0.1.1
 // v0.1.1 (F05-06 M3 CORR-01, R-M3-05): en el éxito, cada «Pendiente con <persona>» sale del `tercero_id` que el servidor devuelve en cada posición creada, nunca de emparejar por importe (dos personas con la misma parte señalaban a la misma).
 // v0.2.0 (F05-D052 paso 2 · R6, F05 §66.A.10): espejo de R6 en «Reparto»: con alguna parte sin indicar y las indicadas sumando el total, aviso propio «reparto-sin-margen» (no sugiere poner 0), «Revisar» bloqueado y el rechazo del servidor `REPARTO_SIN_MARGEN_PARA_DESCONOCIDO` se explica con el mismo texto. El exceso («Supera el total») y la suma incompleta no cambian.
 // ============================================================
@@ -281,7 +282,7 @@ export function GastoCompartidoScreen(p: {
                     onPress={() => editar((y) => ({ ...y, filas: y.filas.map((q) => (q.terceroId === x.terceroId ? { ...q, meDebe: 'NO' } : q)) }))} />
                 </View>
                 {x.meDebe === 'SI' && !r.ok ? (
-                  <Text style={[tipo.footnote, { color: c.critical }]}>Para que te deba su parte, indica cuánto es en el reparto.</Text>
+                  <Text style={[tipo.footnote, { color: c.criticalText }]}>Para que te deba su parte, indica cuánto es en el reparto.</Text>
                 ) : null}
               </View>
             );
@@ -333,7 +334,7 @@ export function GastoCompartidoScreen(p: {
             </View>
             <View style={s.kv}>
               <Text style={[tipo.subheadline, { color: c.textSecondary }]}>Falta por repartir</Text>
-              <Text testID="reparto-falta" style={[tipo.subheadline, { color: res.excede ? c.critical : c.textPrimary, fontWeight: '600' }]}>
+              <Text testID="reparto-falta" style={[tipo.subheadline, { color: res.excede ? c.criticalText : c.textPrimary, fontWeight: '600' }]}>
                 {res.excede ? 'Supera el total' : textoFalta(res)}
               </Text>
             </View>

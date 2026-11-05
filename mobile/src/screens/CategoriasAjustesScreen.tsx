@@ -11,6 +11,7 @@
 // Versión: 0.6.0 (F05-03/F05-04 J2 §2.6; lámina SET-PLT / HOME-QA v0.2 O01/O02): sin NINGUNA categoría, la lista ofrece «Empezar con categorías sugeridas» (O02, árbol del servidor y POST /v1/categorias/onboarding) o «Empezar desde cero» (estado vacío habitual con «Nueva categoría»). La oferta es una tarea inmersiva.
 // Versión: 0.7.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2 S9; SWIPE-RULE): cada categoría va en tarjeta; deslizar a la izquierda una categoría ACTIVA es «Desactivar» (tono de aviso, nunca rojo). Sin subcategorías activas: aviso «<Nombre> desactivada · Deshacer» y, a los 5 s, la misma ruta que la hoja con el modo «solo si no tiene subcategorías activas». Con subcategorías activas hay dudas: abre su detalle con la hoja «Desactivar» de siempre (rama o no). Se puede reactivar después; nunca borra registros.
 // Versión: 0.8.0 (swipe (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados `principal` / `alternativa` del componente común (principal a la izquierda); la raíz y el scroll cierran la fila abierta a medias (`propsZonaSwipe`, `propsScrollSwipe`).)
+// Versión: 0.8.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -343,7 +344,7 @@ export function CategoriasAjustesScreen(p: {
           </View>
           {aviso ? (
             <View testID="detalle-aviso" accessibilityRole="alert" style={[s.aviso, { backgroundColor: c.partialSurface }]}>
-              <Ionicons name="alert-circle-outline" size={18} color={c.warning} />
+              <Ionicons name="alert-circle-outline" size={18} color={c.warningText} />
               <Text style={[tipo.subheadline, { color: c.textPrimary, flexShrink: 1 }]}>{aviso}</Text>
             </View>
           ) : null}
@@ -463,7 +464,7 @@ export function CategoriasAjustesScreen(p: {
         testIDAtras="categorias-atras"
         derecha={
           <Pressable testID="categorias-mas" accessibilityRole="button" accessibilityLabel="Nueva categoría" hitSlop={8} onPress={() => setTarea({ tipo: 'ALTA', padre: nodoNivel?.enabled ? nodoNivel.id : null })}>
-            <Ionicons name="add" size={24} color={c.accent} />
+            <Ionicons name="add" size={24} color={c.accentText} />
           </Pressable>
         }
       />
@@ -479,14 +480,14 @@ export function CategoriasAjustesScreen(p: {
       {nodoNivel ? (
         <View testID="categorias-migas" style={[s.migas, { borderBottomColor: c.separator }]}>
           <Pressable testID="categorias-miga-todas" accessibilityRole="link" onPress={() => setNivel(null)} hitSlop={8}>
-            <Text style={[tipo.footnote, { color: c.accent }]}>Todas</Text>
+            <Text style={[tipo.footnote, { color: c.accentText }]}>Todas</Text>
           </Pressable>
           {migas.map((m, i) => (
             <React.Fragment key={m.id}>
               <Text style={[tipo.footnote, { color: c.textSecondary }]}> › </Text>
               {i < migas.length - 1 ? (
                 <Pressable testID={`categorias-miga-${m.id}`} accessibilityRole="link" onPress={() => setNivel(m.id)} hitSlop={8}>
-                  <Text style={[tipo.footnote, { color: c.accent }]}>{m.nombre}</Text>
+                  <Text style={[tipo.footnote, { color: c.accentText }]}>{m.nombre}</Text>
                 </Pressable>
               ) : (
                 <Text style={[tipo.footnote, { color: c.textPrimary }]}>{m.nombre}</Text>
@@ -504,7 +505,7 @@ export function CategoriasAjustesScreen(p: {
         ) : null}
         {aviso ? (
           <View testID="lista-aviso" accessibilityRole="alert" style={[s.aviso, { backgroundColor: c.partialSurface, marginTop: espacio.m }]}>
-            <Ionicons name="alert-circle-outline" size={18} color={c.warning} />
+            <Ionicons name="alert-circle-outline" size={18} color={c.warningText} />
             <Text style={[tipo.subheadline, { color: c.textPrimary, flexShrink: 1 }]}>{aviso}</Text>
           </View>
         ) : null}
@@ -579,7 +580,7 @@ function Fila(p: { testID: string; iconKey: string | null; titulo: string; subti
     >
       <IconoCategoriaVista iconKey={p.iconKey} />
       <View style={{ flex: 1, gap: 2 }}>
-        <Text style={[tipo.body, { color: p.enfasis ? c.accent : p.inactiva ? c.textSecondary : c.textPrimary, fontWeight: p.enfasis ? '600' : '400' }]}>{p.titulo}</Text>
+        <Text style={[tipo.body, { color: p.enfasis ? c.accentText : p.inactiva ? c.textSecondary : c.textPrimary, fontWeight: p.enfasis ? '600' : '400' }]}>{p.titulo}</Text>
         {p.subtitulo ? <Text style={[tipo.caption, { color: c.textSecondary }]}>{p.subtitulo}</Text> : null}
       </View>
       <Ionicons name="chevron-forward" size={18} color={c.textSecondary} />
@@ -598,7 +599,7 @@ function FilaAccion(p: { testID: string; titulo: string; critica?: boolean; onPr
       onPress={p.onPress}
       style={({ pressed }) => [s.filaDato, { borderBottomColor: c.separator, opacity: pressed ? 0.7 : 1 }]}
     >
-      <Text style={[tipo.body, { color: p.critica ? c.critical : c.textPrimary, flex: 1 }]}>{p.titulo}</Text>
+      <Text style={[tipo.body, { color: p.critica ? c.criticalText : c.textPrimary, flex: 1 }]}>{p.titulo}</Text>
       {p.critica ? null : <Ionicons name="chevron-forward" size={18} color={c.textSecondary} />}
     </Pressable>
   );

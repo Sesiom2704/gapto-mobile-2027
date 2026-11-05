@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-06 M2-B §B1)
 // Versión: 0.2.0 (F05-06 M2-D §2; decisión R-M2A-02 opción b): «Sí, en <cuenta>» solo cuando `cuenta_compra` (cuenta ORIGINAL demostrable) no es null, sin exigir que esté en la lista (el servidor no le exige capacidad); «En otra cuenta» con las de RECIBIR_INGRESO (operación INGRESO). CUENTA_SIN_CAPACIDAD sigue con el mensaje del servidor, que nombra la capacidad del detalle.
 // Versión: 0.3.0 (F05-D052 paso 2 · C-03, §66.A.9): el rechazo GASTO_CON_DERECHO_DE_COBRO al guardar se explica con el mismo motivo que la lectura.
+// Versión: 0.3.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -312,7 +313,7 @@ export function DevolucionScreen(p: {
                       style={[importe.hero, { flex: 1, minWidth: 0, color: c.textPrimary, paddingVertical: espacio.s }]} />
                   </View>
                   {supera ? (
-                    <Text testID="devolucion-supera" accessibilityRole="alert" style={[tipo.footnote, { color: c.critical }]}>{textoSupera(ctx.queda)}</Text>
+                    <Text testID="devolucion-supera" accessibilityRole="alert" style={[tipo.footnote, { color: c.criticalText }]}>{textoSupera(ctx.queda)}</Text>
                   ) : null}
                 </Campo>
                 <Campo etiqueta="Fecha de la devolución">
