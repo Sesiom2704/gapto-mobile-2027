@@ -13,6 +13,8 @@
 #                  SQLSTATE). Los mapas de protectores proceden de P5b (rv3_p5b_rf04015).
 #              Tras cada sonda se verifica que la carga no cambio (recuentos). No hay COMMIT.
 # Versión: 0.1.0
+# Versión: 0.1.1  -- F06-01 B0 (F06-D002): sonda_acl(c, head) con CONTRATO_ACL_POR_HEAD (0330: 48;
+#     0351: 41). Por defecto 0330: las llamadas actuales no cambian.
 # ============================================================
 from __future__ import annotations
 
@@ -26,6 +28,9 @@ from pathlib import Path
 
 _AQUI = Path(__file__).resolve().parent
 CONTRATO_ACL = {"SELECT": 80, "INSERT": 74, "UPDATE": 68, "DELETE": 48}
+# F06-D002 / 0351 (PB0-09 opcion B): siete tablas pierden DELETE. Conjunto finito por head; sin head declarado,
+# el contrato es el de 0330 (comportamiento historico).
+CONTRATO_ACL_POR_HEAD = {"0330": CONTRATO_ACL, "0351": {**CONTRATO_ACL, "DELETE": 41}}
 CONTRATO_FORCE_RLS = 75
 FINANCIERAS = ("FINANCIACION", "DERECHO_OBLIGACION", "INVERSION")
 
@@ -49,7 +54,7 @@ def _error(e) -> dict:
             "tabla": getattr(d, "table_name", None), "mensaje": str(e).split("\n")[0][:300]}
 
 
-def sonda_acl(c) -> dict:
+def sonda_acl(c, head: str = "0330") -> dict:
     fila = c.execute("""SELECT count(*) FILTER (WHERE has_table_privilege('gapto_runtime', k.oid, 'SELECT')),
                                count(*) FILTER (WHERE has_table_privilege('gapto_runtime', k.oid, 'INSERT')),
                                count(*) FILTER (WHERE has_table_privilege('gapto_runtime', k.oid, 'UPDATE')),
@@ -59,8 +64,10 @@ def sonda_acl(c) -> dict:
                          WHERE n.nspname = 'gapto' AND k.relkind = 'r'""").fetchone()
     obt = dict(zip(("SELECT", "INSERT", "UPDATE", "DELETE"), fila[:4]))
     rol = c.execute("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = 'gapto_runtime'").fetchone()
-    ok = obt == CONTRATO_ACL and fila[4] == CONTRATO_FORCE_RLS and rol == (False, False)
-    return {"matriz": obt, "force_rls": fila[4], "runtime_super_bypassrls": rol, "resultado": "PASS" if ok else "FAIL"}
+    contrato = CONTRATO_ACL_POR_HEAD.get(head)  # head no declarado -> FAIL (fail-closed)
+    ok = contrato is not None and obt == contrato and fila[4] == CONTRATO_FORCE_RLS and rol == (False, False)
+    return {"matriz": obt, "head": head, "force_rls": fila[4], "runtime_super_bypassrls": rol,
+            "resultado": "PASS" if ok else "FAIL"}
 
 
 def _tablas_tenant(c) -> list:

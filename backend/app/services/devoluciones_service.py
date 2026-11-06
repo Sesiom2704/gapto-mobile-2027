@@ -32,6 +32,10 @@
 #   previsión sigue siendo cierto despues de la devolucion. Este servicio NO
 #   lee para escribir ni modifica `prevision_hechos`; solo informa de cuantos
 #   vinculos tiene el original.
+# Version: 0.5.0
+#   0.5.0 (F06-01 B0, F06-D002; AJ-B0-03): el INSERT de efectos declara
+#   `causa_valor_activo=None`: las naturalezas devolubles nunca son
+#   VALOR_ACTIVO. Ninguna regla cambia.
 # Version: 0.4.0
 #   0.4.0 (F04-D046 R2 · mandato R1+R2 v0.3 §9/§10/§11): con GASTO o INGRESO
 #   en el hecho resultante `NO_APLICA` es INVALIDO aunque el llamante lo
@@ -242,6 +246,7 @@ class DevolucionesService:
                 estado_atribucion=datos.estado_atribucion,
                 categoria_id=datos.categoria_id,
                 descripcion=datos.concepto,
+                causa_valor_activo=None,  # F06-D002: nunca VALOR_ACTIVO
             )
             if efecto is None:
                 raise self._conflicto_identidad()

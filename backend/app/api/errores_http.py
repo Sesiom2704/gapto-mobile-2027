@@ -172,6 +172,18 @@
 #   (corregir y anular un hecho con posiciones vinculadas). Ningun codigo
 #   existente cambia de status.
 # Version: 0.26.0
+#   0.27.0 (F06-01 B0, F06-D002): CAUSA_VALOR_ACTIVO_REQUERIDA,
+#   CAUSA_VALOR_ACTIVO_NO_ADMITIDA y CORRECCION_TIPO_EFECTO_VALOR_ACTIVO_NO_
+#   ADMITIDA (422, sin escritura). Ninguna ruta HTTP los produce hoy: ningun
+#   DTO admite VALOR_ACTIVO ni los arquetipos patrimoniales (PB0-05); se
+#   declaran para que no caigan en el mensaje generico. Ningun codigo existente
+#   cambia de status.
+# Version: 0.27.0
+#   0.28.0 (F06-01 B0 v0.3, F06-D002; PB0I-06, AJ-B0I-01):
+#   CORRECCION_CONVERSION_VALOR_ACTIVO_NO_ADMITIDA (422, sin escritura): OP-21
+#   no convierte hacia ni desde VALOR_ACTIVO retirando un efecto y dando de
+#   alta otro en la misma correccion. Ningun codigo existente cambia de status.
+# Version: 0.28.0
 # ============================================================
 
 from __future__ import annotations
@@ -255,6 +267,17 @@ _MAPA: dict[CodigoError, tuple[int, str, bool]] = {
         409, "Ese registro ya está enlazado a esta previsión. No se ha guardado nada.", False),
     # F05-06 M5-B (F04-D065).
     CodigoError.PREVISION_SIN_REALIDAD_ACTIVA: (409, MENSAJE_SIN_REALIDAD, False),
+    # F06-D002 (B0). Sin ruta que los produzca hasta F06-01 B2.
+    CodigoError.CAUSA_VALOR_ACTIVO_REQUERIDA: (
+        422, "Indica qué ha pasado con el bien: compra, mejora o baja. No se ha guardado nada.", False),
+    CodigoError.CAUSA_VALOR_ACTIVO_NO_ADMITIDA: (
+        422, "Este movimiento no cambia el valor de un bien. No se ha guardado nada.", False),
+    CodigoError.CORRECCION_TIPO_EFECTO_VALOR_ACTIVO_NO_ADMITIDA: (
+        422, "Esta corrección no puede convertir un movimiento en valor de un bien, ni al revés. "
+             "No se ha cambiado nada.", False),
+    CodigoError.CORRECCION_CONVERSION_VALOR_ACTIVO_NO_ADMITIDA: (
+        422, "Esta corrección cambiaría un movimiento por valor de un bien, o al revés, o la causa "
+             "de ese valor. No se ha cambiado nada.", False),
     CodigoError.TENANT_AUSENTE: (500, "Error interno de configuración.", False),
     CodigoError.ACTOR_DESCONOCIDO: (500, "Error interno de configuración.", False),
 }

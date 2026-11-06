@@ -14,12 +14,20 @@
 #      guarda de frontera de API, no una garantia historica: un llamante que
 #      declare un acontecimiento falso no queda desmentido por nada persistido.
 #      La limitacion se documenta en el handoff como riesgo residual.
+#      F06-D002 (B0): desde 0351 el acontecimiento declarado SI se persiste,
+#      en `hecho_efectos.causa_valor_activo` (`DatosEfecto.causa_valor_activo`
+#      lo deriva; no hay segundo campo que pueda discrepar). La guarda
+#      `exigir_causa_valor_activo` la aplica el unico INSERT de efectos.
 #
 #   2) Identidades reservadas. Tanto los efectos como las atribuciones traen su
 #      UUID desde el llamante, antes del primer intento. Es lo que permite que
 #      un retry tras un COMMIT de resultado desconocido no duplique realidad
 #      (INV-20), y por eso no hay `default_factory=uuid4` en ningun sitio: un
 #      UUID generado dentro de la operacion se regeneraria en cada intento.
+# Version: 0.2.0
+#   0.2.0 (F06-01 B0, F06-D002; AJ-B0-03): `DatosEfecto.causa_valor_activo`
+#   y `exigir_causa_valor_activo`, guarda de escritura compartida por todos
+#   los caminos que insertan efectos. Ningun campo existente cambia.
 # Version: 0.1.0
 # ============================================================
 
@@ -29,6 +37,8 @@ import decimal
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Final
+
+from app.core.errores import CodigoError, ErrorMotor
 
 TIPO_GASTO: Final = "GASTO"
 TIPO_INGRESO: Final = "INGRESO"
@@ -115,6 +125,37 @@ class DatosEfecto:
     descripcion: str | None = None
     acontecimiento: str | None = None
     atribuciones: tuple[DatosAtribucion, ...] = ()
+
+    @property
+    def causa_valor_activo(self) -> str | None:
+        """F06-D002: la causa persistida ES el acontecimiento declarado.
+
+        Se deriva en lugar de duplicarse para que causa y acontecimiento no
+        puedan discrepar. Admisibilidad: `exigir_causa_valor_activo`.
+        """
+        return self.acontecimiento
+
+
+def exigir_causa_valor_activo(tipo_efecto: str, causa: str | None) -> None:
+    """F06-D002 (B0) · guarda de escritura de `causa_valor_activo`.
+
+    Obligatoria y del dominio cerrado si el efecto es VALOR_ACTIVO; prohibida
+    en cualquier otro tipo. La invoca el INSERT de efectos, de modo que cubre
+    OP-04, OP-22 (via OP-04), las altas de OP-21 y las escrituras directas de
+    los demas servicios. No sustituye a los CHECK de 0351: son defensas
+    independientes (PB0-03).
+    """
+    if tipo_efecto == TIPO_VALOR_ACTIVO:
+        if causa not in ACONTECIMIENTOS_VALOR_ACTIVO:
+            raise ErrorMotor(
+                CodigoError.CAUSA_VALOR_ACTIVO_REQUERIDA,
+                "Un efecto VALOR_ACTIVO exige una causa del conjunto cerrado.",
+            )
+    elif causa is not None:
+        raise ErrorMotor(
+            CodigoError.CAUSA_VALOR_ACTIVO_NO_ADMITIDA,
+            "Solo un efecto VALOR_ACTIVO admite causa.",
+        )
 
 
 @dataclass(frozen=True, slots=True)

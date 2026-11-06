@@ -31,6 +31,10 @@
 #   INV-08 · UN HECHO POR PERIODO. Un efecto no tiene fecha propia: la toma de
 #   su hecho. Una realidad que abarca varios periodos economicos exige un hecho
 #   por periodo, y este servicio crea exactamente uno.
+# Version: 0.6.0
+#   0.6.0 (F06-01 B0, F06-D002; AJ-B0-03): el INSERT de efectos declara
+#   `causa_valor_activo=None`: las naturalezas suplementables nunca son
+#   VALOR_ACTIVO. Ninguna regla cambia.
 # Version: 0.5.0
 #   0.5.0 (F04-R1 G-R1-B; F04-D058): OP-18 con relacion relee el estado del
 #   hecho ajustado tras su lock y exige ACTIVO ->
@@ -151,6 +155,7 @@ class SuplementosService:
                 estado_atribucion=datos.estado_atribucion,
                 categoria_id=datos.categoria_id,
                 descripcion=datos.concepto,
+                causa_valor_activo=None,  # F06-D002: nunca VALOR_ACTIVO
             )
             if efecto is None:
                 raise self._conflicto_identidad()

@@ -19,6 +19,8 @@
 #                   head 0350). Cualquier otro conjunto sigue siendo drift. La
 #                   regla UUIDv5 se aplica a TODAS las filas, CONDONACION
 #                   incluida, y no se debilita.
+# Versión: 0.2.1  -- F06-01 B0 (F06-D002) / 0351. El conjunto finito de estados autorizados
+#     anade el head 0351 (los ocho de 0350 mas ADQUISICION_PATRIMONIAL y MEJORA_PATRIMONIAL).
 # ============================================================
 
 from __future__ import annotations
@@ -35,6 +37,8 @@ TIPOS_HECHO_DESCARTADOS = {"SALDO_APERTURA", "AJUSTE_SALDO"}
 TIPOS_HECHO_POR_HEAD = {
     "0150..0340": TIPOS_HECHO_ESPERADOS,
     "0350": TIPOS_HECHO_ESPERADOS | {"CONDONACION"},
+    # F06-D002 / 0351: arquetipos patrimoniales (PB0-05).
+    "0351": TIPOS_HECHO_ESPERADOS | {"CONDONACION", "ADQUISICION_PATRIMONIAL", "MEJORA_PATRIMONIAL"},
 }
 
 METRICAS_ESPERADAS = {

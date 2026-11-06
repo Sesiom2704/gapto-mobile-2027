@@ -12,6 +12,8 @@
 #              DEFERRED, así que el rechazo se provoca con
 #              `SET CONSTRAINTS ALL IMMEDIATE` dentro de un savepoint y el
 #              montaje multi-paso se valida con `_validar_montaje`.
+# Versión: 0.2.3  -- F06-01 B0 (F06-D002): el fixture de VALOR_ACTIVO declara causa ADQUISICION
+#     en head 0351 (CHECK de equivalencia). Ningun caso cambia de intencion.
 # Versión: 0.2.2  -- SUCESORA 0330 / D-185. Los dos indices unicos parciales de
 #                   presentacion llevan el total a 287. Conjunto explicito y
 #                   FINITO, con cada estado nombrado (D-073 refinado por D-187).
@@ -145,6 +147,19 @@ class Escenario:
             "concepto, importe_total, moneda, estado_localizacion, presupuestable) "
             "VALUES (%s, %s, %s, CURRENT_DATE, 'aportacion', %s, 'EUR', 'NO_APLICA', false)",
             (hid, owner, tipo, importe))
+        # F06-D002 / 0351: VALOR_ACTIVO exige causa (CHECK de equivalencia). El
+        # fixture la declara solo donde la columna existe; la intencion del
+        # caso (D-080 fuera de INVERSION) no cambia.
+        if tipo_efecto == "VALOR_ACTIVO" and _uno(self.db, """
+                SELECT count(*) FROM pg_catalog.pg_attribute
+                 WHERE attrelid = 'gapto.hecho_efectos'::regclass
+                   AND attname = 'causa_valor_activo' AND NOT attisdropped"""):
+            self.db.execute(
+                "INSERT INTO gapto.hecho_efectos (id, hecho_id, tipo_efecto, importe_delta, "
+                "estado_atribucion, causa_valor_activo) "
+                "VALUES (%s, %s, %s, %s, 'NO_DISPONIBLE', 'ADQUISICION')",
+                (eid, hid, tipo_efecto, importe))
+            return hid, eid
         self.db.execute(
             "INSERT INTO gapto.hecho_efectos (id, hecho_id, tipo_efecto, importe_delta, "
             "estado_atribucion) VALUES (%s, %s, %s, %s, 'NO_DISPONIBLE')",

@@ -14,6 +14,8 @@
 #
 # PRECONDICIÓN: requiere F03-01-B16 (migration 0190) para poder asumir
 #              gapto_runtime. Ver test_020.
+# Versión: 0.3.1  -- F06-01 B0 (F06-D002): la matriz efectiva es finita POR HEAD: DELETE 48 hasta
+#     0350 y 41 en 0351 (PB0-09 opcion B). El alcance de B18 no cambia.
 # Versión: 0.3.0  -- SUCESORA 0320 / D-183 + D-186. B18 NO se revoca ni se
 #                   revierte: sigue siendo cierta su afirmación de que la
 #                   realidad financiera no admite hard-delete indiscriminado.
@@ -157,6 +159,15 @@ def test_b18_no_desborda_su_alcance(db: psycopg.Connection, tabla: str) -> None:
     )
 
 
+def _head_0351(db: psycopg.Connection) -> bool:
+    """F06-D002: 0351 aplicada (marca: hecho_efectos.causa_valor_activo)."""
+    return db.execute(
+        "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_attribute WHERE attrelid = "
+        "'gapto.hecho_efectos'::regclass AND attname = 'causa_valor_activo' "
+        "AND NOT attisdropped)"
+    ).fetchone()[0]
+
+
 def test_b18_matriz_efectiva_de_runtime(db: psycopg.Connection) -> None:
     """SELECT 80 / INSERT 74 / UPDATE 68 / DELETE 48."""
     # SUCESORA 0320 / D-183: las once hijas y puentes del Bucket A más
@@ -164,7 +175,9 @@ def test_b18_matriz_efectiva_de_runtime(db: psycopg.Connection) -> None:
     assert _cuenta(db, "gapto_runtime", "SELECT") == 80
     assert _cuenta(db, "gapto_runtime", "INSERT") == 74
     assert _cuenta(db, "gapto_runtime", "UPDATE") == 68
-    assert _cuenta(db, "gapto_runtime", "DELETE") == 48
+    # F06-D002 / 0351 (PB0-09 opcion B): siete tablas sin lifecycle de borrado
+    # pierden DELETE; ninguna del Bucket A de B18 cambia. 48 - 7 = 41.
+    assert _cuenta(db, "gapto_runtime", "DELETE") == (41 if _head_0351(db) else 48)
 
 
 def test_b18_no_afecta_a_owner_ni_backup(db: psycopg.Connection) -> None:
@@ -212,5 +225,6 @@ def test_b18_d086_cerrado(db: psycopg.Connection) -> None:
 
     Si este número cambia, es que alguien ha movido la política de borrado.
     Debe actualizarse aquí y en la documentación canónica, nunca silenciarse.
+    F06-D002 / 0351: 41 (DB_Schema y expediente F06 lo registran).
     """
-    assert _cuenta(db, "gapto_runtime", "DELETE") == 48
+    assert _cuenta(db, "gapto_runtime", "DELETE") == (41 if _head_0351(db) else 48)

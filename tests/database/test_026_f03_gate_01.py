@@ -19,6 +19,7 @@
 #
 # PRECONDICIÓN: requiere 0190 (B16). Debe ejecutarse desde la raiz del
 #              repositorio, porque G6 inspecciona migrations/ y tests/.
+# Versión: 0.10.1  -- F06-01 B0 (F06-D002): sucesora 0351 de la matriz de runtime (DELETE 41).
 # Versión: 0.10.0 -- SUCESORA 0320 / D-183. La matriz de runtime pasa a DELETE 48.
 #                   Los dicts SUCESORA_* no cuentan indices ni columnas, de modo
 #                   que 0330 no los mueve. El recuento exacto se conserva porque
@@ -132,6 +133,8 @@ SUCESORA_0310 = {**SUCESORA_0300, "funciones": 28,
 # SELECT, INSERT y UPDATE, y NO en DELETE (bucket A de D-093).
 # SUCESORA 0320 / D-183: el reparto del Bucket A de B18 lleva DELETE a 48.
 MATRIZ_RUNTIME = {"SELECT": 80, "INSERT": 74, "UPDATE": 68, "DELETE": 48}
+# F06-D002 / 0351: siete tablas pierden DELETE de runtime (48 - 7).
+MATRIZ_RUNTIME_SUCESORA_0351 = {**MATRIZ_RUNTIME, "DELETE": 41}
 
 
 def _uno(db: psycopg.Connection, sql: str, params: tuple | None = None):
@@ -215,8 +218,21 @@ def test_gate_g2_contrato_fisico(db: psycopg.Connection) -> None:
     )
 
 
+def _head_0351(db: psycopg.Connection) -> bool:
+    """F06-D002: 0351 aplicada (marca: hecho_efectos.causa_valor_activo)."""
+    return db.execute(
+        "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_attribute WHERE attrelid = "
+        "'gapto.hecho_efectos'::regclass AND attname = 'causa_valor_activo' "
+        "AND NOT attisdropped)"
+    ).fetchone()[0]
+
+
 @pytest.mark.parametrize("privilegio,esperado", sorted(MATRIZ_RUNTIME.items()))
 def test_gate_g2_matriz_runtime(db: psycopg.Connection, privilegio: str, esperado: int) -> None:
+    # F06-D002 / 0351 (PB0-09 opcion B): sucesora conocida con DELETE 41. El id
+    # del caso conserva el valor del gate (DELETE-48) para no romper su traza.
+    if privilegio == "DELETE" and _head_0351(db):
+        esperado = MATRIZ_RUNTIME_SUCESORA_0351["DELETE"]
     total = _uno(db, """
         SELECT count(*) FROM pg_catalog.pg_class c
           JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace

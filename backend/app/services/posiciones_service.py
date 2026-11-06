@@ -65,6 +65,10 @@
 #   Reapertura auditable (B1): `reabrir_posicion` es la unica transicion
 #   CERRADA -> ACTIVA; todo cierre se audita CERRAR y toda reapertura
 #   REABRIR, ambos bajo la raiz B8 (invariante de alternancia de R-Q2).
+# Version: 0.10.0
+#   0.10.0 (F06-01 B0, F06-D002; AJ-B0-03): los tres INSERT de efectos declaran
+#   `causa_valor_activo=None` (GASTO, INGRESO y efectos de posicion). Ninguna
+#   regla cambia.
 # Version: 0.9.0
 #   0.9.0 (F04-D060 · F04-R2 R2-A, C3; contrato F04-R2 v0.6 §6.5): OP-12A
 #   enganchado a un hecho existente con importe inicial (escribe el efecto y el
@@ -423,6 +427,7 @@ class PosicionesService:
                 estado_atribucion=ATRIBUCION_INICIAL,
                 categoria_id=None,
                 descripcion=None,
+                causa_valor_activo=None,  # F06-D002: nunca VALOR_ACTIVO
             )
             if creado is None:
                 raise self._conflicto_identidad()
@@ -523,6 +528,7 @@ class PosicionesService:
                 estado_atribucion=ATRIBUCION_INICIAL,
                 categoria_id=None,
                 descripcion=None,
+                causa_valor_activo=None,  # F06-D002: nunca VALOR_ACTIVO
             )
             if creado is None:
                 raise self._conflicto_identidad()
@@ -1084,6 +1090,7 @@ class PosicionesService:
             estado_atribucion=ATRIBUCION_INICIAL,
             categoria_id=None,
             descripcion=concepto,
+            causa_valor_activo=None,  # F06-D002: nunca VALOR_ACTIVO
         )
         if creado is None:
             raise self._conflicto_identidad()

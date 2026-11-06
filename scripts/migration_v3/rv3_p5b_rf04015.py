@@ -13,6 +13,13 @@
 #              El mapa FK/ACL de 0330 se declara aqui y un test lo contrasta con el catalogo fisico (deriva = fallo).
 #              P9 confirmara las PROTEGIDAS con DELETE real bajo gapto_runtime en ROLLBACK (esperado 23503).
 # Versión: 0.1.0
+# Versión: 0.1.1  -- F06-01 B0 (F06-D002): RUNTIME_SIN_DELETE_POR_HEAD y RUNTIME_UPDATE_FK_POR_HEAD
+#     declaran el head 0351 (tres protectoras durables mas). auditar() no cambia.
+# Versión: 0.2.0  -- F06-01 B0 v0.3 (dictamen B0 implementacion PB0I-03, AJ-B0I-05; deuda R-RV3-016):
+#     auditar(ds, *, head) exige el head de forma EXPLICITA (sin default): una ejecucion destinada a 0351 ya no
+#     puede clasificar en silencio con el mapa de 0330. head='0330' reproduce exactamente el comportamiento
+#     historico (0330..0350); head='0351' usa los mapas declarados de 0351; otro head -> ValueError. La salida
+#     declara 'head_auditoria'. CLI: --head obligatorio.
 # ============================================================
 from __future__ import annotations
 
@@ -61,9 +68,30 @@ RUNTIME_UPDATE_FK = {("contrato_participantes", "contrato_entidad_id"),
                      ("inversion_objetivos_versiones", "inversion_entidad_id"),
                      ("inversion_valoraciones", "inversion_entidad_id"), ("inversiones", "inversion_padre_entidad_id"),
                      ("propiedad_valoraciones", "propiedad_entidad_id")}
+# F06-D002 / 0351 (PB0-09 opcion B): contrato_servicios, propiedad_servicios y entidad_relaciones pierden el
+# DELETE de runtime y pasan a protectoras durables; su UPDATE de FK no cambia. Mapas DECLARADOS por head, conjunto
+# finito. Desde 0.2.0 auditar() recibe el head obligatorio y usa el mapa de ESE head (PB0I-03): el de 0330
+# conserva la clasificacion historica; el de 0351 es una declaracion fisica, no una certificacion funcional de la
+# auditoria RV3 sobre 0351 (deuda R-RV3-016, receptor RV3/MANT).
+_NUEVAS_SIN_DELETE_0351 = {"contrato_servicios", "propiedad_servicios", "entidad_relaciones"}
+RUNTIME_SIN_DELETE_POR_HEAD = {"0330": RUNTIME_SIN_DELETE, "0351": RUNTIME_SIN_DELETE | _NUEVAS_SIN_DELETE_0351}
+RUNTIME_UPDATE_FK_POR_HEAD = {
+    "0330": RUNTIME_UPDATE_FK,
+    "0351": RUNTIME_UPDATE_FK | {("contrato_servicios", "contrato_entidad_id"),
+                                 ("contrato_servicios", "servicio_entidad_id"),
+                                 ("propiedad_servicios", "propiedad_entidad_id"),
+                                 ("propiedad_servicios", "servicio_entidad_id"),
+                                 ("entidad_relaciones", "entidad_origen_id"),
+                                 ("entidad_relaciones", "entidad_destino_id")},
+}
 
 
-def auditar(ds) -> dict:
+def auditar(ds, *, head: str) -> dict:
+    """Clasificacion R-F04-015 del dataset con los mapas FK/ACL DECLARADOS para `head` (obligatorio, PB0I-03)."""
+    if head not in RUNTIME_SIN_DELETE_POR_HEAD or head not in RUNTIME_UPDATE_FK_POR_HEAD:
+        raise ValueError(f"head {head!r} sin mapa P5b declarado; declarados: {sorted(RUNTIME_SIN_DELETE_POR_HEAD)}")
+    sin_delete = RUNTIME_SIN_DELETE_POR_HEAD[head]
+    update_fk = RUNTIME_UPDATE_FK_POR_HEAD[head]
     F = ds.filas
     prot = collections.defaultdict(list)  # entidad -> [(tabla, columna, via)]
     for t, cols in RESTRICT_ENTIDAD.items():
@@ -81,12 +109,12 @@ def auditar(ds) -> dict:
     for e in sorted(F["entidades"].values(), key=lambda x: (x["tipo_entidad"], x["id"])):
         tipo = e["tipo_entidad"]
         ps = prot.get(e["id"], [])
-        durables = sorted({(t, c) for t, c, _ in ps if t in RUNTIME_SIN_DELETE})
+        durables = sorted({(t, c) for t, c, _ in ps if t in sin_delete})
         if tipo not in SUBTIPO_POR_TIPO:
             clase = "INDETERMINADA"
         else:
             clase = "PROTEGIDA" if durables else "NO_PROTEGIDA"
-        evadible = bool(durables) and all((t, c) in RUNTIME_UPDATE_FK for t, c in durables)
+        evadible = bool(durables) and all((t, c) in update_fk for t, c in durables)
         fila = {"entidad_id": e["id"], "tipo": tipo, "nombre": e.get("nombre"),
                 "financiera": tipo in POSICIONES_FINANCIERAS, "clase": clase,
                 "protectores": dict(collections.Counter(t for t, _, _ in ps)),
@@ -96,7 +124,7 @@ def auditar(ds) -> dict:
         resumen[(tipo, clase, evadible)] += 1
     fin = [f for f in filas if f["financiera"]]
     bloquea = [f["entidad_id"] for f in fin if f["clase"] != "PROTEGIDA"]
-    return {"entidades": len(filas), "financieras": len(fin),
+    return {"head_auditoria": head, "entidades": len(filas), "financieras": len(fin),
             "resumen": {f"{t}|{c}|{'evadible' if ev else 'no_evadible'}": n for (t, c, ev), n in sorted(resumen.items())},
             "financieras_no_protegidas": bloquea,
             "financieras_evadibles_por_update": [f["entidad_id"] for f in fin if f["evadible_por_update"]],
@@ -116,6 +144,8 @@ def main(argv=None) -> int:
     ap.add_argument("--run06", required=True, type=Path)
     ap.add_argument("--decisiones-propietario", required=True, type=Path)
     ap.add_argument("--salida", required=True, type=Path)
+    ap.add_argument("--head", required=True, choices=sorted(RUNTIME_SIN_DELETE_POR_HEAD),
+                    help="head fisico cuyos mapas FK/ACL aplica la auditoria (PB0I-03: sin default)")
     a = ap.parse_args(argv)
     spec = importlib.util.spec_from_file_location("rv3_p5_transformacion",
                                                   Path(__file__).resolve().parent / "rv3_p5_transformacion.py")
@@ -125,7 +155,7 @@ def main(argv=None) -> int:
     b0 = P5.fu.cargar_b0(a.run06)
     ds = P5.transformar(b0, P5.fu.p1.sha256_fichero(a.run06), modo_lab=False,
                         decisiones=P5.cargar_decisiones(a.decisiones_propietario))
-    r = auditar(ds)
+    r = auditar(ds, head=a.head)
     a.salida.mkdir(parents=True, exist_ok=True)
     (a.salida / "rv3_p5b_rf04015.json").write_text(
         json.dumps({"p5_version": P5.VERSION, "hash_dataset": ds.hash(), **r}, ensure_ascii=False, indent=1),

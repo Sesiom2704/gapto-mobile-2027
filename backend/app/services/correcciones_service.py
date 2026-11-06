@@ -33,6 +33,31 @@
 #   D-080 · ADVISORY PRIMERO. Si la correccion toca superficies de inversion,
 #   el advisory (INVERSIONES, owner) se toma ANTES de cualquier row lock. Los
 #   locks genericos no lo sustituyen.
+# Version: 0.16.0
+#   0.16.0 (F06-01 B0 N1, LOTE9 C2; dictamen de reconsulta RB0-01, RB0-06,
+#   N1-F): la regla de conversion logica queda documentada como CONTRATO
+#   TEMPORAL de B0 (restriccion conservadora por conjuntos; receptor B3) y su
+#   precedencia sobre la guarda comun del INSERT como contrato (tests W8).
+#   Sin cambio de comportamiento.
+# Version: 0.15.0
+#   0.15.0 (F06-01 B0 v0.3, F06-D002; dictamen B0 implementacion PB0I-06,
+#   AJ-B0I-01, alternativa A): OP-21 rechaza con
+#   CORRECCION_CONVERSION_VALOR_ACTIVO_NO_ADMITIDA (422) la conversion LOGICA
+#   hacia o desde VALOR_ACTIVO en una misma correccion: (a) retira un
+#   VALOR_ACTIVO y da de alta un efecto de otro tipo; (b) retira un efecto de
+#   otro tipo y da de alta un VALOR_ACTIVO; (c) retira y da de alta
+#   VALOR_ACTIVO con causa distinta. Bajo la raiz y ANTES de cualquier
+#   escritura (toque de raiz incluido): row_version, efectos, atribuciones y
+#   auditoria intactos. Retirar y dar de alta el MISMO tipo no VALOR_ACTIVO
+#   sigue admitido. La correccion de causa y tipo se disena en B3.
+# Version: 0.14.0
+#   0.14.0 (F06-01 B0, F06-D002; reapertura acotada de F04; PB0-04, PB0-03):
+#   OP-21 rechaza con CORRECCION_TIPO_EFECTO_VALOR_ACTIVO_NO_ADMITIDA (422)
+#   cambiar `tipo_efecto` hacia VALOR_ACTIVO (en la validacion de entrada) o
+#   desde VALOR_ACTIVO (lectura bajo la raiz, ANTES del primer UPDATE, incluido
+#   el toque de row_version). Rollback integro: no se escribe nada. Las altas
+#   de reemplazo pasan su causa al INSERT, cuya guarda rechaza un VALOR_ACTIVO
+#   sin acontecimiento valido. La correccion de causa y tipo se disena en B3.
 # Version: 0.13.0
 #   0.13.0 (F05-06 M3 §1 (i); F05-D043 §57.1.1; AJ-M3-DEC-01/02): GUARDA
 #   REPARTO_CAMBIA_POSICIONES. «Corregir reparto» v1 (opcion A) solo cambia
@@ -170,6 +195,7 @@ from typing import Any
 
 from app.core.contexto import ContextoOperacion
 from app.core.errores import CodigoError, ErrorMotor
+from app.core.modelos_efectos import TIPO_VALOR_ACTIVO
 from app.core.unidad_trabajo import SesionMotor, Traza, UnidadDeTrabajo
 from app.repositories import auditoria_repository as auditoria
 from app.repositories import correcciones_repository as repo_corr
@@ -478,6 +504,12 @@ class CorreccionesService:
             # reasigna posiciones (F05-D043 §57.1.1). Bajo la raiz y antes de
             # la primera escritura.
             exigir_reparto_sin_cambio_de_posiciones(sesion, datos)
+            # F06-D002 (PB0-04): desde VALOR_ACTIVO, bajo la raiz y antes de
+            # cualquier UPDATE (el toque de raiz incluido).
+            self._exigir_sin_conversion_desde_valor_activo(sesion, datos)
+            # F06-D002 (PB0I-06): ni por retirada y alta en la misma
+            # correccion. Tambien antes de la primera escritura.
+            self._exigir_sin_conversion_logica_valor_activo(sesion, datos)
             nueva_version = repo_hechos.tocar_raiz(
                 sesion, datos.hecho_id, datos.row_version_esperada
             )
@@ -1219,6 +1251,92 @@ class CorreccionesService:
                 "accesible.",
             )
 
+    @staticmethod
+    def _exigir_sin_conversion_desde_valor_activo(
+        sesion: SesionMotor, datos: DatosCorreccion
+    ) -> None:
+        """F06-D002 (PB0-04): OP-21 no cambia el tipo de un VALOR_ACTIVO.
+
+        La causa es obligatoria en VALOR_ACTIVO y prohibida en cualquier otro
+        tipo, y OP-21 no tiene contrato para limpiarla ni declararla en el
+        mismo UPDATE. B3 lo disena; hasta entonces, rechazo de dominio en vez
+        de VIOLACION_INVARIANTE_FISICA.
+        """
+        con_tipo = [
+            efecto_id
+            for efecto_id, cambios in datos.efectos_a_actualizar.items()
+            if "tipo_efecto" in cambios
+        ]
+        if con_tipo and repo_corr.cuenta_efectos_valor_activo(
+            sesion, datos.hecho_id, con_tipo
+        ):
+            raise ErrorMotor(
+                CodigoError.CORRECCION_TIPO_EFECTO_VALOR_ACTIVO_NO_ADMITIDA,
+                "OP-21 no cambia el tipo de un efecto VALOR_ACTIVO en esta "
+                "version.",
+            )
+
+    @staticmethod
+    def _exigir_sin_conversion_logica_valor_activo(
+        sesion: SesionMotor, datos: DatosCorreccion
+    ) -> None:
+        """F06-D002 (PB0I-06, AJ-B0I-01): sin conversion por reemplazo.
+
+        Retirar un efecto y dar de alta otro en la misma correccion es una
+        conversion de naturaleza aunque ninguna fila cambie de `tipo_efecto`.
+        El CHECK de 0351 juzga cada fila, no la equivalencia entre lo retirado
+        y lo creado, asi que la guarda vive aqui. Regla conservadora, sobre
+        CONJUNTOS (no hay emparejamiento fila a fila que la haga eludible):
+          (a) se retira algun VALOR_ACTIVO y se crea algun efecto de otro tipo;
+          (b) se retira algun efecto de otro tipo y se crea algun VALOR_ACTIVO;
+          (c) se retira y se crea VALOR_ACTIVO y el conjunto de causas
+              creadas no es igual al de causas retiradas.
+        Lo retirado se lee bajo la raiz; lo creado viene de la entrada. Retirar
+        sin crear, o crear sin retirar, no es una conversion y sigue su camino
+        (la guarda del INSERT juzga la causa de cada alta).
+
+        CONTRATO TEMPORAL DE B0 (N1-F; dictamen de reconsulta RB0-01,
+        R-B0v03-01). Es una restriccion conservadora, no el contrato
+        definitivo: al comparar conjuntos puede rechazar correcciones mixtas
+        legitimas (se hacen en dos correcciones) y no distingue multiplicidades
+        de causas iguales. Receptor de su revision: B3. No se amplia a otras
+        naturalezas sin decision propia.
+
+        PRECEDENCIA (RB0-06, tests W8 de test_14l). Esta guarda corre antes de
+        cualquier escritura y, por tanto, antes de la guarda comun del INSERT
+        (exigir_causa_valor_activo): si una correccion reune conversion logica
+        y causa ausente o no admitida, el codigo es
+        CORRECCION_CONVERSION_VALOR_ACTIVO_NO_ADMITIDA. La validacion de
+        entrada F04-D005 (VALOR_ACTIVO_SIN_ACONTECIMIENTO, ENTRADA_INVALIDA) es
+        de OP-04/OP-22 y no se sustituye.
+        """
+        if not (datos.efectos_a_eliminar and datos.efectos_a_crear):
+            return
+        retirados = repo_corr.naturaleza_de_efectos(
+            sesion, datos.hecho_id, list(datos.efectos_a_eliminar)
+        )
+        creados = [
+            (efecto.tipo_efecto, getattr(efecto, "causa_valor_activo", None))
+            for efecto in datos.efectos_a_crear
+        ]
+        causas_retiradas = {c for t, c in retirados if t == TIPO_VALOR_ACTIVO}
+        causas_creadas = {c for t, c in creados if t == TIPO_VALOR_ACTIVO}
+        retira_va = any(t == TIPO_VALOR_ACTIVO for t, _ in retirados)
+        retira_otro = any(t != TIPO_VALOR_ACTIVO for t, _ in retirados)
+        crea_va = any(t == TIPO_VALOR_ACTIVO for t, _ in creados)
+        crea_otro = any(t != TIPO_VALOR_ACTIVO for t, _ in creados)
+        if (
+            (retira_va and crea_otro)
+            or (retira_otro and crea_va)
+            or (retira_va and crea_va and causas_creadas != causas_retiradas)
+        ):
+            raise ErrorMotor(
+                CodigoError.CORRECCION_CONVERSION_VALOR_ACTIVO_NO_ADMITIDA,
+                "OP-21 no convierte hacia ni desde VALOR_ACTIVO, ni cambia su "
+                "causa, retirando un efecto y dando de alta otro en esta "
+                "version.",
+            )
+
     def _crear_efectos(self, sesion: SesionMotor, datos: DatosCorreccion) -> int:
         """Reemplazo dentro de la MISMA transaccion.
 
@@ -1236,6 +1354,9 @@ class CorreccionesService:
                 estado_atribucion=efecto.estado_atribucion,
                 categoria_id=efecto.categoria_id,
                 descripcion=efecto.descripcion,
+                # F06-D002: la causa viaja con el efecto de reemplazo; sin
+                # acontecimiento valido la guarda del INSERT lo rechaza.
+                causa_valor_activo=getattr(efecto, "causa_valor_activo", None),
             )
             if creado is None:
                 raise ErrorMotor(
@@ -1279,6 +1400,13 @@ class CorreccionesService:
                 raise ErrorMotor(
                     CodigoError.ENTRADA_INVALIDA,
                     f"Campos no corregibles en un efecto: {sorted(desconocidos)}.",
+                )
+            # F06-D002 (PB0-04): hacia VALOR_ACTIVO, antes de la transaccion.
+            if cambios.get("tipo_efecto") == TIPO_VALOR_ACTIVO:
+                raise ErrorMotor(
+                    CodigoError.CORRECCION_TIPO_EFECTO_VALOR_ACTIVO_NO_ADMITIDA,
+                    "OP-21 no convierte un efecto en VALOR_ACTIVO en esta "
+                    "version.",
                 )
         # F04-D048 R3 · A18. Correccion contextual: solo operaciones
         # contratadas; un alta pura es enriquecimiento, no correccion.
