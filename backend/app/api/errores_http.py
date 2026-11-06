@@ -184,6 +184,14 @@
 #   no convierte hacia ni desde VALOR_ACTIVO retirando un efecto y dando de
 #   alta otro en la misma correccion. Ningun codigo existente cambia de status.
 # Version: 0.28.0
+#   0.29.0 (F06-01 B1, lote 12; contratos R1 v0.8 §1.6): mapa propio de la
+#   capa de propiedades (_RECHAZOS_PROPIEDAD, patron _RECHAZOS_CONTEXTO) con
+#   los codigos ★ de B1 y su mensaje de usuario: PARTICIPACION_NO_POSITIVA,
+#   NATURALEZA_NO_ADMITIDA_EN_TITULARIDAD, ADQUISICION_POSTERIOR_A_TITULARIDAD,
+#   CAMBIO_RETROACTIVO_SIN_POLITICA, CAMBIO_PROGRAMADO_EXISTENTE (409),
+#   REPARTO_ANTERIOR_AL_VIGENTE, METODO_RESERVADO_A_LA_COMPRA y
+#   HABITACIONES_EN_USO (409). Ningun codigo existente cambia de status.
+# Version: 0.29.0
 # ============================================================
 
 from __future__ import annotations
@@ -628,6 +636,38 @@ def rechazo_tercero(codigo: str, detalle: dict | None = None) -> tuple[int, dict
 def rechazo_contexto(codigo: str, detalle: dict | None = None) -> tuple[int, dict]:
     status, mensaje = _RECHAZOS_CONTEXTO[codigo]
     return status, {"codigo": codigo, "mensaje": mensaje, "reintentable": False}
+
+
+# F06-01 B1 (contratos R1 v0.8 §1.6): rechazos de la capa de propiedades. Los ★ son de B1.
+_RECHAZOS_PROPIEDAD: dict[str, tuple[int, str]] = {
+    "AGREGADO_NO_ENCONTRADO": (404, "No encontrado."),
+    "VERSION_DESFASADA": (409, "La propiedad ha cambiado desde que la abriste. Vuelve a cargarla."),
+    "IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION": (409, "Este registro ya existe con otros datos. No se ha guardado nada nuevo."),
+    "ENTRADA_INVALIDA": (422, "Revisa los datos."),
+    "SUMA_NO_CUADRA": (422, "Los porcentajes de la titularidad tienen que sumar 100."),
+    "PARTICIPACION_NO_POSITIVA": (422, "Cada titular tiene que tener un porcentaje mayor que 0."),
+    "PARTICIPANTE_DUPLICADO": (422, "Un titular aparece dos veces."),
+    "TERCERO_NO_DISPONIBLE": (409, "Ese titular ya no está disponible. Elige otro: no se ha guardado nada."),
+    "NATURALEZA_NO_ADMITIDA_EN_TITULARIDAD": (422, "Solo una persona o una empresa puede ser titular."),
+    "FECHA_ANTERIOR_INICIO": (422, "La titularidad no puede empezar antes de la fecha de adquisición."),
+    "ADQUISICION_POSTERIOR_A_TITULARIDAD": (
+        422, "La fecha de adquisición no puede ser posterior al inicio de la titularidad."),
+    "HABITACIONES_EN_USO": (409, "Hay contratos que usan esas habitaciones. Revisa el número de habitaciones."),
+    "CAMBIO_RETROACTIVO_SIN_POLITICA": (422, "El cambio de titularidad tiene que empezar hoy o más adelante."),
+    "CAMBIO_PROGRAMADO_EXISTENTE": (409, "Ya hay un cambio de titularidad programado para esta propiedad."),
+    "REPARTO_ANTERIOR_AL_VIGENTE": (422, "El cambio tiene que empezar después del reparto vigente."),
+    "OPERACION_NO_PERMITIDA_EN_ESTADO": (422, "La titularidad no puede volver a «No lo sé»."),
+    "METODO_RESERVADO_A_LA_COMPRA": (422, "El valor de compra sale de la compra registrada."),
+    "ACTOR_DESCONOCIDO": (409, "No se ha podido identificar tu perfil. No se ha guardado nada."),
+}
+
+
+def rechazo_propiedad(codigo: str, detalle: dict | None = None) -> tuple[int, dict]:
+    status, mensaje = _RECHAZOS_PROPIEDAD[codigo]
+    cuerpo = {"codigo": codigo, "mensaje": mensaje, "reintentable": False}
+    if detalle:
+        cuerpo["detalle"] = detalle
+    return status, cuerpo
 
 
 def rechazo_preferencia(codigo: str, detalle: dict | None = None) -> tuple[int, dict]:

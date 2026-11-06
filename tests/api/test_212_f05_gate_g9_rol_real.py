@@ -24,6 +24,10 @@
 #       backend distinto del rol runtime de la UdT.
 #   El detalle por ruta se escribe en $G9_SALIDA (si esta definida).
 # Version: 0.1.0 (F05-07/GATE tirada nocturna, paso 8)
+# Version: 0.2.0 (F06-01 B1, lote 12): el owner B tiene tambien una propiedad
+#   real (parametro `propiedad_id` de las rutas nuevas de B1) y el
+#   aislamiento por cuerpo gana el cotitular de otro owner en el alta de una
+#   propiedad.
 # ============================================================
 
 from __future__ import annotations
@@ -138,10 +142,14 @@ def b():
     posicion = m3.entidad_de_posicion(owner, cena)
     transf = x5.transferencia(cli, cta, ahorro)
     prevision = m5.prevision(owner, "Luz de B")
+    propiedad = uuid.uuid4()
+    r = cli.post("/v1/propiedades", json={"intencion_id": str(propiedad), "nombre": "Piso de B", "tipo_propiedad": "VIVIENDA",
+                                          "titularidad": {"modo": "SOLO_MIA", "desde": "2026-01-01"}}, headers=h.AUTH)
+    assert r.status_code == 200, r.text
     ids = {"categoria_id": categoria, "asociacion_id": aid, "magnitud_id": mid, "preferencia_id": pref, "cuenta_id": cta,
            "capacidad": "PAGAR_GASTO", "tercero_id": tercero, "contexto_id": contexto, "plantilla_id": plt,
            "accion_id": acc, "origen_id": gasto, "devolucion_id": devolucion, "entidad_id": posicion, "hecho_id": gasto,
-           "prevision_id": prevision, "afinidad_id": afi}
+           "prevision_id": prevision, "afinidad_id": afi, "propiedad_id": propiedad}
     return {"owner": owner, "cli": cli, "ids": ids, "cena": cena, "transferencia": transf, "tania": tania}
 
 
@@ -304,6 +312,11 @@ def _casos_cuerpo(a: dict, b: dict) -> list[tuple[str, str, dict, dict]]:
             lambda x: {"intencion_id": u(), "importe": "5.00", "moneda": "EUR", "fecha_hecho": "2026-10-05",
                        "cuenta_origen_id": str(x["ahorro_id"]), "cuenta_destino_id": str(ia["cuenta_id"]), "nota": None},
             "ahorro_id"),
+        par("propiedad con cotitular", "/v1/propiedades",
+            lambda x: {"intencion_id": u(), "nombre": "Piso G9", "tipo_propiedad": "VIVIENDA",
+                       "titularidad": {"modo": "COMPARTIDA", "desde": "2026-01-01", "partes": [
+                           {"yo": True, "porcentaje": "50"}, {"tercero_id": str(x["persona_id"]), "porcentaje": "50"}]}},
+            "persona_id"),
         par("gasto compartido con persona", "/v1/intenciones/gasto-compartido",
             lambda x: m3.cuerpo("20.00", pagado_por=m3.con_cuenta(ia["cuenta_id"]),
                                 reparto=m3.repartir("10.00", (x["persona_id"], "10.00", "SI"))), "persona_id"),

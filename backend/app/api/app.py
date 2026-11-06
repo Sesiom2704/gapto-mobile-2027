@@ -249,6 +249,17 @@
 #   422 con ese `codigo` y su texto propio; el resto sigue siendo
 #   ENTRADA_INVALIDA. La lectura del reparto gana `posiciones_vinculadas`.
 # Version: 0.30.0
+#   v0.31.0 (F06-01 B1, lote 12; contratos R1 v0.8 Parte I, contrato HTTP
+#   de B1): rutas de propiedades, sin hechos ni efectos:
+#     GET  /v1/propiedades                    lista (L-PROP)
+#     GET  /v1/propiedades/{propiedad_id}     detalle (L-PROP)
+#     POST /v1/propiedades                    alta con titularidad (C-PROP-01)
+#     POST /v1/propiedades/{propiedad_id}/editar        datos (C-PROP-02)
+#     POST /v1/propiedades/{propiedad_id}/titularidad   cambio desde una fecha (C-PROP-03)
+#     POST /v1/propiedades/{propiedad_id}/valoraciones  alta (C-PROP-04)
+#   request_id = intencion_id en todas las escrituras (identidad por la
+#   auditoria del agregado); rechazos con eh.rechazo_propiedad.
+# Version: 0.31.0
 # ============================================================
 
 from __future__ import annotations
@@ -372,6 +383,14 @@ from app.api.dto_vs01 import (
     ResultadoGastoPagado,
 )
 from app.api.dto_registro import IntencionIngresoCobrado, IntencionTransferencia, ResultadoRegistro
+from app.api.dto_propiedades import (
+    CAMPOS_EDITAR,
+    AltaPropiedad,
+    AltaValoracion,
+    CambioTitularidad,
+    EditarPropiedad,
+    presentes,
+)
 from app.api.ejecucion_gasto_pagado import RechazoIntegracion, registrar_gasto_pagado
 from app.api.ejecucion_registro import RechazoRegistro, registrar_ingreso_cobrado, registrar_transferencia
 from app.api.dto_devolucion import (
@@ -437,6 +456,8 @@ from app.plantillas import lecturas as lect_plt
 from app.plantillas import propuesta as prop_plt
 from app.plantillas import servicio as serv_plt
 from app.contextos import servicio as serv_ctx
+from app.propiedades import lecturas as lect_prop
+from app.propiedades import servicio as serv_prop
 from app.terceros import lecturas as lect_ter
 from app.terceros import servicio as serv_ter
 from app.comun import elegibilidad_cuentas as eleg
@@ -954,6 +975,63 @@ def create_app(
     def reactivar_contexto(contexto_id: uuid.UUID, c: EstadoContexto):
         return _comando_maestro("contexto_reactivar", lambda s: serv_ctx.reactivar(
             s, contexto_id=contexto_id, row_version=c.row_version), serv_ctx, eh.rechazo_contexto, "contexto")
+
+    # ------------------------------------------------------------ F06-01 B1 propiedades (contratos R1 v0.8 Parte I)
+    def _partes(partes) -> list | None:
+        return None if partes is None else [
+            serv_prop.Parte(yo=p.yo, tercero_id=p.tercero_id, porcentaje=p.porcentaje) for p in partes]
+
+    def _comando_propiedad(nombre_op: str, intencion_id: uuid.UUID, operacion) -> dict | JSONResponse:
+        ctx = ContextoOperacion.de_usuario(cfg.owner_user_id, request_id=intencion_id)
+        salida = unidad.ejecutar(ctx, operacion, nombre=f"F06-01 B1 {nombre_op}")
+        if isinstance(salida, serv_prop.Rechazo):
+            status, cuerpo = eh.rechazo_propiedad(salida.codigo, salida.detalle)
+            return JSONResponse(cuerpo, status_code=status)
+        return {"propiedad": salida.propiedad, "idempotente": salida.idempotente,
+                "modificadas": list(salida.modificadas), "avisos": list(salida.avisos)}
+
+    @app.get("/v1/propiedades", dependencies=[Depends(autorizar)])
+    def propiedades() -> dict:
+        return {"propiedades": unidad.ejecutar(contexto(), lambda s: lect_prop.listar(s, hoy_owner(s, reloj)),
+                                               nombre="F06-01 B1 propiedades")}
+
+    @app.get("/v1/propiedades/{propiedad_id}", dependencies=[Depends(autorizar)])
+    def detalle_propiedad(propiedad_id: uuid.UUID):
+        vista = unidad.ejecutar(contexto(), lambda s: lect_prop.detalle(s, propiedad_id, hoy_owner(s, reloj)),
+                                nombre="F06-01 B1 propiedad")
+        if vista is None:
+            status, cuerpo = eh.rechazo_propiedad("AGREGADO_NO_ENCONTRADO")
+            return JSONResponse(cuerpo, status_code=status)
+        return {"propiedad": vista}
+
+    @app.post("/v1/propiedades", dependencies=[Depends(autorizar)])
+    def alta_propiedad(c: AltaPropiedad):
+        datos = c.model_dump(exclude={"intencion_id", "nombre", "titularidad"})
+        return _comando_propiedad("propiedad_alta", c.intencion_id, lambda s: serv_prop.alta(
+            s, entidad_id=c.intencion_id, nombre=c.nombre, datos=datos, modo=c.titularidad.modo,
+            desde=c.titularidad.desde, partes=_partes(c.titularidad.partes), reloj=reloj))
+
+    @app.post("/v1/propiedades/{propiedad_id}/editar", dependencies=[Depends(autorizar)])
+    def editar_propiedad(propiedad_id: uuid.UUID, c: EditarPropiedad):
+        campos = presentes(c, CAMPOS_EDITAR)
+        return _comando_propiedad("propiedad_editar", c.intencion_id, lambda s: serv_prop.editar(
+            s, entidad_id=propiedad_id, intencion_id=c.intencion_id, row_version=c.row_version_esperada,
+            campos=campos, motivo=c.motivo, reloj=reloj))
+
+    @app.post("/v1/propiedades/{propiedad_id}/titularidad", dependencies=[Depends(autorizar)])
+    def titularidad_propiedad(propiedad_id: uuid.UUID, c: CambioTitularidad):
+        vista_cliente = [(p.actor_id, p.porcentaje) for p in c.titularidad_vista]
+        return _comando_propiedad("propiedad_titularidad", c.intencion_id, lambda s: serv_prop.cambiar_titularidad(
+            s, entidad_id=propiedad_id, intencion_id=c.intencion_id, row_version=c.row_version_esperada,
+            modo=c.modo, desde=c.desde, partes=_partes(c.partes), vista_cliente=vista_cliente, motivo=c.motivo,
+            reloj=reloj))
+
+    @app.post("/v1/propiedades/{propiedad_id}/valoraciones", dependencies=[Depends(autorizar)])
+    def alta_valoracion_propiedad(propiedad_id: uuid.UUID, c: AltaValoracion):
+        return _comando_propiedad("valoracion_alta", c.intencion_id, lambda s: serv_prop.alta_valoracion(
+            s, propiedad_id=propiedad_id, valoracion_id=c.intencion_id, row_version=c.row_version_esperada,
+            valor_total=c.valor_total, fecha=c.fecha_valoracion, metodo=c.metodo, fuente=c.fuente, notas=c.notas,
+            reloj=reloj))
 
     # ------------------------------------------------------------ F05-03 J2 §1.6 plantillas y acciones
     def _comando_plantilla(nombre_op: str, operacion, clave: str) -> dict | JSONResponse:

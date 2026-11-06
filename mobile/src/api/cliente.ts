@@ -25,6 +25,8 @@
 // v0.19.0 (F05-06 M5-B v1.1): «Pendientes» trae `resueltas_mes` (REALIZADA y OMITIDA cuya transición es del mes en curso, con `resuelta_el` y `resuelta_por`); aparte, no suma a nada.
 // v0.20.0 (F05-D052 paso 2 · C-03, F05 §66.A; CONTRATO_API_C03): POST /v1/intenciones/gasto-reembolsable (`registrarGastoReembolsable`, clasificación de escritura: indeterminado = reintentar el MISMO UUID) y `posiciones_vinculadas` (aditivo, opcional) en el reparto del hecho.
 // Versión: 0.20.0
+// v0.21.0 (F06 Lote 12 · B1 Propiedad, N1): la llamada clasificada (OK / RECHAZADO(codigo, detalle) / INDETERMINADO) se exporta como `crearLlamada(cfg, fetch)` para que el cliente de propiedades (`api/propiedades.ts`) la reutilice sin ampliar `ClienteApi`. Sin cambios de comportamiento ni de rutas.
+// Versión: 0.21.0
 // ============================================================
 
 import type { Ambito, CategoriaNodo } from '../domain/categoria';
@@ -954,8 +956,11 @@ const PREV = (id: string) => `/v1/previsiones/${encodeURIComponent(id)}`;
 const asoc = (cat: string, a?: string) => `${CAT}/${encodeURIComponent(cat)}/magnitudes${a ? `/${encodeURIComponent(a)}` : ''}`;
 const post = (cuerpo: unknown): RequestInit => ({ method: 'POST', body: JSON.stringify(cuerpo) });
 
-export function crearCliente(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): ClienteApi {
-  async function llamar<T>(ruta: string, init: RequestInit, esEscritura: boolean | 'CAMBIO'): Promise<Respuesta<T>> {
+export type Llamada = <T>(ruta: string, init: RequestInit, esEscritura: boolean | 'CAMBIO') => Promise<Respuesta<T>>;
+
+/** Llamada HTTP clasificada: OK, RECHAZADO (4xx con `codigo`, definitivo) o INDETERMINADO (timeout, red, 5xx u otro 4xx). */
+export function crearLlamada(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): Llamada {
+  return async function llamar<T>(ruta: string, init: RequestInit, esEscritura: boolean | 'CAMBIO'): Promise<Respuesta<T>> {
     const msgIndeterminado = esEscritura === 'CAMBIO' ? MSG_INDETERMINADO_CAMBIO : esEscritura ? MSG_INDETERMINADO : MSG_SIN_CONEXION;
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), cfg.timeoutMs);
@@ -983,8 +988,11 @@ export function crearCliente(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): C
     } finally {
       clearTimeout(t);
     }
-  }
+  };
+}
 
+export function crearCliente(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): ClienteApi {
+  const llamar = crearLlamada(cfg, fetchImpl);
   return {
     registrarGastoPagado: (p) =>
       llamar('/v1/intenciones/gasto-pagado', { method: 'POST', body: JSON.stringify(p) }, true),

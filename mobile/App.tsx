@@ -17,7 +17,8 @@
 // v0.13.0 (F05-D051 paso 9.1 · G1 v2): instrumentación por paso, solo `__DEV__`: `trazaG1` (= `g1Traza` en desarrollo, `undefined` en producción) llega por prop al registro y a la transferencia; hitos `hoja_tipos` y `tipo:<TIPO>` aquí, y teclado y AppState con `g1Suscribir` (sin suscripción fuera de `__DEV__`). Sin cambios de navegación ni de comportamiento.
 // v0.14.0 (F05-D052 paso 2 · C-03, §66.A.8): «Pendiente con…» recibe además el `entidad_id` del derecho elegido en el detalle del gasto y lo abre directamente.
 // v0.15.0 (F05-D056 paso 2, COLA-AR v1.0, F05 §70.A.4): la raíz monta el aviso GLOBAL de la cola de acciones rápidas financieras (`AvisosCola global`), encima de cualquier pantalla o tarea: «Cobrando… · Deshacer» con el tiempo restante sigue visible al navegar. Sin cambios de navegación ni de los recorridos de registro.
-// Versión: 0.15.0
+// v0.16.0 (F06 Lote 12 · B1 Propiedad, N1; láminas F06-01 v0.9 A1–A3, D1–D3 y v0.1 C1–C2, D3–D4): «Patrimonio» deja de ser territorio pendiente: monta Patrimonio › Propiedades (PropiedadesScreen) de forma PERSISTENTE desde la primera visita, como Más (conserva el nivel al cambiar de pestaña); sus tareas (alta, nuevo reparto, valoración, edición) son inmersivas y ocultan la barra inferior. El cliente de propiedades (`api/propiedades`) va aparte de `ClienteApi` y llega por prop opcional (por defecto, el de `configApi`). «Mes» sigue pendiente.
+// Versión: 0.16.0
 // ============================================================
 
 import * as Crypto from 'expo-crypto';
@@ -27,6 +28,7 @@ import { AppState, Keyboard, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { ClienteApi, crearCliente } from './src/api/cliente';
+import { ClientePropiedades, crearClientePropiedades } from './src/api/propiedades';
 import { configApi } from './src/api/config';
 import { g1Abrir, g1Fetch, g1Suscribir, g1Traza } from './src/dev/g1';
 import { BarraInferior, Destino } from './src/components/BarraInferior';
@@ -49,13 +51,14 @@ import { DevolucionScreen } from './src/screens/DevolucionScreen';
 import { GastoCompartidoScreen } from './src/screens/GastoCompartidoScreen';
 import { PendienteConScreen } from './src/screens/PendienteConScreen';
 import { PendientesScreen } from './src/screens/PendientesScreen';
+import { PropiedadesScreen } from './src/screens/PropiedadesScreen';
 import { PrevisionDetalleScreen } from './src/screens/PrevisionDetalleScreen';
 import { RegistroGastoScreen } from './src/screens/RegistroGastoScreen';
 import { TerritorioPendiente } from './src/screens/TerritorioPendiente';
 import { TransferenciaScreen } from './src/screens/TransferenciaScreen';
 import { ProveedorTema, useTema } from './src/theme/tema';
 
-const TITULOS: Record<Exclude<Destino, 'INICIO' | 'MAS' | 'DIA'>, string> = { MES: 'Mes', PATRIMONIO: 'Patrimonio' };
+const TITULOS: Record<Exclude<Destino, 'INICIO' | 'MAS' | 'DIA' | 'PATRIMONIO'>, string> = { MES: 'Mes' };
 
 type PantallaMas = 'MAS' | 'AJUSTES' | 'CATEGORIAS' | 'PREFERENCIAS' | 'TERCEROS' | 'CONTEXTOS' | 'PLANTILLAS' | 'CUENTAS' | 'REGISTROS_TERCERO';
 
@@ -67,11 +70,20 @@ type TareaRegistro = {
   clave: number;
 };
 
-export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () => Date }) {
+export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () => Date; propiedades?: ClientePropiedades }) {
   const { c, esquema } = useTema();
+  /** B1: cliente de propiedades (por prop en tests; por defecto, el de `configApi`). */
+  const propiedades = useMemo(() => p.propiedades ?? crearClientePropiedades(configApi, g1Fetch(fetch)), [p.propiedades]);
+  /** Patrimonio se monta en la primera visita y después se conserva (como Más). */
+  const [patrimonioVisto, setPatrimonioVisto] = useState(false);
+  const [inmersivaPat, setInmersivaPat] = useState(false);
+
   /** G1 v2 (F05-D051 9.1): traza por paso solo en desarrollo; en producción, `undefined` (las pantallas no trazan nada). */
   const trazaG1 = __DEV__ ? g1Traza : undefined;
   const [destino, setDestino] = useState<Destino>('INICIO');
+  useEffect(() => {
+    if (destino === 'PATRIMONIO') setPatrimonioVisto(true);
+  }, [destino]);
   const [tarea, setTarea] = useState<TareaRegistro | null>(null);
   const [hojaTipos, setHojaTipos] = useState(false);
   const [refresco, setRefresco] = useState(0);
@@ -141,6 +153,12 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
         {(Object.keys(TITULOS) as (keyof typeof TITULOS)[]).map((d) =>
           destino === d ? <TerritorioPendiente key={d} titulo={TITULOS[d]} /> : null,
         )}
+        {/* Patrimonio › Propiedades (B1): pila propia, montada desde la primera visita. */}
+        {patrimonioVisto ? (
+          <View style={[s.raiz, destino !== 'PATRIMONIO' && s.oculto]}>
+            <PropiedadesScreen cliente={p.cliente} propiedades={propiedades} nuevoId={p.nuevoId} ahora={p.ahora} onInmersiva={setInmersivaPat} />
+          </View>
+        ) : null}
         {/* Más: pila propia montada (conserva el nivel al cambiar de pestaña). */}
         <View style={[s.raiz, destino !== 'MAS' && s.oculto]}>
           {pantallaMas === 'MAS' ? <MasScreen onAjustes={() => setPantallaMas('AJUSTES')} /> : null}
@@ -391,7 +409,7 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
         {/* COLA-AR: aviso global de las acciones rápidas financieras, encima de todo (§70.A.4). */}
         <AvisosCola cola={colaDe(p.cliente)} global />
       </View>
-      {tarea === null && devolucionDe === null && pendienteDe === null && corregirDe === null && corregirHecho === null && !pendientes && prevision === null && !hojaTipos && !(destino === 'MAS' && inmersivaMas) && !(destino === 'DIA' && inmersivaDia) ? <BarraInferior actual={destino} onCambiar={setDestino} /> : null}
+      {tarea === null && devolucionDe === null && pendienteDe === null && corregirDe === null && corregirHecho === null && !pendientes && prevision === null && !hojaTipos && !(destino === 'MAS' && inmersivaMas) && !(destino === 'DIA' && inmersivaDia) && !(destino === 'PATRIMONIO' && inmersivaPat) ? <BarraInferior actual={destino} onCambiar={setDestino} /> : null}
     </View>
   );
 }

@@ -41,6 +41,10 @@
 # Version: 0.2.0 (F05-D052 paso 2; F05 §66.A): comando nuevo C03_gasto_reembolsable
 #   (POST /v1/intenciones/gasto-reembolsable: writer de actor + OP-22) en el barrido,
 #   con una empresa sin actor (el alta perezosa va dentro de la transaccion).
+# Version: 0.3.0 (F06-01 B1 Propiedad, lote 12; PR1-01, CC-R1-07): las cuatro rutas POST
+#   de B1 (alta con cotitular sin actor, editar, titularidad con cotitular nuevo y
+#   valoracion) entran en el barrido: son multirregistro (actor + entidad + subtipo +
+#   participaciones o valoracion + auditoria) y el inventario cerrado las exige.
 # ============================================================
 
 from __future__ import annotations
@@ -55,6 +59,7 @@ import f05_06_m2_helpers as m2
 import f05_06_m3_helpers as r3
 import f05_06_m5_helpers as m5
 import f05_d052_c03_helpers as c03
+import f06_01_b1_helpers as b1
 import vs01_api_helpers as h
 
 #: Tope de puntos de inyeccion por comando (defensa contra un bucle sin fin).
@@ -248,6 +253,37 @@ def p_m4_capacidad_activar(t):
     return f"/v1/cuentas/{cuenta}/capacidades/RECIBIR_INGRESO/activar", {"row_version": rv}
 
 
+# F06-01 B1 ······································································
+def p_b1_alta_propiedad(t):
+    owner, actor, cli, cta, ahorro = t
+    cotitular = b1.tercero(cli, "Elena Cotitular")  # sin actor: el writer de actores va dentro
+    return "/v1/propiedades", b1.alta(b1.compartida([b1.yo("50"), b1.de(cotitular, "50")]))
+
+
+def _propiedad(t):
+    owner, actor, cli, cta, ahorro = t
+    return b1.crear(cli, b1.alta())
+
+
+def p_b1_editar_propiedad(t):
+    prop = _propiedad(t)
+    return f"/v1/propiedades/{prop['id']}/editar", {"intencion_id": _iid(), "row_version_esperada": prop["row_version"],
+                                                    "nombre": "Piso Gran Vía 2", "habitaciones": 3}
+
+
+def p_b1_titularidad(t):
+    owner, actor, cli, cta, ahorro = t
+    prop = _propiedad(t)
+    cotitular = b1.tercero(cli, "Marta Cotitular")  # sin actor: el writer de actores va dentro
+    return f"/v1/propiedades/{prop['id']}/titularidad", b1.cambio(
+        prop, b1.compartida([b1.yo("60"), b1.de(cotitular, "40")], desde="2026-11-01"))
+
+
+def p_b1_valoracion(t):
+    prop = _propiedad(t)
+    return f"/v1/propiedades/{prop['id']}/valoraciones", b1.valoracion(prop)
+
+
 # M5 ·············································································
 def p_m5_vincular(t):
     owner, actor, cli, cta, ahorro = t
@@ -388,6 +424,10 @@ COMANDOS = {
     "M1_corregir_transferencia": ("/v1/transferencias/{hecho_id}/corregir", p_m1_corregir_transferencia),
     "M1_anular_duplicado": ("/v1/hechos/{hecho_id}/anular-duplicado", p_m1_anular_duplicado),
     "M1_corregir_categoria_v3": ("/v1/hechos/{hecho_id}/corregir-categoria", p_m1_corregir_categoria_v3),
+    "B1_alta_propiedad": ("/v1/propiedades", p_b1_alta_propiedad),
+    "B1_editar_propiedad": ("/v1/propiedades/{propiedad_id}/editar", p_b1_editar_propiedad),
+    "B1_titularidad": ("/v1/propiedades/{propiedad_id}/titularidad", p_b1_titularidad),
+    "B1_valoracion": ("/v1/propiedades/{propiedad_id}/valoraciones", p_b1_valoracion),
 }
 
 #: Comandos multirregistro F05-06 cubiertos por la misma frontera que otro del
