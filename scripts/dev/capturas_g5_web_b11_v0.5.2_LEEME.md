@@ -1,16 +1,31 @@
-# capturas_g5_web_b11_v0.5.1.py — herramienta de capturas G5 (oscuro + Dynamic Type emulado)
+# capturas_g5_web_b11_v0.5.2.py — herramienta de capturas G5 (oscuro + Dynamic Type emulado)
 
-GAPTO MOBILE 2027 · F06-M1 Tokens, V1 con anillo (F06-D003) · dictamen PT-06 y PT-07 del 2026-11-05 · rigor N1 (D-181).
+GAPTO MOBILE 2027 · F06-M1 Tokens, V1 con anillo (F06-D003) · dictamen PT-06 y PT-07 del 2026-11-05 · rigor N1 (D-181). Versión 0.5.2 del 2026-11-06 (F06 MANT-TOKENS-RUTAS).
+
+## 0. Cambio de 0.5.1 a 0.5.2
+- **Motivo:** la 0.5.1 llevaba rutas absolutas de la máquina y rompía `tests/migration/test_rv3_000_repo_sin_datos_v3.py::test_sin_secretos_ni_rutas_locales_en_texto[ruta_absoluta_windows]` en `d12ea3b` (errata `ERRATA_F06-M1-TOKENS`).
+- **0.5.1 (sustituida):** 64686 bytes, SHA-256 `fa5df9eb25374b0e8882d9d0bcc99cdd53a4a02c8fa835a5661846f49d7f87f9`. Es la versión con la que se tomaron las 182 capturas de Tokens; esa evidencia no cambia. Sale del árbol porque `test_rv3_000` recorre todo el repositorio, pero se recupera byte a byte con `git show d12ea3b:scripts/dev/capturas_g5_web_b11_v0.5.1.py` (y su LEEME con `git show d12ea3b:scripts/dev/capturas_g5_web_b11_v0.5.1_LEEME.md`).
+- **Qué cambia:** la cabecera; `import os`; el import de `e2e_vs01` (de `scripts/dev/` o de `GAPTO_CAPTURAS_E2E_DIR`); y los valores por defecto de `--dist`, `--token-fichero`, `--pantallas` y `--salida`. `--token-fichero` pasa a ser obligatorio cuando no hay variable. Recetas, detector, variantes, estados, nombres de fichero y JSON no cambian.
+
+| Parámetro | Variable de entorno | Valor por defecto |
+|---|---|---|
+| `--dist` | `GAPTO_CAPTURAS_DIST` | `<repo>/mobile/dist` |
+| `--token-fichero` | `GAPTO_CAPTURAS_TOKEN_FICHERO` | ninguno (obligatorio; el token no vive en el repositorio) |
+| `--pantallas` | `GAPTO_CAPTURAS_PANTALLAS` | `scripts/dev/capturas_g5_PANTALLAS_51.json` |
+| `--salida` | `GAPTO_CAPTURAS_SALIDA` | `<padre del repo>/evidencia_capturas_g5/web` (fuera del repositorio) |
+| import de `e2e_vs01` | `GAPTO_CAPTURAS_E2E_DIR` | el directorio del script (`scripts/dev/`) |
+
+El resto de este LEEME es el de 0.5.1, con las rutas de origen ya sin la unidad de la máquina.
 
 **EVIDENCIA WEB/VIEWPORT — NO EVIDENCIA iOS. El Dynamic Type es EMULADO y no acredita Dynamic Type nativo.**
 
 ## 1. Qué se incorpora y por qué así
 | Fichero | Bytes | SHA-256 | Nota |
 |---|---|---|---|
-| `scripts/dev/capturas_g5_web_b11_v0.5.1.py` | 64686 | `fa5df9eb25374b0e8882d9d0bcc99cdd53a4a02c8fa835a5661846f49d7f87f9` | copia **byte a byte** de la herramienta congelada (PT-06.1). No se edita: cualquier cambio exige versión nueva con su SHA |
-| `scripts/dev/capturas_g5_PANTALLAS_51.json` | 5207 | `5918bc390369ab3aa5485962eeb418a3297e9b2c09dd739c3b46f36b43fe7640` | inventario congelado de las 51 pantallas G5 (origen `C:\DEV\evidencia_f0507_g15\pre_final\PANTALLAS_51.json`) |
+| `scripts/dev/capturas_g5_web_b11_v0.5.2.py` | 66021 | `8d93be60b02556fa7052463c02704d42000d1a1c263d4e9fd1e2e4e4643e9c0c` | herramienta congelada 0.5.2 (§0). No se edita: cualquier cambio exige versión nueva con su SHA |
+| `scripts/dev/capturas_g5_PANTALLAS_51.json` | 5207 | `5918bc390369ab3aa5485962eeb418a3297e9b2c09dd739c3b46f36b43fe7640` | inventario congelado de las 51 pantallas G5 (origen `evidencia_f0507_g15/pre_final/PANTALLAS_51.json`, fuera del repositorio) |
 
-La cabecera congelada de la herramienta conserva las rutas de origen (fuera del repositorio) para no cambiar su SHA. Por eso su cabecera GAPTO dice `Ruta: C:\DEV\evidencia_f0507_g15\...` y este LEEME fija la ruta real en el repositorio.
+En 0.5.1 la cabecera congelada conservaba las rutas de origen para no cambiar su SHA. En 0.5.2 la cabecera GAPTO ya da la ruta real en el repositorio.
 
 ## 2. Comparación con la versión de origen (PT-06.2 y PT-06.3)
 - **Origen:** `capturas_g5_web.py` 0.5.0 de G5, SHA-256 `0346007b10c5f42f9f46c497a0a8438fb0b2db6c53def021c726f60ef8823e1f`.
@@ -27,12 +42,12 @@ La cabecera congelada de la herramienta conserva las rutas de origen (fuera del 
 |---|---|
 | Python | 3.13.4 |
 | Playwright (pip) | 1.63.0, con Chromium 153.0.8010.12 (`pw.chromium.launch()`, sin cabeza) |
-| `e2e_vs01.py` | `LAYOUT_JS`, `fallos_layout`, `ELIPSIS_AUTORIZADA` y `servidor_web`. El import fijo apunta a `C:\DEV\wt_v25_mpg\scripts\dev` (d11bc78); ese fichero es idéntico al de `scripts/dev/e2e_vs01.py` de este repositorio (SHA-256 `b131adbb0d6b3ebf2d71a2d299c8feb2d30d4db6a203e91fcebb394a25ed3c25`) |
+| `e2e_vs01.py` | `LAYOUT_JS`, `fallos_layout`, `ELIPSIS_AUTORIZADA` y `servidor_web`. En 0.5.1 el import fijo apuntaba al worktree `wt_v25_mpg` (d11bc78); en 0.5.2 se importa de `scripts/dev/` del propio repositorio. Ese fichero es idéntico al de `scripts/dev/e2e_vs01.py` de este repositorio (SHA-256 `b131adbb0d6b3ebf2d71a2d299c8feb2d30d4db6a203e91fcebb394a25ed3c25`) |
 | Viewport | 393 × 852 CSS px, `device_scale_factor=3`, `locale="es-ES"`, `timezone_id="Europe/Madrid"` |
 | Variantes | `claro` (light), `oscuro` (dark), `dt` (light + DT ×1,35) y `oscuro_dt` (dark + DT ×1,35), con `FACTOR_DT = 1.35` |
 | Tiempos | timeout por defecto de 10 s; 30 s para esperar Inicio |
 | Puertos por defecto | API 5468, web 5469 |
-| Argumentos que se pasan siempre en el gate | `--dist`, `--token-fichero`, `--pantallas`, `--salida`, `--variantes claro,oscuro,dt,oscuro_dt` y `--json` (los valores por defecto apuntan a rutas de G5 fuera del repositorio) |
+| Argumentos que se pasan siempre en el gate | `--dist`, `--token-fichero`, `--pantallas`, `--salida`, `--variantes claro,oscuro,dt,oscuro_dt` y `--json` (en 0.5.1 los valores por defecto apuntaban a rutas de G5 fuera del repositorio; en 0.5.2, ver §0) |
 
 ## 4. Un fallo nunca es PASS (PT-06.5)
 La herramienta no tiene ningún estado PASS. Estados posibles por fila y variante:

@@ -1,23 +1,28 @@
-# HERRAMIENTA CONGELADA — variante B11 (oscuro + Dynamic Type emulado) de capturas_g5_web.py — F06-M1 Noche 1104
-# Version congelada: 0.5.1-B11 (2026-11-04). Base: capturas_g5_web.py 0.5.0 de G5
-#   (C:\DEV\evidencia_f0507_g15\pre_final\web, SHA-256 0346007b10c5f42f9f46c497a0a8438fb0b2db6c53def021c726f60ef8823e1f).
-# Origen inmediato: copia de L3-1 capturas_g5_web_oscuro_dt.py
-#   (SHA-256 b7478eae86f684b11eeff145c67b5a5294c61c0555c4e2c6b020be0627cabeb9), cuyo unico cambio sobre 0.5.0 es B11:
-#   variante «oscuro_dt» = color_scheme dark + DT_JS (x1.35). El codigo de este fichero es BYTE A BYTE el de esa copia
-#   desde la linea de cabecera «# ====» en adelante; solo cambia este bloque de cabecera.
+# HERRAMIENTA CONGELADA — variante B11 (oscuro + Dynamic Type emulado) de capturas_g5_web.py — F06-M1
+# Version congelada: 0.5.2-B11 (2026-11-06, MANT-TOKENS-RUTAS). Sustituye a 0.5.1-B11
+#   (SHA-256 fa5df9eb25374b0e8882d9d0bcc99cdd53a4a02c8fa835a5661846f49d7f87f9, publicada en d12ea3b y
+#   recuperable con `git show d12ea3b:scripts/dev/capturas_g5_web_b11_v0.5.1.py`), que es la version con la que
+#   se tomaron las 182 capturas de Tokens; su evidencia no cambia.
+# Unico cambio sobre 0.5.1: sin rutas absolutas de la maquina. Las rutas llegan por argumento o por variable de
+#   entorno, con valor por defecto relativo al repositorio (ver main y el LEEME). Recetas, detector, variantes,
+#   estados, nombres de fichero y JSON de salida no cambian.
+# Congelada = no se edita: cualquier cambio exige nueva version con su SHA. Depende de scripts/dev/e2e_vs01.py
+#   (LAYOUT_JS, fallos_layout, ELIPSIS_AUTORIZADA, servidor_web) y de Playwright. No sustituye a la herramienta de G5.
+# PRUEBA WEB — NO EVIDENCIA iOS; el DT emulado no acredita Dynamic Type nativo.
+# ====» en adelante; solo cambia este bloque de cabecera.
 # Congelada = no se edita: cualquier cambio exige nueva version con su SHA. Depende de wt_v25_mpg\scripts\dev\e2e_vs01.py
 #   (LAYOUT_JS, fallos_layout, ELIPSIS_AUTORIZADA, servidor_web) y de Playwright. No sustituye a la herramienta de G5.
 # PRUEBA WEB — NO EVIDENCIA iOS; el DT emulado no acredita Dynamic Type nativo.
 # ============================================================
 # GAPTO MOBILE 2027
-# Fichero: capturas_g5_web.py
-# Ruta: C:\DEV\evidencia_f0507_g15\pre_final\web\capturas_g5_web.py (FUERA del repositorio)
+# Fichero: capturas_g5_web_b11_v0.5.2.py
+# Ruta: scripts/dev/capturas_g5_web_b11_v0.5.2.py
 # Descripcion: PRUEBA WEB de las 51 pantallas G5 (PANTALLAS_51.json) en tres
 #   variantes: CLARO (color_scheme='light'), OSCURO (color_scheme='dark') y
 #   Dynamic Type GRANDE EMULADO (x1.35 de font-size y line-height por script
 #   inyectado; claro). La emulacion NO acredita Dynamic Type nativo.
 #   Detector por captura: LAYOUT_JS / fallos_layout / ELIPSIS_AUTORIZADA de
-#   wt_v25_mpg/scripts/dev/e2e_vs01.py (reutilizados SIN copiar) + objetivos
+#   scripts/dev/e2e_vs01.py (reutilizados SIN copiar) + objetivos
 #   tactiles < 44x44 px CSS, texto con elipsis o recortado y SOLAPAMIENTOS
 #   (interseccion de cajas de texto/controles visibles sin relacion de
 #   ancestro). Cada captura acredita el contenido alcanzado (testID esperado
@@ -47,6 +52,10 @@
 #   /v1/hechos/{id}/devoluciones (disponible); G5-30 «Más» solo si existe (una
 #   prevision abierta no lo tiene); G5-31 acredita el fondo con el primer testID
 #   visible; G5-40 acepta cualquiera de las dos hojas de deshabilitar)
+# Version: 0.5.1-B11 (F06-M1 Tokens, 2026-11-04): variante oscuro_dt (ver LEEME)
+# Version: 0.5.2-B11 (F06 MANT-TOKENS-RUTAS, 2026-11-06): sin rutas absolutas;
+#   --dist, --token-fichero, --pantallas y --salida por argumento o variable
+#   GAPTO_CAPTURAS_*; e2e_vs01 desde este mismo directorio o GAPTO_CAPTURAS_E2E_DIR
 # ============================================================
 
 from __future__ import annotations
@@ -54,6 +63,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import pathlib
 import re
 import sys
@@ -64,7 +74,9 @@ import urllib.parse
 import urllib.request
 
 sys.dont_write_bytecode = True  # el worktree es SOLO LECTURA: sin __pycache__
-sys.path.insert(0, r"C:\DEV\wt_v25_mpg\scripts\dev")
+DIR_SCRIPT = pathlib.Path(__file__).resolve().parent
+REPO = DIR_SCRIPT.parents[1]
+sys.path.insert(0, os.environ.get("GAPTO_CAPTURAS_E2E_DIR") or str(DIR_SCRIPT))
 from e2e_vs01 import ELIPSIS_AUTORIZADA, LAYOUT_JS, fallos_layout, servidor_web  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
 
@@ -1191,15 +1203,22 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--web", default="http://127.0.0.1:5469")
     ap.add_argument("--api", default="http://127.0.0.1:5468")
-    ap.add_argument("--dist", default=r"C:\DEV\f0507g1\dist_d056_v25")
-    ap.add_argument("--token-fichero", default=r"C:\DEV\f0507g1\token_e2e.txt")
-    ap.add_argument("--pantallas", default=r"C:\DEV\evidencia_f0507_g15\pre_final\PANTALLAS_51.json")
-    ap.add_argument("--salida", default=r"C:\DEV\evidencia_f0507_g15\pre_final\web")
+    # sin rutas de la maquina: argumento > variable GAPTO_CAPTURAS_* > defecto relativo al repositorio
+    ap.add_argument("--dist", default=os.environ.get("GAPTO_CAPTURAS_DIST") or str(REPO / "mobile" / "dist"))
+    # el token no vive en el repositorio: sin defecto
+    ap.add_argument("--token-fichero", default=os.environ.get("GAPTO_CAPTURAS_TOKEN_FICHERO"))
+    ap.add_argument("--pantallas", default=os.environ.get("GAPTO_CAPTURAS_PANTALLAS")
+                    or str(DIR_SCRIPT / "capturas_g5_PANTALLAS_51.json"))
+    # la salida (PNG y export con token) queda FUERA del repositorio, junto a el
+    ap.add_argument("--salida", default=os.environ.get("GAPTO_CAPTURAS_SALIDA")
+                    or str(REPO.parent / "evidencia_capturas_g5" / "web"))
     ap.add_argument("--variantes", default="claro,oscuro,dt")
     ap.add_argument("--filas", default="", help="lista de filas (vacio = todas)")
     ap.add_argument("--owner-vacio", action="store_true", help="la API corre con el owner g5-vacio: solo G5-41")
     ap.add_argument("--json", default="detector.json")
     a = ap.parse_args()
+    if not a.token_fichero:
+        ap.error("falta --token-fichero (o GAPTO_CAPTURAS_TOKEN_FICHERO)")
     salida = pathlib.Path(a.salida)
     salida.mkdir(parents=True, exist_ok=True)
     pantallas = json.loads(pathlib.Path(a.pantallas).read_text(encoding="utf-8"))
