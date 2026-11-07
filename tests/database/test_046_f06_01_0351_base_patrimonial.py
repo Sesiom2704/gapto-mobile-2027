@@ -15,7 +15,7 @@
 #
 #              NEGATIVOS (L5-5 ampliado). Cada caso en un SAVEPOINT de una
 #              transacción que SIEMPRE termina en ROLLBACK, con datos
-#              sintéticos creados por el superusuario del laboratorio:
+#              sintéticos creados como gapto_owner con la GUC de tenant:
 #              VALOR_ACTIVO sin causa, GASTO con causa, causa fuera del dominio;
 #              repercutible sin modo, FIJO sin porcentaje, POR_FACTURA CON
 #              porcentaje (ahora rechazado), POR_FACTURA sin actor, modo fuera
@@ -46,6 +46,13 @@
 #              DISCRIMINACIÓN CONTRA 0350 (WM 12C.2). Sobre head 0350 fallan la
 #              huella, el contrato, los negativos que dependen de columnas nuevas
 #              y la denegación de DELETE.
+# Versión: 0.4.0  -- F06 MANT-TEST046-SETROLE (lote 14; R-L13-02): el
+#                   fixture escenario crea sus datos y el test los usa bajo
+#                   SET LOCAL ROLE gapto_owner con la GUC de tenant fijada,
+#                   en la misma transacción revertida, en lugar de con la
+#                   identidad de conexión. En Supabase esa identidad no es
+#                   superusuaria ni tiene INSERT sobre gapto (C8, paso F:
+#                   30 errores de setup). Aserciones sin cambios.
 # Versión: 0.3.0  -- F06-01 B0 N1 (LOTE9 C2; dictamen de reconsulta RB0-10,
 #                   N1-E): negativos permanentes de los prechecks de datos Q2
 #                   (VALOR_ACTIVO previo) y Q3 (residuo de repercusión) y su
@@ -216,10 +223,15 @@ def test_0351_acl_completo_de_las_siete(db: psycopg.Connection) -> None:
 # ------------------------------------------------------------------ negativos
 @pytest.fixture
 def escenario(db: psycopg.Connection):
-    """Datos sintéticos en una transacción que siempre se revierte."""
+    """Datos sintéticos en una transacción que siempre se revierte. Se crean
+    y se usan como gapto_owner con la GUC de tenant fijada (convención del
+    repositorio): la identidad de conexión de Neon o Supabase no es
+    superusuaria. El rol dura hasta el ROLLBACK de la transacción."""
     owner, actor = uuid.uuid4(), uuid.uuid4()
     ids = {k: uuid.uuid4() for k in ("prop", "serv", "con_viv", "con_hab", "hecho")}
     with db.transaction(force_rollback=True):
+        db.execute("SELECT set_config('gapto.owner_user_id', %s, true)", (str(owner),))
+        db.execute("SET LOCAL ROLE gapto_owner")
         db.execute("INSERT INTO gapto.usuarios (id, email, nombre) VALUES (%s, %s, '0351')",
                    (owner, f"{owner}@example.invalid"))
         db.execute("INSERT INTO gapto.actores_financieros (id, owner_user_id) VALUES (%s, %s)", (actor, owner))
@@ -372,10 +384,10 @@ def test_0351_precheck_datos_residuo_repercusion(escenario) -> None:
     with pytest.raises(psycopg.errors.RaiseException) as excinfo:
         with db.transaction(force_rollback=True):
             # El CHECK es de gapto_owner: sin superusuario (Neon, Supabase,
-            # D-189) solo su propietario puede retirarlo.
+            # D-189) solo su propietario puede retirarlo. El fixture ya deja
+            # la transacción como gapto_owner, que también siembra el servicio.
             db.execute("SET LOCAL ROLE gapto_owner")
             db.execute("ALTER TABLE gapto.contrato_servicios DROP CONSTRAINT ck_contrato_servicios__repercusion_coherente")
-            db.execute("RESET ROLE")
             db.execute(SERVICIO, (ids["con_viv"], ids["serv"], False, actor, None, None))
             db.execute("SET CONSTRAINTS ALL IMMEDIATE")
             n = _recuento(db, RESIDUO_REPERCUSION)
