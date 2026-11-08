@@ -8,6 +8,10 @@
 #   transiciones inversas de `estado_atribucion` son legitimas: no son una
 #   perdida posterior de conocimiento, son la constatacion de que lo que se
 #   creia saber era falso. OP-05 conserva su progresion ordinaria.
+# Version: 0.4.0
+#   0.4.0 (F04-D071, MANT de OP-21, R-L12-01; AJ-MOP21-04): test_r11 exige el
+#   codigo exacto CORRECCION_DEJA_HECHO_SIN_EFECTOS (antes aceptaba cualquier
+#   ErrorMotor y pasaba por la FK RESTRICT).
 # Version: 0.3.0
 #   0.3.0 (mandato F04 R1+R2 v0.3 + E01): OP-04 aporta `presupuestable` en la
 #   transicion al primer GASTO/INGRESO (A08-bis generalizada); fixtures de
@@ -474,13 +478,17 @@ def test_r10_cambiar_de_actor_por_update_no_esta_soportado(
 def test_r11_fallo_tardio_deshace_efecto_atribuciones_y_auditoria(
     servicio, servicio_efectos, servicio_correcciones, contexto, actor_a, actor_b, admin
 ) -> None:
-    """La correccion cuadra el reparto pero deja el hecho sin efectos: cae todo."""
+    """La correccion cuadra el reparto pero deja el hecho sin efectos: cae todo.
+
+    R-L12-01: el rechazo tiene que venir de la guarda de estado final D-187,
+    no de la FK RESTRICT de las atribuciones (con el orden anterior pasaba por
+    la FK y el oraculo generico no lo distinguia)."""
     a = _atribucion(actor_a, MITAD)
     b = _atribucion(actor_b, MITAD)
     hecho_id, efecto_id, version = _cena(
         servicio, servicio_efectos, contexto, [a, b], "COMPLETA"
     )
-    with pytest.raises(ErrorMotor):
+    with pytest.raises(ErrorMotor) as excepcion:
         servicio_correcciones.corregir(
             contexto,
             DatosCorreccion(
@@ -491,6 +499,7 @@ def test_r11_fallo_tardio_deshace_efecto_atribuciones_y_auditoria(
                 efectos_a_eliminar=(efecto_id,),
             ),
         )
+    assert excepcion.value.codigo is CodigoError.CORRECCION_DEJA_HECHO_SIN_EFECTOS
     assert _reparto(admin, contexto, efecto_id) == (2, TOTAL)
     assert leer_fila(
         admin,

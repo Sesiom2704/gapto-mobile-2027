@@ -33,6 +33,17 @@
 #   D-080 · ADVISORY PRIMERO. Si la correccion toca superficies de inversion,
 #   el advisory (INVERSIONES, owner) se toma ANTES de cualquier row lock. Los
 #   locks genericos no lo sustituyen.
+# Version: 0.17.0
+#   0.17.0 (F04-D071, MANT de OP-21: R-L12-01 y R-L17-01 opcion A; dictamen
+#   de diseno MANT OP-21 del 2026-11-07, AJ-MOP21-01..10): las atribuciones
+#   (3a) y los vinculos de hecho_entidades de NIVEL EFECTO (3b) que la
+#   correccion retira salen ANTES que sus efectos. fk_efecto_atribuciones__efecto
+#   y fk_hecho_entidades__hecho_efecto son RESTRICT y no diferibles: con el
+#   orden anterior, retirar en la misma correccion un efecto y su reparto o su
+#   vinculo se rechazaba con 23503 aunque el estado final fuera valido. Altas y
+#   cambios siguen despues de crear los efectos; las listas de retirada del
+#   llamante no cambian (sin borrado implicito). Comentario 3bis corregido de
+#   forma prospectiva.
 # Version: 0.16.0
 #   0.16.0 (F06-01 B0 N1, LOTE9 C2; dictamen de reconsulta RB0-01, RB0-06,
 #   N1-F): la regla de conversion logica queda documentada como CONTRATO
@@ -541,6 +552,19 @@ class CorreccionesService:
             # 3. Las aportaciones se retiran ANTES que su conciliacion: al
             #    reves quedarian apuntando al vacio (D-169).
             conciliaciones = self._eliminar_conciliaciones(sesion, datos)
+            # 3a. R-L12-01. Las atribuciones que esta correccion retira salen
+            #     ANTES que sus efectos: fk_efecto_atribuciones__efecto es
+            #     RESTRICT y no diferible, y se comprueba en el propio DELETE
+            #     del efecto. Solo se retiran las listadas por el llamante; un
+            #     efecto retirado con atribuciones no listadas sigue cayendo en
+            #     la FK (no hay borrado en cascada implicito).
+            atribuciones_eliminadas = self._eliminar_atribuciones(sesion, datos)
+            # 3b. R-L17-01 (opcion A, decision de Moises del 2026-11-08). Lo
+            #     mismo para los vinculos contextuales de hecho_entidades de
+            #     NIVEL EFECTO que esta correccion retira:
+            #     fk_hecho_entidades__hecho_efecto es RESTRICT y no diferible.
+            #     Las bajas de nivel hecho y todas las altas siguen en 3ter.
+            vinculos_de_efecto = self._eliminar_vinculos_de_efecto(sesion, datos)
             eliminados = self._eliminar_efectos(sesion, datos)
             relaciones = self._eliminar_relaciones(sesion, datos)
             creados = self._crear_efectos(sesion, datos)
@@ -549,19 +573,20 @@ class CorreccionesService:
             if arquetipo == ARQUETIPO_CONDONACION:
                 exigir_estado_final_condonacion(sesion, datos.hecho_id)
 
-            # 3bis. F04-D039. Las atribuciones se mutan DESPUES de los efectos
-            #     para que un CREATE pueda colgar de un efecto de reemplazo
-            #     instalado en esta misma transaccion. El orden interno no
-            #     importa para la validez: las constraints diferidas juzgan el
-            #     estado final, y por eso se puede pasar por situaciones
-            #     transitoriamente descuadradas sin confirmarlas.
-            atribuciones_eliminadas = self._eliminar_atribuciones(sesion, datos)
+            # 3bis. F04-D039. Los cambios y las altas de atribuciones van
+            #     DESPUES de los efectos para que un CREATE pueda colgar de un
+            #     efecto de reemplazo instalado en esta misma transaccion. Las
+            #     constraints DIFERIDAS juzgan el estado final y toleran
+            #     situaciones transitoriamente descuadradas; las FK RESTRICT
+            #     inmediatas NO: imponen orden (bajas de hijas antes que el
+            #     padre, 3a y 3b; altas de hijas despues del padre, aqui).
             atribuciones_actualizadas = self._actualizar_atribuciones(sesion, datos)
             atribuciones_creadas = self._crear_atribuciones(sesion, datos)
 
             # 3ter. F04-D048 R3 · A18. Dimensiones contextuales: bajas y
-            #     cambios primero, altas de reemplazo despues.
-            self._corregir_contexto(sesion, owner, datos)
+            #     cambios primero, altas de reemplazo despues. Los vinculos de
+            #     nivel efecto ya retirados en 3b no se repiten.
+            self._corregir_contexto(sesion, owner, datos, ya_retirados=vinculos_de_efecto)
 
             # 4. Revalidacion cruzada con OP-13: retirar o reducir un
             #    efecto puede dejar la capacidad reversible por debajo de lo
@@ -737,65 +762,110 @@ class CorreccionesService:
                 "pero no se conoce, es DESCONOCIDA (corregible con OP-02).",
             )
 
+    @staticmethod
+    def _fila_contextual_propia(
+        sesion: SesionMotor, datos: DatosCorreccion, tabla: str, registro_id: uuid.UUID
+    ) -> tuple[dict[str, Any], str]:
+        leida = repo_ctx.leer_registro(sesion, tabla, registro_id)
+        if leida is None:
+            raise ErrorMotor(
+                CodigoError.AGREGADO_NO_ENCONTRADO,
+                "La fila contextual indicada no existe o no es accesible.",
+            )
+        if str(leida[0]["hecho_id"]) != str(datos.hecho_id):
+            raise ErrorMotor(
+                CodigoError.ENTRADA_INVALIDA,
+                "La fila contextual no pertenece a este hecho.",
+            )
+        return leida
+
+    @staticmethod
+    def _baja_contextual(
+        sesion: SesionMotor, datos: DatosCorreccion, tabla: str, registro_id: uuid.UUID, borrar: Any
+    ) -> None:
+        snapshot = borrar(sesion, registro_id)
+        if snapshot is None:  # pragma: no cover - leida justo antes
+            raise ErrorMotor(
+                CodigoError.AGREGADO_NO_ENCONTRADO,
+                "La fila contextual ya no existe.",
+            )
+        auditoria.registrar(
+            sesion,
+            tabla=tabla,
+            registro_id=registro_id,
+            accion=auditoria.ACCION_ANULAR,
+            datos_antes_json=snapshot,
+            motivo=datos.motivo,
+        )
+
+    def _retirar_vinculo_entidad(
+        self, sesion: SesionMotor, datos: DatosCorreccion, registro_id: uuid.UUID
+    ) -> None:
+        fila, _ = self._fila_contextual_propia(sesion, datos, repo_ctx.TABLA_ENTIDADES, registro_id)
+        if fila["tipo_relacion"] not in RELACIONES_CONTEXTUALES:
+            raise ErrorMotor(
+                CodigoError.ENTRADA_INVALIDA,
+                "Solo se corrigen aqui vinculos contextuales: "
+                f"{fila['tipo_relacion']} pertenece a su operacion propietaria.",
+            )
+        entidad = repo_ctx.leer_entidad(sesion, fila["entidad_id"])
+        if (
+            entidad is not None
+            and entidad["tipo_entidad"] == TIPO_ENTIDAD_INVERSION
+            and (fila["efecto_id"] is not None or fila["principal"])
+        ):
+            raise ErrorMotor(
+                CodigoError.OWNERSHIP_F07,
+                "Ese vinculo de inversion puede contar para D-080: su "
+                "correccion pertenece a F07.",
+            )
+        self._baja_contextual(
+            sesion, datos, repo_ctx.TABLA_ENTIDADES, registro_id, repo_ctx.eliminar_entidad
+        )
+
+    def _eliminar_vinculos_de_efecto(
+        self, sesion: SesionMotor, datos: DatosCorreccion
+    ) -> frozenset[uuid.UUID]:
+        """R-L17-01 (opcion A). Retira, ANTES de los efectos, los vinculos de
+        `entidades_a_eliminar` que cuelgan de un efecto (efecto_id no NULL),
+        con las mismas guardas que el paso 3ter. Los de nivel hecho y los que
+        no se pueden leer se dejan al paso 3ter, que conserva sus errores."""
+        retirados: set[uuid.UUID] = set()
+        for registro_id in datos.entidades_a_eliminar:
+            leida = repo_ctx.leer_registro(sesion, repo_ctx.TABLA_ENTIDADES, registro_id)
+            if leida is None or leida[0]["efecto_id"] is None:
+                continue
+            self._retirar_vinculo_entidad(sesion, datos, registro_id)
+            retirados.add(registro_id)
+        return frozenset(retirados)
+
     def _corregir_contexto(
-        self, sesion: SesionMotor, owner: uuid.UUID, datos: DatosCorreccion
+        self,
+        sesion: SesionMotor,
+        owner: uuid.UUID,
+        datos: DatosCorreccion,
+        ya_retirados: frozenset[uuid.UUID] = frozenset(),
     ) -> None:
         if not datos.toca_contexto:
             return
 
         def _fila_propia(tabla: str, registro_id: uuid.UUID) -> tuple[dict[str, Any], str]:
-            leida = repo_ctx.leer_registro(sesion, tabla, registro_id)
-            if leida is None:
-                raise ErrorMotor(
-                    CodigoError.AGREGADO_NO_ENCONTRADO,
-                    "La fila contextual indicada no existe o no es accesible.",
-                )
-            if str(leida[0]["hecho_id"]) != str(datos.hecho_id):
-                raise ErrorMotor(
-                    CodigoError.ENTRADA_INVALIDA,
-                    "La fila contextual no pertenece a este hecho.",
-                )
-            return leida
+            return self._fila_contextual_propia(sesion, datos, tabla, registro_id)
 
         def _baja(tabla: str, registro_id: uuid.UUID, borrar: Any) -> None:
-            snapshot = borrar(sesion, registro_id)
-            if snapshot is None:  # pragma: no cover - leida justo antes
-                raise ErrorMotor(
-                    CodigoError.AGREGADO_NO_ENCONTRADO,
-                    "La fila contextual ya no existe.",
-                )
-            auditoria.registrar(
-                sesion,
-                tabla=tabla,
-                registro_id=registro_id,
-                accion=auditoria.ACCION_ANULAR,
-                datos_antes_json=snapshot,
-                motivo=datos.motivo,
-            )
+            self._baja_contextual(sesion, datos, tabla, registro_id, borrar)
 
         for registro_id in datos.terceros_a_eliminar:
             _fila_propia(repo_ctx.TABLA_TERCEROS, registro_id)
             _baja(repo_ctx.TABLA_TERCEROS, registro_id, repo_ctx.eliminar_tercero)
+        # Solo se salta la PRIMERA aparicion de cada vinculo ya retirado en 3b:
+        # un id repetido sigue fallando como antes (AGREGADO_NO_ENCONTRADO).
+        pendientes_3b = set(ya_retirados)
         for registro_id in datos.entidades_a_eliminar:
-            fila, _ = _fila_propia(repo_ctx.TABLA_ENTIDADES, registro_id)
-            if fila["tipo_relacion"] not in RELACIONES_CONTEXTUALES:
-                raise ErrorMotor(
-                    CodigoError.ENTRADA_INVALIDA,
-                    "Solo se corrigen aqui vinculos contextuales: "
-                    f"{fila['tipo_relacion']} pertenece a su operacion propietaria.",
-                )
-            entidad = repo_ctx.leer_entidad(sesion, fila["entidad_id"])
-            if (
-                entidad is not None
-                and entidad["tipo_entidad"] == TIPO_ENTIDAD_INVERSION
-                and (fila["efecto_id"] is not None or fila["principal"])
-            ):
-                raise ErrorMotor(
-                    CodigoError.OWNERSHIP_F07,
-                    "Ese vinculo de inversion puede contar para D-080: su "
-                    "correccion pertenece a F07.",
-                )
-            _baja(repo_ctx.TABLA_ENTIDADES, registro_id, repo_ctx.eliminar_entidad)
+            if registro_id in pendientes_3b:
+                pendientes_3b.discard(registro_id)
+                continue
+            self._retirar_vinculo_entidad(sesion, datos, registro_id)
         for registro_id in datos.magnitudes_a_eliminar:
             _fila_propia(repo_ctx.TABLA_MAGNITUDES, registro_id)
             _baja(repo_ctx.TABLA_MAGNITUDES, registro_id, repo_ctx.eliminar_magnitud)

@@ -19,6 +19,10 @@
 #   exigido; un unico veredicto por mutante.
 # Uso:
 #   GAPTO_TEST_DATABASE_URL=... python scripts/mutantes/f04_r3.py [R3-M1 ...]
+# Version: 0.1.1
+#   0.1.1 (F04-D071, MANT de OP-21): R3-M18 sigue el bloque de vinculos
+#   contextuales, que pasa a _retirar_vinculo_entidad (sangria de metodo).
+#   Mismo mutante y mismo discriminante.
 # Version: 0.1.0
 # ============================================================
 from __future__ import annotations
@@ -166,7 +170,7 @@ MUTANTES = (
               "    elif tipo not in TIPOS_ENTIDAD_CONTEXTO_LIBRE | {TIPO_ENTIDAD_POSICION}:\n")),
             "test_posicion_no_admite_vinculo_contextual"),
     Mutante("R3-M18", "OP-21 contextual no alcanza GENERADO_POR",
-            ((COR, "            if fila[\"tipo_relacion\"] not in RELACIONES_CONTEXTUALES:\n", "            if False:\n"),),
+            ((COR, "        if fila[\"tipo_relacion\"] not in RELACIONES_CONTEXTUALES:\n", "        if False:\n"),),
             "test_op21_no_toca_vinculos_generado_por"),
     Mutante("R3-M19", "Agregado parcial o distinto no se da por replay",
             ((CMP, "                if self._agregado_coincide(sesion, datos):\n", "                if True:\n"),),
