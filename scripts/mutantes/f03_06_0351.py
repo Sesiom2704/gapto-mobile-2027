@@ -54,6 +54,9 @@
 #   python scripts/mutantes/f03_06_0351.py --admin-dsn "host=127.0.0.1
 #     port=5460 user=postgres dbname=postgres" --plantilla-0340 lab_ref0340
 #     --plantilla-0350 lab_ref --diario /ruta/fuera [H1 S1 ...]
+# Version: 0.4.1  -- F04-D071 (MANT de OP-21): SHA aprobado de
+#                   correcciones_service.py 0.17.0. Las guardas de VALOR_ACTIVO
+#                   que mutan S1..S5 no cambian; solo el orden de retirada.
 # Version: 0.4.0  -- F06-01 B0 N1 (LOTE9 C2): Q2t y Q3t (N1-E), W8 como
 #                   discriminantes de B1a/B1b (RB0-06) y SHA aprobado de
 #                   correcciones_service.py 0.16.0 (solo documentacion, N1-F).
@@ -96,7 +99,7 @@ APROBADOS = {
     EFREPO: "f963b2c1b518bd44a7f07234f2ea48d1a16ca7f3693eb7b8baaa5dc59251c547",
     EFSERV: "62afe78ab2a054dfe2023731ff96fae50bcd4af378212d535f463c493e140b51",
     MODEF: "f6d4bbb69782b7638a4368f278cc5676f538336229ecae82cea1ee440cda9b26",
-    CORR: "e02a328d3d82f5d6197e7cfcc7eec02a4f22894c4f7f05c2f481d36659e4f270",
+    CORR: "a36d0629b4b7dbe7ec3d8535e04c3f608c5c5aa96c110358ebcc1066a7cab83e",
     P5F: "f7c138796e156a244ab763bea7e4f95432b1d77f0dc916850fdcd5770a628181",
     P5BF: "cccda3c7ed4a0461ebc3fa1927eaefe44715ac15d01e9c215f57f7000d46b7f9",
 }
