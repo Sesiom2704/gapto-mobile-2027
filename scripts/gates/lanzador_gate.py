@@ -43,6 +43,8 @@
 #   Codigos de salida: 0 VERDE, 1 ROJO, 2 INVALIDADA, 3 STOP_CERROJO, 4 error
 #   de preparacion (plan, copia o salida).
 # Version: 0.1.0 (F03 · N1 de 0352, Paso 0)
+# Version: 0.1.1 (Paso 0, prueba real 2): un plan ilegible sale con 4 (preparacion) y sin crear la salida; antes
+#   salia con traza y codigo 1, el mismo que ROJO.
 # ============================================================
 from __future__ import annotations
 
@@ -233,9 +235,14 @@ def main(argv: list[str]) -> int:
     if salida.exists() and any(salida.iterdir()):           # punto 7
         print(f"STOP: la salida {salida} ya existe con contenido; no se sobrescribe evidencia", file=sys.stderr)
         return 4
+    try:   # un plan ilegible es error de preparacion (4), nunca ROJO (1)
+        plan = json.loads(pathlib.Path(a.plan).read_text(encoding="utf-8"))
+        assert isinstance(plan.get("pasos"), list) and plan.get("repo") and plan.get("commit")
+    except Exception as exc:  # noqa: BLE001
+        print(f"STOP: plan ilegible o incompleto: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 4
     salida.mkdir(parents=True, exist_ok=True)
     reg = Registro(salida)
-    plan = json.loads(pathlib.Path(a.plan).read_text(encoding="utf-8"))
     (salida / "plan.json").write_text(json.dumps(plan, ensure_ascii=False, indent=1), encoding="utf-8")
     repo = pathlib.Path(plan["repo"]).resolve()
     commit = plan["commit"]
@@ -250,7 +257,7 @@ def main(argv: list[str]) -> int:
         reg.linea(f"VEREDICTO {veredicto} {resultado['fin']}")
         return codigo
 
-    reg.linea(f"lanzador_gate 0.1.0 inicio {resultado['inicio']} commit={commit}")
+    reg.linea(f"lanzador_gate 0.1.1 inicio {resultado['inicio']} commit={commit}")
     activos = cerrojo(repo, diarios)
     if activos:
         resultado["cerrojo"] = activos

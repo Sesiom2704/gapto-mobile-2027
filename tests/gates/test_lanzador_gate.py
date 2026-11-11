@@ -180,6 +180,14 @@ def test_evidencia_existente_no_se_sobrescribe(tmp_path):
     assert not (sal / "resultado.json").exists()
 
 
+def test_plan_ilegible_es_error_de_preparacion_no_rojo(tmp_path):
+    fplan = tmp_path / "plan_roto.json"
+    fplan.write_text('{"repo": "C:\\DEV\\x", "commit": "abc", "pasos": []}', encoding="utf-8")   # escape invalido
+    r = subprocess.run([sys.executable, str(LANZADOR), "--plan", str(fplan), "--salida", str(tmp_path / "salida")], capture_output=True, text=True)
+    assert r.returncode == 4 and "plan ilegible" in r.stderr
+    assert not (tmp_path / "salida").exists()
+
+
 def test_la_copia_es_el_commit_no_el_worktree(tmp_path):
     repo, c = repo_con(tmp_path, {**OK, "app/modulo.py": "VALOR = 1\n"})
     (repo / "app" / "modulo.py").write_text("VALOR = 999  # sin commit\n", encoding="utf-8")
