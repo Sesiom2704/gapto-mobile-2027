@@ -46,6 +46,9 @@
 #              DISCRIMINACIÓN CONTRA 0350 (WM 12C.2). Sobre head 0350 fallan la
 #              huella, el contrato, los negativos que dependen de columnas nuevas
 #              y la denegación de DELETE.
+# Versión: 0.5.0  -- F03 · N1 de 0352 (mandato v1.4, AJ-0352-06): la huella CURRENT
+#                   distingue el head esperado (0351 o 0352) por su marca; 0351 sigue exigida en
+#                   una base detenida en 0351.
 # Versión: 0.4.0  -- F06 MANT-TEST046-SETROLE (lote 14; R-L13-02): el
 #                   fixture escenario crea sus datos y el test los usa bajo
 #                   SET LOCAL ROLE gapto_owner con la GUC de tenant fijada,
@@ -133,8 +136,18 @@ def cuerpo_0351() -> str:
 
 
 # ------------------------------------------------------------------ huella CURRENT
+def _head_0352(db: psycopg.Connection) -> bool:
+    """0352 aplicada (marca: propiedades.coste_adquisicion_declarado_completo)."""
+    return _uno(db, "SELECT count(*) FROM pg_catalog.pg_attribute WHERE attrelid = "
+                    "'gapto.propiedades'::regclass AND attname = 'coste_adquisicion_declarado_completo' "
+                    "AND NOT attisdropped") == 1
+
+
 def test_0351_huella_d111_current(db: psycopg.Connection) -> None:
-    referencia = _runner().HUELLAS_D111_POR_HEAD["0351"]
+    # 0352 (AJ-0352-06, R-0352-14): el head esperado se DISTINGUE por su marca; sobre una
+    # base detenida en 0351 se sigue exigiendo exactamente la referencia de 0351, y sobre 0352
+    # la de 0352 (que test_047 compara ademas campo a campo con 0351).
+    referencia = _runner().HUELLAS_D111_POR_HEAD["0352" if _head_0352(db) else "0351"]
     sql = (RAIZ / "scripts" / "postgres" / "huellas_d111.sql").read_text(encoding="utf-8")
     cursor = db.execute(sql)
     observadas = dict(zip([d.name for d in cursor.description], cursor.fetchone()))

@@ -14,6 +14,9 @@
 #   - Nivel 2 del orden de locks (v0.8 §1.4): FOR NO KEY UPDATE de la
 #     entidad PROPIEDAD antes de leer participaciones o valoraciones.
 # Version: 0.1.0 (F06-01 B1, lote 12)
+# Version: 0.2.0 (F03 · N1 de 0352, AJ-0352-05): corte_adquisicion_declarado, lectura del corte de la
+#   declaracion de adquisicion para la guarda de C-PROP-02. Las seis columnas de 0352 NO entran en
+#   COLUMNAS_PROPIEDAD (AJ-0352-08): B1 nunca las escribe.
 # ============================================================
 
 from __future__ import annotations
@@ -77,6 +80,17 @@ _SELECT = (
     "WHERE e.tipo_entidad = 'PROPIEDAD' AND e.owner_user_id = current_setting('gapto.owner_user_id')::uuid"
 )
 _CLAVES = ("id", "nombre", "enabled", "row_version") + COLUMNAS_LECTURA
+
+
+def corte_adquisicion_declarado(sesion: SesionMotor, entidad_id: uuid.UUID) -> dt.date | None:
+    """0352 (AJ-0352-05): fecha de corte si la adquisicion esta declarada completa; None si no. Solo lectura,
+    tras bloquear la entidad. Las columnas de declaracion no estan en COLUMNAS_PROPIEDAD (AJ-0352-08)."""
+    fila = sesion.uno(
+        "SELECT p.coste_adquisicion_declarado_en FROM gapto.propiedades p WHERE p.entidad_id = %s "
+        "AND p.coste_adquisicion_declarado_completo IS TRUE",
+        (entidad_id,),
+    )
+    return None if fila is None else fila[0]
 
 
 def leer(sesion: SesionMotor, entidad_id: uuid.UUID) -> dict[str, Any] | None:

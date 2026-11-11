@@ -42,6 +42,13 @@
 #   ENTRADA_INVALIDA); el unico redondeo de B1 es el de la vista estructural
 #   de lecturas.py (ROUND_HALF_UP a centimos).
 # Version: 0.1.0 (F06-01 B1, lote 12)
+# Version: 0.2.0 (F03 · N1 de 0352, mandato v1.4; AJ-0352-05; extension de C-PROP-02 autorizada
+#   prospectivamente por F06-D006, expediente F06 0.5 §1.5): `editar` rechaza con
+#   ADQUISICION_POSTERIOR_AL_CORTE_DECLARADO (422) una nueva fecha_adquisicion POSTERIOR al corte de una
+#   declaracion de adquisicion (coste_adquisicion_declarado_completo = true), despues del replay y de
+#   VERSION_DESFASADA y junto a ADQUISICION_POSTERIOR_A_TITULARIDAD, bajo el lock de la entidad y sin
+#   escribir nada (row_version y auditoria intactas). Nada mas cambia en B1: ni otros contratos, ni el
+#   orden de locks, ni la identidad de las intenciones, ni EDITABLES/COLUMNAS_PROPIEDAD (AJ-0352-08).
 # ============================================================
 
 from __future__ import annotations
@@ -91,6 +98,7 @@ TERCERO_NO_DISPONIBLE = "TERCERO_NO_DISPONIBLE"
 NATURALEZA_NO_ADMITIDA = "NATURALEZA_NO_ADMITIDA_EN_TITULARIDAD"
 FECHA_ANTERIOR_INICIO = "FECHA_ANTERIOR_INICIO"
 ADQUISICION_POSTERIOR = "ADQUISICION_POSTERIOR_A_TITULARIDAD"
+ADQUISICION_POSTERIOR_AL_CORTE = "ADQUISICION_POSTERIOR_AL_CORTE_DECLARADO"   # 0352, AJ-0352-05
 HABITACIONES_EN_USO = "HABITACIONES_EN_USO"
 CAMBIO_RETROACTIVO = "CAMBIO_RETROACTIVO_SIN_POLITICA"
 CAMBIO_PROGRAMADO = "CAMBIO_PROGRAMADO_EXISTENTE"
@@ -373,6 +381,10 @@ def editar(sesion: SesionMotor, *, entidad_id: uuid.UUID, intencion_id: uuid.UUI
         inicio = min((f["vigente_desde"] for f in repo.participaciones(sesion, entidad_id)), default=None)
         if inicio is not None and cambios["fecha_adquisicion"] > inicio:
             return Rechazo(ADQUISICION_POSTERIOR)
+        # 0352 (AJ-0352-05): con la adquisicion declarada completa, la fecha no puede pasar del corte declarado.
+        corte = repo.corte_adquisicion_declarado(sesion, entidad_id)
+        if corte is not None and cambios["fecha_adquisicion"] > corte:
+            return Rechazo(ADQUISICION_POSTERIOR_AL_CORTE)
     if "habitaciones" in cambios:
         maxima, contratos = repo.max_habitacion_en_uso(sesion, entidad_id)
         if maxima is not None and (cambios["habitaciones"] is None or cambios["habitaciones"] < maxima):

@@ -30,6 +30,9 @@
 #   python scripts/mutantes/f06_01_b1.py            # todos
 #   python scripts/mutantes/f06_01_b1.py B1-M03     # subconjunto
 # Version: 0.1.0 (F06-01 B1, lote 12)
+# Version: 0.2.0 (F03 · N1 de 0352, mandato v1.4; Alcance 7): B1-M31 (guarda de C-PROP-02 frente a la
+#   declaracion de adquisicion de 0352, AJ-0352-05) y B1-M32 (las seis columnas de 0352 fuera de
+#   COLUMNAS_PROPIEDAD, AJ-0352-08), con discriminantes en test_235. Los 30 anteriores no cambian.
 # ============================================================
 from __future__ import annotations
 
@@ -46,6 +49,8 @@ SRV = "backend/app/propiedades/servicio.py"
 LEC = "backend/app/propiedades/lecturas.py"
 T231 = "tests/api/test_231_f06_01_b1_propiedades.py"
 T232 = "tests/api/test_232_f06_01_b1_concurrencia_serial.py"
+T235 = "tests/api/test_235_f06_01_0352_guarda_c_prop_02.py"
+REPO = "backend/app/propiedades/repositorio.py"
 MARCADOR = RAIZ / ".mutante_f06_01_b1_en_curso"
 
 
@@ -171,6 +176,16 @@ MUTANTES = (
             "        return Rechazo(IDENTIDAD_REUTILIZADA)\n",
             "        return Rechazo(IDENTIDAD_REUTILIZADA)\n",
             (f"{T232}::test_k1_dos_altas_misma_intencion",)),
+    Mutante("B1-M31", "0352 (AJ-0352-05): fecha de adquisicion posterior al corte declarado rechazada", SRV,
+            "        if corte is not None and cambios[\"fecha_adquisicion\"] > corte:\n", "        if False:\n",
+            (f"{T235}::test_guarda_rechaza_fecha_posterior_al_corte_sin_escribir_nada",
+             f"{T235}::test_guarda_no_aplica_sin_declaracion_de_adquisicion")),
+    Mutante("B1-M32", "0352 (AJ-0352-08): las seis columnas de 0352 no se escriben por C-PROP-01/02", REPO,
+            "    \"banos\", \"tiene_garaje\", \"tiene_trastero\", \"referencia_catastral\", \"incluir_en_rentabilidad\", \"notas\",\n)\n",
+            "    \"banos\", \"tiene_garaje\", \"tiene_trastero\", \"referencia_catastral\", \"incluir_en_rentabilidad\", \"notas\",\n"
+            "    \"coste_adquisicion_declarado_completo\",\n)\n",
+            (f"{T235}::test_aj0352_08_columnas_fuera_de_editables_y_columnas_propiedad",
+             f"{T235}::test_aj0352_08_barrera_servicio_editar[coste_adquisicion_declarado_completo]")),
 )
 
 

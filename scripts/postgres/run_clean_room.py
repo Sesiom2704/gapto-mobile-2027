@@ -56,6 +56,15 @@
 # ROLE DRIFT, que es correcto y deliberado. En ese caso se usa --desde 0002
 # y el clean-room demuestra reproducibilidad DE LA BASE, no de la instancia.
 # Reproducir tambien la instancia exige un proyecto nuevo.
+# Versión: 0.18.0 -- F03 · N1 de 0352 (mandato v1.4, lote 22; D-208; dictamen de
+#                    diseno 0352 AJ-0352-06). Se DECLARA el head 0352:
+#                    CONTRATO_0352 = 0351 (6 columnas y 3 CHECK los cubren h1/h2;
+#                    ACL, policies, triggers, funciones e indices sin cambios),
+#                    test_046 y test_047 exigidos, y referencia D-111 medida en
+#                    laboratorio UTC (provisional hasta Neon, M8: si el proveedor
+#                    difiere, STOP con diagnostico). Se CONSERVAN intactos
+#                    el contrato, los tests exigidos y la referencia de 0351
+#                    (R-0352-14). Sin --head el contrato por defecto pasa a 0352.
 # Versión: 0.17.0 -- F06-01 B0 / F06-D002 (0351, PAQUETE v0.2; NO candidato hasta
 #                    dictamen). Se DECLARA el head 0351: CONTRATO_0351 = 0350
 #                    con runtime_delete 41 (PB0-09 opcion B: siete REVOKE), test_046
@@ -257,7 +266,7 @@ from pathlib import Path
 
 # Version del runner que se materializa en el manifest. Debe coincidir con la
 # primera linea "Versión:" de la cabecera; test_040 lo comprueba.
-VERSION_RUNNER = "0.17.0"
+VERSION_RUNNER = "0.18.0"
 
 try:
     import psycopg
@@ -342,6 +351,11 @@ CONTRATO_0350 = {**CONTRATO_0340}
 # runtime_delete (48 -> 41); columnas y CHECK los cubren h1 y h2, el ACL h7.
 CONTRATO_0351 = {**CONTRATO_0350, "runtime_delete": 41}
 
+# F06-01 B2-B3 / 0352 (N1 de 0352): seis columnas nullable y tres CHECK en
+# propiedades. Ningun campo del CONTRATO cambia: columnas y CHECK los cubren
+# h1 y h2; ACL (h7), policies, triggers, funciones e indices identicos a 0351.
+CONTRATO_0352 = {**CONTRATO_0351}
+
 CONTRATOS_POR_HEAD = {
     "0300": CONTRATO_0300,
     "0310": CONTRATO_0310,
@@ -350,10 +364,11 @@ CONTRATOS_POR_HEAD = {
     "0340": CONTRATO_0340,
     "0350": CONTRATO_0350,
     "0351": CONTRATO_0351,
+    "0352": CONTRATO_0352,
 }
 
 # Head vigente de la cadena cuando no se declara --head.
-CONTRATO_POR_DEFECTO = CONTRATO_0351
+CONTRATO_POR_DEFECTO = CONTRATO_0352
 
 
 # ------------------------------------------------------------
@@ -378,11 +393,17 @@ TESTS_EXIGIDOS_POR_HEAD = {
              "test_043_f03_05_0340_categoria_icon_key",
              "test_045_f03_06_0350_tipo_hecho_condonacion",
              "test_046_f06_01_0351_base_patrimonial"),
+    "0352": ("test_041_f03_04_0320_delete_correccion_agregada",
+             "test_042_f03_04_0330_geolocalizacion_y_presentacion",
+             "test_043_f03_05_0340_categoria_icon_key",
+             "test_045_f03_06_0350_tipo_hecho_condonacion",
+             "test_046_f06_01_0351_base_patrimonial",
+             "test_047_f06_01_0352_completitud_coste"),
 }
 
 # Heads cuya certificacion exige comparar las ocho huellas D-111 contra una
 # REFERENCIA aprobada. Sin referencia declarada NO hay PASS: fail-closed.
-HEADS_QUE_EXIGEN_REFERENCIA_D111 = ("0330", "0340", "0350", "0351")
+HEADS_QUE_EXIGEN_REFERENCIA_D111 = ("0330", "0340", "0350", "0351", "0352")
 
 # Referencia aprobada de las ocho huellas D-111 por head (D-187 DEC-8).
 #
@@ -457,6 +478,20 @@ HUELLAS_D111_POR_HEAD = {
         "h7_grants":      "933a65b3869cc2030163e60c34e9b163",
         "h8_vistas":      "bc29f409364899f99402b8ed06f77149",
         "recuentos":      "781/649/287/82/58/28/1024/3",
+    },
+    # 0352 (N1 de 0352). Medida en laboratorio local 17.5 en UTC (lotes 16 y 18 y gate
+    # local de este N1, mismo cuerpo SQL); provisional hasta Neon (M8).
+    # Cambian h1 (+6 columnas) y h2 (+3 CHECK); h3..h8 = 0351.
+    "0352": {
+        "h1_columnas":    "0cbd8c06db9267716b1f562b042c20e9",
+        "h2_constraints": "ec064731abc0de593f10c9219ef9c5b9",
+        "h3_indices":     "aceb34183f2156348a3c58ff033c1d53",
+        "h4_policies":    "e1b1dd81a40b8e10c7f1744b25611fb1",
+        "h5_triggers":    "db650e488abe0226eb33cbd1e0f63c33",
+        "h6_funciones":   "84f053df8ccca616b88bdd9ff8ceb532",
+        "h7_grants":      "933a65b3869cc2030163e60c34e9b163",
+        "h8_vistas":      "bc29f409364899f99402b8ed06f77149",
+        "recuentos":      "787/652/287/82/58/28/1024/3",
     },
 }
 

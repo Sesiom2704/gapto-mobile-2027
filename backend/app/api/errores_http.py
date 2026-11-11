@@ -192,6 +192,10 @@
 #   REPARTO_ANTERIOR_AL_VIGENTE, METODO_RESERVADO_A_LA_COMPRA y
 #   HABITACIONES_EN_USO (409). Ningun codigo existente cambia de status.
 # Version: 0.29.0
+#   0.30.0 (F03 · N1 de 0352, AJ-0352-05; P-0352v12-02 resuelta por la orquestacion):
+#   ADQUISICION_POSTERIOR_AL_CORTE_DECLARADO (422) en _RECHAZOS_PROPIEDAD, guarda de C-PROP-02 frente a
+#   una declaracion de adquisicion de 0352. Ningun codigo existente cambia de status.
+# Version: 0.30.0
 # ============================================================
 
 from __future__ import annotations
@@ -652,6 +656,8 @@ _RECHAZOS_PROPIEDAD: dict[str, tuple[int, str]] = {
     "FECHA_ANTERIOR_INICIO": (422, "La titularidad no puede empezar antes de la fecha de adquisición."),
     "ADQUISICION_POSTERIOR_A_TITULARIDAD": (
         422, "La fecha de adquisición no puede ser posterior al inicio de la titularidad."),
+    "ADQUISICION_POSTERIOR_AL_CORTE_DECLARADO": (
+        422, "La fecha de adquisición no puede ser posterior a la fecha en que declaraste completo su coste."),
     "HABITACIONES_EN_USO": (409, "Hay contratos que usan esas habitaciones. Revisa el número de habitaciones."),
     "CAMBIO_RETROACTIVO_SIN_POLITICA": (422, "El cambio de titularidad tiene que empezar hoy o más adelante."),
     "CAMBIO_PROGRAMADO_EXISTENTE": (409, "Ya hay un cambio de titularidad programado para esta propiedad."),
