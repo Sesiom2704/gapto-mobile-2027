@@ -13,15 +13,18 @@
 #   - api: tests/backend + tests/api (--rootdir=tests/api) sobre un clon de la plantilla;
 #   - migration: tests/migration (GAPTO_RV3_IMPORT_URL) sobre un clon;
 #   - conc027: tests/database/test_027 sobre gapto2027_cleanroom LOCAL (clon de la plantilla);
-#   - baterias: las 18 baterias serie con su variable opt-in, cada una sobre un clon nuevo;
-#   - b1: revalidacion de B1 como bloque SEPARADO (AJ-B1C-08; Alcance 5bis): test_231, test_233 y test_232 con
-#     GAPTO_B1_CONCURRENCIA=1 sobre clones nuevos;
+#   - baterias: las baterias serie con su variable opt-in (las 18 de antes + test_236 de 0352), cada una sobre un
+#     clon nuevo;
+#   - b1: revalidacion de B1 como bloque SEPARADO (AJ-B1C-08; Alcance 5bis): test_231, test_233, test_235 (guarda
+#     de C-PROP-02 y AJ-0352-08), test_232 con GAPTO_B1_CONCURRENCIA=1 y test_236 con GAPTO_0352_CONCURRENCIA=1,
+#     sobre clones nuevos;
 #   - gates: tests/gates (pruebas del propio lanzador; sin base de datos).
 #   Solo bases de LABORATORIO en 127.0.0.1 (puertos 5460-5469) con el usuario postgres por confianza local: el plan
 #   no contiene secretos. Nunca Neon, Supabase ni ENV-DEV.
 # Uso: python scripts/gates/plan_gate_local.py --repo R --commit C --head 0352 --puerto 5461 --psql RUTA_PSQL
 #        --bloques tz,replay,database,api,migration,conc027,baterias,gates [--roles-nuevos] [--diario DIR ...] > plan.json
 # Version: 0.1.0 (F03 · N1 de 0352, Paso 0)
+# Version: 0.2.0 (N1 de 0352, M5): bateria test_236 (GAPTO_0352_CONCURRENCIA) y bloque b1 con test_235 y test_236.
 # ============================================================
 from __future__ import annotations
 
@@ -48,6 +51,7 @@ BATERIAS = [
     ("GAPTO_F04R3_CONCURRENCIA", "tests/api/test_214_f04_r3_c2_reabrir_serial.py"),
     ("GAPTO_C03_CONCURRENCIA", "tests/api/test_218_f05_d052_c03_concurrencia_serial.py"),
     ("GAPTO_B1_CONCURRENCIA", "tests/api/test_232_f06_01_b1_concurrencia_serial.py"),
+    ("GAPTO_0352_CONCURRENCIA", "tests/api/test_236_f06_01_0352_guarda_concurrencia_serial.py"),
 ]
 
 
@@ -123,7 +127,10 @@ def main(argv: list[str]) -> int:
     if "b1" in bloques:
         for et, rutas, extra in [("b1_test_231", ["tests/api/test_231_f06_01_b1_propiedades.py"], {}),
                                  ("b1_test_233", ["tests/api/test_233_f06_01_b1_rls_acl.py"], {}),
-                                 ("b1_test_232_concurrencia", ["tests/api/test_232_f06_01_b1_concurrencia_serial.py"], {"GAPTO_B1_CONCURRENCIA": "1"})]:
+                                 ("b1_test_235_guarda", ["tests/api/test_235_f06_01_0352_guarda_c_prop_02.py"], {}),
+                                 ("b1_test_232_concurrencia", ["tests/api/test_232_f06_01_b1_concurrencia_serial.py"], {"GAPTO_B1_CONCURRENCIA": "1"}),
+                                 ("b1_test_236_guarda_concurrencia", ["tests/api/test_236_f06_01_0352_guarda_concurrencia_serial.py"],
+                                  {"GAPTO_0352_CONCURRENCIA": "1"})]:
             db = "m_" + et
             pasos += [clon(db), {"etiqueta": et, "tipo": "pytest", "env": {"GAPTO_TEST_DATABASE_URL": url(db), **extra},
                                  "args": [*rutas, "-q", "--rootdir=tests/api"]}, borrar(db)]
