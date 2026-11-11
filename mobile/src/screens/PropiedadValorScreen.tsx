@@ -4,17 +4,19 @@
 // Ruta: mobile/src/screens/PropiedadValorScreen.tsx
 // Descripción: Valor de una propiedad (F06-01 B1 · C-PROP-04 alta y L-PROP; lámina F06-01 v0.9 D3 Revisar valor y v0.1 B2 Histórico). D3: nueva valoración del inmueble completo (100 %) con fecha y método obligatorios entre Mercado, Tasación, Manual y Valor de referencia (ya no ofrece «Compra»: la crea solo la compra); «Esto es una estimación: no cambia el coste ni tu dinero». B2: histórico del más reciente al más antiguo, solo lectura; las valoraciones sin fecha, al final como evidencia; la referencia fiscal nunca se presenta como valor de mercado; un valor que cambia se registra como valoración nueva y conserva la anterior. VERSION_DESFASADA → D4 Recargar.
 // Versión: 0.1.0 (F06 Lote 12 · B1 Propiedad, N1)
+// Versión: 0.2.0 (F06-01 B1 MANT N3 del selector, AJ-B1C-01 / PC-B1-04 opción A): la fecha de D3 se elige con «Hoy · Ayer · Otra fecha», el patrón de AbonoHoja (propuesta Hoy; Hoy y Ayer en la fecha civil del dispositivo con `isoLocal` y `ayer` de domain/fechas; «Otra fecha» abre el campo dd/mm/aaaa y solo admite una fecha que exista en el calendario, `esFechaIso`). Sin límite nuevo: C-PROP-04 solo exige una fecha (`fecha_valoracion: date`, no nula). La petición no cambia (fecha_valoracion ISO).
 // ============================================================
 
 import React, { useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ClientePropiedades, Valoracion, VistaPropiedad } from '../api/propiedades';
 import { BotonPrimario, CabeceraNavegacion, Chip, EstadoDato } from '../components/Basicos';
 import { AvisoCaja, CabeceraTarea, Caja, Campo, CampoTexto, estilosFormulario as ef, Tarjeta } from '../components/Formulario';
-import { ddmmaaaaAIso, diaMesAnioIso, isoADdmmaaaa, isoLocal } from '../domain/fechas';
+import { ayer, ddmmaaaaAIso, diaMesAnioIso, fechaCortaIso, isoADdmmaaaa, isoLocal } from '../domain/fechas';
 import { formatearEur, parsearImporte } from '../domain/importe';
+import { esFechaIso } from '../domain/intencion';
 import { detalleValoracion, METODOS_ELEGIBLES, MetodoValoracion, TEXTO_INDETERMINADO_PROP, textoErrorB1 } from '../domain/propiedad';
 import { useTema } from '../theme/tema';
 import { espacio, TACTIL_MIN, tipo } from '../theme/tokens';
@@ -27,6 +29,7 @@ export const TEXTO_CAMBIO_VALOR = 'Si el valor ha cambiado, añade una valoraci�
 type Elegible = Exclude<MetodoValoracion, 'COMPRA'>;
 interface FormValor {
   valor: string;
+  /** ISO (Hoy, Ayer u Otra fecha válida) o el texto escrito en «Otra fecha» mientras no es una fecha. */
   fecha: string;
   metodo: Elegible | null;
   fuente: string;
@@ -41,7 +44,7 @@ export function ordenHistorico(vs: Valoracion[]): Valoracion[] {
 export function faltaValor(f: FormValor): string[] {
   const r: string[] = [];
   if (!parsearImporte(f.valor).ok) r.push('valor mayor que 0 con 2 decimales como mucho');
-  if (!ddmmaaaaAIso(f.fecha)) r.push('fecha como dd/mm/aaaa');
+  if (!esFechaIso(f.fecha)) r.push('fecha como dd/mm/aaaa');
   if (f.metodo === null) r.push('de dónde sale');
   return r;
 }
@@ -57,7 +60,11 @@ export function ValoracionFormScreen(p: {
 }) {
   const { c } = useTema();
   const inset = useSafeAreaInsets();
-  const [f, setF] = useState<FormValor>({ valor: '', fecha: '', metodo: null, fuente: '' });
+  // Fecha civil del dispositivo, como AbonoHoja: propuesta Hoy; el chip deja de marcarse si cambia el día.
+  const hoyIso = isoLocal(p.ahora());
+  const ayerIso = isoLocal(ayer(p.ahora()));
+  const [f, setF] = useState<FormValor>(() => ({ valor: '', fecha: hoyIso, metodo: null, fuente: '' }));
+  const [otraFecha, setOtraFecha] = useState<string | null>(null);
   const [aviso, setAviso] = useState<AvisoCaja>(null);
   const [conflicto, setConflicto] = useState(false);
   const [ocupado, setOcupado] = useState(false);
@@ -74,7 +81,7 @@ export function ValoracionFormScreen(p: {
       intencion_id: id.current,
       row_version_esperada: p.vista.row_version,
       valor_total: imp.ok ? imp.valor : f.valor,
-      fecha_valoracion: ddmmaaaaAIso(f.fecha)!,
+      fecha_valoracion: f.fecha,
       metodo: f.metodo!,
       fuente: f.fuente.trim() ? f.fuente.trim() : null,
       notas: null,
@@ -108,12 +115,18 @@ export function ValoracionFormScreen(p: {
           <CampoTexto testID="prop-val-valor" etiqueta="Valor del inmueble completo" marcador="Ej.: 250.000,00" valor={f.valor} onCambiar={(t) => setF({ ...f, valor: t })} />
         </Campo>
         <Campo etiqueta="Fecha">
-          <CampoTexto testID="prop-val-fecha" etiqueta="Fecha del valor" marcador="dd/mm/aaaa" valor={f.fecha} onCambiar={(t) => setF({ ...f, fecha: t })} />
-          {!f.fecha.trim() ? (
-            <Pressable testID="prop-val-hoy" accessibilityRole="button" onPress={() => setF({ ...f, fecha: isoADdmmaaaa(isoLocal(p.ahora())) })} style={{ minHeight: TACTIL_MIN, justifyContent: 'center' }}>
-              <Text style={[tipo.footnote, { color: c.accentText }]}>Usar la fecha de hoy</Text>
-            </Pressable>
+          <View style={ef.chips}>
+            <Chip testID="prop-val-hoy" etiqueta="Hoy" seleccionado={otraFecha === null && f.fecha === hoyIso} onPress={() => { setOtraFecha(null); setF({ ...f, fecha: hoyIso }); }} />
+            <Chip testID="prop-val-ayer" etiqueta="Ayer" seleccionado={otraFecha === null && f.fecha === ayerIso} onPress={() => { setOtraFecha(null); setF({ ...f, fecha: ayerIso }); }} />
+            <Chip testID="prop-val-otra" etiqueta="Otra fecha" seleccionado={otraFecha !== null} onPress={() => setOtraFecha(esFechaIso(f.fecha) ? isoADdmmaaaa(f.fecha) : f.fecha)} />
+          </View>
+          {otraFecha !== null ? (
+            <CampoTexto testID="prop-val-fecha" etiqueta="Fecha del valor, día barra mes barra año" marcador="dd/mm/aaaa" valor={otraFecha} maximo={10}
+              onCambiar={(t) => { setOtraFecha(t); setF({ ...f, fecha: ddmmaaaaAIso(t) ?? t }); }} />
           ) : null}
+          <Text testID="prop-val-fecha-elegida" style={[tipo.footnote, { color: c.textSecondary }]}>
+            {esFechaIso(f.fecha) ? fechaCortaIso(f.fecha) : 'Escribe la fecha como dd/mm/aaaa.'}
+          </Text>
         </Campo>
         <Campo etiqueta="¿De dónde sale?">
           <View style={ef.chips}>
