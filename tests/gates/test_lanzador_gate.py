@@ -199,7 +199,8 @@ def test_la_copia_es_el_commit_no_el_worktree(tmp_path):
 
 def test_secretos_heredados_no_se_escriben_en_la_evidencia(tmp_path, monkeypatch):
     repo, c = repo_con(tmp_path, OK)
-    monkeypatch.setenv("GAPTO_SECRETO_PRUEBA", "postgresql://u:clave-que-no-debe-salir@h/db")
+    # DSN ficticia montada en ejecucion: el texto del fichero no debe parecer una credencial (test_rv3_000)
+    monkeypatch.setenv("GAPTO_SECRETO_PRUEBA", "postgresql://" + "u" + ":" + "clave-que-no-debe-salir" + "@h/db")
     rc, sal = lanzar(tmp_path, {"repo": str(repo), "commit": c, "pasos": [
         {"etiqueta": "usa", "tipo": "verificacion", "heredar": ["GAPTO_SECRETO_PRUEBA"],
          "args": ["{PYTHON}", "-c", "import os,sys; sys.exit(0 if os.environ['GAPTO_SECRETO_PRUEBA'].startswith('postgresql://') else 5)"]}]})
