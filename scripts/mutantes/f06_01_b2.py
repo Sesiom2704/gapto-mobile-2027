@@ -24,6 +24,10 @@
 # Version: 0.1.0 (F06 T1-F06 B2 N1)
 # Version: 0.1.1 (F06 T1-F06 B2 N1, tirada del paso 12): el resumen de pytest incluye los ERROR (-rfE); con -rf un
 #   discriminante que cae en su fixture (ERROR, no FAILED) se clasificaba NO_CLASIFICABLE (M-CO-09) y paraba el arnes.
+# Version: 0.1.2 (tirada 2 del paso 12): M-Q16-02 quedo VIVO porque mutaba la guarda de tipo de `_comun` y las guardas
+#   siguientes de la lectura (dependencias del H0 y tipo en «corregir») seguian negando las acciones: no era el defecto
+#   que describe el oraculo. Ahora la lectura OFRECE «anular por duplicado» sobre ADQUISICION_PATRIMONIAL (defecto
+#   literal de M-Q16-02, oraculos v0.7 §A.10.3); discriminantes O10.23 (c) en H0 y Hk.
 # ============================================================
 from __future__ import annotations
 
@@ -246,11 +250,11 @@ MUTANTES = (
             "from app.services.correcciones_service import CorreccionesService  # noqa: F401\n",
             (n(T253, "test_o10_23_d_inventario_b2_no_expone_op21_op02_op03"),)),
     Mutante("M-Q16-02", "La lectura de edicion no ofrece corregir ni anular sobre H0/Hk", EDICION,
-            "    if hecho[\"tipo\"] not in (\"GASTO\", \"INGRESO\", \"TRANSFERENCIA\"):\n        return \"TIPO_NO_SOPORTADO\"\n"
-            "    if repo.tiene_entidad_de_inversion",
-            "    if hecho[\"tipo\"] not in (\"GASTO\", \"INGRESO\", \"TRANSFERENCIA\", \"ADQUISICION_PATRIMONIAL\"):\n"
-            "        return \"TIPO_NO_SOPORTADO\"\n    if repo.tiene_entidad_de_inversion",
-            (n(T253, "test_o10_23_superficies_existentes_rechazan_p1_a_p4[H0]"),)),
+            "            \"anular_duplicado\": _accion(_motivo_anular(sesion, hecho_id, hecho, movimientos, comun)),\n",
+            "            \"anular_duplicado\": _accion(None if hecho[\"tipo\"] == \"ADQUISICION_PATRIMONIAL\" else\n"
+            "                                      _motivo_anular(sesion, hecho_id, hecho, movimientos, comun)),\n",
+            (n(T253, "test_o10_23_superficies_existentes_rechazan_p1_a_p4[H0]"),
+             n(T253, "test_o10_23_superficies_existentes_rechazan_p1_a_p4[Hk]"))),
     Mutante("M-AC-01", "Actividad filtra el periodo [desde, hasta)", ACTIVIDAD,
             "        cond.append(\"h.fecha_hecho < %(hasta)s\")\n", "        cond.append(\"h.fecha_hecho <= %(hasta)s\")\n",
             (n(T253, "test_o10_19_periodo_semiabierto"),)),
