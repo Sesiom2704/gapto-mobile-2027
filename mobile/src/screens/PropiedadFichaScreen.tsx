@@ -4,15 +4,18 @@
 // Ruta: mobile/src/screens/PropiedadFichaScreen.tsx
 // Descripción: Ficha de una propiedad (F06-01 B1 · L-PROP; lámina F06-01 v0.9 D1 Resumen y D2 Sin datos). Cada magnitud por separado y con su procedencia: valor estimado (100 %) con método y fecha (una valoración futura no cuenta; la calcula el servidor), referencia fiscal aparte (nunca desplaza al estimado), tu titularidad y la «Cuota del valor según titularidad», etiquetada como vista estructural (no es una atribución ni dice quién pagó). Lo desconocido se queda desconocido: «No disponible» / «Sin indicar», nunca 0. Coste de adquisición, mejoras e inversión llegan con la compra (B2/B3): aquí «No disponible». Acciones de B1: Revisar valor, Histórico de valoraciones, Titularidad y Editar datos.
 // Versión: 0.1.0 (F06 Lote 12 · B1 Propiedad, N1)
+// Versión: 0.2.0 (F06 T1-F06 B2 N1 · D1 con adquisición y mejoras y su estado, lámina F06-01 v0.9 D1/D2): el coste de adquisición, las mejoras, la inversión acumulada (nunca completa: bajas no representadas) y tu parte atribuida salen de L-COSTE (`coste`, opcional: sin él, «No disponible» como en B1); cada uno con su estado («parcial» se etiqueta). Acciones nuevas: «Registrar la compra» (sin compra) y «Añadir un gasto de la compra» (con compra; C-COMPRA-03). Sin D4 Desglose (M-11). El resto de B1 no cambia.
 // ============================================================
 
 import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import type { Coste } from '../api/patrimonio';
 import type { VistaPropiedad } from '../api/propiedades';
 import { CabeceraNavegacion, EstadoDato } from '../components/Basicos';
 import { estilosFormulario as ef, FilaLista, RotuloGrupo, Tarjeta } from '../components/Formulario';
+import { hayCompra, textoEstadoCoste } from '../domain/compra';
 import { diaMesAnioIso } from '../domain/fechas';
 import { formatearEur } from '../domain/importe';
 import { etiquetaMetodo, etiquetaTipo, formatearPorcentaje, mesCortoAnioIso, MetodoValoracion, textoTitularidad, tuParticipacion } from '../domain/propiedad';
@@ -32,6 +35,10 @@ export function PropiedadFichaScreen(p: {
   onHistorico: () => void;
   onTitularidad: () => void;
   onEditar: () => void;
+  /** B2: L-COSTE de la propiedad (null mientras carga o si no se pudo leer). */
+  coste?: Coste | null;
+  onRegistrarCompra?: () => void;
+  onGastoCompra?: () => void;
 }) {
   const { c } = useTema();
   const inset = useSafeAreaInsets();
@@ -54,8 +61,17 @@ export function PropiedadFichaScreen(p: {
             <Magnitud testID="prop-referencia-fiscal" etiqueta="Referencia fiscal" importe={v.referencia_fiscal.valor_total}
               detalle={v.referencia_fiscal.fecha_valoracion ? `Fiscal · ${diaMesAnioIso(v.referencia_fiscal.fecha_valoracion)}` : 'Sin fecha'} />
           ) : null}
-          <Magnitud testID="prop-coste" etiqueta="Coste de adquisición" importe={null} detalle="Llega con el registro de la compra" />
-          <Magnitud testID="prop-inversion" etiqueta="Inversión acumulada" importe={null} />
+          <Magnitud testID="prop-coste" etiqueta="Coste de adquisición" importe={hayCompra(p.coste?.ADQUISICION) ? p.coste!.ADQUISICION.total : null}
+            detalle={textoEstadoCoste(p.coste?.ADQUISICION ?? null, 'ADQUISICION')} />
+          {p.coste && p.coste.MEJORAS.estado !== 'NO_DISPONIBLE' ? (
+            <Magnitud testID="prop-mejoras" etiqueta="Mejoras" importe={p.coste.MEJORAS.total} detalle={textoEstadoCoste(p.coste.MEJORAS, 'MEJORAS')} />
+          ) : null}
+          <Magnitud testID="prop-inversion" etiqueta="Inversión acumulada" importe={p.coste && p.coste.PERMANECE.estado !== 'NO_DISPONIBLE' ? p.coste.PERMANECE.total : null}
+            detalle="Parcial · bajas no representadas" />
+          {p.coste && p.coste.ADQUISICION.tu_parte.importe !== null ? (
+            <Magnitud testID="prop-tu-parte-coste" etiqueta="Tu parte del coste (atribuida)" importe={p.coste.ADQUISICION.tu_parte.importe}
+              detalle={p.coste.ADQUISICION.tu_parte.estado === 'COMPLETO' ? 'De lo registrado' : 'Parcial'} />
+          ) : null}
           <Fila testID="prop-tu-titularidad" etiqueta="Tu titularidad" valor={tu ?? (v.titularidad.modo === 'DE_OTROS' ? 'No eres titular' : 'Sin indicar')} />
           <Magnitud testID="prop-cuota" etiqueta="Cuota del valor según titularidad" ultima
             importe={v.cuota_segun_titularidad?.importe ?? null}
@@ -69,6 +85,12 @@ export function PropiedadFichaScreen(p: {
         ) : null}
         <RotuloGrupo texto="Más" />
         <Tarjeta>
+          {p.onRegistrarCompra && p.coste !== undefined && !hayCompra(p.coste?.ADQUISICION) ? (
+            <FilaLista testID="prop-accion-compra" titulo="Registrar la compra" detalle="Para conocer lo que te costó" onPress={p.onRegistrarCompra} />
+          ) : null}
+          {p.onGastoCompra && hayCompra(p.coste?.ADQUISICION) ? (
+            <FilaLista testID="prop-accion-gasto-compra" titulo="Añadir un gasto de la compra" detalle="Impuestos, notaría o agencia que faltaban" onPress={p.onGastoCompra} />
+          ) : null}
           <FilaLista testID="prop-accion-valor" titulo="Revisar valor" detalle={sinDatos ? 'Para saber lo que vale' : undefined} onPress={p.onRevisarValor} />
           <FilaLista testID="prop-accion-historico" titulo="Histórico de valoraciones" detalle={`${v.valoraciones.length} ${v.valoraciones.length === 1 ? 'valoración' : 'valoraciones'}`} onPress={p.onHistorico} />
           <FilaLista testID="prop-accion-titularidad" titulo="Titularidad" detalle={textoTitularidad(v.titularidad)} onPress={p.onTitularidad} />

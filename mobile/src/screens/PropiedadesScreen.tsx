@@ -4,14 +4,17 @@
 // Ruta: mobile/src/screens/PropiedadesScreen.tsx
 // Descripción: Territorio Patrimonio › Propiedades (F06-01 B1; láminas F06-01 v0.9 y v0.1, entradas PAT-02 «+» y PAT-03). Punto de entrada mínimo de B1: lista de propiedades (GET /v1/propiedades) con «+» (alta, A1–A3) y su ficha (D1/D2), y desde la ficha Titularidad (C1, C2), Revisar valor (D3), Histórico de valoraciones (B2) y Editar datos (D3, D4 de la v0.1). Pila propia montada de forma persistente, como Más: «Atrás» vuelve al nivel anterior real; las tareas (alta, nuevo reparto, valoración, edición) son inmersivas y ocultan la barra inferior. Tras una escritura la ficha muestra la vista que devuelve el servidor (sin optimistic update) y la lista se relee. El resto de Patrimonio (PAT-01, cuentas, inversiones) sigue fuera de este bloque.
 // Versión: 0.1.0 (F06 Lote 12 · B1 Propiedad, N1)
+// Versión: 0.2.0 (F06 T1-F06 B2 N1): la ficha lee también L-COSTE (cliente de patrimonio, por prop opcional; por defecto el de `configApi`) y abre las tareas inmersivas de B2: «Registrar la compra» (CompraScreen, B1–B6) y «Añadir un gasto de la compra» (GastoCompraScreen, C-COMPRA-03). Al cerrar con cambios, la ficha muestra la vista del servidor y relee el coste. Nada más cambia en B1.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ClienteApi } from '../api/cliente';
+import { configApi } from '../api/config';
+import { ClientePatrimonio, Coste, crearClientePatrimonio } from '../api/patrimonio';
 import type { ClientePropiedades, FilaPropiedad, VistaPropiedad } from '../api/propiedades';
 import { EstadoDato } from '../components/Basicos';
 import { estilosFormulario as ef, FilaLista, Tarjeta } from '../components/Formulario';
@@ -19,6 +22,7 @@ import { formatearEur } from '../domain/importe';
 import { etiquetaTipo, MODOS_TITULARIDAD } from '../domain/propiedad';
 import { useTema } from '../theme/tema';
 import { espacio, TACTIL_MIN, tipo } from '../theme/tokens';
+import { CompraScreen, GastoCompraScreen } from './CompraScreen';
 import { PropiedadAltaScreen } from './PropiedadAltaScreen';
 import { PropiedadEditarScreen } from './PropiedadEditarScreen';
 import { PropiedadFichaScreen } from './PropiedadFichaScreen';
@@ -28,7 +32,7 @@ import { HistoricoValoracionesScreen, ValoracionFormScreen } from './PropiedadVa
 type Lista = { fase: 'CARGANDO' } | { fase: 'ERROR' } | { fase: 'OK'; filas: FilaPropiedad[] };
 type Ficha = { fase: 'CARGANDO'; id: string } | { fase: 'ERROR'; id: string } | { fase: 'OK'; vista: VistaPropiedad };
 type Nivel = 'LISTA' | 'FICHA' | 'TITULARIDAD' | 'HISTORICO';
-type Tarea = { t: 'ALTA' } | { t: 'EDITAR' } | { t: 'REPARTO' } | { t: 'VALOR' };
+type Tarea = { t: 'ALTA' } | { t: 'EDITAR' } | { t: 'REPARTO' } | { t: 'VALOR' } | { t: 'COMPRA' } | { t: 'GASTO_COMPRA' };
 
 /** Detalle de la fila de la lista: «Vivienda · Compartida · 245.000,00 €». */
 export function detalleFila(f: FilaPropiedad): string {
@@ -42,6 +46,8 @@ export function PropiedadesScreen(p: {
   nuevoId: () => string;
   ahora: () => Date;
   onInmersiva: (x: boolean) => void;
+  /** B2: cliente de compra y coste (por prop en tests; por defecto, el de `configApi`). */
+  patrimonio?: ClientePatrimonio;
 }) {
   const { c } = useTema();
   const inset = useSafeAreaInsets();
@@ -49,6 +55,16 @@ export function PropiedadesScreen(p: {
   const [nivel, setNivel] = useState<Nivel>('LISTA');
   const [ficha, setFicha] = useState<Ficha | null>(null);
   const [tarea, setTarea] = useState<Tarea | null>(null);
+  const patrimonio = useMemo(() => p.patrimonio ?? crearClientePatrimonio(configApi), [p.patrimonio]);
+  const [coste, setCoste] = useState<Coste | null | undefined>(undefined);
+  const cargarCoste = useCallback(
+    async (id: string) => {
+      setCoste(undefined);
+      const r = await patrimonio.leerCoste(id);
+      setCoste(r.tipo === 'OK' ? r.datos.coste : null);
+    },
+    [patrimonio],
+  );
 
   const cargarLista = useCallback(
     async (silencioso = false) => {
@@ -64,8 +80,9 @@ export function PropiedadesScreen(p: {
       setFicha({ fase: 'CARGANDO', id });
       const r = await p.propiedades.leerPropiedad(id);
       setFicha(r.tipo === 'OK' ? { fase: 'OK', vista: r.datos.propiedad } : { fase: 'ERROR', id });
+      void cargarCoste(id);
     },
-    [p.propiedades],
+    [p.propiedades, cargarCoste],
   );
   useEffect(() => {
     void cargarLista();
@@ -85,6 +102,7 @@ export function PropiedadesScreen(p: {
     if (actualizada) {
       setFicha({ fase: 'OK', vista: actualizada });
       void cargarLista(true);
+      void cargarCoste(actualizada.id);
     }
   };
   const recargar = () => {
@@ -118,6 +136,10 @@ export function PropiedadesScreen(p: {
       tareaVista = (
         <ValoracionFormScreen propiedades={p.propiedades} vista={vista} nuevoId={p.nuevoId} ahora={p.ahora} onCerrar={cerrarTarea} onRecargar={recargar} />
       );
+    if (tarea.t === 'COMPRA')
+      tareaVista = <CompraScreen cliente={p.cliente} patrimonio={patrimonio} vista={vista} nuevoId={p.nuevoId} ahora={p.ahora} onCerrar={cerrarTarea} onRecargar={recargar} />;
+    if (tarea.t === 'GASTO_COMPRA')
+      tareaVista = <GastoCompraScreen cliente={p.cliente} patrimonio={patrimonio} vista={vista} nuevoId={p.nuevoId} ahora={p.ahora} onCerrar={cerrarTarea} onRecargar={recargar} />;
   }
   if (tareaVista) return <View style={{ flex: 1 }}>{tareaVista}</View>;
 
@@ -145,6 +167,9 @@ export function PropiedadesScreen(p: {
         onHistorico={() => setNivel('HISTORICO')}
         onTitularidad={() => setNivel('TITULARIDAD')}
         onEditar={() => setTarea({ t: 'EDITAR' })}
+        coste={coste}
+        onRegistrarCompra={() => setTarea({ t: 'COMPRA' })}
+        onGastoCompra={() => setTarea({ t: 'GASTO_COMPRA' })}
       />
     );
   if (vista && nivel === 'TITULARIDAD') return <PropiedadTitularidadScreen vista={vista} onAtras={() => setNivel('FICHA')} onCambiar={() => setTarea({ t: 'REPARTO' })} />;
