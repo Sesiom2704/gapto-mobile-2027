@@ -4,12 +4,15 @@
 // Ruta: mobile/src/domain/titulos_dia.ts
 // Descripción: Títulos de Día a día por tipo de hecho (H-DIAG-02, F05 §70.2). Módulo propio, usado SOLO por ActividadScreen: `actividad.ts` y `registro.ts` (compartidos con el registro de los recorridos de G1) no cambian. Cada tipo de hecho que trae la lista tiene nombre propio: gasto, ingreso y entre cuentas los de siempre; la liquidación de una posición (REEMBOLSO) es «Cobro» si el dinero entra, «Pago» si sale y «Liquidación» sin movimiento; la condonación es «Perdón»; los demás tipos del catálogo, el suyo; un tipo desconocido usa el fallback explícito «Registro». Un cobro de derecho nunca se llama «Ingreso» ni «Entre cuentas». El título de la fila conserva la precedencia única de `tituloFila` (nota > «Tercero · Categoría» > categoría > tercero) y solo sustituye el último recurso «Tipo · importe» cuando el tipo no es de registro.
 // Versión: 0.1.0 (F05-D056 decisión 2 de Moisés del 2026-10-29: la corrección de 91cc41f sale de actividad.ts y registro.ts a este módulo)
+// Versión: 0.2.0 (F06 T1-F06 B3 · fila patrimonial de Actividad, R1 v0.8 §II.5 y lámina L-6; autorizada en lista cerrada por la decisión de Moisés afaac92d…, solo presentación): los hechos ADQUISICION_PATRIMONIAL y MEJORA_PATRIMONIAL tienen nombre propio («Compra de la propiedad», «Gasto de la compra · <concepto>», «Mejora · <nota>»; en el detalle, «Compra» y «Mejora»). La fuente es el tipo del HECHO (HF-14). Los demás tipos, sus títulos y la precedencia de `tituloFila` no cambian.
 // ============================================================
 
 import type { FilaActividad } from '../api/cliente';
 import { tituloFila } from './actividad';
 import { formatearEur } from './importe';
 import { NOMBRE_TIPO } from './registro';
+import { esPatrimonial, NOMBRE_CONCEPTO } from './compra';
+import type { ConceptoGasto } from '../api/patrimonio';
 
 /** Fallback explícito del nombre de un tipo sin nombre conocido: nunca «undefined». */
 export const NOMBRE_TIPO_DESCONOCIDO = 'Registro';
@@ -20,7 +23,20 @@ const NOMBRE_OTROS_TIPOS: Record<string, string> = {
   GENERACION_DERECHO_OBLIGACION: 'Derecho u obligación',
   COMPRA_FINANCIADA: 'Compra financiada',
   APORTACION_INVERSION: 'Aportación a inversión',
+  ADQUISICION_PATRIMONIAL: 'Compra',
+  MEJORA_PATRIMONIAL: 'Mejora',
 };
+
+/** Fila patrimonial (R1 v0.8 §II.5): nombre por el tipo del HECHO y el concepto que ya trae la fila (`nota` = concepto del hecho). */
+export function tituloPatrimonial(r: Pick<FilaActividad, 'tipo' | 'nota'>): string | null {
+  const t: string = r.tipo;
+  if (!esPatrimonial(t)) return null;
+  const nota = (r.nota ?? '').trim();
+  if (t === 'MEJORA_PATRIMONIAL') return nota ? `Mejora · ${nota}` : 'Mejora';
+  if (nota === 'COMPRA') return 'Compra de la propiedad';
+  const concepto = (NOMBRE_CONCEPTO as Record<string, string | undefined>)[nota as ConceptoGasto];
+  return concepto ? `Gasto de la compra · ${concepto}` : nota ? `Gasto de la compra · ${nota}` : 'Gasto de la compra';
+}
 
 const esDeRegistro = (t: string): t is keyof typeof NOMBRE_TIPO => t === 'GASTO' || t === 'INGRESO' || t === 'TRANSFERENCIA';
 
@@ -37,6 +53,8 @@ export function nombreTipoFila(r: Pick<FilaActividad, 'tipo' | 'cuentas'>): stri
 
 /** Título de la fila en Día a día: el de `tituloFila`, con el nombre propio del tipo en el último recurso. */
 export function tituloFilaDia(r: FilaActividad): string {
+  const patrimonial = tituloPatrimonial(r);
+  if (patrimonial) return patrimonial;
   const base = tituloFila(r);
   const t: string = r.tipo;
   if (esDeRegistro(t)) return base;

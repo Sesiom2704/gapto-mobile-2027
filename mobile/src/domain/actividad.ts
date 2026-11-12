@@ -5,6 +5,7 @@
 // Descripción: Lógica pura de la Actividad v0 de Día a día (F05 §49.4 A7, §49.5 R11/R12; P-ACT-01..03; F09 DAY-Q01..Q05, Q08, Q09; lámina SRCH-ACT-AFI v0.2 B1–B13, C4). Periodo (este mes, mes anterior, otro mes, entre fechas, todo el historial) en mes natural → consulta [desde, hasta); filtros (tipo, categoría con subcategorías, cuenta, tercero, contexto) con su recuento de GRUPOS («Filtros · 2»); búsqueda: si lo escrito es un importe («48,72» o «48.72») se busca el importe exacto, si no, el texto. Fila: título calculado (`tituloRegistro`, una sola implementación) en la línea principal; la secundaria dice lo que el título no dice (tercero, categoría, cuenta, contexto; maestro desactivado marcado); importe con signo y color solo si describen la magnitud (gasto «−», ingreso «+» neutro, transferencia sin signo, DAY-Q04, P-ACT-02); «Total · reparto sin indicar» o «Total · reparto parcial» cuando el importe es el total del hecho y no tu parte (P-ACT-03, R12). Agrupación por día («Hoy · 10 oct 2026», «Ayer · …») en el periodo y por mes en la búsqueda. Sin hora: `fecha_hecho` es una fecha.
 // Versión: 0.1.0 (F05-05 K3 §2.6)
 // Versión: 0.2.0 (F05-06 M2-B §B1; lámina DEV B1, D-DEV-07, P-DEV-03): una devolución se titula «Devolución · <compra>», su línea secundaria dice el tercero de la compra y la categoría, el importe va sin «+» ni «−» y bajo él «Devolución» o «Abono pendiente» (nunca la marca de reparto). Nada más cambia.
+// Versión: 0.3.0 (F06 T1-F06 B3 · fila patrimonial de Actividad, R1 v0.8 §II.5 y lámina L-6; autorizada en lista cerrada por la decisión de Moisés afaac92d…, solo presentación): para los hechos ADQUISICION_PATRIMONIAL y MEJORA_PATRIMONIAL (por el tipo del HECHO, HF-14) el importe va con signo «−» (sale de la cuenta) y la línea secundaria dice «Coste de la compra · no es gasto del mes» o «Mejora · no es gasto del mes» y la cuenta. Ni el periodo, ni los filtros, ni la búsqueda, ni el reparto, ni ningún otro tipo cambian.
 // ============================================================
 
 import type { ConsultaActividad, FilaActividad, TipoActividad } from '../api/cliente';
@@ -12,6 +13,7 @@ import { diaMesAnioIso, limitesMesIso, mesAnioIso, mesDesplazadoIso } from './fe
 import { formatearEur, parsearImporte } from './importe';
 import { esDevolucion, etiquetaDevolucion, importeDevolucion, tituloDevolucion } from './devolucion';
 import { tituloRegistro } from './registro';
+import { esPatrimonial, etiquetaNoGastoMes, importePatrimonial } from './compra';
 
 export type Periodo =
   | { tipo: 'ESTE_MES' }
@@ -142,6 +144,10 @@ export function secundariaFila(r: FilaActividad): string {
     partes.push(r.categoria?.nombre ?? 'Sin categoría');
   } else if (r.tipo === 'TRANSFERENCIA') {
     partes.push('Entre cuentas');
+  } else if (esPatrimonial(r.tipo)) {
+    partes.push(etiquetaNoGastoMes(r.tipo) as string);
+    const cuenta = r.cuentas[0]?.nombre;
+    if (cuenta) partes.push(cuenta);
   } else {
     const ter = r.tercero?.nombre;
     const cat = r.varias ? 'Varias' : r.categoria?.nombre ?? null;
@@ -169,6 +175,7 @@ export function tituloTransferencia(r: FilaActividad): string | null {
 /** Importe con signo según el tipo (DAY-Q04, P-ACT-02). */
 export function importeFila(r: FilaActividad): string {
   if (esDevolucion(r)) return importeDevolucion(r);
+  if (esPatrimonial(r.tipo)) return importePatrimonial(r.importe_total ?? '0');
   const total = formatearEur(r.importe_total ?? '0');
   if (r.tipo === 'GASTO') return `−${total}`;
   if (r.tipo === 'INGRESO') return `+${total}`;

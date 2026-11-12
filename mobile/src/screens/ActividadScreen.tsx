@@ -21,6 +21,7 @@
 // Versión: 0.14.0 (F05-D056 paso 2, COLA-AR v1.0, F05 §70.A): «Recibido» (F2, abono) y «Repetir hoy» (F3) son acciones de la cola de la app (`useAccionFinanciera`): la petición se compone al soltar con la identidad del swipe y sobrevive a la navegación y a cerrar la app; el aviso dice «Registrando…» hasta el 2xx. Sin `nuevoId` no hay acción rápida (se retira el `?? (() => '')`, que habría enviado una identidad vacía).
 // Versión: 0.14.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // Versión: 0.15.0 (F06 T1 UX-1 · M-07, DM-06: la fecha usa el componente único `CampoFecha` (chips, campo dd/mm/aaaa con máscara y calendario en JS); se conservan el estado, las reglas de cada campo, los testID y los textos de validación; «Entre fechas»: solo fechas que existen y d ≤ h; el servidor ya rechaza 31/02, dt.date).
+// Versión: 0.16.0 (F06 T1-F06 B3 · fila patrimonial de Actividad, R1 v0.8 §II.5 y lámina L-6; autorizada en lista cerrada por la decisión de Moisés afaac92d…, solo presentación): la fila de un hecho ADQUISICION_PATRIMONIAL o MEJORA_PATRIMONIAL lleva el icono de propiedad (`iconoPatrimonial`, por el tipo del HECHO, HF-14). Nada más cambia.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -68,6 +69,7 @@ import { construirArbol, elegible, motivoNoSeleccionable, visibleEnRegistro } fr
 import { nombreCorto, ofreceRegistrarAbono, ofreceRegistrarDevolucion, TEXTO_NETO, textoDevolucionDe } from '../domain/devolucion';
 import { ayer, ddmmaaaaAIso, diaMesAnioIso, diaMesIso, isoLocal, mesAnioIso, mesDesplazadoIso } from '../domain/fechas';
 import { formatearEur } from '../domain/importe';
+import { iconoPatrimonial } from '../domain/compra';
 import { esFechaIso } from '../domain/intencion';
 import { categoriaLista, componerAnulacion, componerCorreccionCategoria, TEXTO_ANULADO, TEXTO_CATEGORIA_CORREGIDA } from '../domain/edicion';
 import { componerRepetir, repetibleHoy, type CapacidadesRepetir } from '../domain/repetir';
@@ -806,6 +808,14 @@ function IconoFila({ f, testID }: { f: FilaActividad; testID: string }) {
     return (
       <View testID={testID} style={[s.icono, { backgroundColor: c.surfaceSecondary }]}>
         <Ionicons name="swap-horizontal" size={18} color={c.textSecondary} />
+      </View>
+    );
+  }
+  const patrimonial = iconoPatrimonial(f.tipo);
+  if (patrimonial) {
+    return (
+      <View testID={testID} style={[s.icono, { backgroundColor: c.surfaceSecondary }]} accessibilityElementsHidden importantForAccessibility="no">
+        <Ionicons testID={`${testID}-propiedad`} name={patrimonial as 'home-outline'} size={18} color={c.textSecondary} />
       </View>
     );
   }
