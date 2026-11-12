@@ -20,6 +20,7 @@
 // Versión: 0.13.1 (F05-D056, decisión 2 de Moisés del 2026-10-29): los títulos de la lista, del detalle, de «Más» y del aviso de «Repetir hoy» salen de `domain/titulos_dia.ts` (`tituloFilaDia`, `nombreTipoFila`), módulo propio de Día a día; `actividad.ts` y `registro.ts` vuelven a ser los de 9c62d69.
 // Versión: 0.14.0 (F05-D056 paso 2, COLA-AR v1.0, F05 §70.A): «Recibido» (F2, abono) y «Repetir hoy» (F3) son acciones de la cola de la app (`useAccionFinanciera`): la petición se compone al soltar con la identidad del swipe y sobrevive a la navegación y a cerrar la app; el aviso dice «Registrando…» hasta el 2xx. Sin `nuevoId` no hay acción rápida (se retira el `?? (() => '')`, que habría enviado una identidad vacía).
 // Versión: 0.14.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
+// Versión: 0.15.0 (F06 T1 UX-1 · M-07, DM-06: la fecha usa el componente único `CampoFecha` (chips, campo dd/mm/aaaa con máscara y calendario en JS); se conservan el estado, las reglas de cada campo, los testID y los textos de validación; «Entre fechas»: solo fechas que existen y d ≤ h; el servidor ya rechaza 31/02, dt.date).
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -34,6 +35,7 @@ import { usarIntencion } from '../components/Prevision';
 import { accesibilidadLados, FilaDeslizable, propsScrollSwipe, propsZonaSwipe, type LadoSwipe } from '../components/AccionRapida';
 import { useAccionFinanciera } from '../components/ColaAccionRapida';
 import { BotonPrimario, BotonTexto, Chip } from '../components/Basicos';
+import { CampoFecha } from '../components/CampoFecha';
 import { Hoja } from '../components/HojasCategoria';
 import { BotonSecundario, CargaArbol, IconoCategoriaVista, SelectorCategorias } from '../components/SelectorCategorias';
 import {
@@ -66,6 +68,7 @@ import { construirArbol, elegible, motivoNoSeleccionable, visibleEnRegistro } fr
 import { nombreCorto, ofreceRegistrarAbono, ofreceRegistrarDevolucion, TEXTO_NETO, textoDevolucionDe } from '../domain/devolucion';
 import { ayer, ddmmaaaaAIso, diaMesAnioIso, diaMesIso, isoLocal, mesAnioIso, mesDesplazadoIso } from '../domain/fechas';
 import { formatearEur } from '../domain/importe';
+import { esFechaIso } from '../domain/intencion';
 import { categoriaLista, componerAnulacion, componerCorreccionCategoria, TEXTO_ANULADO, TEXTO_CATEGORIA_CORREGIDA } from '../domain/edicion';
 import { componerRepetir, repetibleHoy, type CapacidadesRepetir } from '../domain/repetir';
 import type { RepartoDeHecho } from '../domain/reparto';
@@ -575,16 +578,15 @@ export function ActividadScreen(p: {
 
       {hoja?.h === 'ENTRE_FECHAS' ? (
         <Hoja titulo="Entre fechas" testID="hoja-entre-fechas">
-          <TextInput testID="entre-desde" accessibilityLabel="Desde, día barra mes barra año" value={hoja.desde} placeholder="Desde dd/mm/aaaa"
-            placeholderTextColor={c.textSecondary} maxLength={10} inputMode="numeric"
-            onChangeText={(t) => setHoja({ ...hoja, desde: t })} style={[tipo.body, s.campo, { color: c.textPrimary, backgroundColor: c.surfaceSecondary }]} />
-          <TextInput testID="entre-hasta" accessibilityLabel="Hasta, día barra mes barra año" value={hoja.hasta} placeholder="Hasta dd/mm/aaaa"
-            placeholderTextColor={c.textSecondary} maxLength={10} inputMode="numeric"
-            onChangeText={(t) => setHoja({ ...hoja, hasta: t })} style={[tipo.body, s.campo, { color: c.textPrimary, backgroundColor: c.surfaceSecondary }]} />
+          <CampoFecha testID="entre-desde" etiqueta="Desde, día barra mes barra año" marcador="Desde dd/mm/aaaa" fondo="secundario"
+            texto={hoja.desde} onTexto={(t) => setHoja({ ...hoja, desde: t })} />
+          <CampoFecha testID="entre-hasta" etiqueta="Hasta, día barra mes barra año" marcador="Hasta dd/mm/aaaa" fondo="secundario"
+            texto={hoja.hasta} onTexto={(t) => setHoja({ ...hoja, hasta: t })} />
           {(() => {
             const d = ddmmaaaaAIso(hoja.desde);
             const h = ddmmaaaaAIso(hoja.hasta);
-            const ok = !!d && !!h && d <= h;
+            // M-07: solo fechas que existen (31/02 no); el servidor ya las rechaza (GET /v1/actividad: desde/hasta dt.date).
+            const ok = !!d && !!h && esFechaIso(d) && esFechaIso(h) && d <= h;
             return (
               <>
                 {hoja.desde.length >= 10 && hoja.hasta.length >= 10 && !ok ? (

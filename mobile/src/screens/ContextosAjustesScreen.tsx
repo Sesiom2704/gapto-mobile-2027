@@ -5,6 +5,7 @@
 // Descripción: Ajustes › Contextos (F05-03 J2 §2.5; F05 §46.3 A6; lámina REG-DYN / SET-TH / SET-CTX v0.1 S03, C01). Lista con el texto de la lámina, filas «Finde Cartagena» / «Viaje · 10–12 oct» y, desactivados, «Evento · Desactivado». Alta y edición con el formulario C01 (FormularioContexto); desactivar / reactivar con row_version y sin borrado. VERSION_DESFASADA → recarga y aviso, sin reintento automático.
 // Versión: 0.1.0 (F05-03/F05-04 J2 §2.5)
 // Versión: 0.1.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
+// Versión: 0.2.0 (F06 T1 UX-1 · M-03, Q-UX-06: publica la señal «hay cambios sin guardar» de su formulario (`usarCambiosSinGuardar`; prop opcional `onCambiosSinGuardar`); sin cambios de escritura; la pasa al formulario de contexto).
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -29,7 +30,14 @@ export const TEXTO_REACTIVADO_CTX = 'Reactivado: vuelve a ofrecerse al registrar
 type Carga = { fase: 'CARGANDO' } | { fase: 'ERROR' } | { fase: 'OK'; lista: Contexto[] };
 type Vista = { v: 'LISTA' } | { v: 'NUEVO' } | { v: 'EDITAR'; id: string; aviso: AvisoCaja };
 
-export function ContextosAjustesScreen(p: { cliente: ClienteApi; nuevoId: () => string; onAtras: () => void; onInmersiva: (x: boolean) => void }) {
+export function ContextosAjustesScreen(p: {
+  cliente: ClienteApi;
+  nuevoId: () => string;
+  onAtras: () => void;
+  onInmersiva: (x: boolean) => void;
+  /** UX-1 M-03: publica si su formulario tiene cambios sin guardar (Q-UX-06). */
+  onCambiosSinGuardar?: (hay: boolean) => void;
+}) {
   const { c } = useTema();
   const inset = useSafeAreaInsets();
   const [carga, setCarga] = useState<Carga>({ fase: 'CARGANDO' });
@@ -88,6 +96,7 @@ export function ContextosAjustesScreen(p: { cliente: ClienteApi; nuevoId: () => 
         existente={actual}
         tituloBoton="Guardar"
         avisoInicial={vista.v === 'EDITAR' ? vista.aviso : null}
+        onCambiosSinGuardar={p.onCambiosSinGuardar}
         onHecho={() => {
           void cargar(true);
           setVista({ v: 'LISTA' });

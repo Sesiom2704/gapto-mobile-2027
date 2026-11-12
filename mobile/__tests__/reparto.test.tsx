@@ -10,11 +10,13 @@
 // Versión: 0.4.0 (F05-D051 paso 8; lámina B D-F0507L-03): bloque «Lámina B» con los tres estados de una posición (pendiente con saldo desconocido, CERRADA con importe inicial conocido y CERRADA con importe inicial desconocido) en «Corregir reparto» y en «Pendiente con» (lista y éxito), en claro y oscuro, con su etiqueta accesible; el éxito de una CERRADA pasa a «0,00 € · Saldado. Ya no queda nada pendiente.».
 // Versión: 0.5.0 (F05-D052 paso 3 · lámina B, F05 §66.2, AJ-F0507G3-06): el texto es «Saldo inicial desconocido» (saldo con el que empezó el seguimiento, solo con `apertura_indeterminada`); C4: una pendiente con saldo desconocido ya no dice «Saldo inicial desconocido» (se derivaba de `saldo === null`).
 // Versión: 0.6.0 (F05-D052 paso 2 · R6, F05 §66.A.10): bloque «R6»: igualdad con alguna parte sin indicar (aviso propio y «Revisar» bloqueado), exceso (su error) y suma incompleta (admitida) distinguidos; rechazo del servidor con el código estable explicado con el texto propio.
+// Versión: 0.7.0 (F06 T1 UX-1 · M-08, Q-UX-04): en «Revisar» del gasto compartido, «Nueva obligación» → «Se lo tienes que devolver» y «Nuevo derecho de cobro» → «Te lo tiene que devolver»; aserción del título «Reparto» del bloque `revision-tu-parte` y de la maquetación de la fila de deuda (encoge: flexShrink 1, minWidth 0).
 // ============================================================
 
 import './tiempos_rn';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react-native';
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import type { ClienteApi, DetalleActividad, FilaActividad } from '../src/api/cliente';
@@ -236,7 +238,11 @@ describe('A · pagado por otra persona', () => {
     fireEvent.press(screen.getByTestId('compartido-revisar'));
     for (const b of ['revision-gasto', 'revision-tu-parte', 'revision-dinero', 'revision-deudas']) expect(await screen.findByTestId(b)).toBeTruthy();
     expect(screen.getByText('Le debes a Tania')).toBeTruthy();
-    expect(screen.getByText('Nueva obligación')).toBeTruthy();
+    expect(screen.getByText('Se lo tienes que devolver')).toBeTruthy(); // UX-1 M-08 (Q-UX-04); antes «Nueva obligación»
+    // UX-1 M-08: el bloque se titula «Reparto» (mismo testID) y la fila de la deuda encoge dentro de su fila (no se sale de la tarjeta).
+    expect(within(screen.getByTestId('revision-tu-parte')).getByText('Reparto')).toBeTruthy();
+    expect(within(screen.getByTestId('revision-tu-parte')).queryByText('Tu parte')).toBeNull();
+    expect(StyleSheet.flatten(screen.getByTestId('revision-deuda-LE_DEBES').props.style)).toMatchObject({ flexShrink: 1, minWidth: 0 });
     expect(within(screen.getByTestId('revision-dinero')).getByText('No sale dinero de tus cuentas')).toBeTruthy();
     fireEvent.press(screen.getByTestId('registrar-compartido'));
     await screen.findByTestId('compartido-exito');
@@ -380,7 +386,7 @@ describe('B · cena repartida', () => {
     await screen.findByTestId('compartido-revision');
     expect(screen.getByText('−44,50 €')).toBeTruthy();
     expect(screen.getByText('Tania te debe')).toBeTruthy();
-    expect(screen.getByText('Nuevo derecho de cobro')).toBeTruthy();
+    expect(screen.getByText('Te lo tiene que devolver')).toBeTruthy(); // UX-1 M-08 (Q-UX-04); antes «Nuevo derecho de cobro»
     expect(screen.queryByText('Carlos te debe')).toBeNull();
     fireEvent.press(screen.getByTestId('registrar-compartido'));
     await screen.findByTestId('compartido-exito');

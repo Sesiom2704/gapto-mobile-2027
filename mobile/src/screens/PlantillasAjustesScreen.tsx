@@ -7,6 +7,7 @@
 // Versión: 0.4.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2 S9; SWIPE-RULE): cada plantilla va en tarjeta; deslizar a la izquierda una plantilla ACTIVA es «Desactivar» (tono de aviso, nunca rojo): aviso «<Nombre> desactivada · Deshacer» y, a los 5 s, la misma ruta que «Desactivar» del detalle. Se puede reactivar después.
 // Versión: 0.5.0 (swipe (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados `principal` / `alternativa` del componente común (principal a la izquierda); la raíz y el scroll cierran la fila abierta a medias (`propsZonaSwipe`, `propsScrollSwipe`).)
 // Versión: 0.5.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
+// Versión: 0.6.0 (F06 T1 UX-1 · M-03, Q-UX-06: publica la señal «hay cambios sin guardar» de su formulario (`usarCambiosSinGuardar`; prop opcional `onCambiosSinGuardar`); sin cambios de escritura).
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -20,6 +21,7 @@ import type { AccionRapida, ClienteApi, Contexto, CuentaElegible, CuentaPago, Pl
 import { BotonPrimario, BotonTexto, CabeceraNavegacion, Chip, EstadoDato, Segmentado } from '../components/Basicos';
 import { FormularioContexto, SelectorContexto } from '../components/Contextos';
 import { AvisoCaja, CabeceraTarea, Caja, Campo, CampoSelector, CampoTexto, estilosFormulario as ef, FilaLista, RotuloGrupo, Tarjeta } from '../components/Formulario';
+import { usarCambiosSinGuardar } from '../components/CambiosSinGuardar';
 import { BotonSecundario, SelectorCategorias } from '../components/SelectorCategorias';
 import { SelectorIconos } from '../components/SelectorIconos';
 import { SelectorTercero } from '../components/SelectorTercero';
@@ -79,12 +81,15 @@ export function PlantillasAjustesScreen(p: {
   ahora: () => Date;
   onAtras: () => void;
   onInmersiva: (x: boolean) => void;
+  /** UX-1 M-03: publica si su formulario tiene cambios sin guardar (Q-UX-06). */
+  onCambiosSinGuardar?: (hay: boolean) => void;
 }) {
   const { c } = useTema();
   const inset = useSafeAreaInsets();
   const [carga, setCarga] = useState<Carga>({ fase: 'CARGANDO' });
   const [vista, setVista] = useState<Vista>({ v: 'LISTA' });
   const [form, setForm] = useState<FormularioPlantilla>(FORMULARIO_PLANTILLA_NUEVO);
+  usarCambiosSinGuardar(vista.v === 'FORM', form, p.onCambiosSinGuardar);
   const [aviso, setAviso] = useState<AvisoP>(null);
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [ocupado, setOcupado] = useState(false);

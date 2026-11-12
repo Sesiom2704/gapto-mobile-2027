@@ -5,6 +5,7 @@
 // Descripción: Formulario y selector de contexto (F05-03 J2 §2.3/§2.5; F05 §46.3 A6; lámina REG-DYN / SET-TH / SET-CTX v0.1 C01, G03, S03). Formulario C01: Nombre, Tipo (Viaje, Reforma, Evento, Social, Proyecto, Otro; NINGUNO marcado al empezar) y «Fechas opcional» Desde — Hasta (dd/mm/aaaa). Alta con UUID sellado al abrir (el reintento reutiliza el MISMO) y edición con row_version. En el registro, «Crear y usar» devuelve el contexto creado y el registro lo usa; la escritura del contexto es independiente del registro. El selector (G03) lista solo los contextos ACTIVOS, «Sin contexto» y «Nuevo contexto».
 // Versión: 0.1.0 (F05-03/F05-04 J2 §2.3/§2.5)
 // Versión: 0.1.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
+// Versión: 0.2.0 (F06 T1 UX-1 · M-07, DM-06: la fecha usa el componente único `CampoFecha` (chips, campo dd/mm/aaaa con máscara y calendario en JS); se conservan el estado, las reglas de cada campo, los testID y los textos de validación; Desde y Hasta uno bajo otro, opcionales y en par; una fecha imposible (31/02) da TEXTO_FECHA_MAL: el servidor ya la rechaza, dt.date) y M-03, Q-UX-06: publica la señal «hay cambios sin guardar» de su formulario (`usarCambiosSinGuardar`; prop opcional `onCambiosSinGuardar`); sin cambios de escritura.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -14,10 +15,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ClienteApi, Contexto, TipoContexto } from '../api/cliente';
 import { ddmmaaaaAIso, isoADdmmaaaa } from '../domain/fechas';
+import { esFechaIso } from '../domain/intencion';
 import { detalleContexto, filtrar, TIPOS_CONTEXTO } from '../domain/maestros';
 import { useTema } from '../theme/tema';
 import { espacio, TACTIL_MIN, tipo } from '../theme/tokens';
 import { BotonPrimario, Chip, EstadoDato } from './Basicos';
+import { usarCambiosSinGuardar } from './CambiosSinGuardar';
+import { CampoFecha } from './CampoFecha';
 import { AvisoCaja, CabeceraTarea, Caja, Campo, CampoTexto, estilosFormulario as ef } from './Formulario';
 import { Hoja } from './HojasCategoria';
 import { BotonSecundario } from './SelectorCategorias';
@@ -55,7 +59,8 @@ export function faltaContexto(f: FormCtx): string[] {
 function fechas(f: FormCtx): { desde: string | null; hasta: string | null } | string {
   const desde = f.desde.trim() ? ddmmaaaaAIso(f.desde) : null;
   const hasta = f.hasta.trim() ? ddmmaaaaAIso(f.hasta) : null;
-  if ((f.desde.trim() && !desde) || (f.hasta.trim() && !hasta)) return TEXTO_FECHA_MAL;
+  // M-07: una fecha que no existe (31/02) también es «mal escrita»; el servidor ya la rechaza (AltaContexto/EditarContexto: dt.date).
+  if ((f.desde.trim() && !(desde && esFechaIso(desde))) || (f.hasta.trim() && !(hasta && esFechaIso(hasta)))) return TEXTO_FECHA_MAL;
   if (desde && hasta && hasta < desde) return TEXTO_FECHAS_ORDEN;
   return { desde, hasta };
 }
@@ -72,10 +77,13 @@ export function FormularioContexto(p: {
   onRecargar?: () => Promise<Contexto | null>;
   pie?: React.ReactNode;
   avisoInicial?: AvisoCaja;
+  /** UX-1 M-03: publica si su formulario tiene cambios sin guardar (Q-UX-06). */
+  onCambiosSinGuardar?: (hay: boolean) => void;
 }) {
   const { c } = useTema();
   const inset = useSafeAreaInsets();
   const [f, setF] = useState<FormCtx>(formDe(p.existente));
+  usarCambiosSinGuardar(true, f, p.onCambiosSinGuardar);
   const [aviso, setAviso] = useState<AvisoCaja>(p.avisoInicial ?? null);
   const [ocupado, setOcupado] = useState(false);
   const idAlta = useRef<string>(p.existente ? p.existente.id : p.nuevoId());
@@ -119,15 +127,8 @@ export function FormularioContexto(p: {
           </View>
         </Campo>
         <Campo etiqueta="Fechas" opcional>
-          <View style={{ flexDirection: 'row', gap: espacio.s, alignItems: 'center' }}>
-            <View style={{ flex: 1 }}>
-              <CampoTexto testID="ctx-desde" etiqueta="Desde" marcador="Desde dd/mm/aaaa" valor={f.desde} onCambiar={(t) => setF({ ...f, desde: t })} />
-            </View>
-            <Text style={[tipo.body, { color: c.textSecondary }]}>—</Text>
-            <View style={{ flex: 1 }}>
-              <CampoTexto testID="ctx-hasta" etiqueta="Hasta" marcador="Hasta dd/mm/aaaa" valor={f.hasta} onCambiar={(t) => setF({ ...f, hasta: t })} />
-            </View>
-          </View>
+          <CampoFecha testID="ctx-desde" etiqueta="Desde" marcador="Desde dd/mm/aaaa" texto={f.desde} onTexto={(t) => setF({ ...f, desde: t })} />
+          <CampoFecha testID="ctx-hasta" etiqueta="Hasta" marcador="Hasta dd/mm/aaaa" texto={f.hasta} onTexto={(t) => setF({ ...f, hasta: t })} />
         </Campo>
         <BotonPrimario
           testID="ctx-guardar"

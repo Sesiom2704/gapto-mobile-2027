@@ -7,14 +7,15 @@
 // Versión: 0.2.0 (F05-03/F05-04 J2 §1.5; F05 §46.5 E3): la preferencia de la categoría lleva el tipo GASTO que informa la lista (`tipos.GASTO`).
 // Versión: 0.3.0 (F05-03/F05-04 J2 §2.4; lámina REG-DYN N01): con `ambitos` (registro por tipo) la tarjeta pregunta «¿Recordarlo para la próxima vez?» y ofrece «Para <tercero>» / «Para <categoría>» (uno solo: nunca ambos); la preferencia lleva el tipo del registro (GASTO o INGRESO) y la clave del ámbito elegido. En ingresos, «Cobrado en». Sin `ambitos`, el comportamiento de F05-02 no cambia.
 // Versión: 0.3.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
+// Versión: 0.4.0 (F06 T1 UX-1 · M-04, TR1-05): la tarjeta lee la lista de GET /v1/preferencias al abrirse (solo lectura) y, si la preferencia de la clave elegida ya tiene esos valores (`yaRecordado`), muestra «✓ Recordado» en vez de preguntar; sin lista se pregunta como siempre. La escritura (plan, cuerpos de alta y edición) no cambia.
 // ============================================================
 
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import type { ClienteApi, CuentaPago, Respuesta, ResultadoComandoPreferencia } from '../api/cliente';
-import { AmbitoRecordable, Casillas, PlanGuardado, planificarGuardadoClave, siNo, ValoresFinales } from '../domain/preferencias';
+import type { ClienteApi, CuentaPago, ListaPreferencias, Respuesta, ResultadoComandoPreferencia } from '../api/cliente';
+import { AmbitoRecordable, Casillas, PlanGuardado, planificarGuardadoClave, siNo, ValoresFinales, yaRecordado } from '../domain/preferencias';
 import { useTema } from '../theme/tema';
 import { espacio, radio, TACTIL_MIN, tipo } from '../theme/tokens';
 import { BotonPrimario, Segmentado, Velo } from './Basicos';
@@ -51,6 +52,24 @@ export function GuardarPreferencia(p: {
     : { categoriaId: p.categoriaId, terceroId: null };
   const nombre = ambito ? ambito.nombre : p.nombre;
   const verboCuenta = tipoReg === 'INGRESO' ? 'Cobrado en' : 'Pagar con';
+  // M-04 (UX-1): la visibilidad se decide con la lista de GET /v1/preferencias (la que ya usa el guardado). Solo
+  // lectura: al montar NUNCA se escribe. Sin lista (cargando o error de lectura) se pregunta como siempre.
+  const [lista, setLista] = useState<ListaPreferencias | null>(null);
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const l = await p.cliente.listarPreferencias();
+        if (vivo && l.tipo === 'OK') setLista(l.datos);
+      } catch {
+        // sin lista: se pregunta como siempre
+      }
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, []);
+  const recordado = fase.f === 'EDITANDO' && lista !== null && yaRecordado(lista.preferencias, clave, p.finales, p.casillas, lista.tipos[tipoReg]);
 
   const nombreCuenta = (id: string | null) => (p.cuentas as { cuenta_id: string; nombre: string }[]).find((x) => x.cuenta_id === id)?.nombre ?? 'una cuenta no disponible';
 
@@ -117,25 +136,37 @@ export function GuardarPreferencia(p: {
 
   const guardando = fase.f === 'GUARDANDO';
   const actual = fase.f === 'CONFLICTO' ? fase.plan.existente : null;
+  const selectorAmbito =
+    p.ambitos && p.ambitos.length > 1 ? (
+      <Segmentado<string>
+        testIDBase="pref-ambito"
+        etiquetaGrupo="Recordar para"
+        opciones={p.ambitos.map((a) => ({ valor: a.clave, etiqueta: `Para ${a.nombre}` }))}
+        valor={ambito?.clave ?? null}
+        onCambiar={(v) => {
+          if (guardando) return;
+          intento.current = null;
+          setAmbito(p.ambitos!.find((a) => a.clave === v) ?? null);
+        }}
+      />
+    ) : null;
+  if (recordado) {
+    // M-04: ya está guardada con los mismos valores: no se vuelve a preguntar; se indica el estado («Recordado»).
+    return (
+      <View testID="pref-recordado" accessibilityLiveRegion="polite" style={[s.tarjeta, { backgroundColor: c.surfacePrimary, borderColor: c.borderDefault }]}>
+        <Text accessibilityRole="header" style={[tipo.subheadline, { color: c.textPrimary, fontWeight: '600' }]}>✓ Recordado</Text>
+        {selectorAmbito}
+        <Text style={[tipo.caption, { color: c.textSecondary }]}>{`Se propondrá en tus próximos ${tipoReg === 'INGRESO' ? 'ingresos' : 'gastos'} de ${nombre}. Podrás cambiarlo siempre.`}</Text>
+      </View>
+    );
+  }
   return (
     <>
       <View testID="pref-tarjeta" style={[s.tarjeta, { backgroundColor: c.surfacePrimary, borderColor: c.borderDefault }]}>
         <Text accessibilityRole="header" style={[tipo.subheadline, { color: c.textPrimary, fontWeight: '600' }]}>
           {p.ambitos ? '¿Recordarlo para la próxima vez?' : `¿Recordarlo para ${p.nombre}?`}
         </Text>
-        {p.ambitos && p.ambitos.length > 1 ? (
-          <Segmentado<string>
-            testIDBase="pref-ambito"
-            etiquetaGrupo="Recordar para"
-            opciones={p.ambitos.map((a) => ({ valor: a.clave, etiqueta: `Para ${a.nombre}` }))}
-            valor={ambito?.clave ?? null}
-            onCambiar={(v) => {
-              if (guardando) return;
-              intento.current = null;
-              setAmbito(p.ambitos!.find((a) => a.clave === v) ?? null);
-            }}
-          />
-        ) : null}
+        {selectorAmbito}
         <Casilla
           testID="pref-casilla-cuenta"
           marcada={casillas.cuenta}

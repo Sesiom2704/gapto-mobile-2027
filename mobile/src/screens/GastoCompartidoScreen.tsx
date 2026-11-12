@@ -7,6 +7,8 @@
 // Versión: 0.1.1
 // v0.1.1 (F05-06 M3 CORR-01, R-M3-05): en el éxito, cada «Pendiente con <persona>» sale del `tercero_id` que el servidor devuelve en cada posición creada, nunca de emparejar por importe (dos personas con la misma parte señalaban a la misma).
 // v0.2.0 (F05-D052 paso 2 · R6, F05 §66.A.10): espejo de R6 en «Reparto»: con alguna parte sin indicar y las indicadas sumando el total, aviso propio «reparto-sin-margen» (no sugiere poner 0), «Revisar» bloqueado y el rechazo del servidor `REPARTO_SIN_MARGEN_PARA_DESCONOCIDO` se explica con el mismo texto. El exceso («Supera el total») y la suma incompleta no cambian.
+// v0.3.0 (F06 T1 UX-1 · M-08 y M-09; Q-UX-04): en «Revisar», el bloque se titula «Reparto» y las etiquetas son «Te lo tiene que devolver» / «Se lo tienes que devolver» (mismos testID); en «Gasto registrado», el ✓ con el token `textPrimary` (contraste máximo en claro y oscuro; `positiveText` está acotado por PT-04) y, por persona, el resumen compacto «Pendiente con X» (lectura OP-20) con el enlace de siempre mientras no está (mismo testID `compartido-ver-pendiente-<tid>`).
+// Versión: 0.3.0
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -15,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ClienteApi, CuentaElegible } from '../api/cliente';
 import { BotonPrimario, BotonTexto, Chip, EstadoDato } from '../components/Basicos';
+import { PendienteCompacto } from '../components/PendienteCompacto';
 import { Aviso, Bloque, CabeceraTarea, Campo, FilaRevision, Inicial, s, SelectorPersona } from '../components/Reparto';
 import { TEXTO_FORMULARIO_SE_CONSERVA } from '../domain/capacidades';
 import { diaMesAnioIso } from '../domain/fechas';
@@ -174,7 +177,7 @@ export function GastoCompartidoScreen(p: {
     return (
       <View testID="compartido-exito" style={[s.pantalla, { backgroundColor: c.background, paddingTop: inset.top + espacio.xl, paddingBottom: inset.bottom + espacio.l }]}>
         <View style={[s.exito, { backgroundColor: c.surfacePrimary }]} accessibilityLiveRegion="polite">
-          <Text style={{ fontSize: 40 }} accessibilityElementsHidden>✓</Text>
+          <Text style={{ fontSize: 40, color: c.textPrimary }} accessibilityElementsHidden>✓</Text>
           <Text accessibilityRole="header" style={[tipo.titleMedium, { color: c.textPrimary }]}>Gasto registrado</Text>
           <Text style={[importe.primary, { color: c.textPrimary }]}>{formatearEur(r.importe)}</Text>
           <Text testID="compartido-exito-tu-parte" style={[tipo.body, { color: c.textSecondary }]}>
@@ -191,8 +194,7 @@ export function GastoCompartidoScreen(p: {
             if (!tid) return null;
             const nombre = nombreDe(tid);
             return (
-              <BotonTexto key={x.entidad_id} testID={`compartido-ver-pendiente-${tid}`} titulo={`Pendiente con ${nombre}`}
-                onPress={() => p.onCerrar(true, { terceroId: tid, nombre })} />
+              <AccesoPendiente key={x.entidad_id} cliente={p.cliente} terceroId={tid} nombre={nombre} onAbrir={() => p.onCerrar(true, { terceroId: tid, nombre })} />
             );
           })}
           <BotonPrimario testID="compartido-hecho" titulo="Hecho" onPress={() => p.onCerrar(true)} />
@@ -218,7 +220,7 @@ export function GastoCompartidoScreen(p: {
             <FilaRevision testID="revision-total" titulo={`${p.base.terceroNombre ?? p.base.nota ?? 'Gasto'} · ${p.base.categoriaNombre}`}
               detalle="Total del hecho" valor={formatearEur(total)} />
           </Bloque>
-          <Bloque titulo="Tu parte" testID="revision-tu-parte">
+          <Bloque titulo="Reparto" testID="revision-tu-parte">
             <FilaRevision testID="revision-mia" titulo={f.modo === 'SOLO_MIO' ? 'Solo tuyo' : otros.join(' · ')}
               detalle={mia === null ? 'Sin indicar: no cuenta como tuyo en el Resultado' : undefined}
               valor={mia === null ? 'Sin indicar' : formatearEur(mia)} />
@@ -243,7 +245,7 @@ export function GastoCompartidoScreen(p: {
                 <View key={`${d.quien}-${d.sentido}`} style={s.kv}>
                   <Inicial nombre={d.quien} />
                   <FilaRevision testID={`revision-deuda-${d.sentido}`} titulo={d.sentido === 'TE_DEBE' ? `${d.quien} te debe` : `Le debes a ${d.quien}`}
-                    valor={formatearEur(d.importe)} etiqueta={d.sentido === 'TE_DEBE' ? 'Nuevo derecho de cobro' : 'Nueva obligación'} />
+                    valor={formatearEur(d.importe)} etiqueta={d.sentido === 'TE_DEBE' ? 'Te lo tiene que devolver' : 'Se lo tienes que devolver'} />
                 </View>
               ))
             )}
@@ -439,5 +441,21 @@ export function GastoCompartidoScreen(p: {
           }} />
       ) : null}
     </View>
+  );
+}
+
+/**
+ * UX-1 M-09: acceso a «Pendiente con X» desde el éxito. Con lo pendiente leído (OP-20) se ve el resumen compacto;
+ * mientras carga, sin posiciones o con error de lectura, el enlace de siempre: el acceso nunca se pierde y conserva
+ * el testID `compartido-ver-pendiente-<tid>` (CORR-01: la persona es la del servidor).
+ */
+function AccesoPendiente(p: { cliente: ClienteApi; terceroId: string; nombre: string; onAbrir: () => void }) {
+  const [compacto, setCompacto] = useState(false);
+  return (
+    <>
+      <PendienteCompacto cliente={p.cliente} terceroId={p.terceroId} nombre={p.nombre} onAbrir={p.onAbrir}
+        testID={`compartido-ver-pendiente-${p.terceroId}`} onVisible={setCompacto} />
+      {compacto ? null : <BotonTexto testID={`compartido-ver-pendiente-${p.terceroId}`} titulo={`Pendiente con ${p.nombre}`} onPress={p.onAbrir} />}
+    </>
   );
 }

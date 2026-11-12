@@ -4,10 +4,12 @@
 // Ruta: mobile/src/domain/propiedad.ts
 // Descripción: Lógica pura de B1 · Propiedad (F06-01; contratos C-PROP-01..04 y L-PROP del candidato R1 v0.8 Parte I y v0.7 Parte I; láminas F06-01 v0.9 A1–A3, D1–D3 y v0.1 C1–C2, D3–D4). Tipos de propiedad, formulario de titularidad (cuatro modos), porcentajes como texto exacto con 4 decimales y suma EXACTA del 100 % en diezmilésimas enteras (sin float: nunca se reparte el resto automáticamente), validaciones previas al envío, construcción de las peticiones y textos de usuario de los códigos ★ de B1. El servidor revalida todo: estas comprobaciones solo evitan envíos que sabemos que se rechazarán.
 // Versión: 0.1.0 (F06 Lote 12 · B1 Propiedad, N1; mandato F06-LOTE12 Parte B punto 3)
+// Versión: 0.2.0 (F06 T1 UX-1 · M-07): la adquisición y «Desde» tienen que existir en el calendario (31/02 no; `esFechaIso`), con los mismos textos; el servidor ya las rechaza (dto_propiedades: dt.date). Vacía = desconocida (null) y el resto de reglas no cambian.
 // ============================================================
 
 import type { TitularidadVista, Valoracion, VistaPropiedad } from '../api/propiedades';
 import { ddmmaaaaAIso, isoADdmmaaaa } from './fechas';
+import { esFechaIso } from './intencion';
 import { parsearImporte } from './importe';
 
 export type TipoPropiedad = 'VIVIENDA' | 'LOCAL' | 'GARAJE' | 'TERRENO' | 'OTRO';
@@ -123,7 +125,9 @@ export function faltaTitularidad(f: FormTitularidad, adquisicion: string | null)
   const r: string[] = [];
   if (f.modo === null) return ['elige de quién es'];
   if (f.modo === 'DESCONOCIDA') return r;
-  const desde = f.desde.trim() ? ddmmaaaaAIso(f.desde) : null;
+  // M-07: «Desde» tiene que existir en el calendario (31/02 no); el servidor ya la rechaza (dto_propiedades: desde dt.date).
+  const leida = f.desde.trim() ? ddmmaaaaAIso(f.desde) : null;
+  const desde = leida && esFechaIso(leida) ? leida : null;
   if (!f.desde.trim()) r.push('la fecha «Desde»');
   else if (!desde) r.push('la fecha «Desde» como dd/mm/aaaa');
   else if (adquisicion && desde < adquisicion) r.push('una fecha «Desde» igual o posterior a la adquisición');
@@ -215,7 +219,9 @@ export function faltaDatos(f: FormDatos): string[] {
   const r: string[] = [];
   if (!f.nombre.trim()) r.push('nombre');
   if (f.tipo === null) r.push('tipo');
-  if (f.adquisicion.trim() && !ddmmaaaaAIso(f.adquisicion)) r.push('fecha de adquisición como dd/mm/aaaa');
+  // M-07: la adquisición, si se escribe, tiene que existir (31/02 no; dto_propiedades: fecha_adquisicion dt.date). Vacía = desconocida (null), como antes.
+  const adq = f.adquisicion.trim() ? ddmmaaaaAIso(f.adquisicion) : null;
+  if (f.adquisicion.trim() && !(adq && esFechaIso(adq))) r.push('fecha de adquisición como dd/mm/aaaa');
   if (superficie(f.superficie) === undefined) r.push('superficie útil mayor que 0');
   if (superficie(f.superficieConstruida) === undefined) r.push('superficie construida mayor que 0');
   if (entero(f.habitaciones) === undefined) r.push('habitaciones como número entero');

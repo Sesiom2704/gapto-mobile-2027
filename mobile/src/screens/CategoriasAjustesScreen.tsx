@@ -12,6 +12,7 @@
 // Versión: 0.7.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2 S9; SWIPE-RULE): cada categoría va en tarjeta; deslizar a la izquierda una categoría ACTIVA es «Desactivar» (tono de aviso, nunca rojo). Sin subcategorías activas: aviso «<Nombre> desactivada · Deshacer» y, a los 5 s, la misma ruta que la hoja con el modo «solo si no tiene subcategorías activas». Con subcategorías activas hay dudas: abre su detalle con la hoja «Desactivar» de siempre (rama o no). Se puede reactivar después; nunca borra registros.
 // Versión: 0.8.0 (swipe (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados `principal` / `alternativa` del componente común (principal a la izquierda); la raíz y el scroll cierran la fila abierta a medias (`propsZonaSwipe`, `propsScrollSwipe`).)
 // Versión: 0.8.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
+// Versión: 0.9.0 (F06 T1 UX-1 · M-03, Q-UX-06: publica la señal «hay cambios sin guardar» de su formulario (`usarCambiosSinGuardar`; prop opcional `onCambiosSinGuardar`); sin cambios de escritura; la pasa al alta de categoría).
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -82,6 +83,8 @@ export function CategoriasAjustesScreen(p: {
   nuevoId: () => string;
   onAtras: () => void;
   onInmersiva: (inmersiva: boolean) => void;
+  /** UX-1 M-03: publica si su formulario tiene cambios sin guardar (Q-UX-06). */
+  onCambiosSinGuardar?: (hay: boolean) => void;
 }) {
   const { c } = useTema();
   const inset = useSafeAreaInsets();
@@ -294,6 +297,7 @@ export function CategoriasAjustesScreen(p: {
         padreInicial={tarea.padre}
         onRecargarArbol={async () => { await cargar(); }}
         onCancelar={() => setTarea(null)}
+        onCambiosSinGuardar={p.onCambiosSinGuardar}
         onCreada={(padre) => {
           setTarea(null);
           setDetalleId(null);

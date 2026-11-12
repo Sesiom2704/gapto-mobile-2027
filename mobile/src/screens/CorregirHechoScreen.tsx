@@ -5,6 +5,7 @@
 // Descripción: «Corregir» un registro (F05-06 M1; lámina EDIT-HECHO v0.1 A2, A3, B3, B4; D-EDIT-02..05, 07, 08; P-EDIT-03, 05; CONTRATO_M1 v0.1 §2; F05 §61.2). Solo para datos que nunca fueron ciertos (INV-07): la línea fija lo dice arriba. Formulario precargado con lo registrado: importe, fecha y cuenta de un pago simple, o importe, fecha y cuentas de una transferencia (el importe se corrige siempre con su movimiento, P-EDIT-03); cada campo cambiado lleva «Editado» y conserva el valor anterior a la vista. «Revisar cambios» enseña cada cambio antes → después y lo que arrastra (movimiento de la cuenta y, en un gasto, el Resultado del mes), con motivo obligatorio (opciones fijas más «Otro…») y «Guardar cambios». Un conflicto de versión (B3) no pisa nada: «Este registro ha cambiado mientras lo corregías» con lo que hay ahora, «Recargar y volver a corregir» o «Descartar». Sin respuesta del servidor, el reintento usa la MISMA intención (el motor no corrige dos veces). Si el registro no se puede corregir, se dice por qué (la elegibilidad viene del servidor, que además revalida al guardar).
 // Versión: 0.1.0 (F05-06 M1)
 // Versión: 0.1.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
+// Versión: 0.2.0 (F06 T1 UX-1 · M-07, DM-06: la fecha usa el componente único `CampoFecha` (chips, campo dd/mm/aaaa con máscara y calendario en JS); se conservan el estado, las reglas de cada campo, los testID y los textos de validación; chips de la fecha original y ≤ hoy como antes; 31/02 ya no se toma: el servidor ya la rechaza, dt.date).
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -13,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ClienteApi, CuentaElegible, EdicionHecho, OperacionCuenta } from '../api/cliente';
 import { BotonPrimario, BotonTexto, Chip, EstadoDato } from '../components/Basicos';
+import { CampoFecha } from '../components/CampoFecha';
 import { Aviso, Bloque, CabeceraTarea, Campo, FilaRevision, s } from '../components/Reparto';
 import { usarIntencion } from '../components/Prevision';
 import {
@@ -30,6 +32,7 @@ import {
 } from '../domain/edicion';
 import { ayer, ddmmaaaaAIso, diaMesAnioIso, isoLocal } from '../domain/fechas';
 import { formatearEur } from '../domain/importe';
+import { esFechaIso } from '../domain/intencion';
 import { useTema } from '../theme/tema';
 import { espacio, tipo } from '../theme/tokens';
 
@@ -263,15 +266,22 @@ export function CorregirHechoScreen(p: {
           <Editado campo="importe" />
         </Campo>
         <Campo etiqueta="Fecha">
-          <View style={s.chips}>
-            {fechas.map((f) => (
-              <Chip key={f} testID={`corregir-hecho-fecha-${f}`} etiqueta={f === hoy ? 'Hoy' : f === isoLocal(ayer(p.ahora())) ? 'Ayer' : diaMesAnioIso(f)}
-                seleccionado={form.fecha === f} onPress={() => { setFechaTexto(''); setForm({ ...form, fecha: f }); }} />
-            ))}
-          </View>
-          <TextInput testID="corregir-hecho-fecha-texto" accessibilityLabel="Otra fecha (dd/mm/aaaa)" placeholder="Otra fecha (dd/mm/aaaa)" placeholderTextColor={c.textSecondary}
-            value={fechaTexto} onChangeText={(t) => { setFechaTexto(t); const iso = ddmmaaaaAIso(t); if (iso && iso <= hoy) setForm({ ...form, fecha: iso }); }}
-            style={[tipo.body, s.input, { color: c.textPrimary, borderColor: c.borderStandard, backgroundColor: c.surfacePrimary }]} />
+          <CampoFecha
+            testID="corregir-hecho-fecha-texto"
+            etiqueta="Otra fecha (dd/mm/aaaa)"
+            marcador="Otra fecha (dd/mm/aaaa)"
+            hoyIso={hoy}
+            max={hoy}
+            texto={fechaTexto}
+            // M-07: solo una fecha que existe (31/02 no; el servidor ya la rechaza, fecha: dt.date) y ≤ hoy, como antes.
+            onTexto={(t) => { setFechaTexto(t); const iso = ddmmaaaaAIso(t); if (iso && esFechaIso(iso) && iso <= hoy) setForm({ ...form, fecha: iso }); }}
+            opciones={fechas.map((f) => ({
+              testID: `corregir-hecho-fecha-${f}`,
+              etiqueta: f === hoy ? 'Hoy' : f === isoLocal(ayer(p.ahora())) ? 'Ayer' : diaMesAnioIso(f),
+              seleccionado: form.fecha === f,
+              onPress: () => { setFechaTexto(''); setForm({ ...form, fecha: f }); },
+            }))}
+          />
           <Editado campo="fecha" />
         </Campo>
         <Campo etiqueta={transferencia ? 'Sale de' : 'Pagado con'}>

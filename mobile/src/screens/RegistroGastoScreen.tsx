@@ -17,7 +17,8 @@
 // v0.13.0 (F05-D052 paso 2 · C-03, F05 §66 y §66.A; lámina F05-07 v0.3 C1–C3; D-F0507L-04/05): «¿De quién es este gasto?» ofrece «Mío, pero me lo reembolsan» (solo en gastos y antes del primer envío), que abre «Me lo reembolsan» (ReembolsoHoja) ENCIMA del formulario, que conserva lo escrito; «Hecho» vuelve con quién y cuánto y el resumen «Te debe <quién> · <importe>» (tocar lo reabre; «Quitar» lo retira; «Solo mío» también). Con reembolso no se ofrecen «Repartir» ni «Otra persona». El envío va a POST /v1/intenciones/gasto-reembolsable (mismo ciclo y mismas reglas que el gasto pagado; `validar` lo comprueba también). Éxito C3: el gasto que cuenta en tu Resultado y lo que te deben, por separado. Rechazos de C-03 explicados en lenguaje llano. Cambiar a Ingreso quita el reembolso con aviso.
 // v0.14.0 (F05-D053 §67.2 · O3, opción 1; sin cambio de servidor): si la propuesta (GET /v1/preferencias/propuesta o /v1/registro/propuesta) de la categoría elegida responde CATEGORIA_NO_ELEGIBLE, la categoría se marca no válida en el acto («Esta categoría ya no está disponible. Elige otra categoría.»), se recarga el árbol y se conservan la cuenta y el presupuesto mostrados: no se aplica SIN_PROPUESTA. Mientras no se elija otra, «Registrar» sigue desactivado (la misma `validar`). Una respuesta de una categoría que ya no es la elegida no toca nada. El servidor conserva sus validaciones y sus 409.
 // v0.14.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
-// Versión: 0.14.1
+// v0.15.0 (F06 T1 UX-1 · M-07, DM-06: la fecha usa el componente único `CampoFecha` (chips, campo dd/mm/aaaa con máscara y calendario en JS); se conservan el estado, las reglas de cada campo, los testID y los textos de validación; regla ≤ hoy) y M-09: bajo el tercero, el resumen compacto «Pendiente con X» (lectura OP-20) que abre «Pendiente con X» encima del formulario (`onPendienteCon`); ✓ de éxito con el token `textPrimary` (contraste máximo en claro y oscuro; `positiveText` está acotado por PT-04).
+// Versión: 0.15.0
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -35,6 +36,8 @@ import { HojaTipos } from '../components/HojaTipos';
 import { RecordarAfinidad } from '../components/RecordarAfinidad';
 import { ReembolsoHoja } from '../components/Reembolso';
 import { SelectorTercero } from '../components/SelectorTercero';
+import { CampoFecha } from '../components/CampoFecha';
+import { PendienteCompacto } from '../components/PendienteCompacto';
 import { BotonSecundario, CargaArbol, IconoCategoriaVista, SelectorCategorias } from '../components/SelectorCategorias';
 import {
   CategoriaNodo,
@@ -145,6 +148,8 @@ export function RegistroGastoScreen(p: {
   onCambiarTipo?: (hacia: TipoRegistro, conservar: { importeTexto: string; fechaHecho: string; aviso: string }) => void;
   /** F05-06 M3: «Repartir» u «Otra persona» abren el gasto compartido con lo común ya validado. */
   onGastoCompartido?: (base: BaseCompartido, inicial: { repartir: boolean; otraPersona: boolean }) => void;
+  /** UX-1 M-09: abre «Pendiente con X» ENCIMA del formulario (que sigue montado y se conserva al volver). */
+  onPendienteCon?: (t: { terceroId: string; nombre: string }) => void;
   /** F05-D051 9.1 (G1 v2): hitos del ensayo G1; solo en `__DEV__` (en producción, undefined). Nunca valores. */
   traza?: (evento: string, extra?: { via?: string; n?: number }) => void;
 }) {
@@ -646,7 +651,7 @@ export function RegistroGastoScreen(p: {
     return (
       <View testID="registro-exito" style={[s.pantalla, { backgroundColor: c.background, paddingTop: inset.top + espacio.xl, paddingBottom: inset.bottom + espacio.l }]}>
         <View style={[s.exito, { backgroundColor: c.surfacePrimary }]} accessibilityLiveRegion="polite">
-          <Text style={{ fontSize: 40 }} accessibilityElementsHidden>✓</Text>
+          <Text style={{ fontSize: 40, color: c.textPrimary }} accessibilityElementsHidden>✓</Text>
           <Text accessibilityRole="header" style={[tipo.titleMedium, { color: c.textPrimary }]}>{tituloExito(tipoReg)}</Text>
           <Text style={[importe.primary, { color: c.textPrimary }]}>{formatearEur(r.importe)}</Text>
           <Text testID="exito-titulo" style={[tipo.body, { color: c.textSecondary }]}>{titulo}</Text>
@@ -859,6 +864,11 @@ export function RegistroGastoScreen(p: {
           </Pressable>
           {b.terceroNombre && b.terceroOrigen === 'INFERIDO' && b.plantilla ? (
             <Text testID="origen-tercero" style={[tipo.footnote, { color: c.textSecondary }]}>{origen('PLANTILLA')}</Text>
+          ) : null}
+          {/* UX-1 M-09: lo pendiente con esa persona, en pequeño (solo lectura OP-20; sin posiciones o con error no aparece). */}
+          {b.terceroId && b.terceroNombre && p.onPendienteCon ? (
+            <PendienteCompacto key={b.terceroId} cliente={p.cliente} terceroId={b.terceroId} nombre={b.terceroNombre}
+              onAbrir={() => p.onPendienteCon?.({ terceroId: b.terceroId!, nombre: b.terceroNombre! })} />
           ) : null}
         </Campo>
 
@@ -1093,31 +1103,27 @@ export function RegistroGastoScreen(p: {
 
         {/* Fecha común del gasto y del pago (REG-01): propuesta «Hoy», editable, nunca futura. */}
         <Campo etiqueta="Fecha" error={visibles.fecha}>
-          <View style={s.chips}>
-            <Chip testID="fecha-hoy" etiqueta="Hoy" seleccionado={otraFecha === null && b.fechaHecho === hoyIso}
-              onPress={() => { if (bloqueado) return; setOtraFecha(null); cambiar({ fechaHecho: hoyIso, fechaOrigen: 'INFERIDO' }); }} />
-            <Chip testID="fecha-ayer" etiqueta="Ayer" seleccionado={otraFecha === null && b.fechaHecho === ayerIso}
-              onPress={() => { if (bloqueado) return; setOtraFecha(null); cambiar({ fechaHecho: ayerIso, fechaOrigen: 'USUARIO' }); }} />
-            <Chip testID="fecha-otra" etiqueta="Otra fecha" seleccionado={otraFecha !== null}
-              onPress={() => { if (!bloqueado) setOtraFecha(isoADdmmaaaa(b.fechaHecho)); }} />
-          </View>
-          {otraFecha !== null ? (
-            <TextInput
-              testID="campo-fecha"
-              accessibilityLabel="Fecha del gasto, día barra mes barra año"
-              value={otraFecha}
-              editable={!bloqueado}
-              onChangeText={(texto) => {
-                setOtraFecha(texto);
-                cambiar({ fechaHecho: ddmmaaaaAIso(texto) ?? texto, fechaOrigen: 'USUARIO' });
-              }}
-              placeholder="dd/mm/aaaa"
-              placeholderTextColor={c.textSecondary}
-              inputMode="numeric"
-              maxLength={10}
-              style={[tipo.body, s.input, { color: c.textPrimary, backgroundColor: c.surfacePrimary, borderColor: visibles.fecha ? c.critical : c.borderStandard }]}
-            />
-          ) : null}
+          <CampoFecha
+            testID="campo-fecha"
+            etiqueta="Fecha del gasto, día barra mes barra año"
+            hoyIso={hoyIso}
+            max={hoyIso}
+            editable={!bloqueado}
+            error={!!visibles.fecha}
+            texto={otraFecha}
+            onTexto={(texto) => {
+              setOtraFecha(texto);
+              cambiar({ fechaHecho: ddmmaaaaAIso(texto) ?? texto, fechaOrigen: 'USUARIO' });
+            }}
+            opciones={[
+              { testID: 'fecha-hoy', etiqueta: 'Hoy', seleccionado: otraFecha === null && b.fechaHecho === hoyIso,
+                onPress: () => { if (bloqueado) return; setOtraFecha(null); cambiar({ fechaHecho: hoyIso, fechaOrigen: 'INFERIDO' }); } },
+              { testID: 'fecha-ayer', etiqueta: 'Ayer', seleccionado: otraFecha === null && b.fechaHecho === ayerIso,
+                onPress: () => { if (bloqueado) return; setOtraFecha(null); cambiar({ fechaHecho: ayerIso, fechaOrigen: 'USUARIO' }); } },
+              { testID: 'fecha-otra', etiqueta: 'Otra fecha', seleccionado: otraFecha !== null,
+                onPress: () => { if (!bloqueado) setOtraFecha(isoADdmmaaaa(b.fechaHecho)); } },
+            ]}
+          />
           <Text testID="fecha" style={[tipo.footnote, { color: c.textSecondary }]}>
             {esFechaIso(b.fechaHecho)
               ? `${b.fechaOrigen === 'INFERIDO' ? 'Propuesta: hoy · ' : ''}${fechaCortaIso(b.fechaHecho)} · fecha del gasto y del pago`

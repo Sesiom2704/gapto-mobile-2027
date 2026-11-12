@@ -9,6 +9,7 @@
 // Versión: 0.4.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2 S9; SWIPE-RULE): cada tercero va en tarjeta; deslizar a la izquierda un tercero ACTIVO es «Desactivar» (tono de aviso, nunca rojo): aviso «<Nombre> desactivado · Deshacer» y, a los 5 s, la misma ruta que el botón «Desactivar» del detalle. Se puede reactivar después; nunca borra registros.
 // Versión: 0.5.0 (swipe (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados `principal` / `alternativa` del componente común (principal a la izquierda); la raíz y el scroll cierran la fila abierta a medias (`propsZonaSwipe`, `propsScrollSwipe`).)
 // Versión: 0.5.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
+// Versión: 0.6.0 (F06 T1 UX-1 · M-03, Q-UX-06: publica la señal «hay cambios sin guardar» de su formulario (`usarCambiosSinGuardar`; prop opcional `onCambiosSinGuardar`); sin cambios de escritura).
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -21,6 +22,7 @@ import { propsScrollSwipe, propsZonaSwipe, useAccionRapida, type LadoSwipe } fro
 import type { ClienteApi, DetalleAfinidades, NaturalezaTercero, Respuesta, ResultadoComandoTercero, Tercero } from '../api/cliente';
 import { BotonPrimario, CabeceraNavegacion, Chip, EstadoDato, Segmentado } from '../components/Basicos';
 import { AvisoCaja, CabeceraTarea, Caja, Campo, CampoTexto, estilosFormulario as ef, FilaLista, Tarjeta } from '../components/Formulario';
+import { usarCambiosSinGuardar } from '../components/CambiosSinGuardar';
 import { BotonCritico, Hoja } from '../components/HojasCategoria';
 import { TEXTO_DUPLICADO, TEXTO_INACTIVO } from '../components/SelectorTercero';
 import { BotonSecundario, CargaArbol, SelectorCategorias } from '../components/SelectorCategorias';
@@ -57,6 +59,8 @@ export function TercerosAjustesScreen(p: {
   nuevoId: () => string;
   onAtras: () => void;
   onInmersiva: (x: boolean) => void;
+  /** UX-1 M-03: publica si su formulario tiene cambios sin guardar (Q-UX-06). */
+  onCambiosSinGuardar?: (hay: boolean) => void;
   /** F05-05: fecha funcional (ventana del historial) y «Ver sus registros». */
   ahora?: () => Date;
   onVerRegistros?: (t: { id: string; nombre: string }) => void;
@@ -72,6 +76,7 @@ export function TercerosAjustesScreen(p: {
   const [filtro, setFiltro] = useState<Filtro>('TODOS');
   const [texto, setTexto] = useState('');
   const [form, setForm] = useState<Form>({ nombre: '', naturaleza: null });
+  usarCambiosSinGuardar(vista.v === 'NUEVO' || vista.v === 'EDITAR', form, p.onCambiosSinGuardar);
   const [idAlta, setIdAlta] = useState<string | null>(null);
   const [aviso, setAviso] = useState<AvisoCaja>(null);
   const [candidatos, setCandidatos] = useState<Tercero[] | null>(null);

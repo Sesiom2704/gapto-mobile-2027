@@ -4,6 +4,7 @@
 // Ruta: mobile/src/screens/PropiedadAltaScreen.tsx
 // Descripción: Alta de propiedad (F06-01 B1 · C-PROP-01; lámina F06-01 v0.9 A1–A3, desde Patrimonio «+»). Tarea inmersiva en tres pasos: A1 Datos (solo nombre y tipo obligatorios, tipo sin preseleccionar, fecha de adquisición opcional con «No la sé», «Más datos» plegados; garaje y trastero «No lo sé» = desconocido), A2 ¿De quién es? (cuatro modos, suma exacta del 100 %, «Desde» propuesta con la adquisición si se conoce) y A3 «Propiedad guardada» con los tres caminos (M-1): registrar la compra y la compra histórica llegan con B2 y aparecen como no disponibles; «Más tarde» deja el coste «no disponible». La `intencion_id` se sella al abrir: un reintento tras un resultado indeterminado reutiliza la MISMA (replay idéntico, sin duplicar). Sin dirección (B5 fuera de B1).
 // Versión: 0.1.0 (F06 Lote 12 · B1 Propiedad, N1)
+// Versión: 0.2.0 (F06 T1 UX-1 · M-07, DM-06: la fecha usa el componente único `CampoFecha` (chips, campo dd/mm/aaaa con máscara y calendario en JS); se conservan el estado, las reglas de cada campo, los testID y los textos de validación; adquisición con «No la sé» como opción del componente; vacía = desconocida).
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -14,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ClienteApi } from '../api/cliente';
 import type { ClientePropiedades, VistaPropiedad } from '../api/propiedades';
 import { BotonPrimario, Chip, EstadoDato } from '../components/Basicos';
+import { CampoFecha } from '../components/CampoFecha';
 import { AvisoCaja, CabeceraTarea, Caja, Campo, CampoTexto, estilosFormulario as ef } from '../components/Formulario';
 import { EditorTitularidad } from '../components/Titularidad';
 import { ddmmaaaaAIso } from '../domain/fechas';
@@ -193,12 +195,13 @@ export function CamposDatos(p: { f: FormDatos; onCambiar: (f: FormDatos) => void
         </View>
       </Campo>
       <Campo etiqueta="Fecha de adquisición" opcional>
-        <View style={{ flexDirection: 'row', gap: espacio.s, alignItems: 'center' }}>
-          <View style={{ flex: 1 }}>
-            <CampoTexto testID={`${p.prefijo}-adquisicion`} etiqueta="Fecha de adquisición" marcador="dd/mm/aaaa" valor={f.adquisicion} onCambiar={(t) => set({ adquisicion: t })} />
-          </View>
-          <Chip testID={`${p.prefijo}-adquisicion-nolase`} etiqueta="No la sé" seleccionado={sinFecha} onPress={() => set({ adquisicion: '' })} />
-        </View>
+        <CampoFecha
+          testID={`${p.prefijo}-adquisicion`}
+          etiqueta="Fecha de adquisición"
+          texto={f.adquisicion}
+          onTexto={(t) => set({ adquisicion: t })}
+          opciones={[{ testID: `${p.prefijo}-adquisicion-nolase`, etiqueta: 'No la sé', seleccionado: sinFecha, onPress: () => set({ adquisicion: '' }) }]}
+        />
       </Campo>
       <Pressable testID={`${p.prefijo}-mas-datos`} accessibilityRole="button" accessibilityState={{ expanded: p.masDatos }} onPress={p.onMasDatos} style={[s.mas, { borderColor: c.borderDefault, backgroundColor: c.surfacePrimary }]}>
         <View style={{ flex: 1 }}>

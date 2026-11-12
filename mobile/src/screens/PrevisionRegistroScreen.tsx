@@ -4,6 +4,7 @@
 // Ruta: mobile/src/screens/PrevisionRegistroScreen.tsx
 // Descripción: Registrar desde la previsión (F05-06 M5 §B1; lámina PREV v0.2 A3/A4, C1/C2, D1/D2; D-PREV-03/04/05/15). Tarea inmersiva CREATE con los datos de la previsión como propuesta VISIBLE («De la previsión»): importe real (manda lo real, «Distinto de lo previsto»), tercero y categoría de la previsión (la categoría se puede quitar: «Sin categoría»), presupuesto, cuenta («Pagado con» / «Cobrado en» o «Desde» / «Hacia»), fecha (Hoy u otra, ≤ hoy) y «¿Queda cubierta la previsión?» SIN respuesta marcada: «Revisar» no se activa hasta elegir (P-PREV-02). La revisión separa «Se registra» (realidad y su movimiento) de «La previsión» (cubierta o pendiente) y dice que la previsión no mueve dinero (MONTH-RULE-06); en la transferencia, que no es gasto ni ingreso. Un envío sin respuesta se reintenta con la MISMA identidad (no duplica). Rechazos con el texto del servidor; «Ha cambiado; revisa» vuelve al detalle releído.
 // Versión: 0.1.0 (F05-06 M5 §B1)
+// Versión: 0.2.0 (F06 T1 UX-1 · M-07, DM-06: la fecha usa el componente único `CampoFecha` (chips, campo dd/mm/aaaa con máscara y calendario en JS); se conservan el estado, las reglas de cada campo, los testID y los textos de validación; ≤ hoy; una fecha imposible (31/02) no se toma y sigue «Hoy», como cualquier texto que no es fecha; el servidor ya la rechaza, dt.date).
 // ============================================================
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -11,9 +12,11 @@ import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput
 
 import type { ClienteApi, DetallePrevision, Respuesta } from '../api/cliente';
 import { BotonPrimario, BotonTexto, Chip, EstadoDato, Segmentado } from '../components/Basicos';
+import { CampoFecha } from '../components/CampoFecha';
 import { CabeceraTarea, Campo, estilosFormulario } from '../components/Formulario';
 import { QuedaCubierta, usarIntencion } from '../components/Prevision';
 import { ddmmaaaaAIso, diaMesIso, isoLocal } from '../domain/fechas';
+import { esFechaIso } from '../domain/intencion';
 import { formatearEur, parsearImporte } from '../domain/importe';
 import {
   componerRegistro,
@@ -200,12 +203,21 @@ export function PrevisionRegistroScreen(p: {
               </Campo>
             ) : null}
             <Campo etiqueta="Fecha">
-              <View style={estilosFormulario.chips}>
-                <Chip testID="prevision-fecha-hoy" etiqueta={`Hoy ${diaMesIso(hoyIso)}`} seleccionado={fechaOtra === null} onPress={() => setFechaOtra(null)} />
-                <TextInput testID="prevision-fecha-otra" accessibilityLabel="Otra fecha (dd/mm/aaaa)" placeholder="Otra fecha dd/mm/aaaa" placeholderTextColor={c.textSecondary}
-                  value={fechaOtraTexto} onChangeText={(t) => { setFechaOtraTexto(t); setFechaOtra(ddmmaaaaAIso(t)); }}
-                  style={[tipo.body, s.input, s.fecha, { color: c.textPrimary, borderColor: c.borderStandard, backgroundColor: c.surfacePrimary }]} />
-              </View>
+              <CampoFecha
+                testID="prevision-fecha-otra"
+                etiqueta="Otra fecha (dd/mm/aaaa)"
+                marcador="Otra fecha dd/mm/aaaa"
+                hoyIso={hoyIso}
+                max={hoyIso}
+                texto={fechaOtraTexto}
+                onTexto={(t) => {
+                  setFechaOtraTexto(t);
+                  // M-07: solo una fecha que existe (31/02 no; el servidor ya la rechaza, fecha_hecho: dt.date); si no, sigue «Hoy».
+                  const iso = ddmmaaaaAIso(t);
+                  setFechaOtra(iso && esFechaIso(iso) ? iso : null);
+                }}
+                opciones={[{ testID: 'prevision-fecha-hoy', etiqueta: `Hoy ${diaMesIso(hoyIso)}`, seleccionado: fechaOtra === null, onPress: () => setFechaOtra(null) }]}
+              />
             </Campo>
             <QuedaCubierta valor={marcar} onCambiar={setMarcar} />
           </>

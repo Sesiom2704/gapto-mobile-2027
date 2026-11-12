@@ -7,6 +7,7 @@
 // Versión: 0.2.0 (F05-06 M4 §3; lámina CAP B2/B3; D-CAP-06/08): al final de «Desde» y de «A», «¿Falta una cuenta? N sin configurar ›» (solo si N > 0) abre la lista de Cuentas encima del formulario, que conserva lo escrito; al volver se recargan ambas listas y el número. CUENTA_SIN_CAPACIDAD al guardar: mensaje del servidor y «El resto del formulario se conserva.»; se recargan las listas y la cuenta que perdió la capacidad deja de estar elegida (sin preselección).
 // Versión: 0.3.0 (F05-D051 paso 9.1 · G1 v2): prop opcional `traza` (solo `__DEV__`, desde App.tsx): `form_montado`, `cuentas_ok`/`cuentas_error`, importe (primer y último cambio, sin valor), `cuenta_desde_elegida` / `cuenta_a_elegida`, `tipo:<TIPO>` y `registrar_pulsado`. Sin la prop no se llama a nada; sin cambios de comportamiento.
 // Versión: 0.3.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
+// Versión: 0.4.0 (F06 T1 UX-1 · M-07, DM-06: la fecha usa el componente único `CampoFecha` (chips, campo dd/mm/aaaa con máscara y calendario en JS); se conservan el estado, las reglas de cada campo, los testID y los textos de validación; regla ≤ hoy).
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -15,6 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ClienteApi, CuentaElegible, PayloadTransferencia, ResultadoRegistroTipo } from '../api/cliente';
 import { BotonPrimario, BotonTexto, Chip, EstadoDato } from '../components/Basicos';
+import { CampoFecha } from '../components/CampoFecha';
 import { AvisoFaltaCuenta, PanelCuentas, useSinConfigurar } from '../components/FaltaCuenta';
 import { HojaTipos } from '../components/HojaTipos';
 import { TEXTO_FORMULARIO_SE_CONSERVA } from '../domain/capacidades';
@@ -246,25 +248,20 @@ export function TransferenciaScreen(p: {
           </View>
         </Campo>
         <Campo etiqueta="Fecha">
-          <View style={s.chips}>
-            <Chip testID="fecha-hoy" etiqueta="Hoy" seleccionado={otraFecha === null && fecha === hoyIso} onPress={() => editar(() => { setOtraFecha(null); setFecha(hoyIso); })} />
-            <Chip testID="fecha-ayer" etiqueta="Ayer" seleccionado={otraFecha === null && fecha === ayerIso} onPress={() => editar(() => { setOtraFecha(null); setFecha(ayerIso); })} />
-            <Chip testID="fecha-otra" etiqueta="Otra fecha" seleccionado={otraFecha !== null} onPress={() => editar(() => setOtraFecha(isoADdmmaaaa(fecha)))} />
-          </View>
-          {otraFecha !== null ? (
-            <TextInput
-              testID="campo-fecha"
-              accessibilityLabel="Fecha, día barra mes barra año"
-              value={otraFecha}
-              editable={!bloqueado}
-              onChangeText={(t) => editar(() => { setOtraFecha(t); setFecha(ddmmaaaaAIso(t) ?? t); })}
-              placeholder="dd/mm/aaaa"
-              placeholderTextColor={c.textSecondary}
-              inputMode="numeric"
-              maxLength={10}
-              style={[tipo.body, s.input, { color: c.textPrimary, backgroundColor: c.surfacePrimary, borderColor: c.borderStandard }]}
-            />
-          ) : null}
+          <CampoFecha
+            testID="campo-fecha"
+            etiqueta="Fecha, día barra mes barra año"
+            hoyIso={hoyIso}
+            max={hoyIso}
+            editable={!bloqueado}
+            texto={otraFecha}
+            onTexto={(t) => editar(() => { setOtraFecha(t); setFecha(ddmmaaaaAIso(t) ?? t); })}
+            opciones={[
+              { testID: 'fecha-hoy', etiqueta: 'Hoy', seleccionado: otraFecha === null && fecha === hoyIso, onPress: () => editar(() => { setOtraFecha(null); setFecha(hoyIso); }) },
+              { testID: 'fecha-ayer', etiqueta: 'Ayer', seleccionado: otraFecha === null && fecha === ayerIso, onPress: () => editar(() => { setOtraFecha(null); setFecha(ayerIso); }) },
+              { testID: 'fecha-otra', etiqueta: 'Otra fecha', seleccionado: otraFecha !== null, onPress: () => editar(() => setOtraFecha(isoADdmmaaaa(fecha))) },
+            ]}
+          />
           <Text testID="fecha" style={[tipo.footnote, { color: c.textSecondary }]}>
             {esFechaIso(fecha) ? (fecha > hoyIso ? 'La fecha no puede ser futura.' : fechaCortaIso(fecha)) : 'Escribe la fecha como dd/mm/aaaa.'}
           </Text>

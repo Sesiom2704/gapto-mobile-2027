@@ -7,6 +7,7 @@
 // Versión: 0.2.0 (F05-06 M2-D §2; decisión R-M2A-02 opción b): «Sí, en <cuenta>» solo cuando `cuenta_compra` (cuenta ORIGINAL demostrable) no es null, sin exigir que esté en la lista (el servidor no le exige capacidad); «En otra cuenta» con las de RECIBIR_INGRESO (operación INGRESO). CUENTA_SIN_CAPACIDAD sigue con el mensaje del servidor, que nombra la capacidad del detalle.
 // Versión: 0.3.0 (F05-D052 paso 2 · C-03, §66.A.9): el rechazo GASTO_CON_DERECHO_DE_COBRO al guardar se explica con el mismo motivo que la lectura.
 // Versión: 0.3.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
+// Versión: 0.4.0 (F06 T1 UX-1 · M-07, DM-06: la fecha usa el componente único `CampoFecha` (chips, campo dd/mm/aaaa con máscara y calendario en JS); se conservan el estado, las reglas de cada campo, los testID y los textos de validación; regla ≤ hoy).
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -15,6 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ClienteApi, ContextoDevolucion, CuentaElegible, PayloadDevolucion, ResultadoDevolucion } from '../api/cliente';
 import { BotonPrimario, BotonTexto, Chip, EstadoDato } from '../components/Basicos';
+import { CampoFecha } from '../components/CampoFecha';
 import { TEXTO_FORMULARIO_SE_CONSERVA } from '../domain/capacidades';
 import {
   atribucionInicial,
@@ -317,17 +319,20 @@ export function DevolucionScreen(p: {
                   ) : null}
                 </Campo>
                 <Campo etiqueta="Fecha de la devolución">
-                  <View style={s.chips}>
-                    <Chip testID="fecha-hoy" etiqueta="Hoy" seleccionado={otraFecha === null && fecha === hoyIso} onPress={() => editar(() => { setOtraFecha(null); setFecha(hoyIso); })} />
-                    <Chip testID="fecha-ayer" etiqueta="Ayer" seleccionado={otraFecha === null && fecha === ayerIso} onPress={() => editar(() => { setOtraFecha(null); setFecha(ayerIso); })} />
-                    <Chip testID="fecha-otra" etiqueta="Otra fecha" seleccionado={otraFecha !== null} onPress={() => editar(() => setOtraFecha(isoADdmmaaaa(fecha)))} />
-                  </View>
-                  {otraFecha !== null ? (
-                    <TextInput testID="campo-fecha" accessibilityLabel="Fecha, día barra mes barra año" value={otraFecha} editable={!bloqueado}
-                      onChangeText={(t) => editar(() => { setOtraFecha(t); setFecha(ddmmaaaaAIso(t) ?? t); })} placeholder="dd/mm/aaaa"
-                      placeholderTextColor={c.textSecondary} inputMode="numeric" maxLength={10}
-                      style={[tipo.body, s.input, { color: c.textPrimary, backgroundColor: c.surfacePrimary, borderColor: c.borderStandard }]} />
-                  ) : null}
+                  <CampoFecha
+                    testID="campo-fecha"
+                    etiqueta="Fecha, día barra mes barra año"
+                    hoyIso={hoyIso}
+                    max={hoyIso}
+                    editable={!bloqueado}
+                    texto={otraFecha}
+                    onTexto={(t) => editar(() => { setOtraFecha(t); setFecha(ddmmaaaaAIso(t) ?? t); })}
+                    opciones={[
+                      { testID: 'fecha-hoy', etiqueta: 'Hoy', seleccionado: otraFecha === null && fecha === hoyIso, onPress: () => editar(() => { setOtraFecha(null); setFecha(hoyIso); }) },
+                      { testID: 'fecha-ayer', etiqueta: 'Ayer', seleccionado: otraFecha === null && fecha === ayerIso, onPress: () => editar(() => { setOtraFecha(null); setFecha(ayerIso); }) },
+                      { testID: 'fecha-otra', etiqueta: 'Otra fecha', seleccionado: otraFecha !== null, onPress: () => editar(() => setOtraFecha(isoADdmmaaaa(fecha))) },
+                    ]}
+                  />
                   <Text testID="fecha" style={[tipo.footnote, { color: c.textSecondary }]}>
                     {esFechaIso(fecha) ? (fecha > hoyIso ? 'La fecha no puede ser futura.' : fechaCortaIso(fecha)) : 'Escribe la fecha como dd/mm/aaaa.'}
                   </Text>

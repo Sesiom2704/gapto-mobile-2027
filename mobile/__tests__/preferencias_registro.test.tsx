@@ -10,6 +10,7 @@
 // Versión: 0.5.0
 // Versión: 0.6.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // Versión: 0.7.0 (F05-D053 §67.2 · O3, opción 1): alta aditiva de los casos O3 (propuesta retenida y rechazada con CATEGORIA_NO_ELEGIBLE: categoría no válida en el acto, cuenta y presupuesto conservados, sin registro, recuperación con otra categoría; cuenta elegida por el usuario; respuesta obsoleta; dominio). Ningún oráculo anterior cambia.
+// Versión: 0.8.0 (F06 T1 UX-1 · M-04): en AJ-B2-04 el número de lecturas de GET /v1/preferencias pasa de 2 a 3 porque la tarjeta lee la lista al abrirse para decidir si ya está recordado (solo lectura; ninguna aserción de escritura cambia).
 // ============================================================
 
 import './tiempos_rn';
@@ -543,7 +544,8 @@ test.each([
   expect(seleccionada('pref-casilla-cuenta')).toBe(true);
   expect(seleccionada('pref-casilla-presupuestable')).toBe(false);
   await act(async () => fireEvent.press(screen.getByTestId('pref-guardar')));
-  await waitFor(() => expect(f.cliente.listarPreferencias).toHaveBeenCalledTimes(2)); // lectura previa + recarga tras el rechazo
+  // UX-1 M-04: +1 lectura de GET /v1/preferencias al abrir la tarjeta, para decidir su visibilidad (solo lectura; antes 2).
+  await waitFor(() => expect(f.cliente.listarPreferencias).toHaveBeenCalledTimes(3)); // visibilidad + lectura previa + recarga tras el rechazo
   expect(screen.getByTestId('pref-tarjeta')).toBeTruthy(); // vuelve a la tarjeta
   expect(screen.queryByTestId('pref-conflicto')).toBeNull(); // sin R07
   expect(screen.queryByTestId('pref-error')).toBeNull();

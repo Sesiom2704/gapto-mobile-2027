@@ -5,6 +5,7 @@
 // Descripción: Valor de una propiedad (F06-01 B1 · C-PROP-04 alta y L-PROP; lámina F06-01 v0.9 D3 Revisar valor y v0.1 B2 Histórico). D3: nueva valoración del inmueble completo (100 %) con fecha y método obligatorios entre Mercado, Tasación, Manual y Valor de referencia (ya no ofrece «Compra»: la crea solo la compra); «Esto es una estimación: no cambia el coste ni tu dinero». B2: histórico del más reciente al más antiguo, solo lectura; las valoraciones sin fecha, al final como evidencia; la referencia fiscal nunca se presenta como valor de mercado; un valor que cambia se registra como valoración nueva y conserva la anterior. VERSION_DESFASADA → D4 Recargar.
 // Versión: 0.1.0 (F06 Lote 12 · B1 Propiedad, N1)
 // Versión: 0.2.0 (F06-01 B1 MANT N3 del selector, AJ-B1C-01 / PC-B1-04 opción A): la fecha de D3 se elige con «Hoy · Ayer · Otra fecha», el patrón de AbonoHoja (propuesta Hoy; Hoy y Ayer en la fecha civil del dispositivo con `isoLocal` y `ayer` de domain/fechas; «Otra fecha» abre el campo dd/mm/aaaa y solo admite una fecha que exista en el calendario, `esFechaIso`). Sin límite nuevo: C-PROP-04 solo exige una fecha (`fecha_valoracion: date`, no nula). La petición no cambia (fecha_valoracion ISO).
+// Versión: 0.3.0 (F06 T1 UX-1 · M-07, DM-06: la fecha usa el componente único `CampoFecha` (chips, campo dd/mm/aaaa con máscara y calendario en JS); se conservan el estado, las reglas de cada campo, los testID y los textos de validación; sin mínimo ni máximo, C-PROP-04; con D-M2-04 acepta años 0001–0099, p. ej. 0050-06-15).
 // ============================================================
 
 import React, { useRef, useState } from 'react';
@@ -13,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ClientePropiedades, Valoracion, VistaPropiedad } from '../api/propiedades';
 import { BotonPrimario, CabeceraNavegacion, Chip, EstadoDato } from '../components/Basicos';
+import { CampoFecha } from '../components/CampoFecha';
 import { AvisoCaja, CabeceraTarea, Caja, Campo, CampoTexto, estilosFormulario as ef, Tarjeta } from '../components/Formulario';
 import { ayer, ddmmaaaaAIso, diaMesAnioIso, fechaCortaIso, isoADdmmaaaa, isoLocal } from '../domain/fechas';
 import { formatearEur, parsearImporte } from '../domain/importe';
@@ -115,15 +117,18 @@ export function ValoracionFormScreen(p: {
           <CampoTexto testID="prop-val-valor" etiqueta="Valor del inmueble completo" marcador="Ej.: 250.000,00" valor={f.valor} onCambiar={(t) => setF({ ...f, valor: t })} />
         </Campo>
         <Campo etiqueta="Fecha">
-          <View style={ef.chips}>
-            <Chip testID="prop-val-hoy" etiqueta="Hoy" seleccionado={otraFecha === null && f.fecha === hoyIso} onPress={() => { setOtraFecha(null); setF({ ...f, fecha: hoyIso }); }} />
-            <Chip testID="prop-val-ayer" etiqueta="Ayer" seleccionado={otraFecha === null && f.fecha === ayerIso} onPress={() => { setOtraFecha(null); setF({ ...f, fecha: ayerIso }); }} />
-            <Chip testID="prop-val-otra" etiqueta="Otra fecha" seleccionado={otraFecha !== null} onPress={() => setOtraFecha(esFechaIso(f.fecha) ? isoADdmmaaaa(f.fecha) : f.fecha)} />
-          </View>
-          {otraFecha !== null ? (
-            <CampoTexto testID="prop-val-fecha" etiqueta="Fecha del valor, día barra mes barra año" marcador="dd/mm/aaaa" valor={otraFecha} maximo={10}
-              onCambiar={(t) => { setOtraFecha(t); setF({ ...f, fecha: ddmmaaaaAIso(t) ?? t }); }} />
-          ) : null}
+          <CampoFecha
+            testID="prop-val-fecha"
+            etiqueta="Fecha del valor, día barra mes barra año"
+            hoyIso={hoyIso}
+            texto={otraFecha}
+            onTexto={(t) => { setOtraFecha(t); setF({ ...f, fecha: ddmmaaaaAIso(t) ?? t }); }}
+            opciones={[
+              { testID: 'prop-val-hoy', etiqueta: 'Hoy', seleccionado: otraFecha === null && f.fecha === hoyIso, onPress: () => { setOtraFecha(null); setF({ ...f, fecha: hoyIso }); } },
+              { testID: 'prop-val-ayer', etiqueta: 'Ayer', seleccionado: otraFecha === null && f.fecha === ayerIso, onPress: () => { setOtraFecha(null); setF({ ...f, fecha: ayerIso }); } },
+              { testID: 'prop-val-otra', etiqueta: 'Otra fecha', seleccionado: otraFecha !== null, onPress: () => setOtraFecha(esFechaIso(f.fecha) ? isoADdmmaaaa(f.fecha) : f.fecha) },
+            ]}
+          />
           <Text testID="prop-val-fecha-elegida" style={[tipo.footnote, { color: c.textSecondary }]}>
             {esFechaIso(f.fecha) ? fechaCortaIso(f.fecha) : 'Escribe la fecha como dd/mm/aaaa.'}
           </Text>

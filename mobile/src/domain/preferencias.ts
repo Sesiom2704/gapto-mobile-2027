@@ -9,6 +9,7 @@
 // Versión: 0.5.0 (F05-03/F05-04 J2 §2.3/§2.4; lámina REG-DYN G01/I01/N01 y REG-PLT R01–R05): propuesta del registro por tipo con la capa plantilla (GET /v1/registro/propuesta): origen visible «De tu plantilla <nombre>.», «Propuesta: tu preferencia para <tercero>.» y, en ingresos, «… para todos los ingresos.»; «Guardar como preferencia» para el tercero O para la categoría (nunca ambos) con la misma lógica de alta / edición / conflicto.
 // Versión: 0.4.0 (F05-03/F05-04 J2 §2.5; F05 §46.4 R6, §46.5 E2/E3; lámina REG-DYN / SET-TH / SET-CTX v0.1 S04): Ajustes › Preferencias con CUATRO ámbitos: «Todos los gastos», «Todos los ingresos», «Una categoría» y «Un tercero»; los dos últimos con tipo Gasto/Ingreso, siempre enviado. Categoría + tercero no se ofrece (PREFERENCIA_AMBITO_NO_ADMITIDO). Grupo nuevo «Por tercero». «Proponer cuenta» del tipo INGRESO usa las cuentas elegibles para cobrar (servidor).
 // Versión: 0.6.0 (F05-D053 §67.2 · O3, opción 1): `categoriaRechazadaEnPropuesta` y `TEXTO_CATEGORIA_NO_DISPONIBLE`. Si la propuesta de la categoría elegida se rechaza con CATEGORIA_NO_ELEGIBLE, la categoría queda no válida y se conservan la cuenta y el presupuesto mostrados (no es SIN_PROPUESTA). `aplicarPropuesta` no cambia.
+// Versión: 0.7.0 (F06 T1 UX-1 · M-04, TR1-05): `yaRecordado` (pura): está recordado si guardar sería una edición sin cambios según el MISMO `planificarGuardadoClave`. `casillasIniciales`, `planificarGuardadoClave` y los cuerpos de escritura no cambian.
 // ============================================================
 
 import type { ContenidoPreferencia, CuentaPago, OrigenPropuesta, Preferencia, PropuestaRegistro, PropuestaRegistroTipo, TiposRegistro } from '../api/cliente';
@@ -305,6 +306,27 @@ export function planificarGuardadoClave(
   if (c.cuenta && e.cuenta_default_id !== null && e.cuenta_default_id !== f.cuenta) campos.push('cuenta');
   if (c.presupuestable && e.presupuestable_default !== null && e.presupuestable_default !== f.presupuestable) campos.push('presupuestable');
   return campos.length > 0 ? { tipo: 'CONFLICTO', existente: e, contenido, campos } : { tipo: 'EDITAR', existente: e, contenido };
+}
+
+/**
+ * M-04 (T1-F06 UX-1, TR1-05): ¿la preferencia de esa clave YA recuerda los valores de las casillas marcadas?
+ * Usa el MISMO plan que el guardado (`planificarGuardadoClave`, sin cambios): está recordado si guardar sería una
+ * edición que no cambia nada. Sin preferencia, con conflicto o sin nada marcado → false (se pregunta como siempre).
+ * Solo decide la VISIBILIDAD de la tarjeta; no escribe.
+ */
+export function yaRecordado(
+  lista: Preferencia[],
+  clave: { categoriaId: string | null; terceroId: string | null },
+  f: ValoresFinales,
+  c: Casillas,
+  tipoId: string,
+): boolean {
+  const plan = planificarGuardadoClave(lista, clave, f, c, tipoId);
+  return (
+    plan.tipo === 'EDITAR' &&
+    plan.contenido.cuenta_default_id === plan.existente.cuenta_default_id &&
+    plan.contenido.presupuestable_default === plan.existente.presupuestable_default
+  );
 }
 
 export function siNo(v: boolean): string {

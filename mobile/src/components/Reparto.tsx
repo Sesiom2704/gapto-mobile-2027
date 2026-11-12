@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-06 M3 §B1)
 // Versión: 0.2.0 (F05-D052 paso 2 · C-03, F05 §66.A.3): `SelectorPersona` admite `naturalezas` (por defecto solo PERSONA: el reparto no cambia). Con PERSONA y EMPRESA («Quién te lo debe» de C-03) lista ambas con su tipo, busca «persona o empresa», ofrece crear persona o empresa y su nota es la de C-03; ORGANISMO, OTRO y sin naturaleza nunca aparecen (DEU-C03-NATURALEZAS). `excluir` sigue quitando, p. ej., el comercio del gasto.
 // Versión: 0.2.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
+// Versión: 0.3.0 (F06 T1 UX-1 · M-08): `FilaRevision` encoge dentro de su fila (flexGrow/flexShrink, minWidth 0; valor y etiqueta alineados a la derecha y con salto de línea): en «Quién debe a quién» el importe y la etiqueta ya no se salen de la tarjeta.
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -31,14 +32,14 @@ export function Campo({ etiqueta, children, testID }: { etiqueta: string; childr
 export function FilaRevision(p: { testID: string; titulo: string; detalle?: string; valor: string; etiqueta?: string }) {
   const { c } = useTema();
   return (
-    <View testID={p.testID} style={[s.kv, { paddingVertical: espacio.xs }]}>
-      <View style={{ flex: 1 }}>
+    <View testID={p.testID} style={[s.kv, s.filaRevision]}>
+      <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={[tipo.body, { color: c.textPrimary }]}>{p.titulo}</Text>
         {p.detalle ? <Text style={[tipo.footnote, { color: c.textSecondary }]}>{p.detalle}</Text> : null}
       </View>
-      <View style={{ alignItems: 'flex-end' }}>
-        {p.valor ? <Text style={[tipo.bodyEmphasis, { color: c.textPrimary }]}>{p.valor}</Text> : null}
-        {p.etiqueta ? <Text style={[tipo.caption, { color: c.textSecondary }]}>{p.etiqueta}</Text> : null}
+      <View style={s.valorRevision}>
+        {p.valor ? <Text style={[tipo.bodyEmphasis, { color: c.textPrimary, textAlign: 'right' }]}>{p.valor}</Text> : null}
+        {p.etiqueta ? <Text style={[tipo.caption, { color: c.textSecondary, textAlign: 'right' }]}>{p.etiqueta}</Text> : null}
       </View>
     </View>
   );
@@ -211,6 +212,9 @@ export const s = StyleSheet.create({
   form: { padding: espacio.l, gap: espacio.xl },
   tarjeta: { borderRadius: radio.m, padding: espacio.m, gap: espacio.s },
   kv: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: espacio.m },
+  /** M-08: la fila de revisión ocupa el hueco que le deja su fila (p. ej. junto a `Inicial`) y encoge: el título y la etiqueta saltan de línea y no se salen de la tarjeta. */
+  filaRevision: { paddingVertical: espacio.xs, flexGrow: 1, flexShrink: 1, minWidth: 0 },
+  valorRevision: { alignItems: 'flex-end', flexShrink: 1, maxWidth: '50%' },
   fila: { flexDirection: 'row', alignItems: 'center', gap: espacio.m, borderRadius: radio.m, paddingHorizontal: espacio.m, minHeight: TACTIL_MIN + 8 },
   input: { borderWidth: 1, borderRadius: radio.s, paddingHorizontal: espacio.m, minHeight: TACTIL_MIN + 4, minWidth: 0 },
   inputImporte: { borderWidth: 1, borderRadius: radio.s, paddingHorizontal: espacio.m, minHeight: TACTIL_MIN, width: 112, textAlign: 'right' },

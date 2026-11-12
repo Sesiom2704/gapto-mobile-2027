@@ -4,6 +4,7 @@
 // Ruta: mobile/src/components/Titularidad.tsx
 // Descripción: Editor de titularidad de una propiedad (F06-01 B1; lámina F06-01 v0.9 A2 y v0.1 C2; C-PROP-01 §I.1 y C-PROP-03). Modos «Solo mía», «Compartida», «Es de otra persona» y «Aún no lo sé» (este último solo en el alta), ninguno marcado al empezar; filas «Tú» y cotitulares con su porcentaje escrito como texto exacto (4 decimales); total visible «Total 100 % ✓» o «Total 90 % · falta un 10 %» sin repartir el resto; fecha «Desde» obligatoria salvo en «Aún no lo sé». Los cotitulares se eligen en una hoja entre los terceros activos: solo PERSONA o EMPRESA (Q-10); los demás aparecen apagados con el motivo. El servidor revalida todo.
 // Versión: 0.1.0 (F06 Lote 12 · B1 Propiedad, N1)
+// Versión: 0.2.0 (F06 T1 UX-1 · M-07, DM-06: la fecha usa el componente único `CampoFecha` (chips, campo dd/mm/aaaa con máscara y calendario en JS); se conservan el estado, las reglas de cada campo, los testID y los textos de validación; reglas de «Desde» sin cambios).
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -15,6 +16,7 @@ import { estadoSuma, FormTitularidad, MODOS_TITULARIDAD, ModoTitularidad, ParteF
 import { useTema } from '../theme/tema';
 import { espacio, radio, TACTIL_MIN, tipo } from '../theme/tokens';
 import { EstadoDato } from './Basicos';
+import { CampoFecha } from './CampoFecha';
 import { Campo, CampoTexto } from './Formulario';
 import { Hoja } from './HojasCategoria';
 import { BotonSecundario } from './SelectorCategorias';
@@ -90,7 +92,7 @@ export function EditorTitularidad(p: {
 
       {f.modo !== null && f.modo !== 'DESCONOCIDA' ? (
         <Campo etiqueta="Desde">
-          <CampoTexto testID="tit-desde" etiqueta="Desde" marcador="dd/mm/aaaa" valor={f.desde} onCambiar={(t) => p.onCambiar({ ...f, desde: t })} />
+          <CampoFecha testID="tit-desde" etiqueta="Desde" texto={f.desde} onTexto={(t) => p.onCambiar({ ...f, desde: t })} />
           {p.ayudaDesde ? <Text style={[tipo.caption, { color: c.textSecondary }]}>{p.ayudaDesde}</Text> : null}
         </Campo>
       ) : null}

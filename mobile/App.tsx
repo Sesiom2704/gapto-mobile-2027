@@ -18,7 +18,8 @@
 // v0.14.0 (F05-D052 paso 2 · C-03, §66.A.8): «Pendiente con…» recibe además el `entidad_id` del derecho elegido en el detalle del gasto y lo abre directamente.
 // v0.15.0 (F05-D056 paso 2, COLA-AR v1.0, F05 §70.A.4): la raíz monta el aviso GLOBAL de la cola de acciones rápidas financieras (`AvisosCola global`), encima de cualquier pantalla o tarea: «Cobrando… · Deshacer» con el tiempo restante sigue visible al navegar. Sin cambios de navegación ni de los recorridos de registro.
 // v0.16.0 (F06 Lote 12 · B1 Propiedad, N1; láminas F06-01 v0.9 A1–A3, D1–D3 y v0.1 C1–C2, D3–D4): «Patrimonio» deja de ser territorio pendiente: monta Patrimonio › Propiedades (PropiedadesScreen) de forma PERSISTENTE desde la primera visita, como Más (conserva el nivel al cambiar de pestaña); sus tareas (alta, nuevo reparto, valoración, edición) son inmersivas y ocultan la barra inferior. El cliente de propiedades (`api/propiedades`) va aparte de `ClienteApi` y llega por prop opcional (por defecto, el de `configApi`). «Mes» sigue pendiente.
-// Versión: 0.16.0
+// v0.17.0 (F06 T1 UX-1 · M-03 y M-09): la barra inferior pasa por `accionBarra`: «Más» estando en «Más» vuelve al menú, o pregunta «¿Descartar cambios?» (Descartar / Seguir editando) si un formulario de la pila de «Más» publica cambios sin guardar (Q-UX-06); cambiar de pestaña conserva la pila. El registro recibe `onPendienteCon`: «Pendiente con X» se abre ENCIMA del formulario, que sigue montado.
+// Versión: 0.17.0
 // ============================================================
 
 import * as Crypto from 'expo-crypto';
@@ -32,6 +33,7 @@ import { ClientePropiedades, crearClientePropiedades } from './src/api/propiedad
 import { configApi } from './src/api/config';
 import { g1Abrir, g1Fetch, g1Suscribir, g1Traza } from './src/dev/g1';
 import { BarraInferior, Destino } from './src/components/BarraInferior';
+import { accionBarra, HojaDescartarCambios } from './src/components/CambiosSinGuardar';
 import { AvisosCola, colaDe } from './src/components/ColaAccionRapida';
 import { HojaTipos } from './src/components/HojaTipos';
 import type { TipoRegistro } from './src/domain/registro';
@@ -89,6 +91,15 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
   const [refresco, setRefresco] = useState(0);
   const [pantallaMas, setPantallaMas] = useState<PantallaMas>('MAS');
   const [inmersivaMas, setInmersivaMas] = useState(false);
+  /** UX-1 M-03 (Q-UX-06): un formulario de la pila de «Más» con cambios sin guardar y la hoja «¿Descartar cambios?». */
+  const [cambiosMas, setCambiosMas] = useState(false);
+  const [descartarMas, setDescartarMas] = useState(false);
+  const pulsarBarra = (d: Destino) => {
+    const a = accionBarra(d, destino, pantallaMas === 'MAS', cambiosMas);
+    if (a.tipo === 'IR') return setDestino(a.destino);
+    if (a.tipo === 'MENU_MAS') return setPantallaMas('MAS');
+    setDescartarMas(true);
+  };
   const [inmersivaDia, setInmersivaDia] = useState(false);
   /** C4: tercero cuyos registros se ven desde Ajustes › Terceros. */
   const [registrosDe, setRegistrosDe] = useState<{ id: string; nombre: string } | null>(null);
@@ -177,6 +188,7 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
             <CategoriasAjustesScreen
               cliente={p.cliente}
               nuevoId={p.nuevoId}
+              onCambiosSinGuardar={setCambiosMas}
               onAtras={() => setPantallaMas('AJUSTES')}
               onInmersiva={setInmersivaMas}
             />
@@ -185,6 +197,7 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
             <TercerosAjustesScreen
               cliente={p.cliente}
               nuevoId={p.nuevoId}
+              onCambiosSinGuardar={setCambiosMas}
               ahora={p.ahora}
               onAtras={() => setPantallaMas('AJUSTES')}
               onInmersiva={setInmersivaMas}
@@ -215,12 +228,13 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
             />
           ) : null}
           {pantallaMas === 'CONTEXTOS' ? (
-            <ContextosAjustesScreen cliente={p.cliente} nuevoId={p.nuevoId} onAtras={() => setPantallaMas('AJUSTES')} onInmersiva={setInmersivaMas} />
+            <ContextosAjustesScreen cliente={p.cliente} nuevoId={p.nuevoId} onAtras={() => setPantallaMas('AJUSTES')} onInmersiva={setInmersivaMas} onCambiosSinGuardar={setCambiosMas} />
           ) : null}
           {pantallaMas === 'PLANTILLAS' ? (
             <PlantillasAjustesScreen
               cliente={p.cliente}
               nuevoId={p.nuevoId}
+              onCambiosSinGuardar={setCambiosMas}
               ahora={p.ahora}
               onAtras={() => setPantallaMas('AJUSTES')}
               onInmersiva={setInmersivaMas}
@@ -233,6 +247,7 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
             <PreferenciasAjustesScreen
               cliente={p.cliente}
               nuevoId={p.nuevoId}
+              onCambiosSinGuardar={setCambiosMas}
               ahora={p.ahora}
               onAtras={() => setPantallaMas('AJUSTES')}
               onInmersiva={setInmersivaMas}
@@ -253,6 +268,7 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
               onCambiarTipo={(t, conservar) => setTarea({ tipo: t, inicial: conservar, clave: tarea.clave + 1 })}
               traza={trazaG1}
               onGastoCompartido={(base, inicial) => setCompartido({ base, inicial, clave: Date.now() })}
+              onPendienteCon={abrirPendiente}
             />
           </View>
         ) : null}
@@ -406,10 +422,20 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
             onCancelar={() => setHojaTipos(false)}
           />
         ) : null}
+        {descartarMas ? (
+          <HojaDescartarCambios
+            onDescartar={() => {
+              setDescartarMas(false);
+              setCambiosMas(false);
+              setPantallaMas('MAS');
+            }}
+            onSeguir={() => setDescartarMas(false)}
+          />
+        ) : null}
         {/* COLA-AR: aviso global de las acciones rápidas financieras, encima de todo (§70.A.4). */}
         <AvisosCola cola={colaDe(p.cliente)} global />
       </View>
-      {tarea === null && devolucionDe === null && pendienteDe === null && corregirDe === null && corregirHecho === null && !pendientes && prevision === null && !hojaTipos && !(destino === 'MAS' && inmersivaMas) && !(destino === 'DIA' && inmersivaDia) && !(destino === 'PATRIMONIO' && inmersivaPat) ? <BarraInferior actual={destino} onCambiar={setDestino} /> : null}
+      {tarea === null && devolucionDe === null && pendienteDe === null && corregirDe === null && corregirHecho === null && !pendientes && prevision === null && !hojaTipos && !(destino === 'MAS' && inmersivaMas) && !(destino === 'DIA' && inmersivaDia) && !(destino === 'PATRIMONIO' && inmersivaPat) ? <BarraInferior actual={destino} onCambiar={pulsarBarra} /> : null}
     </View>
   );
 }

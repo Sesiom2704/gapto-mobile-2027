@@ -9,7 +9,8 @@
 // v0.5.0 (F05-03/F05-04 J2 §2.3/§2.4; F05 §46.3 A5/A6/A9, §45.3): campos ADITIVOS al final del borrador: tercero y contexto (con su origen: USUARIO o INFERIDO por la plantilla), magnitudes declaradas «No lo sé» (`desconocidas`: una obligatoria declarada desconocida NO bloquea y viaja en `categoria.desconocidas`), plantilla aplicada y la categoría que puso la plantilla (para no pisar una categoría tocada por el usuario y para «Quitar»). `validar` y `sellar` reciben el tipo (GASTO por defecto: VS-01 sin cambios); el ingreso se sella con `sellarIngreso` (sin concepto ni financiación; nota en §2.7). El payload del gasto solo lleva `tercero_id`, `contexto_id` y `desconocidas` cuando tienen valor: el de VS-01 no cambia.
 // v0.6.0 (F05-03/F05-04 J3 §2.7; F05 §46.3 A8, F05-D022; CORTE DE CONCEPTO): `concepto` del borrador es la NOTA OPCIONAL («Nota (opcional)»). Ya no bloquea el registro; solo su longitud (200, sobre el valor recortado). Ausencia canónica: vacía o solo espacios no viaja (el payload del gasto omite `concepto`; el del ingreso, `nota`); con texto viaja recortada. El título de presentación se calcula y nunca se persiste (domain/registro.ts).
 // v0.7.0 (F05-D052 paso 2 · C-03, F05 §66.A): borrador con `reembolso` (aditivo); `validar` exige, con él, quién y cuánto (0,01 € .. total, nunca el comercio del gasto) y `sellarReembolsable` produce el payload de POST /v1/intenciones/gasto-reembolsable: el del gasto pagado sin `atribucion` y con `reembolso`.
-// Versión: 0.7.0
+// v0.8.0 (F06 T1 UX-1 · M-07, D-M2-04): `esFechaIso` construye la fecha con `setFullYear` y ya no convierte los años 0–99 en 1900–1999: acepta 0001-01-01..0099-12-31 si el día existe (p. ej. 0050-06-15). El resto de la validación no cambia (sigue rechazando 2026-02-30).
+// Versión: 0.8.0
 // ============================================================
 
 import type { MagnitudCategoria } from './categoria';
@@ -192,7 +193,8 @@ const ISO = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 export function esFechaIso(s: string): boolean {
   if (!ISO.test(s)) return false;
   const [a, m, d] = s.split('-').map(Number);
-  const f = new Date(a, m - 1, d);
+  const f = new Date(2000, 0, 1, 12);
+  f.setFullYear(a, m - 1, d); // D-M2-04: new Date(a, …) convertiría 0–99 en 1900–1999
   return f.getFullYear() === a && f.getMonth() === m - 1 && f.getDate() === d;
 }
 
