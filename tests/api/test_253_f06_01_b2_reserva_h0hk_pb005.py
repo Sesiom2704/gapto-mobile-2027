@@ -18,6 +18,11 @@
 #   y el Resultado del mes, el gasto del mes de VS-01 y las senales no cambian con la compra.
 #   Cada caso deja su JSON si GAPTO_B2_EVIDENCIA apunta a una carpeta (inventario O10.23 por superficie).
 # Version: 0.1.0 (F06 T1-F06 B2 N1)
+# Version: 0.2.0 (F06 T1-F06 B3 N1; adaptacion declarada y minima por la regla v2 de T1-F06, decision de Moises del
+#   2026-11-12 `5b54258a…`): O10.23 (d) admite, en lista cerrada, la UNICA importacion de lectura que C-MEJ-03 hace
+#   de un modulo de tesoreria: `from app.repositories.correccion_tesoreria_repository import periodo_cerrado` (guarda
+#   de periodo cerrado de la v0.9 §III.3.3, paso 6; no expone OP-21P). Los demas tokens prohibidos y la lista de
+#   rutas de B2 no cambian; las rutas de B3 las inventaria test_258.
 # ============================================================
 
 from __future__ import annotations
@@ -144,9 +149,13 @@ def test_a1_correccion_de_reparto_rechazada_por_llamada_directa(compra):
     assert c2.huella() == antes
 
 
+#: regla v2 (F06 B3): unica importacion de lectura admitida (guarda de periodo cerrado de C-MEJ-03).
+ADMITIDA_B3 = "from app.repositories.correccion_tesoreria_repository import periodo_cerrado"
+
+
 def test_o10_23_d_inventario_b2_no_expone_op21_op02_op03():
     texto = "\n".join(f.read_text(encoding="utf-8") for f in (RAIZ / "backend" / "app" / "patrimonio").rglob("*.py"))
-    codigo = "\n".join(l.split("#", 1)[0] for l in texto.splitlines())
+    codigo = "\n".join(l.split("#", 1)[0] for l in texto.splitlines() if l.strip() != ADMITIDA_B3)
     for prohibido in ("CorreccionesService", "correcciones_service", "anular_hecho", "corregir_hecho",
                       "AnulacionTesoreriaService", "correccion_tesoreria", "devoluciones_service", "ejecucion_reparto",
                       "ejecucion_correccion", "ejecucion_anulacion"):
