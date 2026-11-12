@@ -24,6 +24,10 @@
 #   que, sobre la base, cada test falle por si mismo (no la coleccion entera).
 # Version: 0.1.0 (F04-R2 R2-B)
 # Version: 0.2.0 (F04-R2 R2-C: altas nominales de OP-03P en WRITERS_UPDATE)
+# Version: 0.3.0 (F06 T1-F06 B3 N1; adaptacion declarada y minima por la regla v2 de T1-F06, decision de Moises
+#   del 2026-11-12 `5b54258a…`): alta nominal en WRITERS_UPDATE del UNICO writer nuevo de hechos_financieros,
+#   patrimonio/correccion_clase.py (C-MEJ-03, excepcion E-1: UPDATE de tipo_hecho_id y presupuestable dentro de la
+#   correccion agregada). Ninguna entrada previa ni regla cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -890,6 +894,7 @@ WRITERS_UPDATE = {
     ("backend/app/repositories/correccion_tesoreria_repository.py", "hecho_aportaciones_pago"),
     ("backend/app/repositories/anulacion_tesoreria_repository.py", "hechos_financieros"),
     ("backend/app/repositories/anulacion_tesoreria_repository.py", "movimientos_tesoreria"),
+    ("backend/app/patrimonio/correccion_clase.py", "hechos_financieros"),  # F06 B3 C-MEJ-03 (E-1), regla v2
 }
 
 

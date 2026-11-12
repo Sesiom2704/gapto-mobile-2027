@@ -402,6 +402,12 @@
 #     contiene `categoria_id` en el cuerpo de altaPreferencia). I13a: RegistroGastoScreen importa CampoFecha (M-07,
 #     DM-06: campo unico de fecha) y PendienteCompacto (M-09: resumen «Pendiente con X», lectura OP-20); ninguno
 #     menciona la categoria ni propone, resuelve o completa categoria. Sin otros cambios.
+# Version: 0.39.0 (F06 T1-F06 B3 N1; adaptacion declarada y minima por la regla v2 de T1-F06, decision de Moises del
+#     2026-11-12 `5b54258a…`, mandato B3 N1 §5.1): SOLO altas, en lista cerrada, de los ficheros de B3 que mencionan
+#     categoria_id. I1: patrimonio/gasto_propiedad.py (C-MEJ-01/02 y L-GASTO-PROPIEDAD), patrimonio/correccion_clase.py
+#     (C-MEJ-03) y patrimonio/dto_b3.py. I7: mobile/src/api/patrimonio_b3.ts y mobile/src/domain/gasto_propiedad.ts.
+#     Las guardas C-a de B3 (validar_seleccion_categoria) se invocan tras la identidad y antes de componer/escribir.
+#     Ninguna regla (I1..I13) ni entrada previa cambia; `componer` sigue con un unico llamador (I4).
 # ============================================================
 
 from __future__ import annotations
@@ -2268,3 +2274,44 @@ def test_i3_v3_solo_app_llama_al_adaptador():
                 usados = {m.attr for m in ast.walk(arbol) if isinstance(m, ast.Attribute)
                           and isinstance(m.value, ast.Name) and m.value.id == "ejv3"}
                 assert usados == {"corregir_categoria_v3"}, usados
+
+
+# ------------------------------------------------------------------ F06 T1-F06 B3 N1 (regla v2, lista cerrada)
+REGISTRO.update({
+    ("backend/app/patrimonio/gasto_propiedad.py", "<modulo>"): (
+        "R", "L-GASTO-PROPIEDAD (F06 B3)", "SQL de lectura: categoria_id del efecto principal del gasto de la propiedad"),
+    ("backend/app/patrimonio/gasto_propiedad.py", "validar_clase"): (
+        "R", "C-MEJ-01 forma", "categoria obligatoria con REPARACION/GASTO_CORRIENTE y prohibida con MEJORA; no escribe"),
+    ("backend/app/patrimonio/gasto_propiedad.py", "componer_gasto"): (
+        "A_FRONTERA", "C-MEJ-01 -> OP-22", "sella categoria_id en el efecto GASTO; MEJORA sin categoria; la guarda C-a "
+        "la invoca registrar_gasto en la rama de intencion nueva"),
+    ("backend/app/patrimonio/gasto_propiedad.py", "registrar_gasto"): (
+        "GUARDA", "C-MEJ-01", "punto de invocacion de validar_seleccion_categoria tras la identidad (OP-22) y antes de "
+        "componer"),
+    ("backend/app/patrimonio/gasto_propiedad.py", "registrar_gasto.datos"): (
+        "A_FRONTERA", "C-MEJ-01 -> OP-22", "pasa la categoria de la peticion a componer_gasto"),
+    ("backend/app/patrimonio/gasto_propiedad.py", "registrar_mejora_historica.datos"): (
+        "R", "C-MEJ-02", "categoria_id=None fijo (MEJORA sin categoria)"),
+    ("backend/app/patrimonio/gasto_propiedad.py", "leer_gasto"): (
+        "R", "L-GASTO-PROPIEDAD", "copia categoria_id del efecto principal a la lectura"),
+    ("backend/app/patrimonio/correccion_clase.py", "<modulo>"): (
+        "R", "C-MEJ-03", "SQL de lectura del efecto y snapshot de auditoria con categoria_id (§III.4)"),
+    ("backend/app/patrimonio/correccion_clase.py", "_dto"): (
+        "R", "C-MEJ-03 DTO", "categoria obligatoria hacia gasto y prohibida hacia MEJORA; no escribe"),
+    ("backend/app/patrimonio/correccion_clase.py", "_efectos"): ("R", "C-MEJ-03", "lee categoria_id de los efectos del hecho"),
+    ("backend/app/patrimonio/correccion_clase.py", "canonica"): ("R", "C-MEJ-03 identidad", "categoria_id en el sello"),
+    ("backend/app/patrimonio/correccion_clase.py", "corregir_naturaleza_patrimonial"): (
+        "GUARDA", "C-MEJ-03", "lock FOR SHARE de la categoria (nivel 4) e invocacion de validar_seleccion_categoria "
+        "tras la identidad (§III.3.6) y antes de escribir"),
+    ("backend/app/patrimonio/correccion_clase.py", "_escribir"): (
+        "A_FRONTERA", "C-MEJ-03 -> efectos_repository", "sella la categoria del efecto destino GASTO tras la guarda C-a; "
+        "hacia MEJORA, None"),
+    ("backend/app/patrimonio/dto_b3.py", "GastoPropiedad"): ("R", "DTO C-MEJ-01", "declaracion de campo"),
+    ("backend/app/patrimonio/dto_b3.py", "CorregirClase"): ("R", "DTO C-MEJ-03", "declaracion de campo"),
+})
+MENCIONES_CLIENTE.update({
+    "mobile/src/api/patrimonio_b3.ts": "tipos del wire de B3: categoria_id de C-MEJ-01, de L-GASTO-PROPIEDAD y de C-MEJ-03 "
+                                       "(F06 B3, R; C-a en servidor)",
+    "mobile/src/domain/gasto_propiedad.ts": "envio de C-MEJ-01 y C-MEJ-03 con la categoria elegida por el usuario "
+                                            "(A_FRONTERA via OP-22 / C-MEJ-03; C-a en servidor)",
+})

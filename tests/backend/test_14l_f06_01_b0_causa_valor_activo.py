@@ -31,6 +31,10 @@
 #        precede a la guarda comun del INSERT), sin escribir nada. Es
 #        contrato, no orden accidental de llamadas.
 #   Se ejecuta como gapto_runtime con RLS (conftest).
+# Version: 0.5.0  -- F06 T1-F06 B3 N1; adaptacion declarada y minima por la regla v2 de T1-F06
+#   (decision de Moises del 2026-11-12 `5b54258a…`): W6 admite la llamada de C-MEJ-03
+#   (patrimonio/correccion_clase.py, efecto destino por el repositorio comun con su causa): 7 -> 8
+#   llamadas, todas declarando `causa_valor_activo` por nombre; el INSERT sigue solo en el repositorio.
 # Version: 0.4.0  -- F06-01 B0 N1 (LOTE9 C2; dictamen de reconsulta RB0-06):
 #   W8, precedencia de la guarda de conversion logica sobre la del INSERT.
 # Version: 0.3.0  -- CANDIDATO B0 v0.3 (pendiente de dictamen y decision).
@@ -436,5 +440,6 @@ def test_w6_todo_insert_de_efectos_declara_su_causa() -> None:
                 llamadas.append((fichero.name, nodo.lineno,
                                  any(k.arg == "causa_valor_activo" for k in nodo.keywords)))
     assert inserts == ["efectos_repository.py"]
-    assert len(llamadas) == 7, llamadas
+    assert len(llamadas) == 8, llamadas  # + correccion_clase.py (F06 B3, regla v2)
+    assert sum(1 for f, _, _ in llamadas if f == "correccion_clase.py") == 1, llamadas
     assert all(declara for _, _, declara in llamadas), llamadas

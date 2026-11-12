@@ -50,6 +50,11 @@
 #   gasto de la compra despues (OP-22 por raiz + PARTE_DE + valoraciones + version + auditoria) son
 #   multirregistro y entran en el barrido; C-PROP-05 (/completitud) se clasifica como ajena: consumidor de 0352
 #   con la habilitacion bloqueada (404 sin escribir, O10.29). Nada de F05 cambia.
+# Version: 0.5.0 (F06 T1-F06 B3 N1; adaptacion declarada y minima por la regla v2 de T1-F06, decision de Moises del
+#   2026-11-12 `5b54258a…`, mandato B3 N1 §5.1): las tres rutas POST de B3 entran en el inventario cerrado y en el
+#   barrido (lista cerrada): C-MEJ-01 con derecho de cobro confirmado (OP-22 + posicion + auditoria), C-MEJ-02 (OP-22
+#   sin pago) y C-MEJ-03 (tipo del hecho, efecto destino, atribuciones, vinculo y retiradas, con auditoria por paso).
+#   Ninguna ruta ni comando previo cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -318,6 +323,57 @@ def p_b2_gasto_posterior(t):
         "atribucion": {"modo": "MANUAL", "partes": [{"actor_id": str(actor), "porcentaje": "100"}]}}
 
 
+# F06-01 B3 ······································································
+def _propiedad_b3(t):
+    owner, actor, cli, cta, ahorro = t
+    cotitular = b1.tercero(cli, "Tomás Cotitular")
+    prop = b1.crear(cli, b1.alta(b1.compartida([b1.yo("50"), b1.de(cotitular, "50")], desde="2026-01-01")))
+    partes = [{"actor_id": p["actor_id"], "porcentaje": p["porcentaje"]} for p in prop["titularidad"]["partes"]]
+    otro = next(p["actor_id"] for p in prop["titularidad"]["partes"] if not p["yo"])
+    return prop, partes, otro
+
+
+def _gasto_b3(t, prop, partes, otro, clase="MEJORA", deuda="SI"):
+    owner, actor, cli, cta, ahorro = t
+    return {"intencion_id": _iid(), "propiedad_id": prop["id"], "clase": clase, "importe": "300.00",
+            "fecha_hecho": "2026-05-15", "cuenta_id": str(cta),
+            "atribucion": {"modo": "SEGUN_TITULARIDAD_ACEPTADA", "propuesta_vista": {
+                "criterio": "TITULARIDAD_EN_FECHA_HECHO", "fecha_referencia": "2026-05-15", "partes": partes}},
+            "deuda": [{"actor_id": otro, "me_debe": deuda}],
+            "derechos_confirmados": [{"actor_id": otro, "importe": "150.00"}] if deuda == "SI" else []}
+
+
+def p_b3_gasto_propiedad(t):
+    prop, partes, otro = _propiedad_b3(t)
+    return "/v1/intenciones/gasto-propiedad", _gasto_b3(t, prop, partes, otro)
+
+
+def p_b3_mejora_historica(t):
+    prop, partes, otro = _propiedad_b3(t)
+    return f"/v1/propiedades/{prop['id']}/mejoras-historicas", {
+        "intencion_id": _iid(), "row_version_esperada": prop["row_version"], "descripcion": "Cocina",
+        "importe": "3000.00", "fecha": "2026-02-10",
+        "atribucion": {"modo": "SEGUN_TITULARIDAD_ACEPTADA", "propuesta_vista": {
+            "criterio": "TITULARIDAD_EN_FECHA_HECHO", "fecha_referencia": "2026-02-10", "partes": partes}},
+        "deuda": [{"actor_id": otro, "me_debe": "NO"}]}
+
+
+def p_b3_corregir_clase(t):
+    owner, actor, cli, cta, ahorro = t
+    prop, partes, otro = _propiedad_b3(t)
+    alta = _gasto_b3(t, prop, partes, otro, deuda="NO")
+    assert cli.post("/v1/intenciones/gasto-propiedad", json=alta, headers=h.AUTH).status_code == 200
+    base = f"/v1/propiedades/{prop['id']}/gastos/{alta['intencion_id']}"
+    g = cli.get(base, headers=h.AUTH).json()
+    comparacion = cli.get(f"{base}/impacto-correccion", params={"clase_nueva": "REPARACION", "presupuestable": "true"},
+                          headers=h.AUTH).json()["comparacion"]
+    categoria = x.categoria(owner, "Hogar B3")
+    return f"{base}/corregir-clase", {
+        "intencion_id": g["intencion_correccion_id"], "row_version_esperada": g["row_version"],
+        "clase_nueva": "REPARACION", "motivo": "Error de captura", "categoria_id": str(categoria),
+        "presupuestable": True, "comparacion_vista": comparacion}
+
+
 # M5 ·············································································
 def p_m5_vincular(t):
     owner, actor, cli, cta, ahorro = t
@@ -464,6 +520,9 @@ COMANDOS = {
     "B1_valoracion": ("/v1/propiedades/{propiedad_id}/valoraciones", p_b1_valoracion),
     "B2_compra": ("/v1/propiedades/{propiedad_id}/compra", p_b2_compra),
     "B2_gasto_posterior": ("/v1/propiedades/{propiedad_id}/compra/gastos", p_b2_gasto_posterior),
+    "B3_gasto_propiedad": ("/v1/intenciones/gasto-propiedad", p_b3_gasto_propiedad),
+    "B3_mejora_historica": ("/v1/propiedades/{propiedad_id}/mejoras-historicas", p_b3_mejora_historica),
+    "B3_corregir_clase": ("/v1/propiedades/{propiedad_id}/gastos/{hecho_id}/corregir-clase", p_b3_corregir_clase),
 }
 
 #: Comandos multirregistro F05-06 cubiertos por la misma frontera que otro del

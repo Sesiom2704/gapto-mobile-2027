@@ -27,6 +27,7 @@
 # Version: 0.2.0 (N1 de 0352, M5): bateria test_236 (GAPTO_0352_CONCURRENCIA) y bloque b1 con test_235 y test_236.
 # Version: 0.3.0 (F06 T1-F06 B2 N1, mandato §7.4): bloque B2 en las baterias serie (test_237 del subhito B2·R-B1 con
 #   GAPTO_B1_CONCURRENCIA y test_254 de B2 con GAPTO_B2_CONCURRENCIA) y test_237 en el bloque b1 (regresion de B1).
+# Version: 0.4.0 (F06 T1-F06 B3 N1, mandato §7.4): bateria serie de B3 (test_257 con GAPTO_B3_CONCURRENCIA).
 # ============================================================
 from __future__ import annotations
 
@@ -56,6 +57,7 @@ BATERIAS = [
     ("GAPTO_0352_CONCURRENCIA", "tests/api/test_236_f06_01_0352_guarda_concurrencia_serial.py"),
     ("GAPTO_B1_CONCURRENCIA", "tests/api/test_237_f06_01_b1r_intencion_concurrente_serial.py"),
     ("GAPTO_B2_CONCURRENCIA", "tests/api/test_254_f06_01_b2_concurrencia_serial.py"),
+    ("GAPTO_B3_CONCURRENCIA", "tests/api/test_257_f06_01_b3_concurrencia_serial.py"),
 ]
 
 

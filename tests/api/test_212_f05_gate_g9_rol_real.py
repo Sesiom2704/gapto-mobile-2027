@@ -28,6 +28,12 @@
 #   real (parametro `propiedad_id` de las rutas nuevas de B1) y el
 #   aislamiento por cuerpo gana el cotitular de otro owner en el alta de una
 #   propiedad.
+# Version: 0.3.0 (F06 T1-F06 B3 N1; adaptacion declarada y minima por la regla v2 de T1-F06, decision de Moises del
+#   2026-11-12 `5b54258a…`, mandato B3 N1 §5.1): para admitir las rutas de B3 con parametros (lista cerrada), el
+#   owner B tiene tambien un gasto REAL de su propiedad (C-MEJ-01) que sustituye a `hecho_id` en las rutas
+#   /v1/propiedades/{propiedad_id}/gastos/..., y CONSULTA gana los parametros obligatorios de dos lecturas
+#   (propuesta-gasto: fecha; impacto-correccion: clase_nueva). El oraculo, las rutas recorridas (todas, desde la
+#   propia app) y las demas sustituciones no cambian.
 # ============================================================
 
 from __future__ import annotations
@@ -146,15 +152,27 @@ def b():
     r = cli.post("/v1/propiedades", json={"intencion_id": str(propiedad), "nombre": "Piso de B", "tipo_propiedad": "VIVIENDA",
                                           "titularidad": {"modo": "SOLO_MIA", "desde": "2026-01-01"}}, headers=h.AUTH)
     assert r.status_code == 200, r.text
+    gasto_propiedad = uuid.uuid4()
+    yo = r.json()["propiedad"]["titularidad"]["partes"][0]["actor_id"]
+    r = cli.post("/v1/intenciones/gasto-propiedad", json={
+        "intencion_id": str(gasto_propiedad), "propiedad_id": str(propiedad), "clase": "MEJORA", "importe": "100.00",
+        "fecha_hecho": "2026-05-15", "cuenta_id": str(cta), "deuda": [], "derechos_confirmados": [],
+        "atribucion": {"modo": "SEGUN_TITULARIDAD_ACEPTADA", "propuesta_vista": {
+            "criterio": "TITULARIDAD_EN_FECHA_HECHO", "fecha_referencia": "2026-05-15",
+            "partes": [{"actor_id": yo, "porcentaje": "100.0000"}]}}}, headers=h.AUTH)
+    assert r.status_code == 200, r.text
     ids = {"categoria_id": categoria, "asociacion_id": aid, "magnitud_id": mid, "preferencia_id": pref, "cuenta_id": cta,
            "capacidad": "PAGAR_GASTO", "tercero_id": tercero, "contexto_id": contexto, "plantilla_id": plt,
            "accion_id": acc, "origen_id": gasto, "devolucion_id": devolucion, "entidad_id": posicion, "hecho_id": gasto,
-           "prevision_id": prevision, "afinidad_id": afi, "propiedad_id": propiedad}
+           "prevision_id": prevision, "afinidad_id": afi, "propiedad_id": propiedad,
+           "gasto_propiedad": gasto_propiedad}
     return {"owner": owner, "cli": cli, "ids": ids, "cena": cena, "transferencia": transf, "tania": tania}
 
 
 #: Parametros de consulta obligatorios de algunas lecturas (sin ellos la respuesta seria un 422 de validacion).
-CONSULTA = {"/v1/terceros/{tercero_id}/afinidades": "?fecha=2026-10-10"}
+CONSULTA = {"/v1/terceros/{tercero_id}/afinidades": "?fecha=2026-10-10",
+            "/v1/propiedades/{propiedad_id}/propuesta-gasto": "?fecha=2026-10-10",
+            "/v1/propiedades/{propiedad_id}/gastos/{hecho_id}/impacto-correccion": "?clase_nueva=REPARACION"}
 #: Cuerpos validos explicitos donde el DTO es una union discriminada (el generado no pasaria la validacion).
 CUERPOS = {("POST", "/v1/categorias/{categoria_id}/magnitudes"): lambda: {
     "origen": "NUEVA", "obligatoria": False, "magnitud": {"magnitud_id": str(uuid.uuid4()), "nombre": "Kilos G9",
@@ -168,6 +186,8 @@ def _ruta_con_ids(path: str, ids: dict, cena, transf) -> str:
             return str(cena)
         if nombre == "hecho_id" and path.startswith("/v1/transferencias/"):
             return str(transf)
+        if nombre == "hecho_id" and path.startswith("/v1/propiedades/") and "/gastos/" in path:
+            return str(ids["gasto_propiedad"])
         return str(ids[nombre])
     return re.sub(r"\{(\w+)\}", sustituir, path) + CONSULTA.get(path, "")
 
