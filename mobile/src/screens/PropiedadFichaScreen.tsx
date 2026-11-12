@@ -5,6 +5,7 @@
 // Descripción: Ficha de una propiedad (F06-01 B1 · L-PROP; lámina F06-01 v0.9 D1 Resumen y D2 Sin datos). Cada magnitud por separado y con su procedencia: valor estimado (100 %) con método y fecha (una valoración futura no cuenta; la calcula el servidor), referencia fiscal aparte (nunca desplaza al estimado), tu titularidad y la «Cuota del valor según titularidad», etiquetada como vista estructural (no es una atribución ni dice quién pagó). Lo desconocido se queda desconocido: «No disponible» / «Sin indicar», nunca 0. Coste de adquisición, mejoras e inversión llegan con la compra (B2/B3): aquí «No disponible». Acciones de B1: Revisar valor, Histórico de valoraciones, Titularidad y Editar datos.
 // Versión: 0.1.0 (F06 Lote 12 · B1 Propiedad, N1)
 // Versión: 0.2.0 (F06 T1-F06 B2 N1 · D1 con adquisición y mejoras y su estado, lámina F06-01 v0.9 D1/D2): el coste de adquisición, las mejoras, la inversión acumulada (nunca completa: bajas no representadas) y tu parte atribuida salen de L-COSTE (`coste`, opcional: sin él, «No disponible» como en B1); cada uno con su estado («parcial» se etiqueta). Acciones nuevas: «Registrar la compra» (sin compra) y «Añadir un gasto de la compra» (con compra; C-COMPRA-03). Sin D4 Desglose (M-11). El resto de B1 no cambia.
+// Versión: 0.3.0 (F06 T1-F06 B3 N1): SOLO aditivo: prop opcional `onGastos` y la fila «Obras y gastos» (C1–C3 y corrección de clase de B3). Sin `onGastos` la ficha es la de B2.
 // ============================================================
 
 import React from 'react';
@@ -39,6 +40,8 @@ export function PropiedadFichaScreen(p: {
   coste?: Coste | null;
   onRegistrarCompra?: () => void;
   onGastoCompra?: () => void;
+  /** B3: obras y gastos de la propiedad (mejora, reparación, gasto corriente y mejora antigua). */
+  onGastos?: () => void;
 }) {
   const { c } = useTema();
   const inset = useSafeAreaInsets();
@@ -91,6 +94,7 @@ export function PropiedadFichaScreen(p: {
           {p.onGastoCompra && hayCompra(p.coste?.ADQUISICION) ? (
             <FilaLista testID="prop-accion-gasto-compra" titulo="Añadir un gasto de la compra" detalle="Impuestos, notaría o agencia que faltaban" onPress={p.onGastoCompra} />
           ) : null}
+          {p.onGastos ? <FilaLista testID="prop-accion-gastos" titulo="Obras y gastos" detalle="Mejoras, reparaciones y gastos de la propiedad" onPress={p.onGastos} /> : null}
           <FilaLista testID="prop-accion-valor" titulo="Revisar valor" detalle={sinDatos ? 'Para saber lo que vale' : undefined} onPress={p.onRevisarValor} />
           <FilaLista testID="prop-accion-historico" titulo="Histórico de valoraciones" detalle={`${v.valoraciones.length} ${v.valoraciones.length === 1 ? 'valoración' : 'valoraciones'}`} onPress={p.onHistorico} />
           <FilaLista testID="prop-accion-titularidad" titulo="Titularidad" detalle={textoTitularidad(v.titularidad)} onPress={p.onTitularidad} />
