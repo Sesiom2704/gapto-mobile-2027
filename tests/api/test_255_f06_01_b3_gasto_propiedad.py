@@ -12,6 +12,8 @@
 #     8quater con deuda), lista de gastos y L-COSTE de MEJORAS con los componentes de B3 (politica de B2, §II.6).
 #   Cada rechazo comprueba el estado identico (huella de las tablas de B3).
 # Version: 0.1.0 (F06 T1-F06 B3 N1)
+# Version: 0.1.1 (F06 T1-F06 B3 N1, tirada de mutantes del paso 10): O9.21 con «No lo sé» y un derecho confirmado o
+#   una aportacion manual sin deuda declarada (el caso que alcanza la guarda de la exclusion 4; M-DM02-13 quedaba VIVO).
 # ============================================================
 
 from __future__ import annotations
@@ -307,6 +309,10 @@ def test_o9_20_c_mej_02_no_admite_derecho(lab):
 
 def test_o9_21_no_lo_se_no_admite_derecho(lab):
     _rechazo(lab, lab.cuerpo(atribucion={"modo": "NO_LO_SE"}, **_si(lab)), 422, "ENTRADA_INVALIDA")
+    # sin partes no hay cotitular al que deber: un derecho confirmado o una aportacion manual sueltos -> 422
+    _rechazo(lab, lab.cuerpo(atribucion={"modo": "NO_LO_SE"}, deuda=[],
+                             derechos=[{"actor_id": lab.ta, "importe": "150.00"}]), 422, "ENTRADA_INVALIDA")
+    _rechazo(lab, lab.cuerpo(atribucion={"modo": "NO_LO_SE"}, deuda=[], aportacion="MANUAL"), 422, "ENTRADA_INVALIDA")
 
 
 def test_o9_22_sin_confirmacion_o_con_otro_importe_422(lab):

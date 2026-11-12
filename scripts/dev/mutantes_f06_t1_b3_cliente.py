@@ -13,6 +13,9 @@
 #   (sin mutar ni ejecutar Jest).
 # Uso: python scripts/dev/mutantes_f06_t1_b3_cliente.py [--comprobar] [ID ...]
 # Version: 0.1.0 (F06 T1-F06 B3 N1)
+# Version: 0.1.1 (F06 T1-F06 B3 N1, tirada del paso 10): Jest por `node jest.js` y no por npx.cmd (cmd.exe partia
+#   el patron -t en el «|» y el preflight daba «ruta no encontrada»); salida en UTF-8 (un «−» en el texto de un
+#   invariante rompia el print en cp1252).
 # ============================================================
 from __future__ import annotations
 
@@ -134,8 +137,9 @@ def _sha(b: bytes) -> str:
 
 def _jest(test: str, patrones: tuple[str, ...]) -> tuple[int, str]:
     patron = "|".join(p.replace("(", "\\(").replace(")", "\\)").replace("+", "\\+").replace(".", "\\.") for p in patrones)
-    npx = "npx.cmd" if os.name == "nt" else "npx"
-    r = subprocess.run([npx, "jest", test, "-t", patron, "--ci"], cwd=MOVIL, capture_output=True, text=True,
+    # node + jest.js directamente: con npx.cmd, cmd.exe interpreta el «|» del patron (ruta no encontrada).
+    jest = str(MOVIL / "node_modules" / "jest" / "bin" / "jest.js")
+    r = subprocess.run(["node", jest, test, "-t", patron, "--ci"], cwd=MOVIL, capture_output=True, text=True,
                        encoding="utf-8", errors="replace")
     return r.returncode, r.stdout + r.stderr
 
@@ -155,7 +159,16 @@ def _a_disco(reg: dict) -> None:
             f.write(json.dumps(reg, ensure_ascii=False) + "\n")
 
 
+def _utf8() -> None:
+    for flujo in (sys.stdout, sys.stderr):
+        try:
+            flujo.reconfigure(encoding="utf-8", errors="replace")
+        except AttributeError:
+            pass
+
+
 def main(argv: list[str]) -> int:
+    _utf8()
     comprobar = "--comprobar" in argv
     argv = [a for a in argv if a != "--comprobar"]
     _recuperar()
