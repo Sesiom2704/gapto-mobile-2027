@@ -12,13 +12,20 @@
 #     - como runtime, el owner A no ve ni modifica filas de B (0 filas en
 #       SELECT y UPDATE) y no puede insertar una valoracion o una fila de
 #       titularidad colgada de la propiedad de B (RLS WITH CHECK);
-#     - el codigo de B1 no contiene DELETE, SET ROLE ni advisory locks.
+#     - el codigo de B1 no contiene DELETE ni SET ROLE, y su UNICO advisory es la
+#       funcion del 0P de intencion (R1 v0.9.5 §I.5.4) y sus llamadas (O11.22).
 #   El aislamiento por HTTP de cada ruta nueva lo cubre test_212 (G9).
 # Version: 0.1.0 (F06-01 B1, lote 12)
+# Version: 0.2.0 (F06 T1-F06 B2·R-B1 (F06-D009); R1 v0.9.5 §I.5.5 punto 4): el inventario admite SOLO la funcion
+#   `bloquear_intencion_propiedad` de servicio.py (una definicion, sentencia exacta) y sus cuatro llamadas en B1,
+#   cada una como primera llamada con `sesion` de su writer (O11.22); sigue prohibiendo DELETE, SET ROLE y
+#   cualquier otro advisory en backend/app/propiedades; el literal 'gapto:INTENCION' solo vive en esa funcion
+#   dentro de backend/app y su espacio es distinto del de OP-22 (O11.24).
 # ============================================================
 
 from __future__ import annotations
 
+import ast
 import pathlib
 import re
 import uuid
@@ -87,11 +94,70 @@ def test_runtime_aislado_por_owner():
                          (uuid.UUID(vid),))[1] == [(1,)]
 
 
+SERVICIO = RAIZ / "backend" / "app" / "propiedades" / "servicio.py"
+FUNCION_0P = "bloquear_intencion_propiedad"
+SQL_0P = ("SELECT pg_advisory_xact_lock(hashtext('gapto:INTENCION'), "
+          "hashtext(current_setting('gapto.owner_user_id') || ':' || %s::text))")
+#: writer de B1 -> argumento que es la clave del 0P (§I.5.4, punto 2)
+CLAVES_0P = {"alta": "entidad_id", "editar": "intencion_id", "cambiar_titularidad": "intencion_id",
+             "alta_valoracion": "valoracion_id"}
+
+
+def _definicion_0p() -> ast.FunctionDef:
+    arbol = ast.parse(SERVICIO.read_text(encoding="utf-8"))
+    defs = [n for n in ast.walk(arbol) if isinstance(n, ast.FunctionDef) and n.name == FUNCION_0P]
+    assert len(defs) == 1, defs
+    return defs[0]
+
+
 def test_codigo_de_b1_sin_delete_set_role_ni_advisory():
+    """Solo la funcion del 0P nombra advisory; DELETE y SET ROLE siguen prohibidos en todo el modulo."""
+    d = _definicion_0p()
     hallazgos = []
     for f in (RAIZ / "backend" / "app" / "propiedades").rglob("*.py"):
         for n, linea in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
             codigo = linea.split("#", 1)[0]
-            if re.search(r"\bDELETE\b|SET\s+(LOCAL\s+)?ROLE|advisory", codigo, re.I):
+            if re.search(r"\bDELETE\b|SET\s+(LOCAL\s+)?ROLE", codigo, re.I):
+                hallazgos.append(f"{f.name}:{n}")
+            elif re.search(r"advisory", codigo, re.I) and not (f == SERVICIO and d.lineno <= n <= d.end_lineno):
                 hallazgos.append(f"{f.name}:{n}")
     assert hallazgos == []
+
+
+def test_o11_22_funcion_unica_del_0p_y_cuatro_llamadas_en_primer_lugar():
+    """O11.22: una definicion con la sentencia exacta y cuatro llamadas, una por writer y antes que nada."""
+    d = _definicion_0p()
+    llamadas_bd = [n for n in ast.walk(d) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
+    assert len(llamadas_bd) == 1 and llamadas_bd[0].func.attr == "uno", ast.dump(d)
+    sql = llamadas_bd[0].args[0]
+    assert isinstance(sql, ast.Constant) and sql.value == SQL_0P, ast.dump(sql)
+    assert ast.unparse(llamadas_bd[0].args[1]) == "(str(intencion_id),)"
+    arbol = ast.parse(SERVICIO.read_text(encoding="utf-8"))
+    llamadas = [n for n in ast.walk(arbol) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                and n.func.id == FUNCION_0P]
+    assert len(llamadas) == len(CLAVES_0P)
+    writers = {n.name: n for n in arbol.body if isinstance(n, ast.FunctionDef) and n.name in CLAVES_0P}
+    assert set(writers) == set(CLAVES_0P)
+    for nombre, clave in CLAVES_0P.items():
+        # primera llamada del writer que recibe la sesion (cualquier lectura o lock la necesita)
+        con_sesion = [n for n in ast.walk(writers[nombre]) if isinstance(n, ast.Call)
+                      and any(isinstance(a, ast.Name) and a.id == "sesion" for a in n.args)]
+        primera = min(con_sesion, key=lambda n: (n.lineno, n.col_offset))
+        assert ast.unparse(primera) == f"{FUNCION_0P}(sesion, {clave})", (nombre, ast.unparse(primera))
+        assert sum(1 for n in con_sesion if isinstance(n.func, ast.Name) and n.func.id == FUNCION_0P) == 1, nombre
+
+
+def test_o11_24_literal_del_espacio_solo_en_la_funcion_y_distinto_de_op22():
+    """'gapto:INTENCION' solo dentro de la funcion del 0P (backend/app entero); espacio distinto de OP-22."""
+    d = _definicion_0p()
+    apariciones = []
+    for f in (RAIZ / "backend" / "app").rglob("*.py"):
+        for n, linea in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+            if "gapto:INTENCION" in linea.split("#", 1)[0]:
+                apariciones.append((f.relative_to(RAIZ).as_posix(), n))
+    assert apariciones and all(f == "backend/app/propiedades/servicio.py" and d.lineno <= n <= d.end_lineno
+                               for f, n in apariciones), apariciones
+    with psycopg.connect(h.dsn()) as c:
+        espacios = c.execute("SELECT hashtext('gapto:INTENCION'), hashtext('gapto:OP22'), "
+                             "hashtext('gapto:INVERSIONES')").fetchone()
+    assert len(set(espacios)) == 3, espacios

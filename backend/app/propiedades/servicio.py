@@ -49,6 +49,13 @@
 #   VERSION_DESFASADA y junto a ADQUISICION_POSTERIOR_A_TITULARIDAD, bajo el lock de la entidad y sin
 #   escribir nada (row_version y auditoria intactas). Nada mas cambia en B1: ni otros contratos, ni el
 #   orden de locks, ni la identidad de las intenciones, ni EDITABLES/COLUMNAS_PROPIEDAD (AJ-0352-08).
+# Version: 0.3.0 (F06 T1-F06 B2·R-B1 (F06-D009); R1 v0.9.5 §I.5.4 y §I.5.5): nivel 0P. Una UNICA funcion,
+#   `bloquear_intencion_propiedad`, toma el advisory de intencion de la Parte I (espacio 'gapto:INTENCION', clave
+#   owner de la GUC + ':' + intencion como texto de UUID) y los cuatro writers la llaman como PRIMER recurso de
+#   la transaccion, antes de cualquier lectura de estado o lock: alta (clave entidad_id), editar y
+#   cambiar_titularidad (intencion_id) y alta_valoracion (valoracion_id). C-PROP-05 (B2) la importa. Cierra
+#   R-R1V093-01 (misma intencion en dos propiedades a la vez). Nada mas cambia: ni codigos, ni DTO, ni HTTP,
+#   ni 0352, ni el resto del orden de locks (que sigue en el nivel 2 tras 0P).
 # ============================================================
 
 from __future__ import annotations
@@ -82,6 +89,17 @@ NATURALEZAS_TITULARIDAD = frozenset({repo_act.NATURALEZA_PERSONA, repo_act.NATUR
 CIEN = Decimal("100")
 CENTIMO = Decimal("0.01")
 DIEZMILESIMA = Decimal("0.0001")
+
+
+def bloquear_intencion_propiedad(sesion: SesionMotor, intencion_id: uuid.UUID) -> None:
+    """Nivel 0P (R1 v0.9.5 §I.5.4; F06-D009): UNICA funcion del advisory de intencion de C-PROP-01..05.
+
+    Primer recurso de la transaccion: quien espera aqui no retiene nada, asi que no crea ciclos (§I.5.3). Misma
+    clave para la misma intencion en cualquier writer y en cualquier propiedad; el owner sale de la GUC (dos
+    owners nunca se serializan entre si). Una colision de hashtext solo serializa de mas.
+    """
+    sesion.uno("SELECT pg_advisory_xact_lock(hashtext('gapto:INTENCION'), "
+               "hashtext(current_setting('gapto.owner_user_id') || ':' || %s::text))", (str(intencion_id),))
 
 #: Campos editables de C-PROP-02 y los que admiten null explicito (borrar el dato).
 EDITABLES = ("nombre",) + repo.COLUMNAS_PROPIEDAD
@@ -304,6 +322,7 @@ def alta(sesion: SesionMotor, *, entidad_id: uuid.UUID, nombre: str, datos: dict
         return rechazo
     contenido = {"nombre": visible, **{c: _texto(v) for c, v in datos.items()},
                  "titularidad": {"modo": modo, "desde": _texto(desde), "partes": _partes_canonicas(partes)}}
+    bloquear_intencion_propiedad(sesion, entidad_id)  # 0P, primer recurso (F06-D009)
     hoy = hoy_owner(sesion, reloj)
     replay = _replay(sesion, entidad_id, OP_ALTA, entidad_id, contenido)
     if replay is True:
@@ -364,6 +383,7 @@ def editar(sesion: SesionMotor, *, entidad_id: uuid.UUID, intencion_id: uuid.UUI
         return rechazo
     contenido = {"row_version_esperada": row_version, "motivo": motivo,
                  "campos": {c: _texto(v) for c, v in sorted(nuevos.items())}}
+    bloquear_intencion_propiedad(sesion, intencion_id)  # 0P, primer recurso (F06-D009)
     hoy = hoy_owner(sesion, reloj)
     raiz = repo.bloquear(sesion, entidad_id)
     if raiz is None:
@@ -409,6 +429,7 @@ def cambiar_titularidad(sesion: SesionMotor, *, entidad_id: uuid.UUID, intencion
     contenido = {"row_version_esperada": row_version, "motivo": motivo, "modo": modo, "desde": _texto(desde),
                  "partes": _partes_canonicas(partes),
                  "titularidad_vista": sorted([str(a), _texto(p, DIEZMILESIMA)] for a, p in vista_cliente)}
+    bloquear_intencion_propiedad(sesion, intencion_id)  # 0P, primer recurso (F06-D009)
     hoy = hoy_owner(sesion, reloj)
     raiz = repo.bloquear(sesion, entidad_id)
     if raiz is None:
@@ -487,6 +508,7 @@ def alta_valoracion(sesion: SesionMotor, *, propiedad_id: uuid.UUID, valoracion_
         return rechazo
     contenido = {"row_version_esperada": row_version, "valoracion_id": str(valoracion_id),
                  **{c: _texto(v) for c, v in valores.items()}}
+    bloquear_intencion_propiedad(sesion, valoracion_id)  # 0P, primer recurso (F06-D009)
     hoy = hoy_owner(sesion, reloj)
     raiz = repo.bloquear(sesion, propiedad_id)
     if raiz is None:

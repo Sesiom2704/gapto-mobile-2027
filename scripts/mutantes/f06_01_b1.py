@@ -33,6 +33,18 @@
 # Version: 0.2.0 (F03 · N1 de 0352, mandato v1.4; Alcance 7): B1-M31 (guarda de C-PROP-02 frente a la
 #   declaracion de adquisicion de 0352, AJ-0352-05) y B1-M32 (las seis columnas de 0352 fuera de
 #   COLUMNAS_PROPIEDAD, AJ-0352-08), con discriminantes en test_235. Los 30 anteriores no cambian.
+# Version: 0.3.0 (F06 T1-F06 B2·R-B1 (F06-D009); R1 v0.9.5 §I.5.5 punto 4; oraculos v0.7 §A.10.2):
+#   - M-IP-08 (B1 sin 0P: la funcion unica no toma el advisory) y M-IP-09 (editar toma el 0P DESPUES del NK),
+#     con discriminantes en test_237 (S20/O11.19, O11.21, O11.23), test_232 (k4) y test_233 (O11.22);
+#   - B1-M30: con el 0P primero la segunda alta del mismo owner espera en el 0P y reconoce el replay en la
+#     PRIMERA lectura, antes de la PK, asi que k1 de test_232 ya no lo discrimina (DIAG del lote 23: VIVO).
+#     Tratamiento (2) del §I.5.5: discriminante valido test_237::test_b1_m30_alta_sin_0p_replay_tras_la_pk, que
+#     sustituye la funcion del 0P por un doble SIN advisory en el propio test y fuerza la carrera hasta la PK con
+#     COMMIT real. La rama se conserva como defensa (sin 0P, o con un entidad_id ocupado por otra entidad u
+#     otro owner, donde _replay nunca devuelve True y el resultado es el mismo con o sin el mutante);
+#   - GAPTO_B1_MUTANTES_SALIDA (opcional): carpeta donde se guarda la salida de pytest de cada mutante.
+#   Ninguna linea protegida por los mutantes B1-M01..M32 cambia con el 0P (el preflight lo comprueba: patron
+#   exacto, una aparicion).
 # ============================================================
 from __future__ import annotations
 
@@ -50,6 +62,8 @@ LEC = "backend/app/propiedades/lecturas.py"
 T231 = "tests/api/test_231_f06_01_b1_propiedades.py"
 T232 = "tests/api/test_232_f06_01_b1_concurrencia_serial.py"
 T235 = "tests/api/test_235_f06_01_0352_guarda_c_prop_02.py"
+T233 = "tests/api/test_233_f06_01_b1_rls_acl.py"
+T237 = "tests/api/test_237_f06_01_b1r_intencion_concurrente_serial.py"
 REPO = "backend/app/propiedades/repositorio.py"
 MARCADOR = RAIZ / ".mutante_f06_01_b1_en_curso"
 
@@ -170,12 +184,13 @@ MUTANTES = (
             "ESTIMADO = (\"MERCADO\", \"TASACION\", \"MANUAL\")\n",
             "ESTIMADO = (\"MERCADO\", \"TASACION\", \"MANUAL\", \"FISCAL_REFERENCIA\")\n",
             (t("test_lecturas_precedencia_y_cuota"),)),
-    Mutante("B1-M30", "Alta concurrente con la misma intencion: replay tras la PK (no rechazo)", SRV,
+    Mutante("B1-M30", "Alta concurrente con la misma intencion: replay tras la PK (no rechazo); con el 0P solo se "
+            "alcanza sin advisory: discriminante con doble del 0P en test_237 (§I.5.5, via 2)", SRV,
             "        replay = _replay(sesion, entidad_id, OP_ALTA, entidad_id, contenido)\n        if replay is True:\n"
             "            return Resultado(propiedad=_vista(sesion, entidad_id, hoy), idempotente=True)\n"
             "        return Rechazo(IDENTIDAD_REUTILIZADA)\n",
             "        return Rechazo(IDENTIDAD_REUTILIZADA)\n",
-            (f"{T232}::test_k1_dos_altas_misma_intencion",)),
+            (f"{T237}::test_b1_m30_alta_sin_0p_replay_tras_la_pk", f"{T232}::test_k1_dos_altas_misma_intencion")),
     Mutante("B1-M31", "0352 (AJ-0352-05): fecha de adquisicion posterior al corte declarado rechazada", SRV,
             "        if corte is not None and cambios[\"fecha_adquisicion\"] > corte:\n", "        if False:\n",
             (f"{T235}::test_guarda_rechaza_fecha_posterior_al_corte_sin_escribir_nada",
@@ -186,6 +201,23 @@ MUTANTES = (
             "    \"coste_adquisicion_declarado_completo\",\n)\n",
             (f"{T235}::test_aj0352_08_columnas_fuera_de_editables_y_columnas_propiedad",
              f"{T235}::test_aj0352_08_barrera_servicio_editar[coste_adquisicion_declarado_completo]")),
+    Mutante("M-IP-08", "B2·R-B1: B1 toma el 0P de intencion (sin 0P, dos ejecuciones de la misma intencion)", SRV,
+            "    sesion.uno(\"SELECT pg_advisory_xact_lock(hashtext('gapto:INTENCION'), \"\n"
+            "               \"hashtext(current_setting('gapto.owner_user_id') || ':' || %s::text))\", "
+            "(str(intencion_id),))\n",
+            "    return None\n",
+            (f"{T237}::test_s20_o11_19_misma_intencion_en_dos_propiedades[C-PROP-02__C-PROP-02]",
+             f"{T232}::test_k4_alta_solo_con_el_0p",
+             f"{T233}::test_o11_22_funcion_unica_del_0p_y_cuatro_llamadas_en_primer_lugar")),
+    Mutante("M-IP-09", "B2·R-B1: el 0P es el PRIMER recurso (editar con el 0P despues del NK -> ciclo y 40P01)", SRV,
+            "                 \"campos\": {c: _texto(v) for c, v in sorted(nuevos.items())}}\n"
+            "    bloquear_intencion_propiedad(sesion, intencion_id)  # 0P, primer recurso (F06-D009)\n"
+            "    hoy = hoy_owner(sesion, reloj)\n    raiz = repo.bloquear(sesion, entidad_id)\n",
+            "                 \"campos\": {c: _texto(v) for c, v in sorted(nuevos.items())}}\n"
+            "    hoy = hoy_owner(sesion, reloj)\n    raiz = repo.bloquear(sesion, entidad_id)\n"
+            "    bloquear_intencion_propiedad(sesion, intencion_id)  # M-IP-09\n",
+            (f"{T237}::test_o11_21_0p_primer_recurso_sin_ciclo_editar_y_valoracion",
+             f"{T237}::test_o11_20_o11_23_primer_lock_es_el_0p[C-PROP-02]")),
 )
 
 
@@ -213,6 +245,13 @@ def _pytest(nodos: tuple[str, ...]) -> tuple[int, str]:
     return proceso.returncode, proceso.stdout + proceso.stderr
 
 
+def _guardar_salida(m: Mutante, salida: str) -> None:
+    carpeta = os.environ.get("GAPTO_B1_MUTANTES_SALIDA")
+    if carpeta:
+        pathlib.Path(carpeta).mkdir(parents=True, exist_ok=True)
+        (pathlib.Path(carpeta) / f"{m.ident}.log").write_text(salida, encoding="utf-8")
+
+
 def ejecutar(m: Mutante) -> str:
     ruta = RAIZ / m.fichero
     original = ruta.read_bytes()
@@ -225,6 +264,7 @@ def ejecutar(m: Mutante) -> str:
     try:
         ruta.write_bytes(texto.replace(m.viejo, m.nuevo, 1).encode("utf-8"))
         codigo, salida = _pytest(m.discriminantes)
+        _guardar_salida(m, salida)
     finally:
         ruta.write_bytes(original)
         if _sha(ruta.read_bytes()) != sha_original:

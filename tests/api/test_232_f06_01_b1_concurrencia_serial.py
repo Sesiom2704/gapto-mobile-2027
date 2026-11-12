@@ -17,10 +17,15 @@
 #     K2 cambio de titularidad frente a valoracion (misma version vista): el
 #        segundo espera en la entidad (nivel 2) y sale VERSION_DESFASADA;
 #     K3 dos cambios de titularidad: uno OK y el otro VERSION_DESFASADA;
-#     K4 orden de locks (prueba POSITIVA, v0.8 §1.4): con el writer retenido
-#        tras el nivel 2, la entidad esta bloqueada y NO hay advisory
-#        (ni INVERSIONES ni raiz de OP-22): B1 empieza en el nivel 2.
+#     K4 orden de locks (prueba POSITIVA, v0.8 §1.4; R1 v0.9.5 §I.5.4): con el
+#        writer retenido tras el nivel 2 (o tras insertar, en el alta), la
+#        entidad esta bloqueada y hay EXACTAMENTE un advisory: el 0P
+#        'gapto:INTENCION' con la clave del writer, concedido; ni INVERSIONES
+#        ni raiz de OP-22 ni ningun otro advisory.
 # Version: 0.1.0 (F06-01 B1, lote 12)
+# Version: 0.2.0 (F06 T1-F06 B2·R-B1 (F06-D009); R1 v0.9.5 §I.5.5 punto 4): k4 x3 reescritos. Antes fijaban
+#   «ningun advisory» (orden publicado sin 0P); ahora exigen exactamente un advisory gapto:INTENCION concedido,
+#   con la clave del §I.5.4 (owner de la GUC + ':' + intencion), y ningun otro (O11.20). K1-K3 no cambian.
 # ============================================================
 
 from __future__ import annotations
@@ -109,15 +114,15 @@ def alta(owner, intencion_id, tercero_id):
         modo="COMPARTIDA", desde=dt.date(2026, 1, 1), partes=partes, reloj=RELOJ))
 
 
-def titularidad(owner, pid, version, vista, desde: dt.date, partes=None, modo="SOLO_MIA"):
-    i = uuid.uuid4()
+def titularidad(owner, pid, version, vista, desde: dt.date, partes=None, modo="SOLO_MIA", i=None):
+    i = i or uuid.uuid4()
     return lambda: ejecutar(owner, i, lambda s: serv.cambiar_titularidad(
         s, entidad_id=pid, intencion_id=i, row_version=version, modo=modo, desde=desde, partes=partes,
         vista_cliente=vista, reloj=RELOJ))
 
 
-def valoracion(owner, pid, version):
-    i = uuid.uuid4()
+def valoracion(owner, pid, version, i=None):
+    i = i or uuid.uuid4()
     return lambda: ejecutar(owner, i, lambda s: serv.alta_valoracion(
         s, propiedad_id=pid, valoracion_id=i, row_version=version, valor_total=D("250000"),
         fecha=dt.date(2026, 9, 1), metodo="MERCADO", fuente=None, notas=None, reloj=RELOJ))
@@ -204,9 +209,23 @@ def test_k3_dos_cambios_de_titularidad(t, monkeypatch, caplog, orden):
 
 
 # ------------------------------------------------------------------ K4
-def _sondear(owner, pid) -> dict:
+def advisories(cn) -> list:
+    """Advisory locks del laboratorio como (es 0P de intencion, clave2, concedido)."""
+    return [tuple(f) for f in cn.execute(
+        "SELECT l.classid::bigint = ((hashtext('gapto:INTENCION')::bigint + 4294967296) % 4294967296), "
+        "l.objid::bigint, l.granted FROM pg_locks l WHERE l.locktype = 'advisory' ORDER BY 2").fetchall()]
+
+
+def clave_0p(cn, owner, intencion) -> int:
+    """Segunda clave del 0P (§I.5.4) tal como la muestra pg_locks.objid."""
+    return cn.execute("SELECT (hashtext(%s::text || ':' || %s::text)::bigint + 4294967296) %% 4294967296",
+                      (str(owner), str(intencion))).fetchone()[0]
+
+
+def _sondear(owner, pid, intencion) -> dict:
     with psycopg.connect(h.dsn(), autocommit=True) as cn:
-        advisory = cn.execute("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'").fetchone()[0]
+        advisory = advisories(cn)
+        esperado = [(True, clave_0p(cn, owner, intencion), True)]
         inversiones = cn.execute("SELECT pg_try_advisory_lock(hashtext('gapto:INVERSIONES'), hashtext(%s::text))",
                                  (str(owner),)).fetchone()[0]
         if inversiones:
@@ -218,7 +237,8 @@ def _sondear(owner, pid) -> dict:
             entidad_bloqueada = False
         except psycopg.errors.LockNotAvailable:
             entidad_bloqueada = True
-    return {"advisory": advisory, "inversiones_libre": inversiones, "entidad_bloqueada": entidad_bloqueada}
+    return {"advisory_solo_0p": advisory == esperado, "advisory": advisory, "inversiones_libre": inversiones,
+            "entidad_bloqueada": entidad_bloqueada}
 
 
 @pytest.mark.parametrize("escritor", ["titularidad", "valoracion"])
@@ -226,22 +246,24 @@ def test_k4_orden_de_locks_empieza_en_el_nivel_2(t, monkeypatch, escritor):
     owner, _, cli = t
     pid, vista = _propiedad(cli)
     pausa = Pausa(monkeypatch, *_pt_bloquear(), hilo="ESCRITOR")
-    fn = titularidad(owner, pid, 1, vista, dt.date(2026, 12, 1)) if escritor == "titularidad" \
-        else valoracion(owner, pid, 1)
+    i = uuid.uuid4()
+    fn = titularidad(owner, pid, 1, vista, dt.date(2026, 12, 1), i=i) if escritor == "titularidad" \
+        else valoracion(owner, pid, 1, i=i)
     paso = Paso("ESCRITOR", fn)
     try:
         paso.start()
         assert pausa.llego.wait(30)
-        estado = _sondear(owner, pid)
+        estado = _sondear(owner, pid, i)
     finally:
         pausa.sigue.set()
         paso.join(60)
     evidencia(f"k4_orden_locks_{escritor}", estado)
-    assert estado == {"advisory": 0, "inversiones_libre": True, "entidad_bloqueada": True}, estado
+    assert (estado["advisory_solo_0p"], estado["inversiones_libre"], estado["entidad_bloqueada"]) == \
+        (True, True, True), estado
     assert paso.codigo == OK
 
 
-def test_k4_alta_sin_advisory(t, monkeypatch):
+def test_k4_alta_solo_con_el_0p(t, monkeypatch):
     owner, _, cli = t
     ana = b.tercero(cli, "Ana")
     i = uuid.uuid4()
@@ -251,9 +273,10 @@ def test_k4_alta_sin_advisory(t, monkeypatch):
         paso.start()
         assert pausa.llego.wait(30)
         with psycopg.connect(h.dsn(), autocommit=True) as cn:
-            advisory = cn.execute("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'").fetchone()[0]
+            advisory = advisories(cn)
+            esperado = [(True, clave_0p(cn, owner, i), True)]
     finally:
         pausa.sigue.set()
         paso.join(60)
-    evidencia("k4_orden_locks_alta", {"advisory": advisory})
-    assert advisory == 0 and paso.codigo == OK
+    evidencia("k4_orden_locks_alta", {"advisory": advisory, "esperado": esperado})
+    assert advisory == esperado and paso.codigo == OK
