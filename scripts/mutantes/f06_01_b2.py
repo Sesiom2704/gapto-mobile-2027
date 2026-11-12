@@ -22,6 +22,8 @@
 #   python scripts/mutantes/f06_01_b2.py              # todos
 #   python scripts/mutantes/f06_01_b2.py M-ID-14      # subconjunto
 # Version: 0.1.0 (F06 T1-F06 B2 N1)
+# Version: 0.1.1 (F06 T1-F06 B2 N1, tirada del paso 12): el resumen de pytest incluye los ERROR (-rfE); con -rf un
+#   discriminante que cae en su fixture (ERROR, no FAILED) se clasificaba NO_CLASIFICABLE (M-CO-09) y paraba el arnes.
 # ============================================================
 from __future__ import annotations
 
@@ -307,7 +309,7 @@ def _estado_arbol() -> str:
 
 def _pytest(nodos: tuple[str, ...]) -> tuple[int, str]:
     proceso = subprocess.run(
-        [sys.executable, "-m", "pytest", *nodos, "-q", "-p", "no:cacheprovider", "--rootdir=tests/api", "-rf"],
+        [sys.executable, "-m", "pytest", *nodos, "-q", "-p", "no:cacheprovider", "--rootdir=tests/api", "-rfE"],
         cwd=RAIZ, capture_output=True, text=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
     return proceso.returncode, proceso.stdout + proceso.stderr
 
