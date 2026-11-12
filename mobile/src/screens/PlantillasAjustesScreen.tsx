@@ -8,6 +8,7 @@
 // Versión: 0.5.0 (swipe (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados `principal` / `alternativa` del componente común (principal a la izquierda); la raíz y el scroll cierran la fila abierta a medias (`propsZonaSwipe`, `propsScrollSwipe`).)
 // Versión: 0.5.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // Versión: 0.6.0 (F06 T1 UX-1 · M-03, Q-UX-06: publica la señal «hay cambios sin guardar» de su formulario (`usarCambiosSinGuardar`; prop opcional `onCambiosSinGuardar`); sin cambios de escritura).
+// Versión: 0.7.0 (F06 T1 UX-1 · DUD-UX1-01, decisión de Moisés del lote 26): salir del formulario con cambios por «Cancelar» pregunta «¿Descartar cambios?» (Descartar / Seguir editando, `salir` de `usarCambiosSinGuardar`); sin cambios sale sin preguntar.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -89,7 +90,7 @@ export function PlantillasAjustesScreen(p: {
   const [carga, setCarga] = useState<Carga>({ fase: 'CARGANDO' });
   const [vista, setVista] = useState<Vista>({ v: 'LISTA' });
   const [form, setForm] = useState<FormularioPlantilla>(FORMULARIO_PLANTILLA_NUEVO);
-  usarCambiosSinGuardar(vista.v === 'FORM', form, p.onCambiosSinGuardar);
+  const salida = usarCambiosSinGuardar(vista.v === 'FORM', form, p.onCambiosSinGuardar);
   const [aviso, setAviso] = useState<AvisoP>(null);
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [ocupado, setOcupado] = useState(false);
@@ -294,10 +295,11 @@ export function PlantillasAjustesScreen(p: {
     const cuentaGuardadaFuera = form.cuentaId !== null && !cuentas.some((x) => x.cuenta_id === form.cuentaId);
     return (
       <View testID="ajplt-form" style={{ flex: 1, backgroundColor: c.background }}>
+        {salida.hojaDescartar}
         <CabeceraTarea
           titulo={base ? 'Editar plantilla' : 'Nueva plantilla'}
           testIDCancelar="ajplt-cancelar"
-          onCancelar={() => (base ? abrirDetalle(base.id) : setVista({ v: 'LISTA' }))}
+          onCancelar={() => salida.salir(() => (base ? abrirDetalle(base.id) : setVista({ v: 'LISTA' })))}
         />
         <ScrollView contentContainerStyle={[ef.cuerpo, { paddingBottom: inset.bottom + espacio.xxl }]} keyboardShouldPersistTaps="handled">
           {bloqueAviso(aviso, 'ajplt-form')}

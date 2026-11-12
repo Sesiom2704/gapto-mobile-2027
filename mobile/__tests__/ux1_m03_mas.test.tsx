@@ -8,6 +8,7 @@
 //   (`usarCambiosSinGuardar`), compuesto como en App.tsx: sin cambios vuelve al menú; con cambios pregunta
 //   «¿Descartar cambios?»; «Seguir editando» conserva lo escrito; «Descartar» vuelve al menú.
 // Versión: 0.1.0 (F06 T1 UX-1 · M-03)
+// Versión: 0.2.0 (F06 T1 UX-1 · DUD-UX1-01, decisión de Moisés del lote 26): salir de un formulario de la pila de «Más» por «Cancelar» con cambios pregunta «¿Descartar cambios?»; «Seguir editando» conserva lo escrito y «Descartar» sale; sin cambios sale sin preguntar (alta de categoría en la app y formulario de prueba).
 // ============================================================
 
 import './tiempos_rn';
@@ -157,4 +158,72 @@ test('volver al valor de partida ya no cuenta como cambio: vuelve sin preguntar'
   await act(async () => fireEvent.changeText(screen.getByTestId('form-nombre'), 'Mercadona'));
   await pulsar('tab-MAS');
   expect(screen.getByTestId('menu-mas')).toBeTruthy();
+});
+
+// ------------------------------------------------------------------ DUD-UX1-01: salida por «Cancelar»
+async function abrirAltaCategoria() {
+  await montarApp();
+  await pulsar('tab-MAS');
+  await pulsar('mas-ajustes');
+  await pulsar('ajustes-categorias');
+  expect(await screen.findByTestId('fila-hogar')).toBeTruthy();
+  await pulsar('nueva-categoria');
+  expect(await screen.findByTestId('nueva-categoria-pantalla')).toBeTruthy();
+}
+
+test('DUD-UX1-01 · App: «Cancelar» sin cambios sale del alta sin preguntar', async () => {
+  await abrirAltaCategoria();
+  await pulsar('alta-cancelar');
+  expect(screen.queryByTestId('descartar-cambios')).toBeNull();
+  expect(screen.queryByTestId('nueva-categoria-pantalla')).toBeNull();
+  expect(screen.getByTestId('fila-hogar')).toBeTruthy();
+});
+
+test('DUD-UX1-01 · App: «Cancelar» con cambios pregunta; «Seguir editando» conserva lo escrito; «Descartar» sale', async () => {
+  await abrirAltaCategoria();
+  await act(async () => fireEvent.changeText(screen.getByTestId('alta-nombre'), 'Mascotas'));
+  await pulsar('alta-cancelar');
+  expect(screen.getByTestId('descartar-cambios')).toBeTruthy(); // O-DUD01-01: con cambios no sale sin confirmar
+  expect(screen.getByTestId('nueva-categoria-pantalla')).toBeTruthy();
+  await pulsar('descartar-cambios-seguir');
+  expect(screen.queryByTestId('descartar-cambios')).toBeNull();
+  expect(screen.getByTestId('alta-nombre').props.value).toBe('Mascotas');
+  await pulsar('alta-cancelar');
+  await pulsar('descartar-cambios-descartar');
+  expect(screen.queryByTestId('nueva-categoria-pantalla')).toBeNull();
+  expect(screen.getByTestId('fila-hogar')).toBeTruthy();
+});
+
+function FormularioConSalida(p: { onSalir: () => void }) {
+  const [nombre, setNombre] = useState('Mercadona');
+  const salida = usarCambiosSinGuardar(true, { nombre });
+  return (
+    <View style={{ flex: 1 }}>
+      {salida.hojaDescartar}
+      <Text testID="form-cancelar" onPress={() => salida.salir(p.onSalir)}>Cancelar</Text>
+      <TextInput testID="form-nombre" value={nombre} onChangeText={setNombre} />
+    </View>
+  );
+}
+
+test('DUD-UX1-01 · `salir`: sin cambios sale; con cambios pregunta y solo «Descartar» sale (O-DUD01-01)', async () => {
+  const onSalir = jest.fn();
+  render(
+    <SafeAreaProvider initialMetrics={METRICAS}>
+      <ProveedorTema forzar="light">
+        <FormularioConSalida onSalir={onSalir} />
+      </ProveedorTema>
+    </SafeAreaProvider>,
+  );
+  await pulsar('form-cancelar');
+  expect(onSalir).toHaveBeenCalledTimes(1);
+  await act(async () => fireEvent.changeText(screen.getByTestId('form-nombre'), 'Otro'));
+  await pulsar('form-cancelar');
+  expect(onSalir).toHaveBeenCalledTimes(1);
+  expect(screen.getByText('¿Descartar cambios?')).toBeTruthy();
+  await pulsar('descartar-cambios-seguir');
+  expect(onSalir).toHaveBeenCalledTimes(1);
+  await pulsar('form-cancelar');
+  await pulsar('descartar-cambios-descartar');
+  expect(onSalir).toHaveBeenCalledTimes(2);
 });

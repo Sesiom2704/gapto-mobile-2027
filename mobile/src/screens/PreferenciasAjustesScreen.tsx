@@ -8,6 +8,7 @@
 // Versión: 0.3.0 (F05-03/F05-04 J2 §2.5; F05 §46.4 R6; lámina REG-DYN / SET-TH / SET-CTX v0.1 S04): cuatro ámbitos «Todos los gastos», «Todos los ingresos», «Una categoría» y «Un tercero»; los dos últimos con tipo Gasto/Ingreso (Gasto marcado al elegir el ámbito: el de F05-02) y SIEMPRE enviado. El selector de categoría filtra por el tipo (el de REG-01 para gastos, el de ingresos para ingresos); el de tercero es el del registro (activos, alta mínima con duplicados). «Proponer cuenta» ofrece las cuentas del registro de ese tipo (cuentas-pago para gastos; GET /v1/cuentas/elegibles?operacion=INGRESO para ingresos). Grupo «Por tercero» en la lista.
 // Versión: 0.3.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // Versión: 0.4.0 (F06 T1 UX-1 · M-03, Q-UX-06: publica la señal «hay cambios sin guardar» de su formulario (`usarCambiosSinGuardar`; prop opcional `onCambiosSinGuardar`); sin cambios de escritura).
+// Versión: 0.5.0 (F06 T1 UX-1 · DUD-UX1-01, decisión de Moisés del lote 26): salir del formulario con cambios por «Cancelar» pregunta «¿Descartar cambios?» (Descartar / Seguir editando, `salir` de `usarCambiosSinGuardar`); sin cambios sale sin preguntar.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -99,7 +100,7 @@ export function PreferenciasAjustesScreen(p: {
   const [ocupado, setOcupado] = useState(false);
   // Formulario (S02 / S06)
   const [form, setForm] = useState<FormularioPreferencia>(FORMULARIO_NUEVO);
-  usarCambiosSinGuardar(vista.v === 'NUEVA' || vista.v === 'EDITAR', form, p.onCambiosSinGuardar);
+  const salida = usarCambiosSinGuardar(vista.v === 'NUEVA' || vista.v === 'EDITAR', form, p.onCambiosSinGuardar);
   const [idAlta, setIdAlta] = useState<string | null>(null);
   const [avisoForm, setAvisoForm] = useState<Aviso>(null);
   const [conflicto, setConflicto] = useState<Preferencia | null>(null);
@@ -338,11 +339,12 @@ export function PreferenciasAjustesScreen(p: {
     };
     return (
       <View testID="ajpref-form" style={{ flex: 1, backgroundColor: c.background }}>
+        {salida.hojaDescartar}
         <View style={[s.cabTarea, { paddingTop: inset.top + espacio.s, borderBottomColor: c.borderDefault }]}>
           <BotonTexto
             testID="ajpref-form-cancelar"
             titulo="Cancelar"
-            onPress={() => (base ? abrirDetalle(base.id) : setVista({ v: 'LISTA' }))}
+            onPress={() => salida.salir(() => (base ? abrirDetalle(base.id) : setVista({ v: 'LISTA' })))}
           />
           <Text accessibilityRole="header" numberOfLines={1} style={[tipo.titleSmall, { color: c.textPrimary, flexShrink: 1 }]}>
             {titulo}

@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-01 S6-WIRE+UI (este mandato))
 // Versión: 0.1.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // Versión: 0.2.0 (F06 T1 UX-1 · M-03, Q-UX-06: publica la señal «hay cambios sin guardar» de su formulario (`usarCambiosSinGuardar`; prop opcional `onCambiosSinGuardar`); sin cambios de escritura).
+// Versión: 0.3.0 (F06 T1 UX-1 · DUD-UX1-01, decisión de Moisés del lote 26): salir del formulario con cambios por «Cancelar» pregunta «¿Descartar cambios?» (Descartar / Seguir editando, `salir` de `usarCambiosSinGuardar`); sin cambios sale sin preguntar.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -51,7 +52,7 @@ export function NuevaCategoriaScreen(p: {
   const [selector, setSelector] = useState<'UBICACION' | 'ICONO' | null>(null);
   const [envio, setEnvio] = useState<Envio>({ fase: 'EDITANDO' });
   const [errorNombre, setErrorNombre] = useState<string | null>(null);
-  usarCambiosSinGuardar(true, { nombre, padre, ambito, presupuestable, iconKey }, p.onCambiosSinGuardar);
+  const salida = usarCambiosSinGuardar(true, { nombre, padre, ambito, presupuestable, iconKey }, p.onCambiosSinGuardar);
   const [aviso, setAviso] = useState<string | null>(null);
   const enVuelo = useRef(false);
 
@@ -106,8 +107,9 @@ export function NuevaCategoriaScreen(p: {
 
   return (
     <KeyboardAvoidingView testID="nueva-categoria-pantalla" style={{ flex: 1, backgroundColor: c.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      {salida.hojaDescartar}
       <View style={[s.cab, { paddingTop: inset.top + espacio.s, borderBottomColor: c.borderDefault }]}>
-        <BotonTexto testID="alta-cancelar" titulo="Cancelar" onPress={p.onCancelar} />
+        <BotonTexto testID="alta-cancelar" titulo="Cancelar" onPress={() => salida.salir(p.onCancelar)} />
         <Text accessibilityRole="header" style={[tipo.titleSmall, { color: c.textPrimary }]}>Nueva categoría</Text>
         <View style={{ width: 72 }} />
       </View>

@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-03/F05-04 J2 §2.3/§2.5)
 // Versión: 0.1.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // Versión: 0.2.0 (F06 T1 UX-1 · M-07, DM-06: la fecha usa el componente único `CampoFecha` (chips, campo dd/mm/aaaa con máscara y calendario en JS); se conservan el estado, las reglas de cada campo, los testID y los textos de validación; Desde y Hasta uno bajo otro, opcionales y en par; una fecha imposible (31/02) da TEXTO_FECHA_MAL: el servidor ya la rechaza, dt.date) y M-03, Q-UX-06: publica la señal «hay cambios sin guardar» de su formulario (`usarCambiosSinGuardar`; prop opcional `onCambiosSinGuardar`); sin cambios de escritura.
+// Versión: 0.3.0 (F06 T1 UX-1 · DUD-UX1-01, decisión de Moisés del lote 26): salir del formulario con cambios por «Cancelar» pregunta «¿Descartar cambios?» (Descartar / Seguir editando, `salir` de `usarCambiosSinGuardar`); sin cambios sale sin preguntar.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -83,7 +84,7 @@ export function FormularioContexto(p: {
   const { c } = useTema();
   const inset = useSafeAreaInsets();
   const [f, setF] = useState<FormCtx>(formDe(p.existente));
-  usarCambiosSinGuardar(true, f, p.onCambiosSinGuardar);
+  const salida = usarCambiosSinGuardar(true, f, p.onCambiosSinGuardar);
   const [aviso, setAviso] = useState<AvisoCaja>(p.avisoInicial ?? null);
   const [ocupado, setOcupado] = useState(false);
   const idAlta = useRef<string>(p.existente ? p.existente.id : p.nuevoId());
@@ -113,7 +114,8 @@ export function FormularioContexto(p: {
 
   return (
     <View testID={p.testID ?? 'form-contexto'} style={[StyleSheet.absoluteFill, { backgroundColor: c.background }]}>
-      <CabeceraTarea titulo={p.existente ? 'Editar contexto' : 'Nuevo contexto'} testIDCancelar="ctx-cancelar" onCancelar={p.onCancelar} />
+      {salida.hojaDescartar}
+      <CabeceraTarea titulo={p.existente ? 'Editar contexto' : 'Nuevo contexto'} testIDCancelar="ctx-cancelar" onCancelar={() => salida.salir(p.onCancelar)} />
       <ScrollView contentContainerStyle={[ef.cuerpo, { paddingBottom: inset.bottom + espacio.xxl }]} keyboardShouldPersistTaps="handled">
         {aviso ? <Caja testID={aviso.tipo === 'OK' ? 'ctx-aviso-ok' : 'ctx-aviso'} aviso={aviso} /> : null}
         <Campo etiqueta="Nombre">

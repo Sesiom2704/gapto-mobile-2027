@@ -10,6 +10,7 @@
 // Versión: 0.5.0 (swipe (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados `principal` / `alternativa` del componente común (principal a la izquierda); la raíz y el scroll cierran la fila abierta a medias (`propsZonaSwipe`, `propsScrollSwipe`).)
 // Versión: 0.5.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // Versión: 0.6.0 (F06 T1 UX-1 · M-03, Q-UX-06: publica la señal «hay cambios sin guardar» de su formulario (`usarCambiosSinGuardar`; prop opcional `onCambiosSinGuardar`); sin cambios de escritura).
+// Versión: 0.7.0 (F06 T1 UX-1 · DUD-UX1-01, decisión de Moisés del lote 26): salir del formulario con cambios por «Cancelar» pregunta «¿Descartar cambios?» (Descartar / Seguir editando, `salir` de `usarCambiosSinGuardar`); sin cambios sale sin preguntar.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -76,7 +77,7 @@ export function TercerosAjustesScreen(p: {
   const [filtro, setFiltro] = useState<Filtro>('TODOS');
   const [texto, setTexto] = useState('');
   const [form, setForm] = useState<Form>({ nombre: '', naturaleza: null });
-  usarCambiosSinGuardar(vista.v === 'NUEVO' || vista.v === 'EDITAR', form, p.onCambiosSinGuardar);
+  const salida = usarCambiosSinGuardar(vista.v === 'NUEVO' || vista.v === 'EDITAR', form, p.onCambiosSinGuardar);
   const [idAlta, setIdAlta] = useState<string | null>(null);
   const [aviso, setAviso] = useState<AvisoCaja>(null);
   const [candidatos, setCandidatos] = useState<Tercero[] | null>(null);
@@ -245,7 +246,8 @@ export function TercerosAjustesScreen(p: {
     const nombre = form.nombre.trim();
     return (
       <View testID="ajter-form" style={{ flex: 1, backgroundColor: c.background }}>
-        <CabeceraTarea titulo={actual ? 'Editar tercero' : 'Nuevo tercero'} testIDCancelar="ajter-cancelar" onCancelar={() => setVista({ v: 'LISTA' })} />
+        {salida.hojaDescartar}
+        <CabeceraTarea titulo={actual ? 'Editar tercero' : 'Nuevo tercero'} testIDCancelar="ajter-cancelar" onCancelar={() => salida.salir(() => setVista({ v: 'LISTA' }))} />
         <ScrollView contentContainerStyle={[ef.cuerpo, { paddingBottom: inset.bottom + espacio.xxl }]} keyboardShouldPersistTaps="handled">
           {aviso ? <Caja testID={aviso.tipo === 'OK' ? 'ajter-aviso-ok' : 'ajter-aviso'} aviso={aviso} /> : null}
           <Campo etiqueta="Nombre">

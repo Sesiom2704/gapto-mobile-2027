@@ -16,6 +16,8 @@
 #   Uso: python scripts/dev/mutantes_f06_t1_ux1.py [--solo ID,ID] [--salida fichero]
 #   No ejecutar en paralelo con otro arnes ni con la suite sobre el mismo arbol.
 # Version: 0.1.0 (F06 T1 UX-1)
+# Version: 0.2.0 (F06 T1 UX-1 · DUD-UX1-01, lote 26): mutantes MU-DUD01-01..03 de la salida por «Cancelar»
+#   con cambios (`salir` de usarCambiosSinGuardar y su uso en el alta de categoria).
 # ============================================================
 
 from __future__ import annotations
@@ -32,6 +34,7 @@ RAIZ = pathlib.Path(__file__).resolve().parents[2]
 JOURNAL = RAIZ / ".mutantes_f06_t1_ux1.journal.json"
 
 CSG = "mobile/src/components/CambiosSinGuardar.tsx"
+NCA = "mobile/src/screens/NuevaCategoriaScreen.tsx"
 APP = "mobile/App.tsx"
 PRE = "mobile/src/domain/preferencias.ts"
 GPR = "mobile/src/components/GuardarPreferencia.tsx"
@@ -55,6 +58,16 @@ MUTANTES = [
     ("MU-M03-02", "M-03: la barra vuelve a `setDestino` (no regresa al menu «Mas»)",
      [(APP, "<BarraInferior actual={destino} onCambiar={pulsarBarra} />", "<BarraInferior actual={destino} onCambiar={setDestino} />")],
      [M03 + "vuelve al menú"], None),
+    # ---------------------------------------------------------------- DUD-UX1-01 (salida por «Cancelar»)
+    ("MU-DUD01-01", "DUD-01: `salir` sale sin comprobar los cambios",
+     [(CSG, "    if (hay) setPendiente(() => accion);\n    else accion();", "    accion();")],
+     [M03 + "DUD-UX1-01"], None),
+    ("MU-DUD01-02", "DUD-01: el alta de categoria vuelve a salir por `onCancelar` sin pasar por `salir`",
+     [(NCA, "onPress={() => salida.salir(p.onCancelar)}", "onPress={p.onCancelar}")],
+     [M03 + "DUD-UX1-01 · App"], None),
+    ("MU-DUD01-03", "DUD-01: «Descartar» cierra la hoja pero no sale",
+     [(CSG, "        setPendiente(null);\n        a();", "        setPendiente(null);")],
+     [M03 + "DUD-UX1-01"], None),
     # ---------------------------------------------------------------- M-04 (TR1-05)
     ("MU-M04-01", "M-04: casillas iniciales cambiadas (presupuestable siempre false)",
      [(PRE, "  const presupuestable = f.presupuestable !== (p?.presupuestable ?? null);", "  const presupuestable = false;")],
