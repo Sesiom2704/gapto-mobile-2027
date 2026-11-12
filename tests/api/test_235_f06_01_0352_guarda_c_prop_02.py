@@ -16,6 +16,14 @@
 #   de B2-B3 (Alcance 9) y no existe en este N1. La concurrencia con una declaracion simultanea esta en
 #   test_236 (bateria serie, GAPTO_0352_CONCURRENCIA=1).
 # Version: 0.1.0 (F03 · N1 de 0352, mandato v1.4)
+# Version: 0.2.0 (F06 T1-F06 B2 N1 · FA-01, opcion a; decision de Moises del 2026-11-12,
+#   `90_TRABAJO/F06/F06-00_Decisiones_Moises_2026-11-12_FA01_y_regla_tests_v1.0.md`, SHA-256 e0adb0be…, decision 1):
+#   el inventario AJ-0352-08 admite los consumidores provisionales de B2 sin dejar de concentrar el acceso en
+#   `propiedades/repositorio.py`: (1) ningun otro fichero de backend/app nombra las columnas; (2) repositorio.py
+#   nombra exactamente las SEIS; (3) lista cerrada de funciones de repositorio.py que las tocan (lectura del corte
+#   de B1 y las de B2 con su constructor SQL) y una sola constante (AMBITOS_COMPLETITUD); (4) la unica que las
+#   escribe es escribir_declaracion_completitud. Las barreras de C-PROP-01/02 (HTTP, servicio y
+#   COLUMNAS_PROPIEDAD/EDITABLES) no cambian. Se revalida en el recierre de F03 (cierre del tren).
 # ============================================================
 
 from __future__ import annotations
@@ -220,15 +228,35 @@ def test_aj0352_08_columnas_fuera_de_editables_y_columnas_propiedad():
     assert not set(SEIS) & set(serv.EDITABLES)
 
 
+#: FA-01 (decision 1): funciones de repositorio.py que tocan las columnas de 0352 (lista cerrada).
+FUNCIONES_0352 = {"corte_adquisicion_declarado", "conjunto_completitud", "declaracion_completitud",
+                  "escribir_declaracion_completitud", "_ambito_coste_sql", "leer_coste"}
+ESCRITOR_0352 = "escribir_declaracion_completitud"
+
+
 def test_aj0352_08_inventario_de_escritura_en_backend():
-    """Solo la lectura del corte nombra columnas de 0352 en backend/app (ninguna escritura)."""
+    """Las columnas de 0352 solo se nombran en propiedades/repositorio.py (las seis, ni una mas ni una menos), a
+    traves de una lista cerrada de funciones y con un unico escritor (FA-01, opcion a)."""
+    import ast
     hallados = {}
     for f in (RAIZ / "backend" / "app").rglob("*.py"):
         texto = "\n".join(linea.split("#", 1)[0] for linea in f.read_text(encoding="utf-8").splitlines())   # sin comentarios
         nombres = sorted({c for c in SEIS if re.search(r"\b" + c + r"\b", texto)})
         if nombres:
             hallados[f.relative_to(RAIZ).as_posix()] = nombres
-    assert hallados == {"backend/app/propiedades/repositorio.py": ["coste_adquisicion_declarado_completo",
-                                                                   "coste_adquisicion_declarado_en"]}, hallados
-    repo_txt = (RAIZ / "backend" / "app" / "propiedades" / "repositorio.py").read_text(encoding="utf-8")
-    assert not re.search(r"(UPDATE|INSERT)[^;\"]*coste_adquisicion_declarado", repo_txt)
+    assert hallados == {"backend/app/propiedades/repositorio.py": sorted(SEIS)}, hallados
+    fuente = (RAIZ / "backend" / "app" / "propiedades" / "repositorio.py").read_text(encoding="utf-8")
+    arbol = ast.parse(fuente)
+    constantes = {n.targets[0].id for n in arbol.body if isinstance(n, ast.Assign) and len(n.targets) == 1
+                  and isinstance(n.targets[0], ast.Name) and any(c in ast.get_source_segment(fuente, n) for c in SEIS)}
+    assert constantes == {"AMBITOS_COMPLETITUD"}, constantes
+    funciones = {n.name: ast.get_source_segment(fuente, n) for n in arbol.body if isinstance(n, ast.FunctionDef)}
+    tocan = {nombre for nombre, src in funciones.items()
+             if "AMBITOS_COMPLETITUD" in src or any(c in src for c in SEIS)}
+    assert tocan == FUNCIONES_0352, tocan
+    escriben = {nombre for nombre in tocan if re.search(r"\b(UPDATE|INSERT)\b", funciones[nombre])}
+    assert escriben == {ESCRITOR_0352}, escriben
+    # B1 sigue sin tocarlas: servicio.py y lecturas.py solo usan la lectura del corte (barrera de C-PROP-01/02)
+    for b1 in ("servicio.py", "lecturas.py"):
+        texto_b1 = (RAIZ / "backend" / "app" / "propiedades" / b1).read_text(encoding="utf-8")
+        assert not any(re.search(r"\b" + fn + r"\b", texto_b1) for fn in FUNCIONES_0352 - {"corte_adquisicion_declarado"})

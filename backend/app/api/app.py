@@ -260,6 +260,9 @@
 #   request_id = intencion_id en todas las escrituras (identidad por la
 #   auditoria del agregado); rechazos con eh.rechazo_propiedad.
 # Version: 0.31.0
+# Version: 0.32.0 (F06 T1-F06 B2 N1): rutas de B2 (compra, gasto de la compra despues, L-COSTE, titularidad
+#   en una fecha y C-PROP-05 con su habilitacion bloqueada) registradas con UNA llamada a
+#   app.patrimonio.rutas.registrar; ninguna ruta existente cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -458,6 +461,7 @@ from app.plantillas import servicio as serv_plt
 from app.contextos import servicio as serv_ctx
 from app.propiedades import lecturas as lect_prop
 from app.propiedades import servicio as serv_prop
+from app.patrimonio import rutas as rutas_patrimonio
 from app.terceros import lecturas as lect_ter
 from app.terceros import servicio as serv_ter
 from app.comun import elegibilidad_cuentas as eleg
@@ -1032,6 +1036,10 @@ def create_app(
             s, propiedad_id=propiedad_id, valoracion_id=c.intencion_id, row_version=c.row_version_esperada,
             valor_total=c.valor_total, fecha=c.fecha_valoracion, metodo=c.metodo, fuente=c.fuente, notas=c.notas,
             reloj=reloj))
+
+    # ------------------------------------------------------------ F06-01 B2 compra y coste (modulo patrimonio)
+    rutas_patrimonio.registrar(app, unidad=unidad, owner=lambda: cfg.owner_user_id, contexto=contexto,
+                               autorizar=autorizar, reloj=reloj)
 
     # ------------------------------------------------------------ F05-03 J2 §1.6 plantillas y acciones
     def _comando_plantilla(nombre_op: str, operacion, clave: str) -> dict | JSONResponse:

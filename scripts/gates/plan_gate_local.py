@@ -25,6 +25,8 @@
 #        --bloques tz,replay,database,api,migration,conc027,baterias,gates [--roles-nuevos] [--diario DIR ...] > plan.json
 # Version: 0.1.0 (F03 · N1 de 0352, Paso 0)
 # Version: 0.2.0 (N1 de 0352, M5): bateria test_236 (GAPTO_0352_CONCURRENCIA) y bloque b1 con test_235 y test_236.
+# Version: 0.3.0 (F06 T1-F06 B2 N1, mandato §7.4): bloque B2 en las baterias serie (test_237 del subhito B2·R-B1 con
+#   GAPTO_B1_CONCURRENCIA y test_254 de B2 con GAPTO_B2_CONCURRENCIA) y test_237 en el bloque b1 (regresion de B1).
 # ============================================================
 from __future__ import annotations
 
@@ -52,6 +54,8 @@ BATERIAS = [
     ("GAPTO_C03_CONCURRENCIA", "tests/api/test_218_f05_d052_c03_concurrencia_serial.py"),
     ("GAPTO_B1_CONCURRENCIA", "tests/api/test_232_f06_01_b1_concurrencia_serial.py"),
     ("GAPTO_0352_CONCURRENCIA", "tests/api/test_236_f06_01_0352_guarda_concurrencia_serial.py"),
+    ("GAPTO_B1_CONCURRENCIA", "tests/api/test_237_f06_01_b1r_intencion_concurrente_serial.py"),
+    ("GAPTO_B2_CONCURRENCIA", "tests/api/test_254_f06_01_b2_concurrencia_serial.py"),
 ]
 
 
@@ -130,7 +134,9 @@ def main(argv: list[str]) -> int:
                                  ("b1_test_235_guarda", ["tests/api/test_235_f06_01_0352_guarda_c_prop_02.py"], {}),
                                  ("b1_test_232_concurrencia", ["tests/api/test_232_f06_01_b1_concurrencia_serial.py"], {"GAPTO_B1_CONCURRENCIA": "1"}),
                                  ("b1_test_236_guarda_concurrencia", ["tests/api/test_236_f06_01_0352_guarda_concurrencia_serial.py"],
-                                  {"GAPTO_0352_CONCURRENCIA": "1"})]:
+                                  {"GAPTO_0352_CONCURRENCIA": "1"}),
+                                 ("b1_test_237_intencion_concurrente", ["tests/api/test_237_f06_01_b1r_intencion_concurrente_serial.py"],
+                                  {"GAPTO_B1_CONCURRENCIA": "1"})]:
             db = "m_" + et
             pasos += [clon(db), {"etiqueta": et, "tipo": "pytest", "env": {"GAPTO_TEST_DATABASE_URL": url(db), **extra},
                                  "args": [*rutas, "-q", "--rootdir=tests/api"]}, borrar(db)]

@@ -393,6 +393,9 @@
 #     TEXTO_CATEGORIA_NO_DISPONIBLE): con CATEGORIA_NO_ELEGIBLE en la propuesta de la
 #     categoria elegida, la dejan PENDIENTE (no valida, como el 409 del registro) con su
 #     motivo; no proponen, resuelven ni completan categoria.
+# Version: 0.37.0 (F06 T1-F06 B2 N1; adaptacion declarada y minima por la regla permanente de T1-F06, decision 2
+#     de Moises del 2026-11-12 `e0adb0be…`): alta aditiva en I1 del comparador propio de la compra
+#     (backend/app/patrimonio/compra.py::agregado_coincide, clase R: lee categoria_id para comparar; no escribe).
 # ============================================================
 
 from __future__ import annotations
@@ -532,6 +535,9 @@ REGISTRO: dict[tuple[str, str], tuple[str, str, str]] = {
         "R", "OP-04 idempotencia", "comparacion de intencion en reintento"),
     ("backend/app/services/compuesto_service.py", "HechosCompuestosService._agregado_coincide"): (
         "R", "OP-22 identidad", "comparacion exacta del agregado (F04-D051)"),
+    ("backend/app/patrimonio/compra.py", "agregado_coincide"): (
+        "R", "C-COMPRA-01/03 identidad (F06 B2)", "comparador propio del replay de la compra: igualdad exacta del "
+        "agregado (F04-D050, AJ-TR1-09); B2 nunca escribe categoria (VALOR_ACTIVO de adquisicion sin categoria)"),
     ("backend/app/services/suplementos_service.py", "SuplementosService.registrar.operacion"): (
         "A_MOTOR", "OP-18", "realidad suplementaria nueva con categoria declarada (no se presupone B)"),
     ("backend/app/services/devoluciones_service.py", "DevolucionesService.devolver.operacion"): (

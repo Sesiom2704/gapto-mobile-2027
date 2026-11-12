@@ -45,6 +45,11 @@
 #   de B1 (alta con cotitular sin actor, editar, titularidad con cotitular nuevo y
 #   valoracion) entran en el barrido: son multirregistro (actor + entidad + subtipo +
 #   participaciones o valoracion + auditoria) y el inventario cerrado las exige.
+# Version: 0.4.0 (F06 T1-F06 B2 N1; adaptacion declarada y minima por la regla permanente de T1-F06, decision 2
+#   de Moises del 2026-11-12 `e0adb0be…`): las rutas POST de B2 entran en el inventario cerrado. La compra y el
+#   gasto de la compra despues (OP-22 por raiz + PARTE_DE + valoraciones + version + auditoria) son
+#   multirregistro y entran en el barrido; C-PROP-05 (/completitud) se clasifica como ajena: consumidor de 0352
+#   con la habilitacion bloqueada (404 sin escribir, O10.29). Nada de F05 cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -284,6 +289,35 @@ def p_b1_valoracion(t):
     return f"/v1/propiedades/{prop['id']}/valoraciones", b1.valoracion(prop)
 
 
+# F06-01 B2 ······································································
+def _compra_b2(t, prop):
+    owner, actor, cli, cta, ahorro = t
+    return {"intencion_id": _iid(), "row_version_esperada": prop["row_version"], "fecha_escritura": "2026-03-20",
+            "precio": "1000.00", "pagos_propios": [{"linea_id": _iid(), "rol": "FIRMA", "cuenta_id": str(cta),
+                                                    "fecha_pago": "2026-03-20", "importe": "1000.00"}],
+            "gastos": [{"linea_id": _iid(), "concepto": "ITP", "cuenta_id": str(cta), "fecha_economica": "2026-03-20",
+                        "fecha_pago": "2026-03-20", "importe": "60.00"}],
+            "atribucion": {"modo": "MANUAL", "partes": [{"actor_id": str(actor), "porcentaje": "100"}]}}
+
+
+def p_b2_compra(t):
+    prop = _propiedad(t)
+    return f"/v1/propiedades/{prop['id']}/compra", _compra_b2(t, prop)
+
+
+def p_b2_gasto_posterior(t):
+    owner, actor, cli, cta, ahorro = t
+    prop = _propiedad(t)
+    r = cli.post(f"/v1/propiedades/{prop['id']}/compra", json=_compra_b2(t, prop), headers=h.AUTH)
+    assert r.status_code == 200, r.text
+    prop = r.json()["propiedad"]
+    return f"/v1/propiedades/{prop['id']}/compra/gastos", {
+        "intencion_id": _iid(), "row_version_esperada": prop["row_version"],
+        "linea": {"linea_id": _iid(), "concepto": "OTRO", "cuenta_id": str(cta), "fecha_economica": "2026-04-02",
+                  "fecha_pago": "2026-04-02", "importe": "40.00"},
+        "atribucion": {"modo": "MANUAL", "partes": [{"actor_id": str(actor), "porcentaje": "100"}]}}
+
+
 # M5 ·············································································
 def p_m5_vincular(t):
     owner, actor, cli, cta, ahorro = t
@@ -428,6 +462,8 @@ COMANDOS = {
     "B1_editar_propiedad": ("/v1/propiedades/{propiedad_id}/editar", p_b1_editar_propiedad),
     "B1_titularidad": ("/v1/propiedades/{propiedad_id}/titularidad", p_b1_titularidad),
     "B1_valoracion": ("/v1/propiedades/{propiedad_id}/valoraciones", p_b1_valoracion),
+    "B2_compra": ("/v1/propiedades/{propiedad_id}/compra", p_b2_compra),
+    "B2_gasto_posterior": ("/v1/propiedades/{propiedad_id}/compra/gastos", p_b2_gasto_posterior),
 }
 
 #: Comandos multirregistro F05-06 cubiertos por la misma frontera que otro del
@@ -464,6 +500,8 @@ AJENAS_A_F05_06 = {
     "/v1/acciones-rapidas": "F05-03", "/v1/acciones-rapidas/reordenar": "F05-03",
     "/v1/acciones-rapidas/{accion_id}/editar": "F05-03", "/v1/acciones-rapidas/{accion_id}/desactivar": "F05-03",
     "/v1/afinidades": "F05-05", "/v1/afinidades/{afinidad_id}/retirar": "F05-05",
+    "/v1/propiedades/{propiedad_id}/completitud": "F06-01 B2 C-PROP-05: consumidor de 0352 no habilitado (404, O10.29; "
+                                                  "test_252)",
 }
 
 
