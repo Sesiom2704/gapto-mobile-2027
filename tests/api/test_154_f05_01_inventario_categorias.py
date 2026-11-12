@@ -396,6 +396,12 @@
 # Version: 0.37.0 (F06 T1-F06 B2 N1; adaptacion declarada y minima por la regla permanente de T1-F06, decision 2
 #     de Moises del 2026-11-12 `e0adb0be…`): alta aditiva en I1 del comparador propio de la compra
 #     (backend/app/patrimonio/compra.py::agregado_coincide, clase R: lee categoria_id para comparar; no escribe).
+# Version: 0.38.0 (F06 T1-F06 UX-1 · MANT; hallazgo H-B2-01; adaptacion declarada y minima por la regla permanente
+#     v2 de T1-F06, decision de Moises del 2026-11-12 `5b54258a…`, aplicacion 2): lista cerrada de dos altas que UX-1
+#     no registro. I1: EXCLUIDOS gana el arnes scripts/dev/mutantes_f06_t1_ux1.py (sus mutantes son texto; uno
+#     contiene `categoria_id` en el cuerpo de altaPreferencia). I13a: RegistroGastoScreen importa CampoFecha (M-07,
+#     DM-06: campo unico de fecha) y PendienteCompacto (M-09: resumen «Pendiente con X», lectura OP-20); ninguno
+#     menciona la categoria ni propone, resuelve o completa categoria. Sin otros cambios.
 # ============================================================
 
 from __future__ import annotations
@@ -764,6 +770,8 @@ EXCLUIDOS: dict[str, str] = {
     "scripts/dev/mutantes_f05_j2j3.py": "arnes de mutacion F05-03/F05-04 J2J3 (D-181): los mutantes son texto",
     "scripts/dev/mutantes_f05_05.py": "arnes de mutacion F05-05 K3 (D-181): los mutantes son texto",
     "scripts/dev/mutantes_f05_06_m1_v3.py": "arnes de mutacion F05-06 M1 v1.1 (lista blanca V3): los mutantes son texto",
+    # F06 T1-F06 UX-1 · MANT (H-B2-01; regla v2 de T1-F06, `5b54258a…`).
+    "scripts/dev/mutantes_f06_t1_ux1.py": "arnes de mutacion UX-1 de T1-F06: los mutantes son texto",
 }
 
 
@@ -1739,6 +1747,13 @@ IMPORTS_CAMINO[REG] = IMPORTS_CAMINO[REG] | {
     "TEXTO_OPCION_REEMBOLSO_SUB", "TEXTO_TE_DEBE", "importeReembolso", "totalDe")}
 IMPORTS_CAMINO[CLI] = IMPORTS_CAMINO[CLI] | {
     ("../domain/reembolso", "type PayloadGastoReembolsable"), ("../domain/reembolso", "type ResultadoGastoReembolsable"),
+}
+
+# F06 T1-F06 UX-1 · MANT (alta aditiva, lista cerrada; H-B2-01; regla v2 de T1-F06, `5b54258a…`):
+# M-07 (DM-06) sustituye el campo de fecha por el componente unico CampoFecha y M-09 anade
+# bajo el tercero el resumen PendienteCompacto (lectura OP-20). Ninguno toca la categoria.
+IMPORTS_CAMINO[REG] = IMPORTS_CAMINO[REG] | {
+    ("../components/CampoFecha", "CampoFecha"), ("../components/PendienteCompacto", "PendienteCompacto"),
 }
 
 MENCIONES_CLIENTE.update({
