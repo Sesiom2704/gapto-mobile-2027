@@ -9,6 +9,15 @@
 #   o NADA, que no invente posiciones y que no duplique ninguna capacidad ya
 #   certificada. El caso C-11 completo y los adversariales A4, A5, A6 y A7
 #   viven aqui.
+# Version: 0.4.0
+#   0.4.0 (F06 T1-F06 B2 N1 · R-B2-N12; adaptacion declarada y minima por la regla
+#   permanente v2 de T1-F06, decision de Moises del 2026-11-12
+#   `F06-00_Decisiones_Moises_2026-11-12_regla_tests_v2_v1.0.md` `5b54258a…`,
+#   aplicacion 1; base: contrato R1 v0.9.5 `80c6cfc0…` §II.1 y Q-R1-01 del dictamen
+#   del tren 1, replay propio de la compra): N12 admite UN unico escritor de
+#   `PARTE_DE`, backend/app/patrimonio/compra.py (lote de la compra). `REPERCUSION_DE`
+#   y `REVERSA_A` siguen sin writer en todo backend/app. La comprobacion dinamica por
+#   owner no cambia. Ninguna otra prueba cambia.
 # Version: 0.3.0
 #   0.3.0 (mandato F04 R1+R2 v0.3 + E01): OP-04 aporta `presupuestable` en la
 #   transicion al primer GASTO/INGRESO (A08-bis generalizada); fixtures de
@@ -437,7 +446,9 @@ def test_conciliacion_de_otro_hecho_se_rechaza(
 
 
 def test_ningun_writer_emite_relaciones_reservadas(admin, contexto) -> None:
-    """N12. `PARTE_DE`, `REPERCUSION_DE` y `REVERSA_A` siguen sin writer.
+    """N12. `REPERCUSION_DE` y `REVERSA_A` siguen sin writer; `PARTE_DE` tiene
+    un unico writer autorizado, la compra de T1-F06 B2
+    (backend/app/patrimonio/compra.py; contrato R1 v0.9.5 §II.1, Q-R1-01).
 
     Auditoria estatica sobre el codigo de servicios mas comprobacion dinamica
     de que la suite no ha dejado ni una fila con esos tokens. El estatico
@@ -450,12 +461,20 @@ def test_ningun_writer_emite_relaciones_reservadas(admin, contexto) -> None:
     # El token entrecomillado, no la subcadena: `CONTRAPARTE_DESCONOCIDA`
     # contiene `PARTE_DE` y no tiene nada que ver.
     emision = _re.compile(r"""['"](PARTE_DE|REPERCUSION_DE|REVERSA_A)['"]""")
-    emisores = [
-        ruta.name
+    # Lista CERRADA de escritores autorizados por token (regla v2 de T1-F06,
+    # `5b54258a…`): solo la compra puede emitir PARTE_DE; los otros dos, nadie.
+    autorizados = {"PARTE_DE": {"patrimonio/compra.py"}}
+    emisores = sorted(
+        (token, ruta.relative_to(servicios).as_posix())
         for ruta in servicios.rglob("*.py")
-        if emision.search(ruta.read_text(encoding="utf-8"))
+        for token in set(emision.findall(ruta.read_text(encoding="utf-8")))
+    )
+    no_autorizados = [
+        (token, ruta)
+        for token, ruta in emisores
+        if ruta not in autorizados.get(token, set())
     ]
-    assert emisores == []
+    assert no_autorizados == []
 
     assert leer_fila(
         admin,
