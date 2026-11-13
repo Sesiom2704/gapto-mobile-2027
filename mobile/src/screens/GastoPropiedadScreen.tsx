@@ -9,6 +9,11 @@
 //   - `CorregirClaseScreen` (C-MEJ-03): solo con `intencion_correccion_id`; clase actual → nueva; categoría y presupuesto sin valor previo al pasar a gasto; tabla Antes/Después de este gasto; motivo obligatorio; IMPACTO_CORRECCION_DESFASADO avisa y recarga la tabla.
 //   Con deuda (8quater) el detalle no ofrece «Corregir la clase» y muestra la limitación literal; nunca propone anular y recrear ni la corrección de categoría como equivalentes. Todas las fechas con el CampoFecha de UX-1.
 // Versión: 0.1.0 (F06 T1-F06 B3 N1)
+// Versión: 0.2.0 (F06 T1-F06 B3 ajuste N3 · decisión de Moisés 2026-11-13 «B3 alcance y CAT-VIV» v1.0): el alta
+//   (C-MEJ-01) solo ofrece «Reforma o mejora» (clase MEJORA preseleccionada, sin chips, sin categoría ni presupuesto);
+//   los gastos corrientes y las reparaciones se registran desde «Registrar gasto». Lista «Reformas y mejoras · <propiedad>»
+//   y botón «Añadir una reforma o mejora». La corrección de clase (C-MEJ-03) y la lista no cambian: siguen mostrando y
+//   corrigiendo lo que haya, también reparaciones y gastos corrientes ya registrados.
 // ============================================================
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -26,17 +31,21 @@ import { AvisoCaja, CabeceraTarea, Caja, Campo, CampoTexto, estilosFormulario as
 import { ancestros, CategoriaNodo, construirArbol, elegibleParaGasto } from '../domain/categoria';
 import { ddmmaaaaAIso, diaMesAnioIso, isoADdmmaaaa, isoLocal } from '../domain/fechas';
 import {
-  alCambiarPropuesta, atribucionTexto, AYUDA_CLASE, borradorInicial, BorradorGastoPropiedad, CLASES, clasesDestino, completarDeuda,
+  alCambiarPropuesta, atribucionTexto, AYUDA_CLASE, borradorInicial, BorradorGastoPropiedad, clasesDestino, completarDeuda,
   cuentaCompartida, Derecho, derechos, EleccionReparto, faltasCorreccion, faltasDatos, faltasReparto, filasImpacto, hayPropuesta,
   muestraLimitacion, NOMBRE_CLASE, ofreceCorregir, ofreceDeuda, partesEfectivas, payloadCorreccion, payloadGastoPropiedad,
   payloadMejoraHistorica, repartirImporte, repartoInicial, resumenGastos, seleccionInicial, SeleccionCorreccion, TEXTO_CUENTA_COMPARTIDA,
-  TEXTO_DESFASADA, TEXTO_IMPACTO_DESFASADO, TEXTO_INDETERMINADO, TEXTO_LIMITACION_8QUATER, TEXTO_SE_CREA_DERECHO, TEXTO_SIN_CLASE,
+  TEXTO_DESFASADA, TEXTO_IMPACTO_DESFASADO, TEXTO_INDETERMINADO, TEXTO_LIMITACION_8QUATER, TEXTO_SE_CREA_DERECHO,
   TEXTO_SIN_PAGO, TEXTO_SIN_TITULARIDAD, textoError, textoPropuesta,
 } from '../domain/gasto_propiedad';
 import { formatearEur, parsearImporte } from '../domain/importe';
 import { esFechaIso } from '../domain/intencion';
 import { useTema } from '../theme/tema';
 import { espacio, tipo } from '../theme/tokens';
+
+/** Alta de B3 (decisión 2026-11-13): solo «Reforma o mejora». */
+const TEXTO_CLASE_ALTA = 'Reforma o mejora (aumenta el valor)';
+const TEXTO_GASTOS_EN_REGISTRAR = 'Los gastos corrientes y las reparaciones se registran desde «Registrar gasto».';
 
 function Fecha(p: { testID: string; etiqueta: string; iso: string; hoyIso: string; onCambiar: (iso: string) => void }) {
   const [texto, setTexto] = useState<string>(esFechaIso(p.iso) ? isoADdmmaaaa(p.iso) : p.iso);
@@ -135,7 +144,8 @@ export function GastoPropiedadScreen(p: {
   const hoyIso = isoLocal(p.ahora());
   type Paso = 'DATOS' | 'REPARTO' | 'CONFIRMAR' | 'HECHO';
   const [paso, setPaso] = useState<Paso>('DATOS');
-  const [b, setB] = useState<BorradorGastoPropiedad>(() => borradorInicial(hoyIso));
+  // Decisión 2026-11-13: el alta solo registra reformas o mejoras; la clase va fijada (sin chip).
+  const [b, setB] = useState<BorradorGastoPropiedad>(() => ({ ...borradorInicial(hoyIso), clase: 'MEJORA' }));
   const [cuentas, setCuentas] = useState<CuentaElegible[]>([]);
   const [prop, setProp] = useState<PropuestaGasto | null>(null);
   const [aviso, setAviso] = useState<AvisoCaja>(null);
@@ -194,7 +204,7 @@ export function GastoPropiedadScreen(p: {
   if (paso === 'HECHO') {
     return (
       <View testID="gprop-hecho" style={[StyleSheet.absoluteFill, { backgroundColor: c.background }]}>
-        <CabeceraTarea titulo="Gasto guardado" testIDCancelar="gprop-hecho-cerrar" onCancelar={() => p.onCerrar(true)} />
+        <CabeceraTarea titulo="Reforma o mejora guardada" testIDCancelar="gprop-hecho-cerrar" onCancelar={() => p.onCerrar(true)} />
         <ScrollView contentContainerStyle={[ef.cuerpo, { paddingBottom: inset.bottom + espacio.xxl }]}>
           <Text style={[tipo.body, { color: c.textPrimary }]}>{b.clase === 'MEJORA' ? 'Suma al coste de la vivienda. No es gasto del mes.' : 'Cuenta como gasto del mes.'}</Text>
           <BotonPrimario testID="gprop-listo" titulo="Listo" onPress={() => p.onCerrar(true)} />
@@ -203,7 +213,7 @@ export function GastoPropiedadScreen(p: {
     );
   }
 
-  const titulo = paso === 'REPARTO' ? '¿De quién es el gasto?' : paso === 'CONFIRMAR' ? 'Revisar y confirmar' : 'Gasto de la propiedad';
+  const titulo = paso === 'REPARTO' ? '¿De quién es el gasto?' : paso === 'CONFIRMAR' ? 'Revisar y confirmar' : 'Reforma o mejora';
   return (
     <View testID={`gprop-paso-${paso.toLowerCase()}`} style={[StyleSheet.absoluteFill, { backgroundColor: c.background }]}>
       <CabeceraTarea titulo={titulo} testIDCancelar="gprop-cancelar" onCancelar={() => p.onCerrar(false)} />
@@ -224,23 +234,11 @@ export function GastoPropiedadScreen(p: {
               )}
             </Campo>
             <CampoTexto testID="gprop-nota" etiqueta="Nota" marcador="Opcional" valor={b.nota} onCambiar={(t) => setB({ ...b, nota: t })} />
-            <RotuloGrupo texto="¿Qué es este gasto?" />
-            {CLASES.map((k) => (
-              <View key={k} style={{ gap: 2 }}>
-                <Chip testID={`gprop-clase-${k}`} etiqueta={NOMBRE_CLASE[k]} seleccionado={b.clase === k}
-                  onPress={() => setB({ ...b, clase: k, ...(k === 'MEJORA' ? { categoriaId: null, presupuestable: null } : {}) })} />
-                <Text style={[tipo.caption, { color: c.textSecondary }]}>{AYUDA_CLASE[k]}</Text>
-              </View>
-            ))}
-            {b.clase === null ? <Text testID="gprop-sin-clase" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_SIN_CLASE}</Text> : null}
-            {b.clase !== null && b.clase !== 'MEJORA' ? (
-              <>
-                <Campo etiqueta="Categoría">
-                  <Categorias testID="gprop-categoria" cliente={p.cliente} valor={b.categoriaId} onCambiar={(id) => setB({ ...b, categoriaId: id })} />
-                </Campo>
-                <Presupuesto testID="gprop-presupuestable" valor={b.presupuestable} onCambiar={(v) => setB({ ...b, presupuestable: v })} />
-              </>
-            ) : null}
+            <View testID="gprop-clase" style={{ gap: 2 }}>
+              <Text style={[tipo.bodyEmphasis, { color: c.textPrimary }]}>{TEXTO_CLASE_ALTA}</Text>
+              <Text style={[tipo.caption, { color: c.textSecondary }]}>{AYUDA_CLASE.MEJORA}</Text>
+            </View>
+            <Text testID="gprop-nota-registrar-gasto" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_GASTOS_EN_REGISTRAR}</Text>
           </>
         ) : null}
         {paso === 'REPARTO' ? (
@@ -276,7 +274,7 @@ export function GastoPropiedadScreen(p: {
         {paso === 'CONFIRMAR' ? (
           <>
             <Tarjeta testID="gprop-resumen">
-              <Linea testID="gprop-res-clase" etiqueta="Clase" valor={b.clase ? NOMBRE_CLASE[b.clase] : ''} />
+              <Linea testID="gprop-res-clase" etiqueta="Clase" valor={TEXTO_CLASE_ALTA} />
               <Linea testID="gprop-res-importe" etiqueta="Importe" valor={formatearEur(parsearImporte(b.importe).ok ? (parsearImporte(b.importe) as { valor: string }).valor : '0')} fuerte />
               <Linea testID="gprop-res-fecha" etiqueta="Fecha" valor={esFechaIso(b.fecha) ? diaMesAnioIso(b.fecha) : b.fecha} />
               <Linea testID="gprop-res-gasto-mes" etiqueta="Cuenta como gasto del mes" valor={b.clase === 'MEJORA' ? 'No · suma al coste' : 'Sí'} />
@@ -477,7 +475,7 @@ export function DetalleGastoPropiedad(p: { lectura: LecturaGastoPropiedad; onCor
   );
 }
 
-/** C2 · Obras y gastos de la propiedad: lista con lo que suma al coste y lo que es gasto, detalle y corrección. */
+/** C2 · Reformas y mejoras de la propiedad: lista (muestra todo lo registrado, también reparaciones y gastos) con lo que suma al coste y lo que es gasto, detalle y corrección. */
 export function GastosPropiedadScreen(p: {
   cliente: ClienteApi;
   patrimonio: ClientePatrimonioB3;
@@ -520,7 +518,7 @@ export function GastosPropiedadScreen(p: {
     );
   return (
     <View testID="gastos-propiedad" style={[StyleSheet.absoluteFill, { backgroundColor: c.background }]}>
-      <CabeceraTarea titulo={nivel.n === 'DETALLE' ? 'Gasto de la propiedad' : `Obras y gastos · ${p.vista.nombre}`} testIDCancelar="gastos-cerrar"
+      <CabeceraTarea titulo={nivel.n === 'DETALLE' ? 'Gasto de la propiedad' : `Reformas y mejoras · ${p.vista.nombre}`} testIDCancelar="gastos-cerrar"
         onCancelar={() => (nivel.n === 'DETALLE' ? volver(false) : p.onCerrar(cambio))} />
       <ScrollView contentContainerStyle={[ef.cuerpo, { paddingBottom: inset.bottom + espacio.xxl }]}>
         {nivel.n === 'DETALLE' ? (
@@ -542,7 +540,7 @@ export function GastosPropiedadScreen(p: {
                 ))}
               </Tarjeta>
             ) : null}
-            <BotonPrimario testID="gastos-nuevo" titulo="Añadir un gasto" onPress={() => setNivel({ n: 'NUEVO' })} />
+            <BotonPrimario testID="gastos-nuevo" titulo="Añadir una reforma o mejora" onPress={() => setNivel({ n: 'NUEVO' })} />
             <BotonTexto testID="gastos-historica" titulo="Anotar una mejora antigua" onPress={() => setNivel({ n: 'HISTORICA' })} />
           </>
         )}

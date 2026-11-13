@@ -7,6 +7,9 @@
 //   - O9.14/O9.15 «Te debe su parte: Sí» por defecto con cuenta solo tuya y cotitular persona, y «No»; O9.16 cuenta compartida sin preselección, importe a mano sin valor previo y aportación MANUAL; O9.18 EMPRESA y O9.21 «No lo sé» no ofrecen; O9.20 la mejora histórica no ofrece;
 //   - O9.23 confirmación (quién, cuánto, concepto, parte atribuida, «Se creará un derecho de cobro» y la atribución que se persistirá) y `derechos_confirmados` = exactamente lo mostrado; ATRIBUCION_PROPUESTA_DESFASADA vuelve al reparto con la propuesta releída.
 // Versión: 0.1.0 (F06 T1-F06 B3 N1)
+// Versión: 0.2.0 (F06 T1-F06 B3 ajuste N3 · decisión de Moisés 2026-11-13 «B3 alcance y CAT-VIV» v1.0): cambio DECLARADO de alcance de pantalla: el alta solo ofrece
+//   «Reforma o mejora» (MEJORA fijada, sin chips de clase ni categoría/presupuesto). El test C1 de las tres clases pasa a fijar ese alcance; la
+//   regla de dominio de las tres clases (faltasDatos) sigue cubierta y la corrección de clase (C-MEJ-03) no cambia.
 // ============================================================
 
 import './tiempos_rn';
@@ -199,19 +202,22 @@ async function montar(pat: ClientePatrimonioB3) {
 async function datosMejora() {
   await escribir('gprop-importe', '300');
   await pulsar(`gprop-cuenta-${C1}`);
-  await pulsar('gprop-clase-MEJORA');
   await pulsar('gprop-continuar');
 }
 
-test('C1: tres clases, ninguna marcada; Mejora oculta categoría y presupuesto', async () => {
+test('C1 (ajuste N3, decisión 2026-11-13): el alta solo ofrece «Reforma o mejora»; sin Reparación, Gasto corriente, categoría ni presupuesto', async () => {
   await montar(patrimonio(() => prop()));
-  expect(['MEJORA', 'REPARACION', 'GASTO_CORRIENTE'].map((k) => marcado(`gprop-clase-${k}`))).toEqual([false, false, false]);
-  expect(screen.getByTestId('gprop-sin-clase')).toBeTruthy();
-  await pulsar('gprop-clase-REPARACION');
-  await waitFor(() => expect(screen.getByTestId(`gprop-categoria-${CAT}`)).toBeTruthy());
-  expect(marcado('gprop-presupuestable-si') || marcado('gprop-presupuestable-no')).toBe(false);   // sin valor previo
-  await pulsar('gprop-clase-MEJORA');
+  expect(screen.getByText('Reforma o mejora (aumenta el valor)')).toBeTruthy();
+  for (const k of ['MEJORA', 'REPARACION', 'GASTO_CORRIENTE']) expect(screen.queryByTestId(`gprop-clase-${k}`)).toBeNull();
+  expect(screen.queryByTestId('gprop-sin-clase')).toBeNull();
+  expect(screen.queryByTestId(`gprop-categoria-${CAT}`)).toBeNull();
   expect(screen.queryByTestId('gprop-presupuestable-si')).toBeNull();
+  expect(screen.getByTestId('gprop-nota-registrar-gasto')).toBeTruthy();
+  await escribir('gprop-importe', '300');
+  await pulsar(`gprop-cuenta-${C1}`);
+  expect(screen.queryByTestId('gprop-faltas')).toBeNull();   // la clase ya no falta: va fijada a MEJORA
+  await pulsar('gprop-continuar');
+  expect(screen.getByTestId('gprop-paso-reparto')).toBeTruthy();
 });
 
 test('O9.14 + O9.23: reparto marcado, «Sí» por defecto, confirmación visible y derechos_confirmados = lo mostrado', async () => {
