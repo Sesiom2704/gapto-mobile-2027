@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F06 Lote 12 · B1 Propiedad, N1)
 // Versión: 0.2.0 (F06 T1-F06 B2 N1): la ficha lee también L-COSTE (cliente de patrimonio, por prop opcional; por defecto el de `configApi`) y abre las tareas inmersivas de B2: «Registrar la compra» (CompraScreen, B1–B6) y «Añadir un gasto de la compra» (GastoCompraScreen, C-COMPRA-03). Al cerrar con cambios, la ficha muestra la vista del servidor y relee el coste. Nada más cambia en B1.
 // Versión: 0.3.0 (F06 T1-F06 B3 N1): SOLO aditivo: tarea inmersiva «Obras y gastos» (GastosPropiedadScreen de B3, con su cliente `patrimonioB3` por prop opcional; por defecto el de `configApi`). Al cerrar con cambios se relee el coste. Nada más cambia en B1 ni B2.
+// Versión: 0.4.0 (F06 LOTE30 punto 1, observaciones de Moisés en ENV-DEV e1d2386; N3 de cliente): a) tras el alta la ficha no leía L-COSTE (el coste quedaba sin cargar, o era el de la propiedad abierta antes) y «Registrar la compra» no aparecía; ahora el alta relee el coste de la propiedad creada y A3 abre la compra de B2 directamente. b) Día a día (Actividad) e Inicio solo releían tras un registro de la hoja: la compra, el gasto de la compra y las obras y gastos guardados aquí no se veían hasta cambiar de periodo; ahora se avisa con `onCambios` (la raíz sube `refresco`). Nada más cambia.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -53,6 +54,8 @@ export function PropiedadesScreen(p: {
   patrimonio?: ClientePatrimonio;
   /** B3: cliente de obras y gastos (por prop en tests; por defecto, el de `configApi`). */
   patrimonioB3?: ClientePatrimonioB3;
+  /** Se guardó un hecho desde Patrimonio (compra, gasto de la compra, obras y gastos): Día a día e Inicio vuelven a leer. */
+  onCambios?: () => void;
 }) {
   const { c } = useTema();
   const inset = useSafeAreaInsets();
@@ -104,11 +107,13 @@ export function PropiedadesScreen(p: {
   };
   /** Cierre de una tarea: con la vista nueva del servidor, la ficha la muestra y la lista se relee. */
   const cerrarTarea = (actualizada: VistaPropiedad | null) => {
+    const conHechos = tarea?.t === 'COMPRA' || tarea?.t === 'GASTO_COMPRA';
     setTarea(null);
     if (actualizada) {
       setFicha({ fase: 'OK', vista: actualizada });
       void cargarLista(true);
       void cargarCoste(actualizada.id);
+      if (conHechos) p.onCambios?.();
     }
   };
   const recargar = () => {
@@ -129,8 +134,16 @@ export function PropiedadesScreen(p: {
           if (creada) {
             void cargarLista(true);
             setFicha({ fase: 'OK', vista: creada });
+            void cargarCoste(creada.id);
             setNivel('FICHA');
           }
+        }}
+        onRegistrarCompra={(creada) => {
+          void cargarLista(true);
+          setFicha({ fase: 'OK', vista: creada });
+          void cargarCoste(creada.id);
+          setNivel('FICHA');
+          setTarea({ t: 'COMPRA' });
         }}
       />
     );
@@ -149,7 +162,7 @@ export function PropiedadesScreen(p: {
     if (tarea.t === 'GASTOS')
       tareaVista = (
         <GastosPropiedadScreen cliente={p.cliente} patrimonio={patrimonioB3} vista={vista} nuevoId={p.nuevoId} ahora={p.ahora}
-          onCerrar={(cambio) => { setTarea(null); if (cambio) void cargarCoste(vista.id); }} />
+          onCerrar={(cambio) => { setTarea(null); if (cambio) { void cargarCoste(vista.id); p.onCambios?.(); } }} />
       );
   }
   if (tareaVista) return <View style={{ flex: 1 }}>{tareaVista}</View>;

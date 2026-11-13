@@ -4,6 +4,7 @@
 // Ruta: mobile/__tests__/propiedades.test.tsx
 // Descripción: Pantallas de B1 · Propiedad (F06-01; láminas F06-01 v0.9 A1–A3, D1–D3 y v0.1 B2–B3, C1–C2, D3–D4; contrato HTTP de B1 v1.0) contra un servidor simulado en memoria con las reglas que el cliente necesita ver: alta con los cuatro modos y la petición exacta (porcentajes como texto de 4 decimales, DESCONOCIDA sin `desde` ni partes), suma exacta y bloqueo del envío, cotitulares solo PERSONA/EMPRESA, A3 con la compra no disponible, misma `intencion_id` al reintentar tras un indeterminado, textos de los códigos ★, ficha con valor estimado, referencia fiscal aparte y cuota etiquetada como vista estructural, valoración nueva sin «Compra», histórico y corrección con motivo (solo campos cambiados), nuevo reparto con fecha ≥ hoy y `titularidad_vista` completa, conflicto de versión con «Recargar», edición que envía solo lo cambiado, y la pestaña Patrimonio en la raíz con la barra oculta durante una tarea.
 // Versión: 0.1.0 (F06 Lote 12 · B1 Propiedad, N1)
+// Versión: 0.1.1 (F06 LOTE30 punto 1 a, N3 de cliente): A3 ofrece «Registrar la compra» pulsable (abre B2); la que sigue no disponible es «La compré hace tiempo».
 // ============================================================
 
 import './tiempos_rn';
@@ -181,9 +182,10 @@ test('alta compartida: A1 → A2 con suma exacta y cotitular PERSONA → petici�
     habitaciones: null, banos: null, tiene_garaje: null, tiene_trastero: null, referencia_catastral: null, notas: null,
     titularidad: { modo: 'COMPARTIDA', desde: '2023-10-15', partes: [{ yo: true, porcentaje: '50.0000' }, { tercero_id: LAURA, porcentaje: '50.0000' }] },
   });
-  // A3: guardada; la compra llega con B2 (no disponible); «Más tarde»
+  // A3: guardada; «Registrar la compra» abre la compra de B2 (LOTE30 1a); la compra histórica sigue no disponible; «Más tarde»
   expect(screen.getByTestId('prop-alta-guardada-texto').props.children).toBe('«Piso Calle Mayor» ya está guardada.');
-  expect(within(screen.getByTestId('prop-alta-camino-compra')).getByText('No disponible')).toBeTruthy();
+  expect(screen.getByTestId('prop-alta-camino-compra').props.accessibilityRole).toBe('button');
+  expect(within(screen.getByTestId('prop-alta-camino-historica')).getByText('No disponible')).toBeTruthy();
   await pulsar('prop-alta-continuar-final');
   expect(inmersiva).toHaveBeenLastCalledWith(false);
   expect(screen.getByTestId('prop-ficha')).toBeTruthy();

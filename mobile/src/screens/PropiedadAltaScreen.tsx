@@ -5,6 +5,7 @@
 // Descripción: Alta de propiedad (F06-01 B1 · C-PROP-01; lámina F06-01 v0.9 A1–A3, desde Patrimonio «+»). Tarea inmersiva en tres pasos: A1 Datos (solo nombre y tipo obligatorios, tipo sin preseleccionar, fecha de adquisición opcional con «No la sé», «Más datos» plegados; garaje y trastero «No lo sé» = desconocido), A2 ¿De quién es? (cuatro modos, suma exacta del 100 %, «Desde» propuesta con la adquisición si se conoce) y A3 «Propiedad guardada» con los tres caminos (M-1): registrar la compra y la compra histórica llegan con B2 y aparecen como no disponibles; «Más tarde» deja el coste «no disponible». La `intencion_id` se sella al abrir: un reintento tras un resultado indeterminado reutiliza la MISMA (replay idéntico, sin duplicar). Sin dirección (B5 fuera de B1).
 // Versión: 0.1.0 (F06 Lote 12 · B1 Propiedad, N1)
 // Versión: 0.2.0 (F06 T1 UX-1 · M-07, DM-06: la fecha usa el componente único `CampoFecha` (chips, campo dd/mm/aaaa con máscara y calendario en JS); se conservan el estado, las reglas de cada campo, los testID y los textos de validación; adquisición con «No la sé» como opción del componente; vacía = desconocida).
+// Versión: 0.3.0 (F06 LOTE30 punto 1 a, observación de Moisés en ENV-DEV e1d2386; N3 de cliente): A3 dejaba «Registrar la compra» como no disponible («Llega con la compra»), resto de B1 cuando B2 aún no existía. Con `onRegistrarCompra` la fila es pulsable y abre la compra de B2 (CompraScreen) sobre la propiedad recién creada. «La compré hace tiempo» sigue sin estar en la app: queda como no disponible y un texto explica por qué y qué hacer. Nada más cambia.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -37,11 +38,17 @@ import { espacio, radio, TACTIL_MIN, tipo } from '../theme/tokens';
 
 type Paso = 'DATOS' | 'TITULARIDAD' | 'GUARDADA';
 
+/** A3: por qué «La compré hace tiempo» no se puede elegir y qué hacer mientras tanto (lenguaje sencillo). */
+export const TEXTO_HISTORICA_NO_DISPONIBLE =
+  '«La compré hace tiempo» todavía no está en la app. Puedes registrar la compra con su precio y la fecha de la escritura, ahora o más tarde desde la ficha de la propiedad.';
+
 export function PropiedadAltaScreen(p: {
   cliente: ClienteApi;
   propiedades: ClientePropiedades;
   nuevoId: () => string;
   onCerrar: (creada: VistaPropiedad | null) => void;
+  /** A3 · «Registrar la compra»: abre la compra de B2 sobre la propiedad recién creada. Sin ella, la fila queda como no disponible. */
+  onRegistrarCompra?: (creada: VistaPropiedad) => void;
 }) {
   const { c } = useTema();
   const inset = useSafeAreaInsets();
@@ -90,8 +97,19 @@ export function PropiedadAltaScreen(p: {
           <Text accessibilityRole="header" style={[tipo.titleMedium, { color: c.textPrimary }]}>Propiedad guardada</Text>
           <Text testID="prop-alta-guardada-texto" style={[tipo.body, { color: c.textPrimary }]}>{`«${creada.nombre}» ya está guardada.`}</Text>
           <Text style={[tipo.body, { color: c.textSecondary }]}>¿Quieres registrar ahora cómo la compraste?</Text>
+          {p.onRegistrarCompra ? (
+            <Pressable testID="prop-alta-camino-compra" accessibilityRole="button" accessibilityLabel="Registrar la compra. Precio, cómo se pagó y gastos (impuestos, notaría…)"
+              onPress={() => p.onRegistrarCompra!(creada)}
+              style={({ pressed }) => [s.camino, { borderColor: c.borderDefault, backgroundColor: c.surfacePrimary, opacity: pressed ? 0.7 : 1 }]}>
+              <View style={{ flex: 1, gap: 2 }}>
+                <Text style={[tipo.body, { color: c.textPrimary }]}>Registrar la compra</Text>
+                <Text style={[tipo.caption, { color: c.textSecondary }]}>Precio, cómo se pagó y gastos (impuestos, notaría…)</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={c.textSecondary} />
+            </Pressable>
+          ) : null}
           {[
-            ['compra', 'Registrar la compra', 'Precio, cómo se pagó y gastos (impuestos, notaría…)'],
+            ...(p.onRegistrarCompra ? [] : [['compra', 'Registrar la compra', 'Precio, cómo se pagó y gastos (impuestos, notaría…)']]),
             ['historica', 'La compré hace tiempo', 'Anota el importe total sin detalle de pagos'],
           ].map(([k, t, d]) => (
             <View key={k} testID={`prop-alta-camino-${k}`} accessibilityState={{ disabled: true }} style={[s.camino, { borderColor: c.borderDefault, backgroundColor: c.surfacePrimary }]}>
@@ -99,9 +117,10 @@ export function PropiedadAltaScreen(p: {
                 <Text style={[tipo.body, { color: c.textSecondary }]}>{t}</Text>
                 <Text style={[tipo.caption, { color: c.textSecondary }]}>{d}</Text>
               </View>
-              <EstadoDato estado="NO_DISPONIBLE" detalle="Llega con la compra" />
+              <EstadoDato estado="NO_DISPONIBLE" detalle="Aún no está en la app" />
             </View>
           ))}
+          <Text testID="prop-alta-historica-nota" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_HISTORICA_NO_DISPONIBLE}</Text>
           <View testID="prop-alta-camino-tarde" style={[s.camino, { borderColor: c.accent, backgroundColor: c.accentSurface }]}>
             <Ionicons name="radio-button-on" size={20} color={c.accentText} />
             <View style={{ flex: 1, gap: 2 }}>
