@@ -10,6 +10,7 @@
 // Versión: 0.2.0 (F06 T1-F06 B3 ajuste N3 · decisión de Moisés 2026-11-13 «B3 alcance y CAT-VIV» v1.0): cambio DECLARADO de alcance de pantalla: el alta solo ofrece
 //   «Reforma o mejora» (MEJORA fijada, sin chips de clase ni categoría/presupuesto). El test C1 de las tres clases pasa a fijar ese alcance; la
 //   regla de dominio de las tres clases (faltasDatos) sigue cubierta y la corrección de clase (C-MEJ-03) no cambia.
+// Versión: 0.2.1 (F06 T1-F06 B3 ajuste N3 · KO visual iPhone casilla 7): «chips de fecha» en el alta y en la mejora antigua (Hoy por defecto, Ayer, Otra fecha).
 // ============================================================
 
 import './tiempos_rn';
@@ -320,4 +321,41 @@ test('O9.20 (pantalla): la mejora histórica no ofrece «Te debe su parte»', as
   expect(screen.getByTestId('mh-sin-pago')).toBeTruthy();
   expect(screen.queryByText(/te debe/i)).toBeNull();
   expect(marcado('mh-rep-titularidad')).toBe(true);
+});
+
+test('chips de fecha: alta de reforma con «Hoy · Ayer · Otra fecha», Hoy por defecto y sin campo hasta «Otra fecha»', async () => {
+  const pat = patrimonio(() => prop());
+  await montar(pat);
+  expect(marcado('gprop-fecha-hoy')).toBe(true);
+  expect(marcado('gprop-fecha-ayer')).toBe(false);
+  expect(marcado('gprop-fecha-otra')).toBe(false);
+  expect(screen.queryByTestId('gprop-fecha')).toBeNull();
+  expect(pat.propuestaGasto).toHaveBeenLastCalledWith('p1', '2026-10-10', null);
+  await pulsar('gprop-fecha-ayer');
+  expect(marcado('gprop-fecha-ayer')).toBe(true);
+  expect(pat.propuestaGasto).toHaveBeenLastCalledWith('p1', '2026-10-09', null);
+  await pulsar('gprop-fecha-otra');
+  expect(screen.getByTestId('gprop-fecha').props.value).toBe('09/10/2026');
+  await escribir('gprop-fecha', '01/10/2026');
+  expect(pat.propuestaGasto).toHaveBeenLastCalledWith('p1', '2026-10-01', null);
+  await pulsar('gprop-fecha-hoy');
+  expect(screen.queryByTestId('gprop-fecha')).toBeNull();
+  expect(pat.propuestaGasto).toHaveBeenLastCalledWith('p1', '2026-10-10', null);
+});
+
+test('chips de fecha: la mejora antigua también ofrece «Hoy · Ayer · Otra fecha»', async () => {
+  const pat = patrimonio(() => prop());
+  render(
+    <SafeAreaProvider initialMetrics={METRICAS}>
+      <ProveedorTema forzar="light">
+        <MejoraHistoricaScreen patrimonio={pat} vista={vista()} nuevoId={nuevoId} ahora={AHORA} onCerrar={jest.fn()} />
+      </ProveedorTema>
+    </SafeAreaProvider>,
+  );
+  await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+  expect(marcado('mh-fecha-hoy')).toBe(true);
+  await pulsar('mh-fecha-ayer');
+  expect(pat.propuestaGasto).toHaveBeenLastCalledWith('p1', '2026-10-09');
+  await pulsar('mh-fecha-otra');
+  expect(screen.getByTestId('mh-fecha')).toBeTruthy();
 });

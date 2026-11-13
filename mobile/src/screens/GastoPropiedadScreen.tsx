@@ -14,6 +14,8 @@
 //   los gastos corrientes y las reparaciones se registran desde «Registrar gasto». Lista «Reformas y mejoras · <propiedad>»
 //   y botón «Añadir una reforma o mejora». La corrección de clase (C-MEJ-03) y la lista no cambian: siguen mostrando y
 //   corrigiendo lo que haya, también reparaciones y gastos corrientes ya registrados.
+// Versión: 0.2.1 (F06 T1-F06 B3 ajuste N3 · KO visual iPhone casilla 7): las fechas de B3 (alta de reforma y mejora antigua)
+//   muestran los chips «Hoy · Ayer · Otra fecha» con el patrón de RegistroGasto/PropiedadValor (Hoy por defecto, ≤ hoy).
 // ============================================================
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -29,7 +31,7 @@ import { BotonPrimario, BotonTexto, Chip, EstadoDato } from '../components/Basic
 import { CampoFecha } from '../components/CampoFecha';
 import { AvisoCaja, CabeceraTarea, Caja, Campo, CampoTexto, estilosFormulario as ef, FilaLista, RotuloGrupo, Tarjeta } from '../components/Formulario';
 import { ancestros, CategoriaNodo, construirArbol, elegibleParaGasto } from '../domain/categoria';
-import { ddmmaaaaAIso, diaMesAnioIso, isoADdmmaaaa, isoLocal } from '../domain/fechas';
+import { ayer, ddmmaaaaAIso, diaMesAnioIso, isoADdmmaaaa, isoLocal } from '../domain/fechas';
 import {
   alCambiarPropuesta, atribucionTexto, AYUDA_CLASE, borradorInicial, BorradorGastoPropiedad, clasesDestino, completarDeuda,
   cuentaCompartida, Derecho, derechos, EleccionReparto, faltasCorreccion, faltasDatos, faltasReparto, filasImpacto, hayPropuesta,
@@ -47,11 +49,17 @@ import { espacio, tipo } from '../theme/tokens';
 const TEXTO_CLASE_ALTA = 'Reforma o mejora (aumenta el valor)';
 const TEXTO_GASTOS_EN_REGISTRAR = 'Los gastos corrientes y las reparaciones se registran desde «Registrar gasto».';
 
-function Fecha(p: { testID: string; etiqueta: string; iso: string; hoyIso: string; onCambiar: (iso: string) => void }) {
-  const [texto, setTexto] = useState<string>(esFechaIso(p.iso) ? isoADdmmaaaa(p.iso) : p.iso);
+/** Fecha de B3 con el patrón de RegistroGasto y PropiedadValor: chips «Hoy · Ayer · Otra fecha» (Hoy por defecto), campo solo con «Otra fecha», regla ≤ hoy. */
+function Fecha(p: { testID: string; etiqueta: string; iso: string; hoyIso: string; ayerIso: string; onCambiar: (iso: string) => void }) {
+  const [otra, setOtra] = useState<string | null>(p.iso === p.hoyIso || p.iso === p.ayerIso ? null : esFechaIso(p.iso) ? isoADdmmaaaa(p.iso) : p.iso);
   return (
-    <CampoFecha testID={p.testID} etiqueta={p.etiqueta} hoyIso={p.hoyIso} texto={texto}
-      onTexto={(t) => { setTexto(t); p.onCambiar(ddmmaaaaAIso(t) ?? t); }} />
+    <CampoFecha testID={p.testID} etiqueta={p.etiqueta} hoyIso={p.hoyIso} max={p.hoyIso} texto={otra}
+      onTexto={(t) => { setOtra(t); p.onCambiar(ddmmaaaaAIso(t) ?? t); }}
+      opciones={[
+        { testID: `${p.testID}-hoy`, etiqueta: 'Hoy', seleccionado: otra === null && p.iso === p.hoyIso, onPress: () => { setOtra(null); p.onCambiar(p.hoyIso); } },
+        { testID: `${p.testID}-ayer`, etiqueta: 'Ayer', seleccionado: otra === null && p.iso === p.ayerIso, onPress: () => { setOtra(null); p.onCambiar(p.ayerIso); } },
+        { testID: `${p.testID}-otra`, etiqueta: 'Otra fecha', seleccionado: otra !== null, onPress: () => setOtra(esFechaIso(p.iso) ? isoADdmmaaaa(p.iso) : p.iso) },
+      ]} />
   );
 }
 
@@ -142,6 +150,7 @@ export function GastoPropiedadScreen(p: {
   const { c } = useTema();
   const inset = useSafeAreaInsets();
   const hoyIso = isoLocal(p.ahora());
+  const ayerIso = isoLocal(ayer(p.ahora()));
   type Paso = 'DATOS' | 'REPARTO' | 'CONFIRMAR' | 'HECHO';
   const [paso, setPaso] = useState<Paso>('DATOS');
   // Decisión 2026-11-13: el alta solo registra reformas o mejoras; la clase va fijada (sin chip).
@@ -224,7 +233,7 @@ export function GastoPropiedadScreen(p: {
             <Linea testID="gprop-propiedad" etiqueta="Propiedad" valor={p.vista.nombre} />
             <CampoTexto testID="gprop-importe" etiqueta="Importe" marcador="0,00" valor={b.importe} onCambiar={(t) => setB({ ...b, importe: t })} />
             <Campo etiqueta="Fecha del gasto y del pago">
-              <Fecha testID="gprop-fecha" etiqueta="Fecha del gasto" iso={b.fecha} hoyIso={hoyIso} onCambiar={(iso) => setB({ ...b, fecha: iso })} />
+              <Fecha testID="gprop-fecha" etiqueta="Fecha del gasto" iso={b.fecha} hoyIso={hoyIso} ayerIso={ayerIso} onCambiar={(iso) => setB({ ...b, fecha: iso })} />
             </Campo>
             <Campo etiqueta="Cuenta">
               {cuentas.length === 0 ? <EstadoDato testID="gprop-cuenta-sin" estado="NO_DISPONIBLE" detalle="Sin cuentas para pagar" /> : (
@@ -321,6 +330,7 @@ export function MejoraHistoricaScreen(p: {
   const { c } = useTema();
   const inset = useSafeAreaInsets();
   const hoyIso = isoLocal(p.ahora());
+  const ayerIso = isoLocal(ayer(p.ahora()));
   const [descripcion, setDescripcion] = useState('');
   const [importe, setImporte] = useState('');
   const [fecha, setFecha] = useState(hoyIso);
@@ -370,7 +380,7 @@ export function MejoraHistoricaScreen(p: {
         <CampoTexto testID="mh-descripcion" etiqueta="Qué se hizo" marcador="Ej.: Reforma integral" valor={descripcion} onCambiar={setDescripcion} />
         <CampoTexto testID="mh-importe" etiqueta="Importe" marcador="0,00" valor={importe} onCambiar={setImporte} />
         <Campo etiqueta="Fecha">
-          <Fecha testID="mh-fecha" etiqueta="Fecha de la mejora" iso={fecha} hoyIso={hoyIso} onCambiar={setFecha} />
+          <Fecha testID="mh-fecha" etiqueta="Fecha de la mejora" iso={fecha} hoyIso={hoyIso} ayerIso={ayerIso} onCambiar={setFecha} />
         </Campo>
         <Text testID="mh-sin-pago" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_SIN_PAGO}</Text>
         <RotuloGrupo texto="¿De quién es la mejora?" />

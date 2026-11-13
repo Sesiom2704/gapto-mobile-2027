@@ -16,6 +16,8 @@
 # Version: 0.1.1 (F06 T1-F06 B3 N1, tirada del paso 10): Jest por `node jest.js` y no por npx.cmd (cmd.exe partia
 #   el patron -t en el «|» y el preflight daba «ruta no encontrada»); salida en UTF-8 (un «−» en el texto de un
 #   invariante rompia el print en cp1252).
+# Version: 0.2.0 (F06 T1-F06 B3 ajuste N3 · KO visual iPhone casilla 7): MC-FECHA-01 y MC-FECHA-02 (chips «Hoy · Ayer ·
+#   Otra fecha» en las fechas de B3).
 # ============================================================
 from __future__ import annotations
 
@@ -128,6 +130,14 @@ MUTANTES = (
             "  const patrimonial = iconoPatrimonial(f.tipo);\n",
             "  const patrimonial = null as string | null;\n",
             T_AP, ("pantalla",)),
+    Mutante("MC-FECHA-01", "Fecha de B3: chip «Hoy» (marcado por defecto) junto a «Ayer · Otra fecha» (KO iPhone casilla 7)", PANT,
+            "        { testID: `${p.testID}-hoy`, etiqueta: 'Hoy', seleccionado: otra === null && p.iso === p.hoyIso, onPress: () => { setOtra(null); p.onCambiar(p.hoyIso); } },\n",
+            "",
+            T_GP, ("chips de fecha",)),
+    Mutante("MC-FECHA-02", "Fecha de B3: «Ayer» fija el dia anterior (KO iPhone casilla 7)", PANT,
+            "p.onCambiar(p.ayerIso);",
+            "p.onCambiar(p.hoyIso);",
+            T_GP, ("chips de fecha",)),
 )
 
 
