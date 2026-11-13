@@ -14,6 +14,9 @@
 //   los gastos corrientes y las reparaciones se registran desde «Registrar gasto». Lista «Reformas y mejoras · <propiedad>»
 //   y botón «Añadir una reforma o mejora». La corrección de clase (C-MEJ-03) y la lista no cambian: siguen mostrando y
 //   corrigiendo lo que haya, también reparaciones y gastos corrientes ya registrados.
+// Versión: 0.2.2 (F06 T1-F06 B3 ajuste N3 · KO 2 de la prueba en iPhone, decisión de Moisés del 2026-11-13 «según tu recomendación»):
+//   solo texto: «No, le invito» pasa a «No, no me debe nada (lo pagamos a medias o ya está saldado)». El modelo de pagador y deuda en
+//   ambos sentidos (aportaciones) pasa al diseño del tren 2 con CAT-VIV. Sin cambios de comportamiento, contrato ni testID.
 // Versión: 0.2.1 (F06 T1-F06 B3 ajuste N3 · KO visual iPhone casilla 7): las fechas de B3 (alta de reforma y mejora antigua)
 //   muestran los chips «Hoy · Ayer · Otra fecha» con el patrón de RegistroGasto/PropiedadValor (Hoy por defecto, ≤ hoy).
 // ============================================================
@@ -264,7 +267,7 @@ export function GastoPropiedadScreen(p: {
                     <Text style={[tipo.body, { color: c.textPrimary }]}>{`${x.nombre ?? 'Otra persona'} te debe su parte (${formatearEur(imp[x.actor_id] ?? '0')})`}</Text>
                     <View style={ef.chips}>
                       <Chip testID={`gprop-debe-${x.actor_id}-si`} etiqueta="Sí" seleccionado={b.deuda[x.actor_id]?.me_debe === 'SI'} onPress={() => cambiarDeuda(x.actor_id, 'SI')} />
-                      <Chip testID={`gprop-debe-${x.actor_id}-no`} etiqueta="No, le invito" seleccionado={b.deuda[x.actor_id]?.me_debe === 'NO'} onPress={() => cambiarDeuda(x.actor_id, 'NO')} />
+                      <Chip testID={`gprop-debe-${x.actor_id}-no`} etiqueta="No, no me debe nada (lo pagamos a medias o ya está saldado)" seleccionado={b.deuda[x.actor_id]?.me_debe === 'NO'} onPress={() => cambiarDeuda(x.actor_id, 'NO')} />
                     </View>
                     {cuentaCompartida(prop) && b.deuda[x.actor_id]?.me_debe === 'SI' ? (
                       <CampoTexto testID={`gprop-debe-${x.actor_id}-importe`} etiqueta={`¿Cuánto te debe ${x.nombre ?? 'esa persona'}?`} marcador="Indícalo tú"
