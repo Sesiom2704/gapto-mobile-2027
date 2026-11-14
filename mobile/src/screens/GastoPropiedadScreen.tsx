@@ -23,6 +23,18 @@
 //   SHA 6ba8afd3…a9cbc0; parche del laboratorio lote 30): el «No» de «¿Te debe su parte?» deja de decir «lo pagamos a medias»
 //   («No, no me debe nada (ya está saldado o le invito)») y se avisa de que el pago a medias aún no se puede registrar bien
 //   (testID gprop-aviso-a-medias). Solo texto; sin backend, contrato ni DDL. R-L29-05 / HT2-01 sigue ALTO y abierto (receptor PAG, tren 2).
+// Versión: 0.3.0 (F06 T2-F06 PAG N1; reapertura acotada de B3 por L-02; contrato operativo único del mandato PAG §1.1 y §1.4):
+//   - alta en cuatro pasos: datos → «¿Quién pagó?» («Yo, todo», «Cada uno su parte», «<Cotitular>, todo», «Otra combinación» solo con dos
+//     titulares y «Desde una cuenta compartida», que sigue la vía de B3) con la cuenta solo cuando pagas tú → reparto y «¿Queda algo pendiente?»
+//     (ME_DEBE o LE_DEBO por el desequilibrio completo, preseleccionado, visible y desmarcable, importe editable a la baja; nunca frente a una
+//     EMPRESA ni con «No lo sé») → confirmación por persona (su parte, lo que puso y la posición que se crea, o «No queda nada pendiente»), con
+//     `posiciones_confirmadas` = lo mostrado (C-MEJ-01 v2);
+//   - SUSTITUCIÓN del aviso N3 de HT2-01 en el mismo cambio: se retiran `gprop-aviso-a-medias` y el chip «No, no me debe nada (ya está saldado
+//     o le invito)»; el pago a medias se registra con «Cada uno su parte» u «Otra combinación». Los gastos ya registrados no se reescriben;
+//   - detalle: «Quién pagó» (desde tu cuenta o por la suya), lo que salió de tus cuentas, las posiciones en su sentido, «Pago sin declarar» en
+//     los hechos anteriores, la limitación de 8quater con su ampliación «en cualquier sentido» y «Ver el movimiento en la cuenta»
+//     (L-MOV-CUENTA, pantalla nueva `MovimientosCuentaScreen`).
+//   Código de partida: laboratorio lab-t2 (43a71c4, a0d1af4, 10b9596), copia revisada.
 // ============================================================
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -42,19 +54,31 @@ import { ayer, ddmmaaaaAIso, diaMesAnioIso, isoADdmmaaaa, isoLocal } from '../do
 import {
   alCambiarPropuesta, atribucionTexto, AYUDA_CLASE, borradorInicial, BorradorGastoPropiedad, clasesDestino, completarDeuda,
   cuentaCompartida, Derecho, derechos, EleccionReparto, faltasCorreccion, faltasDatos, faltasReparto, filasImpacto, hayPropuesta,
-  muestraLimitacion, NOMBRE_CLASE, ofreceCorregir, ofreceDeuda, partesEfectivas, payloadCorreccion, payloadGastoPropiedad,
+  muestraLimitacion, NOMBRE_CLASE, ofreceCorregir, ofreceDeuda, partesEfectivas, payloadCorreccion, payloadGastoPropiedad, payloadGastoPropiedadV2,
   payloadMejoraHistorica, repartirImporte, repartoInicial, resumenGastos, seleccionInicial, SeleccionCorreccion, TEXTO_CUENTA_COMPARTIDA,
-  TEXTO_DESFASADA, TEXTO_IMPACTO_DESFASADO, TEXTO_INDETERMINADO, TEXTO_LIMITACION_8QUATER, TEXTO_SE_CREA_DERECHO,
+  TEXTO_DESFASADA, TEXTO_IMPACTO_DESFASADO, TEXTO_INDETERMINADO, TEXTO_LIMITACION_8QUATER, TEXTO_LIMITACION_SENTIDO, TEXTO_PAGO_SIN_DECLARAR, TEXTO_SE_CREA_DERECHO,
   TEXTO_SIN_PAGO, TEXTO_SIN_TITULARIDAD, textoError, textoPropuesta,
 } from '../domain/gasto_propiedad';
 import { formatearEur, parsearImporte } from '../domain/importe';
 import { esFechaIso } from '../domain/intencion';
+import {
+  ajustarDeudas, confirmacion, Cotitular, DeudaElegida, EleccionPago, faltasPago, ModoPago, necesitaCuenta, opcionesPago, pagoInicial, pagosWire,
+  posicionesConfirmadas, propuestas, saldos, saleDeMisCuentas, TEXTO_DESMARCAR, TEXTO_DESMARCAR_LE, TEXTO_EMPRESA, TEXTO_NADA_PENDIENTE,
+  TEXTO_NO_ES_MOVIMIENTO, TEXTO_NO_LO_SE, TEXTO_QUIEN_PAGO, TEXTO_SIN_MOVIMIENTO, textoPosicion,
+} from '../domain/quien_pago';
+import { MovimientosCuentaScreen } from './MovimientosCuentaScreen';
 import { useTema } from '../theme/tema';
 import { espacio, tipo } from '../theme/tokens';
 
 /** Alta de B3 (decisión 2026-11-13): solo «Reforma o mejora». */
 const TEXTO_CLASE_ALTA = 'Reforma o mejora (aumenta el valor)';
 const TEXTO_GASTOS_EN_REGISTRAR = 'Los gastos corrientes y las reparaciones se registran desde «Registrar gasto».';
+/** PAG: la cuenta se elige en «¿Quién pagó?» (solo si pagas tú). */
+const faltasDatosAlta = (b: BorradorGastoPropiedad) => faltasDatos(b).filter((x) => x !== 'la cuenta');
+const importeDeTexto = (t: string) => {
+  const r = parsearImporte(t);
+  return r.ok ? r.valor : '0';
+};
 
 /** Fecha de B3 con el patrón de RegistroGasto y PropiedadValor: chips «Hoy · Ayer · Otra fecha» (Hoy por defecto), campo solo con «Otra fecha», regla ≤ hoy. */
 function Fecha(p: { testID: string; etiqueta: string; iso: string; hoyIso: string; ayerIso: string; onCambiar: (iso: string) => void }) {
@@ -145,7 +169,7 @@ function Reparto(p: {
   );
 }
 
-/** C-MEJ-01 · Gasto de una propiedad. */
+/** C-MEJ-01 · Reforma o mejora de una propiedad: datos → «¿Quién pagó?» → reparto y lo que queda pendiente → confirmación (PAG). */
 export function GastoPropiedadScreen(p: {
   cliente: ClienteApi;
   patrimonio: ClientePatrimonioB3;
@@ -158,10 +182,13 @@ export function GastoPropiedadScreen(p: {
   const inset = useSafeAreaInsets();
   const hoyIso = isoLocal(p.ahora());
   const ayerIso = isoLocal(ayer(p.ahora()));
-  type Paso = 'DATOS' | 'REPARTO' | 'CONFIRMAR' | 'HECHO';
+  type Paso = 'DATOS' | 'PAGO' | 'REPARTO' | 'CONFIRMAR' | 'HECHO';
   const [paso, setPaso] = useState<Paso>('DATOS');
   // Decisión 2026-11-13: el alta solo registra reformas o mejoras; la clase va fijada (sin chip).
   const [b, setB] = useState<BorradorGastoPropiedad>(() => ({ ...borradorInicial(hoyIso), clase: 'MEJORA' }));
+  const [pago, setPago] = useState<EleccionPago>(pagoInicial);
+  const [deudas, setDeudas] = useState<Record<string, DeudaElegida>>({});
+  const [deudasTocadas, setDeudasTocadas] = useState(false);
   const [cuentas, setCuentas] = useState<CuentaElegible[]>([]);
   const [prop, setProp] = useState<PropuestaGasto | null>(null);
   const [aviso, setAviso] = useState<AvisoCaja>(null);
@@ -169,6 +196,7 @@ export function GastoPropiedadScreen(p: {
   const [ocupado, setOcupado] = useState(false);
   const intencion = useRef(p.nuevoId());
   const actores = actoresDe(p.vista, prop);
+  const compartida = pago.modo === 'COMPARTIDA';
 
   useEffect(() => {
     if (!esFechaIso(b.fecha)) return;
@@ -186,14 +214,37 @@ export function GastoPropiedadScreen(p: {
   useEffect(() => { void leerPropuesta(); }, [b.fecha, b.cuentaId]);
 
   const concepto = b.nota.trim() || (b.clase ? NOMBRE_CLASE[b.clase].split(' (')[0] : 'Gasto');
-  const mostrados: Derecho[] = derechos(b, prop, actores, `${concepto} · ${p.vista.nombre}`);
-  const faltas = paso === 'DATOS' ? faltasDatos(b) : paso === 'REPARTO' ? faltasReparto(b, prop, actores) : [];
   const partes = partesEfectivas(b.reparto, prop, actores);
   const imp = repartirImporte(b.importe, partes);
+  const noLoSe = b.reparto?.modo === 'NO_LO_SE';
+  const cotitulares: Cotitular[] = actores.filter((x) => !x.yo).map((x) => ({ actor_id: x.actor_id, nombre: x.nombre }));
+  const numTitulares = actores.length;
+  // PAG (L-08): deudas propuestas por el desequilibrio completo, preseleccionadas y desmarcables en los dos sentidos.
+  const props = compartida ? [] : propuestas(pago, b.importe, partes);
+  useEffect(() => { setDeudas((d) => ajustarDeudas(d, props, deudasTocadas)); }, [JSON.stringify(props)]);
+  const saldosEnvio = saldos(pago, b.importe, partes, deudas);
+  const posiciones = posicionesConfirmadas(saldosEnvio);
+  // Vía de B3 (cuenta compartida, 8ter): sin preselección y con el importe a mano.
+  const mostrados: Derecho[] = compartida ? derechos(b, prop, actores, `${concepto} · ${p.vista.nombre}`) : [];
+  const cuentaEsCompartida = cuentaCompartida(prop);
+  const faltas = paso === 'DATOS' ? faltasDatosAlta(b)
+    : paso === 'PAGO' ? faltasPago(pago, b.importe, partes, noLoSe, b.cuentaId, cuentaEsCompartida, deudas, numTitulares).filter((x) => !x.startsWith('cuánto'))
+      : paso === 'REPARTO' ? [...faltasReparto(b, prop, actores, !compartida),
+        ...faltasPago(pago, b.importe, partes, noLoSe, b.cuentaId, cuentaEsCompartida, deudas, numTitulares)]
+        : [];
 
   const cambiarReparto = (e: EleccionReparto) => {
     setAvisoRep(null);
     setB({ ...b, reparto: e, repartoTocado: true, deuda: completarDeuda(b.deuda, e, prop, actores) });
+  };
+  const elegirPago = (modo: ModoPago, pagadorId: string | null) => setPago({ ...pago, modo, pagadorId });
+  const cambiarDeudaPag = (actor: string, marcada: boolean) => {
+    setDeudasTocadas(true);
+    setDeudas({ ...deudas, [actor]: { marcada, importe: deudas[actor]?.importe ?? '' } });
+  };
+  const importeDeudaPag = (actor: string, t: string) => {
+    setDeudasTocadas(true);
+    setDeudas({ ...deudas, [actor]: { marcada: true, importe: t } });
   };
   const cambiarDeuda = (actor: string, me: 'SI' | 'NO') => setB({ ...b, deudaTocada: true, deuda: { ...b.deuda, [actor]: { me_debe: me, importe: b.deuda[actor]?.importe ?? '' } } });
   const importeDeuda = (actor: string, t: string) => setB({ ...b, deudaTocada: true, deuda: { ...b.deuda, [actor]: { me_debe: 'SI', importe: t } } });
@@ -202,14 +253,19 @@ export function GastoPropiedadScreen(p: {
     if (ocupado) return;
     setOcupado(true);
     setAviso(null);
-    // `derechos_confirmados` = exactamente lo que muestra esta pantalla de confirmación (8bis).
-    const r = await p.patrimonio.registrarGastoPropiedad(payloadGastoPropiedad(intencion.current, p.vista.id, b, prop, actores, mostrados));
+    // PAG: `posiciones_confirmadas` = exactamente lo que muestra esta confirmación; con la cuenta compartida, la forma de B3
+    // (`derechos_confirmados` = lo mostrado, 8bis). El servidor nunca infiere una deuda.
+    const cuerpo = compartida
+      ? payloadGastoPropiedad(intencion.current, p.vista.id, b, prop, actores, mostrados)
+      : payloadGastoPropiedadV2(intencion.current, p.vista.id, b, prop, pagosWire(pago, b.importe, partes, b.cuentaId), saldosEnvio, posiciones);
+    const r = await p.patrimonio.registrarGastoPropiedad(cuerpo);
     setOcupado(false);
     if (r.tipo === 'OK') return setPaso('HECHO');
     if (r.tipo === 'INDETERMINADO') return setAviso({ tipo: 'AVISO', texto: TEXTO_INDETERMINADO });
     if (r.codigo === 'ATRIBUCION_PROPUESTA_DESFASADA') {
       intencion.current = p.nuevoId();
       setB((x) => ({ ...x, repartoTocado: false, deudaTocada: false }));
+      setDeudasTocadas(false);
       setAvisoRep(TEXTO_DESFASADA);
       setPaso('REPARTO');
       return void leerPropuesta();
@@ -229,7 +285,10 @@ export function GastoPropiedadScreen(p: {
     );
   }
 
-  const titulo = paso === 'REPARTO' ? '¿De quién es el gasto?' : paso === 'CONFIRMAR' ? 'Revisar y confirmar' : 'Reforma o mejora';
+  const siguiente: Record<Exclude<Paso, 'HECHO' | 'CONFIRMAR'>, Paso> = { DATOS: 'PAGO', PAGO: 'REPARTO', REPARTO: 'CONFIRMAR' };
+  const anterior: Record<Exclude<Paso, 'HECHO' | 'DATOS'>, Paso> = { PAGO: 'DATOS', REPARTO: 'PAGO', CONFIRMAR: 'REPARTO' };
+  const titulo = paso === 'PAGO' ? TEXTO_QUIEN_PAGO : paso === 'REPARTO' ? '¿De quién es el gasto?' : paso === 'CONFIRMAR' ? 'Revisar y confirmar' : 'Reforma o mejora';
+  const confirmar = compartida ? [] : confirmacion(pago, b.importe, partes, saldosEnvio);
   return (
     <View testID={`gprop-paso-${paso.toLowerCase()}`} style={[StyleSheet.absoluteFill, { backgroundColor: c.background }]}>
       <CabeceraTarea titulo={titulo} testIDCancelar="gprop-cancelar" onCancelar={() => p.onCerrar(false)} />
@@ -242,13 +301,6 @@ export function GastoPropiedadScreen(p: {
             <Campo etiqueta="Fecha del gasto y del pago">
               <Fecha testID="gprop-fecha" etiqueta="Fecha del gasto" iso={b.fecha} hoyIso={hoyIso} ayerIso={ayerIso} onCambiar={(iso) => setB({ ...b, fecha: iso })} />
             </Campo>
-            <Campo etiqueta="Cuenta">
-              {cuentas.length === 0 ? <EstadoDato testID="gprop-cuenta-sin" estado="NO_DISPONIBLE" detalle="Sin cuentas para pagar" /> : (
-                <View style={ef.chips}>
-                  {cuentas.map((x) => <Chip key={x.cuenta_id} testID={`gprop-cuenta-${x.cuenta_id}`} etiqueta={x.nombre} seleccionado={b.cuentaId === x.cuenta_id} onPress={() => setB({ ...b, cuentaId: x.cuenta_id })} />)}
-                </View>
-              )}
-            </Campo>
             <CampoTexto testID="gprop-nota" etiqueta="Nota" marcador="Opcional" valor={b.nota} onCambiar={(t) => setB({ ...b, nota: t })} />
             <View testID="gprop-clase" style={{ gap: 2 }}>
               <Text style={[tipo.bodyEmphasis, { color: c.textPrimary }]}>{TEXTO_CLASE_ALTA}</Text>
@@ -257,39 +309,92 @@ export function GastoPropiedadScreen(p: {
             <Text testID="gprop-nota-registrar-gasto" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_GASTOS_EN_REGISTRAR}</Text>
           </>
         ) : null}
+        {paso === 'PAGO' ? (
+          <>
+            <View testID="gprop-quien-pago" style={ef.chips}>
+              {opcionesPago(cotitulares).map((o) => (
+                <Chip key={o.clave} testID={`gprop-pago-${o.clave}`} etiqueta={o.etiqueta}
+                  seleccionado={pago.modo === o.modo && (o.modo !== 'COTITULAR_TODO' || pago.pagadorId === o.pagadorId)}
+                  onPress={() => elegirPago(o.modo, o.pagadorId)} />
+              ))}
+            </View>
+            {pago.modo === 'MIXTO' ? (
+              <>
+                <CampoTexto testID="gprop-pago-mio" etiqueta="Lo que pusiste tú (desde tu cuenta)" marcador="0,00" valor={pago.mio} onCambiar={(t) => setPago({ ...pago, mio: t })} />
+                <CampoTexto testID="gprop-pago-suyo" etiqueta={`Lo que puso ${cotitulares[0]?.nombre ?? 'el otro titular'} (por su cuenta)`} marcador="0,00" valor={pago.suyo}
+                  onCambiar={(t) => setPago({ ...pago, suyo: t })} />
+              </>
+            ) : null}
+            {pago.modo === 'COTITULAR_TODO' ? <Text testID="gprop-pago-sin-movimiento" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_SIN_MOVIMIENTO}</Text> : null}
+            {necesitaCuenta(pago) ? (
+              <Campo etiqueta={compartida ? 'Cuenta compartida' : 'Tu cuenta'}>
+                {cuentas.length === 0 ? <EstadoDato testID="gprop-cuenta-sin" estado="NO_DISPONIBLE" detalle="Sin cuentas para pagar" /> : (
+                  <View style={ef.chips}>
+                    {cuentas.map((x) => <Chip key={x.cuenta_id} testID={`gprop-cuenta-${x.cuenta_id}`} etiqueta={x.nombre} seleccionado={b.cuentaId === x.cuenta_id} onPress={() => setB({ ...b, cuentaId: x.cuenta_id })} />)}
+                  </View>
+                )}
+              </Campo>
+            ) : null}
+          </>
+        ) : null}
         {paso === 'REPARTO' ? (
           <>
             <Reparto testID="gprop-rep" propiedad={p.vista.nombre} prop={prop} eleccion={b.reparto} actores={actores} onCambiar={cambiarReparto} aviso={avisoRep} />
-            {partes.some((x) => !x.yo) ? <RotuloGrupo texto="¿Te debe su parte?" /> : null}
-            {partes.some((x) => !x.yo) ? (
-              <Text testID="gprop-aviso-a-medias" style={[tipo.footnote, { color: c.warningText }]}>
-                Si lo pagasteis entre los dos, todavía no se puede registrar bien: registra solo los gastos que pagaste tú entero. Llegará en una próxima versión.
-              </Text>
-            ) : null}
-            {cuentaCompartida(prop) && partes.some((x) => ofreceDeuda(x, imp[x.actor_id], prop, false)) ? (
-              <Text testID="gprop-compartida" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_CUENTA_COMPARTIDA}</Text>
-            ) : null}
-            {partes.filter((x) => !x.yo).map((x) => (
-              ofreceDeuda(x, imp[x.actor_id], prop, false) ? (
-                <Tarjeta key={x.actor_id} testID={`gprop-debe-${x.actor_id}`}>
-                  <View style={{ padding: espacio.m, gap: espacio.s }}>
-                    <Text style={[tipo.body, { color: c.textPrimary }]}>{`${x.nombre ?? 'Otra persona'} te debe su parte (${formatearEur(imp[x.actor_id] ?? '0')})`}</Text>
-                    <View style={ef.chips}>
-                      <Chip testID={`gprop-debe-${x.actor_id}-si`} etiqueta="Sí" seleccionado={b.deuda[x.actor_id]?.me_debe === 'SI'} onPress={() => cambiarDeuda(x.actor_id, 'SI')} />
-                      <Chip testID={`gprop-debe-${x.actor_id}-no`} etiqueta="No, no me debe nada (ya está saldado o le invito)" seleccionado={b.deuda[x.actor_id]?.me_debe === 'NO'} onPress={() => cambiarDeuda(x.actor_id, 'NO')} />
+            {partes.some((x) => !x.yo) || noLoSe ? <RotuloGrupo texto="¿Queda algo pendiente?" /> : null}
+            {noLoSe && !compartida ? <Text testID="gprop-deuda-no-lo-se" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_NO_LO_SE}</Text> : null}
+            {!compartida ? (
+              <>
+                {props.map((x) => (
+                  <Tarjeta key={x.actor_id} testID={`gprop-deuda-${x.actor_id}`}>
+                    <View style={{ padding: espacio.m, gap: espacio.s }}>
+                      <Text testID={`gprop-deuda-${x.actor_id}-texto`} style={[tipo.body, { color: c.textPrimary }]}>{textoPosicion(x.sentido, x.nombre, deudas[x.actor_id]?.marcada ? importeDeTexto(deudas[x.actor_id].importe) : x.maximo)}</Text>
+                      <View style={ef.chips}>
+                        <Chip testID={`gprop-deuda-${x.actor_id}-si`} etiqueta={x.sentido === 'ME_DEBE' ? 'Sí, me lo debe' : 'Sí, se lo debo'} seleccionado={deudas[x.actor_id]?.marcada === true} onPress={() => cambiarDeudaPag(x.actor_id, true)} />
+                        <Chip testID={`gprop-deuda-${x.actor_id}-no`} etiqueta={TEXTO_NADA_PENDIENTE} seleccionado={deudas[x.actor_id]?.marcada === false} onPress={() => cambiarDeudaPag(x.actor_id, false)} />
+                      </View>
+                      {deudas[x.actor_id]?.marcada ? (
+                        <CampoTexto testID={`gprop-deuda-${x.actor_id}-importe`} etiqueta={`Importe (como mucho ${formatearEur(x.maximo)}; menos si le invitas a una parte)`} marcador={x.maximo}
+                          valor={deudas[x.actor_id]?.importe ?? ''} onCambiar={(t) => importeDeudaPag(x.actor_id, t)} />
+                      ) : null}
+                      <Text style={[tipo.caption, { color: c.textSecondary }]}>{x.sentido === 'ME_DEBE' ? TEXTO_DESMARCAR : TEXTO_DESMARCAR_LE}</Text>
                     </View>
-                    {cuentaCompartida(prop) && b.deuda[x.actor_id]?.me_debe === 'SI' ? (
-                      <CampoTexto testID={`gprop-debe-${x.actor_id}-importe`} etiqueta={`¿Cuánto te debe ${x.nombre ?? 'esa persona'}?`} marcador="Indícalo tú"
-                        valor={b.deuda[x.actor_id]?.importe ?? ''} onCambiar={(t) => importeDeuda(x.actor_id, t)} />
-                    ) : null}
-                  </View>
-                </Tarjeta>
-              ) : (
-                <Text key={x.actor_id} testID={`gprop-no-debe-${x.actor_id}`} style={[tipo.footnote, { color: c.textSecondary }]}>
-                  {`${x.nombre ?? 'Otra persona'}: ${x.naturaleza === 'EMPRESA' ? 'una empresa no genera aquí un derecho de cobro' : 'sin derecho de cobro'}`}
-                </Text>
-              )
-            ))}
+                  </Tarjeta>
+                ))}
+                {partes.filter((x) => !x.yo && x.naturaleza !== 'PERSONA').map((x) => (
+                  <Text key={x.actor_id} testID={`gprop-no-debe-${x.actor_id}`} style={[tipo.footnote, { color: c.textSecondary }]}>{`${x.nombre ?? 'Otra persona'}: ${TEXTO_EMPRESA}`}</Text>
+                ))}
+                {partes.some((x) => !x.yo) && props.length === 0 && !noLoSe ? (
+                  <Text testID="gprop-deuda-nada" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_NADA_PENDIENTE}</Text>
+                ) : null}
+              </>
+            ) : (
+              <>
+                {partes.some((x) => ofreceDeuda(x, imp[x.actor_id], prop, false)) ? (
+                  <Text testID="gprop-compartida" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_CUENTA_COMPARTIDA}</Text>
+                ) : null}
+                {partes.filter((x) => !x.yo).map((x) => (
+                  ofreceDeuda(x, imp[x.actor_id], prop, false) ? (
+                    <Tarjeta key={x.actor_id} testID={`gprop-debe-${x.actor_id}`}>
+                      <View style={{ padding: espacio.m, gap: espacio.s }}>
+                        <Text style={[tipo.body, { color: c.textPrimary }]}>{`¿${x.nombre ?? 'Otra persona'} te debe algo? (su parte: ${formatearEur(imp[x.actor_id] ?? '0')})`}</Text>
+                        <View style={ef.chips}>
+                          <Chip testID={`gprop-debe-${x.actor_id}-si`} etiqueta="Sí" seleccionado={b.deuda[x.actor_id]?.me_debe === 'SI'} onPress={() => cambiarDeuda(x.actor_id, 'SI')} />
+                          <Chip testID={`gprop-debe-${x.actor_id}-no`} etiqueta={TEXTO_NADA_PENDIENTE} seleccionado={b.deuda[x.actor_id]?.me_debe === 'NO'} onPress={() => cambiarDeuda(x.actor_id, 'NO')} />
+                        </View>
+                        {b.deuda[x.actor_id]?.me_debe === 'SI' ? (
+                          <CampoTexto testID={`gprop-debe-${x.actor_id}-importe`} etiqueta={`¿Cuánto te debe ${x.nombre ?? 'esa persona'}?`} marcador="Indícalo tú"
+                            valor={b.deuda[x.actor_id]?.importe ?? ''} onCambiar={(t) => importeDeuda(x.actor_id, t)} />
+                        ) : null}
+                      </View>
+                    </Tarjeta>
+                  ) : (
+                    <Text key={x.actor_id} testID={`gprop-no-debe-${x.actor_id}`} style={[tipo.footnote, { color: c.textSecondary }]}>
+                      {`${x.nombre ?? 'Otra persona'}: ${x.naturaleza === 'EMPRESA' ? TEXTO_EMPRESA : 'sin deuda'}`}
+                    </Text>
+                  )
+                ))}
+              </>
+            )}
           </>
         ) : null}
         {paso === 'CONFIRMAR' ? (
@@ -299,33 +404,57 @@ export function GastoPropiedadScreen(p: {
               <Linea testID="gprop-res-importe" etiqueta="Importe" valor={formatearEur(parsearImporte(b.importe).ok ? (parsearImporte(b.importe) as { valor: string }).valor : '0')} fuerte />
               <Linea testID="gprop-res-fecha" etiqueta="Fecha" valor={esFechaIso(b.fecha) ? diaMesAnioIso(b.fecha) : b.fecha} />
               <Linea testID="gprop-res-gasto-mes" etiqueta="Cuenta como gasto del mes" valor={b.clase === 'MEJORA' ? 'No · suma al coste' : 'Sí'} />
+              <Linea testID="gprop-res-sale" etiqueta="Sale de tus cuentas" valor={formatearEur(compartida ? importeDeTexto(b.importe) : saleDeMisCuentas(pago, b.importe, partes))} />
             </Tarjeta>
             <RotuloGrupo texto="De quién es (lo que se guardará)" />
             <Tarjeta testID="gprop-atribucion">
               {atribucionTexto(b, prop, actores).map((x) => <Text key={x.actor_id} testID={`gprop-atr-${x.actor_id}`} style={[tipo.body, s.pad, { color: c.textPrimary }]}>{x.texto}</Text>)}
               {partes.length === 0 ? <Text testID="gprop-atr-sin" style={[tipo.body, s.pad, { color: c.textSecondary }]}>Tu parte quedará «sin indicar»</Text> : null}
             </Tarjeta>
-            {mostrados.length > 0 ? <RotuloGrupo texto="Derechos de cobro" /> : null}
-            {mostrados.map((d) => (
-              <Tarjeta key={d.actor_id} testID={`gprop-derecho-${d.actor_id}`}>
-                <View style={{ padding: espacio.m, gap: 2 }}>
-                  <Text testID={`gprop-derecho-${d.actor_id}-quien`} style={[tipo.bodyEmphasis, { color: c.textPrimary }]}>{`${d.nombre} te debe ${formatearEur(d.importe)}`}</Text>
-                  <Text style={[tipo.caption, { color: c.textSecondary }]}>{`Por: ${d.concepto}`}</Text>
-                  <Text style={[tipo.caption, { color: c.textSecondary }]}>{`Parte que se le atribuye: ${Number(d.porcentaje).toLocaleString('es-ES', { maximumFractionDigits: 4 })} % · ${formatearEur(d.parte)}`}</Text>
-                  <Text testID={`gprop-derecho-${d.actor_id}-aviso`} style={[tipo.footnote, { color: c.accentText }]}>{TEXTO_SE_CREA_DERECHO}</Text>
-                </View>
-              </Tarjeta>
-            ))}
-            {mostrados.length > 0 ? <Text style={[tipo.footnote, { color: c.textSecondary }]}>No es un movimiento: tus saldos y tu liquidez no cambian. Puedes volver atrás y cambiarlo a «No».</Text> : null}
+            {!compartida ? (
+              <>
+                <RotuloGrupo texto="Quién pagó y qué queda pendiente" />
+                {confirmar.map((x) => (
+                  <Tarjeta key={x.actor_id} testID={`gprop-conf-${x.actor_id}`}>
+                    <View style={{ padding: espacio.m, gap: 2 }}>
+                      <Text style={[tipo.bodyEmphasis, { color: c.textPrimary }]}>{x.nombre}</Text>
+                      {x.parte !== null ? <Text testID={`gprop-conf-${x.actor_id}-parte`} style={[tipo.caption, { color: c.textSecondary }]}>{`Su parte: ${formatearEur(x.parte)}`}</Text> : null}
+                      <Text testID={`gprop-conf-${x.actor_id}-puso`} style={[tipo.caption, { color: c.textSecondary }]}>{`Puso: ${formatearEur(x.puso)}`}</Text>
+                      <Text testID={`gprop-conf-${x.actor_id}-posicion`} style={[tipo.body, { color: c.textPrimary }]}>{x.posicion}</Text>
+                    </View>
+                  </Tarjeta>
+                ))}
+                {partes.length === 0 ? (
+                  <Text testID="gprop-conf-pagos" style={[tipo.body, { color: c.textPrimary }]}>{pagosWire(pago, b.importe, partes, b.cuentaId).map((x) => `${x.pagador === 'YO' ? 'Tú' : cotitulares.find((y) => y.actor_id === x.pagador)?.nombre ?? 'Otra persona'} puso ${formatearEur(x.importe)}`).join(' · ')}</Text>
+                ) : null}
+                {posiciones.length > 0 ? <Text style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_NO_ES_MOVIMIENTO}</Text> : null}
+              </>
+            ) : (
+              <>
+                {mostrados.length > 0 ? <RotuloGrupo texto="Derechos de cobro" /> : null}
+                {mostrados.map((d) => (
+                  <Tarjeta key={d.actor_id} testID={`gprop-derecho-${d.actor_id}`}>
+                    <View style={{ padding: espacio.m, gap: 2 }}>
+                      <Text testID={`gprop-derecho-${d.actor_id}-quien`} style={[tipo.bodyEmphasis, { color: c.textPrimary }]}>{`${d.nombre} te debe ${formatearEur(d.importe)}`}</Text>
+                      <Text style={[tipo.caption, { color: c.textSecondary }]}>{`Por: ${d.concepto}`}</Text>
+                      <Text style={[tipo.caption, { color: c.textSecondary }]}>{`Parte que se le atribuye: ${Number(d.porcentaje).toLocaleString('es-ES', { maximumFractionDigits: 4 })} % · ${formatearEur(d.parte)}`}</Text>
+                      <Text testID={`gprop-derecho-${d.actor_id}-aviso`} style={[tipo.footnote, { color: c.accentText }]}>{TEXTO_SE_CREA_DERECHO}</Text>
+                    </View>
+                  </Tarjeta>
+                ))}
+                {mostrados.length === 0 ? <Text testID="gprop-conf-nada" style={[tipo.body, { color: c.textPrimary }]}>{TEXTO_NADA_PENDIENTE}</Text> : null}
+                {mostrados.length > 0 ? <Text style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_NO_ES_MOVIMIENTO}</Text> : null}
+              </>
+            )}
           </>
         ) : null}
         {faltas.length > 0 ? <Text testID="gprop-faltas" style={[tipo.footnote, { color: c.textSecondary }]}>{`Falta: ${faltas.join(', ')}.`}</Text> : null}
         {paso === 'CONFIRMAR' ? (
           <BotonPrimario testID="gprop-guardar" titulo="Confirmar y guardar" cargando={ocupado} onPress={() => void guardar()} />
         ) : (
-          <BotonPrimario testID="gprop-continuar" titulo="Continuar" deshabilitado={faltas.length > 0} onPress={() => setPaso(paso === 'DATOS' ? 'REPARTO' : 'CONFIRMAR')} />
+          <BotonPrimario testID="gprop-continuar" titulo="Continuar" deshabilitado={faltas.length > 0} onPress={() => setPaso(siguiente[paso])} />
         )}
-        {paso !== 'DATOS' ? <BotonTexto testID="gprop-atras" titulo="‹ Atrás" onPress={() => setPaso(paso === 'CONFIRMAR' ? 'REPARTO' : 'DATOS')} /> : null}
+        {paso !== 'DATOS' ? <BotonTexto testID="gprop-atras" titulo="‹ Atrás" onPress={() => setPaso(anterior[paso])} /> : null}
       </ScrollView>
     </View>
   );
@@ -479,20 +608,45 @@ export function CorregirClaseScreen(p: {
   );
 }
 
-/** Detalle del gasto: «Corregir la clase» solo con intención vigente; con deuda, la limitación literal (8quater). */
-export function DetalleGastoPropiedad(p: { lectura: LecturaGastoPropiedad; onCorregir: () => void }) {
+/**
+ * Detalle del gasto: «Corregir la clase» solo con intención vigente; con deuda en cualquier sentido, la limitación literal (8quater) y su
+ * ampliación. PAG: «Quién pagó», lo que salió de tus cuentas, las posiciones en su sentido y «Ver el movimiento en la cuenta».
+ */
+export function DetalleGastoPropiedad(p: { lectura: LecturaGastoPropiedad; onCorregir: () => void; nombres?: Record<string, string>;
+  onVerMovimientos?: (cuentaId: string) => void }) {
   const { c } = useTema();
   const l = p.lectura;
+  const nombre = (a: string) => p.nombres?.[a] ?? 'Otra persona';
+  const pos = l.pago?.posiciones ?? [];
+  const cuentaMov = l.pago?.cuentas_movimiento?.[0] ?? null;
   return (
     <View testID="gprop-detalle" style={{ gap: espacio.m }}>
       <Tarjeta>
         <Linea testID="gprop-det-clase" etiqueta="Clase" valor={l.clase === 'MEJORA' ? 'Mejora · suma al coste' : 'Gasto'} />
         <Linea testID="gprop-det-importe" etiqueta="Importe" valor={formatearEur(l.importe)} fuerte />
         <Linea testID="gprop-det-fecha" etiqueta="Fecha" valor={diaMesAnioIso(l.fecha)} />
-        {l.con_deuda ? <Linea testID="gprop-det-deuda" etiqueta="Derecho de cobro" valor="Sí" /> : null}
+        {l.con_deuda && pos.length === 0 ? <Linea testID="gprop-det-deuda" etiqueta="Derecho de cobro" valor="Sí" /> : null}
+        {pos.map((x) => (
+          <Linea key={`${x.actor_id}-${x.tipo}`} testID={`gprop-det-pos-${x.actor_id}`}
+            etiqueta={x.sentido === 'LE_DEBO' ? `Le debes a ${nombre(x.actor_id)}` : `${nombre(x.actor_id)} te debe`} valor={formatearEur(x.importe)} />
+        ))}
       </Tarjeta>
+      {l.pago ? (
+        <>
+          <RotuloGrupo texto="Quién pagó" />
+          <Tarjeta testID="gprop-det-pago">
+            {l.pago.declarado ? l.pago.pagos.map((x) => (
+              <Linea key={x.actor_id} testID={`gprop-det-pago-${x.actor_id}`} etiqueta={`${nombre(x.actor_id)}${x.con_movimiento ? ' · desde tu cuenta' : ' · por su cuenta'}`}
+                valor={formatearEur(x.importe)} />
+            )) : <Text testID="gprop-det-pago-sin-declarar" style={[tipo.body, s.pad, { color: c.textSecondary }]}>{TEXTO_PAGO_SIN_DECLARAR}</Text>}
+            <Linea testID="gprop-det-sale" etiqueta="Salió de tus cuentas" valor={formatearEur(l.pago.sale_de_mis_cuentas)} />
+          </Tarjeta>
+          {cuentaMov && p.onVerMovimientos ? <BotonTexto testID="gprop-ver-movimiento" titulo="Ver el movimiento en la cuenta" onPress={() => p.onVerMovimientos!(cuentaMov)} /> : null}
+        </>
+      ) : null}
       {ofreceCorregir(l) ? <BotonTexto testID="gprop-corregir-clase" titulo="Corregir la clase" onPress={p.onCorregir} /> : null}
       {muestraLimitacion(l) ? <Text testID="gprop-limitacion" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_LIMITACION_8QUATER}</Text> : null}
+      {muestraLimitacion(l) ? <Text testID="gprop-limitacion-sentido" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_LIMITACION_SENTIDO}</Text> : null}
     </View>
   );
 }
@@ -508,7 +662,8 @@ export function GastosPropiedadScreen(p: {
 }) {
   const { c } = useTema();
   const inset = useSafeAreaInsets();
-  type Nivel = { n: 'LISTA' } | { n: 'DETALLE'; id: string } | { n: 'CORREGIR'; l: LecturaGastoPropiedad } | { n: 'NUEVO' } | { n: 'HISTORICA' };
+  type Nivel = { n: 'LISTA' } | { n: 'DETALLE'; id: string } | { n: 'CORREGIR'; l: LecturaGastoPropiedad } | { n: 'NUEVO' } | { n: 'HISTORICA' }
+    | { n: 'MOVIMIENTOS'; cuentaId: string; hechoId: string };
   const [nivel, setNivel] = useState<Nivel>({ n: 'LISTA' });
   const [filas, setFilas] = useState<FilaGastoPropiedad[] | null>(null);
   const [lectura, setLectura] = useState<LecturaGastoPropiedad | null>(null);
@@ -533,6 +688,8 @@ export function GastosPropiedadScreen(p: {
   };
   if (nivel.n === 'NUEVO') return <GastoPropiedadScreen cliente={p.cliente} patrimonio={p.patrimonio} vista={p.vista} nuevoId={p.nuevoId} ahora={p.ahora} onCerrar={volver} />;
   if (nivel.n === 'HISTORICA') return <MejoraHistoricaScreen patrimonio={p.patrimonio} vista={p.vista} nuevoId={p.nuevoId} ahora={p.ahora} onCerrar={volver} />;
+  if (nivel.n === 'MOVIMIENTOS' && p.patrimonio.movimientosCuenta)
+    return <MovimientosCuentaScreen cargar={(pag) => p.patrimonio.movimientosCuenta!(nivel.cuentaId, pag)} resaltar={nivel.hechoId} onCerrar={() => void abrir(nivel.hechoId)} />;
   if (nivel.n === 'CORREGIR')
     return (
       <CorregirClaseScreen cliente={p.cliente} patrimonio={p.patrimonio} propiedadId={p.vista.id} lectura={nivel.l}
@@ -544,7 +701,10 @@ export function GastosPropiedadScreen(p: {
         onCancelar={() => (nivel.n === 'DETALLE' ? volver(false) : p.onCerrar(cambio))} />
       <ScrollView contentContainerStyle={[ef.cuerpo, { paddingBottom: inset.bottom + espacio.xxl }]}>
         {nivel.n === 'DETALLE' ? (
-          lectura ? <DetalleGastoPropiedad lectura={lectura} onCorregir={() => setNivel({ n: 'CORREGIR', l: lectura })} /> : <EstadoDato testID="gprop-detalle-cargando" estado="CARGANDO" />
+          lectura ? <DetalleGastoPropiedad lectura={lectura} onCorregir={() => setNivel({ n: 'CORREGIR', l: lectura })}
+            nombres={Object.fromEntries((p.vista.titularidad?.partes ?? []).map((x) => [x.actor_id, x.yo ? 'Tú' : x.nombre ?? 'Otra persona']))}
+            onVerMovimientos={p.patrimonio.movimientosCuenta ? (cuentaId) => setNivel({ n: 'MOVIMIENTOS', cuentaId, hechoId: lectura.hecho_id }) : undefined} />
+            : <EstadoDato testID="gprop-detalle-cargando" estado="CARGANDO" />
         ) : (
           <>
             <Tarjeta testID="gastos-resumen">

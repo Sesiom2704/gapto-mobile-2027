@@ -13,6 +13,12 @@
 // Versión: 0.2.1 (F06 T1-F06 B3 ajuste N3 · KO visual iPhone casilla 7): «chips de fecha» en el alta y en la mejora antigua (Hoy por defecto, Ayer, Otra fecha).
 // Versión: 0.2.2 (F06 T1-F06 B3 ajuste N3 · HT2-01 · decisión 1 de Moisés del 2026-11-14, F06-00_Decisiones_Moises_2026-11-14_HT2-01_y_Q-29_v1.0):
 //   el «No» de «¿Te debe su parte?» no dice «a medias» y se muestra el aviso gprop-aviso-a-medias.
+// Versión: 0.3.0 (F06 T2-F06 PAG N1): CAMBIO DE CONTRATO de B3 autorizado por L-02 (no es adaptación de L-06), con los cuatro elementos del
+//   precedente Q-29 en cada test marcado «CAMBIO DE CONTRATO (L-02)»: el alta pasa a datos → «¿Quién pagó?» (con la cuenta) → reparto y
+//   «¿Queda algo pendiente?» → confirmación; fuera de la cuenta compartida el envío es C-MEJ-01 v2 (`pagos`, `saldos`,
+//   `posiciones_confirmadas`) y la deuda por defecto es la propuesta de L-08; la cuenta compartida conserva la vía de B3 (O9.16). El test de
+//   HT2-01 (N3) pasa a exigir «¿Quién pagó?» y la AUSENCIA de gprop-aviso-a-medias y del chip «No, no me debe nada (ya está saldado o le
+//   invito)». Los tests de dominio de B3 (payloadGastoPropiedad, derechos, faltasReparto) no cambian: siguen fijando la forma de B3.
 // ============================================================
 
 import './tiempos_rn';
@@ -21,7 +27,7 @@ import React from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import type { ClienteApi, Respuesta } from '../src/api/cliente';
-import type { ClientePatrimonioB3, PayloadGastoPropiedad, PropuestaGasto } from '../src/api/patrimonio_b3';
+import type { ClientePatrimonioB3, PayloadGastoPropiedad, PayloadGastoPropiedadV2, PropuestaGasto } from '../src/api/patrimonio_b3';
 import type { VistaPropiedad } from '../src/api/propiedades';
 import {
   alCambiarPropuesta, borradorInicial, BorradorGastoPropiedad, derechos, faltasDatos, faltasReparto, payloadGastoPropiedad, payloadMejoraHistorica,
@@ -202,12 +208,18 @@ async function montar(pat: ClientePatrimonioB3) {
   await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 }
 
-async function datosMejora() {
+/** PAG: datos → «¿Quién pagó?» (por defecto en estos tests «Yo, todo» o la opción indicada, con la cuenta) → reparto. */
+async function datosMejora(opcion = 'yo', cuenta: string | null = C1) {
   await escribir('gprop-importe', '300');
-  await pulsar(`gprop-cuenta-${C1}`);
+  await pulsar('gprop-continuar');
+  await pulsar(`gprop-pago-${opcion}`);
+  if (cuenta) await pulsar(`gprop-cuenta-${cuenta}`);
   await pulsar('gprop-continuar');
 }
 
+// CAMBIO DE CONTRATO (L-02) · (1) antes: la cuenta se elegía en los datos y «Continuar» llevaba al reparto; ahora la cuenta se elige en
+// «¿Quién pagó?» (solo si pagas tú) y «Continuar» lleva a ese paso. (2) Se conserva: solo «Reforma o mejora», sin chips de clase,
+// categoría ni presupuesto. (3) Discriminante: este test (gprop-paso-pago) y MC-PAG-11. (4) Autorización: L-02 (decisiones lote 34 d593a15d…).
 test('C1 (ajuste N3, decisión 2026-11-13): el alta solo ofrece «Reforma o mejora»; sin Reparación, Gasto corriente, categoría ni presupuesto', async () => {
   await montar(patrimonio(() => prop()));
   expect(screen.getByText('Reforma o mejora (aumenta el valor)')).toBeTruthy();
@@ -217,12 +229,21 @@ test('C1 (ajuste N3, decisión 2026-11-13): el alta solo ofrece «Reforma o mejo
   expect(screen.queryByTestId('gprop-presupuestable-si')).toBeNull();
   expect(screen.getByTestId('gprop-nota-registrar-gasto')).toBeTruthy();
   await escribir('gprop-importe', '300');
-  await pulsar(`gprop-cuenta-${C1}`);
+  expect(screen.queryByTestId(`gprop-cuenta-${C1}`)).toBeNull();          // PAG: la cuenta ya no está en los datos
   expect(screen.queryByTestId('gprop-faltas')).toBeNull();   // la clase ya no falta: va fijada a MEJORA
+  await pulsar('gprop-continuar');
+  expect(screen.getByTestId('gprop-paso-pago')).toBeTruthy();
+  await pulsar('gprop-pago-yo');
+  await pulsar(`gprop-cuenta-${C1}`);
   await pulsar('gprop-continuar');
   expect(screen.getByTestId('gprop-paso-reparto')).toBeTruthy();
 });
 
+// CAMBIO DE CONTRATO (L-02) · (1) antes: «Sí» por defecto en gprop-debe-* y envío `deuda` + `derechos_confirmados` (forma de B3); ahora, con
+// «Yo, todo», la deuda propuesta (L-08) gprop-deuda-* está preseleccionada y el envío es v2: `pagos` (YO, cuenta, total), `saldos` (ME_DEBE
+// por su parte) y `posiciones_confirmadas` = lo mostrado. (2) Se conserva: reparto marcado según la titularidad en la fecha del hecho,
+// confirmación visible antes de registrar y nada se envía sin ella; la forma de B3 sigue en O9.16 y en los tests de dominio. (3)
+// Discriminantes: este test, O-PAG-01/06/21 (servidor), MC-PAG-11 y MC-PAG-10. (4) Autorización: L-02 y L-08 (d593a15d…).
 test('O9.14 + O9.23: reparto marcado, «Sí» por defecto, confirmación visible y derechos_confirmados = lo mostrado', async () => {
   const pat = patrimonio(() => prop());
   await montar(pat);
@@ -230,38 +251,47 @@ test('O9.14 + O9.23: reparto marcado, «Sí» por defecto, confirmación visible
   expect(pat.propuestaGasto).toHaveBeenLastCalledWith('p1', HOY, C1);           // fecha del HECHO y la cuenta elegida
   expect(marcado('gprop-rep-titularidad')).toBe(true);
   expect(screen.getByTestId('gprop-rep-titularidad').props.accessibilityLabel).toBe('Según la titularidad de Piso Ejemplo el 10 oct 2026: tú 50 %, Ana 50 %');
-  expect(marcado(`gprop-debe-${ANA}-si`)).toBe(true);
+  expect(marcado(`gprop-deuda-${ANA}-si`)).toBe(true);
+  expect(screen.getByTestId(`gprop-deuda-${ANA}-texto`).props.children).toBe('Ana te debe 150,00 €');
   await pulsar('gprop-continuar');
-  expect(screen.getByTestId(`gprop-derecho-${ANA}-quien`).props.children).toBe('Ana te debe 150,00 €');
-  expect(screen.getByTestId(`gprop-derecho-${ANA}-aviso`).props.children).toBe(TEXTO_SE_CREA_DERECHO);
-  expect(screen.getByText('Parte que se le atribuye: 50 % · 150,00 €')).toBeTruthy();
+  expect(screen.getByTestId(`gprop-conf-${ANA}-posicion`).props.children).toBe('Ana te debe 150,00 €');
+  expect(screen.getByTestId(`gprop-conf-${ANA}-parte`).props.children).toBe('Su parte: 150,00 €');
   expect(screen.getByTestId(`gprop-atr-${ANA}`)).toBeTruthy();
   await pulsar('gprop-guardar');
-  const body = (pat.registrarGastoPropiedad as jest.Mock).mock.calls[0][0] as PayloadGastoPropiedad;
-  expect(body.derechos_confirmados).toEqual([{ actor_id: ANA, importe: '150.00' }]);
-  expect(body.deuda).toEqual([{ actor_id: ANA, me_debe: 'SI' }]);
+  const body = (pat.registrarGastoPropiedad as jest.Mock).mock.calls[0][0] as PayloadGastoPropiedadV2;
+  expect(body.pagos).toEqual([{ pagador: 'YO', cuenta_id: C1, importe: '300.00' }]);
+  expect(body.saldos).toEqual([{ actor_id: ANA, sentido: 'ME_DEBE', importe: '150.00' }]);
+  expect(body.posiciones_confirmadas).toEqual([{ actor_id: ANA, tipo: 'DERECHO_COBRO', importe: '150.00' }]);
+  expect(body).not.toHaveProperty('derechos_confirmados');
+  expect(body).not.toHaveProperty('cuenta_id');
   expect(body.atribucion.modo).toBe('SEGUN_TITULARIDAD_ACEPTADA');
   expect(screen.getByTestId('gprop-hecho')).toBeTruthy();
 });
 
+// CAMBIO DE CONTRATO (L-02) · (1) antes: «No» enviaba `deuda` NO y `derechos_confirmados` vacío; ahora desmarcar la deuda propuesta envía
+// `saldos` NADA y `posiciones_confirmadas` vacío, y la confirmación dice «No queda nada pendiente». (2) Se conserva: desmarcar quita la
+// posición de la confirmación y del envío (INV-04). (3) Discriminantes: este test, O-PAG-20 (servidor). (4) Autorización: L-02 y L-08.
 test('O9.15 + O9.23: si cambia a «No», el derecho desaparece de la confirmación y del envío', async () => {
   const pat = patrimonio(() => prop());
   await montar(pat);
   await datosMejora();
-  await pulsar(`gprop-debe-${ANA}-no`);
+  await pulsar(`gprop-deuda-${ANA}-no`);
   await pulsar('gprop-continuar');
-  expect(screen.queryByTestId(`gprop-derecho-${ANA}`)).toBeNull();
+  expect(screen.getByTestId(`gprop-conf-${ANA}-posicion`).props.children).toBe('No queda nada pendiente');
   expect(screen.queryByText(TEXTO_SE_CREA_DERECHO)).toBeNull();
   await pulsar('gprop-guardar');
-  const body = (pat.registrarGastoPropiedad as jest.Mock).mock.calls[0][0] as PayloadGastoPropiedad;
-  expect(body.derechos_confirmados).toEqual([]);
-  expect(body.deuda).toEqual([{ actor_id: ANA, me_debe: 'NO' }]);
+  const body = (pat.registrarGastoPropiedad as jest.Mock).mock.calls[0][0] as PayloadGastoPropiedadV2;
+  expect(body.posiciones_confirmadas).toEqual([]);
+  expect(body.saldos).toEqual([{ actor_id: ANA, sentido: 'NADA' }]);
 });
 
+// CAMBIO DE CONTRATO (L-02) · (1) antes: la cuenta compartida se elegía en los datos; ahora se elige «Desde una cuenta compartida» en
+// «¿Quién pagó?». (2) Se conserva TODO lo demás de O9.16: vía de B3, nada marcado, importe a mano y aportación MANUAL. (3) Discriminantes:
+// este test, O-PAG-17 (servidor). (4) Autorización: L-02 (§1.1.9: la cuenta compartida sigue la vía de B3).
 test('O9.16: cuenta compartida → nada marcado, el envío exige elegir y el importe se teclea', async () => {
   const pat = patrimonio(() => prop({ soloMia: false }));
   await montar(pat);
-  await datosMejora();
+  await datosMejora('compartida');
   expect(marcado(`gprop-debe-${ANA}-si`) || marcado(`gprop-debe-${ANA}-no`)).toBe(false);
   expect(screen.getByTestId('gprop-faltas').props.children).toContain('elegir si Ana te debe su parte');
   await pulsar(`gprop-debe-${ANA}-si`);
@@ -272,15 +302,23 @@ test('O9.16: cuenta compartida → nada marcado, el envío exige elegir y el imp
   const body = (pat.registrarGastoPropiedad as jest.Mock).mock.calls[0][0] as PayloadGastoPropiedad;
   expect(body.aportacion_indicada).toBe('MANUAL');
   expect(body.derechos_confirmados).toEqual([{ actor_id: ANA, importe: '120.00' }]);
+  expect(body.cuenta_id).toBe(C1);
 });
 
+// CAMBIO DE CONTRATO (L-02) · (1) antes: comprobaba la ausencia de gprop-debe-*; ahora la de la deuda propuesta gprop-deuda-*. (2) Se
+// conserva: frente a una EMPRESA no se ofrece deuda y se explica (gprop-no-debe-*). (3) Discriminantes: este test, O-PAG-08 (servidor).
+// (4) Autorización: L-02 (§1.1.9, Q-PAG-05).
 test('O9.18: cotitular EMPRESA → «Te debe su parte» no se ofrece', async () => {
   await montar(patrimonio(() => prop({ naturaleza: 'EMPRESA' })));
   await datosMejora();
+  expect(screen.queryByTestId(`gprop-deuda-${ANA}`)).toBeNull();
   expect(screen.queryByTestId(`gprop-debe-${ANA}`)).toBeNull();
   expect(screen.getByTestId(`gprop-no-debe-${ANA}`)).toBeTruthy();
 });
 
+// CAMBIO DE CONTRATO (L-02) · (1) antes: con «No lo sé» desaparecía gprop-debe-*; ahora no hay deuda propuesta (gprop-deuda-*) y se explica
+// (gprop-deuda-no-lo-se). (2) Se conserva: sin titularidad nada marcado y el envío exige elegir. (3) Discriminantes: este test, O-PAG-05.
+// (4) Autorización: L-02 (§1.1.9, Q-PAG-09).
 test('O9.12 / O9.21: sin titularidad nada marcado y bloqueado; con «No lo sé» no se ofrece la deuda', async () => {
   const pat = patrimonio(() => ({ ...prop(), titularidad_disponible: false, partes: [] }));
   await montar(pat);
@@ -289,10 +327,13 @@ test('O9.12 / O9.21: sin titularidad nada marcado y bloqueado; con «No lo sé»
   expect(screen.getByTestId('gprop-rep-sin-titularidad')).toBeTruthy();
   expect(screen.getByTestId('gprop-faltas').props.children).toContain('elegir de quién es el gasto');
   await pulsar('gprop-rep-no-lo-se');
-  expect(screen.queryByTestId(`gprop-debe-${ANA}`)).toBeNull();
+  expect(screen.queryByTestId(`gprop-deuda-${ANA}`)).toBeNull();
+  expect(screen.getByTestId('gprop-deuda-no-lo-se')).toBeTruthy();
   expect(screen.queryByTestId('gprop-faltas')).toBeNull();
 });
 
+// CAMBIO DE CONTRATO (L-02) · (1) solo el recorrido hasta el reparto (paso «¿Quién pagó?» antes) y el tipo del cuerpo (v2). (2) Se conserva:
+// vuelve al reparto con la propuesta releída y otra intención. (3) Discriminante: este test. (4) Autorización: L-02.
 test('ATRIBUCION_PROPUESTA_DESFASADA: vuelve al reparto con la propuesta releída y otra intención', async () => {
   const registrar = jest.fn(async () => ({ tipo: 'RECHAZADO', codigo: 'ATRIBUCION_PROPUESTA_DESFASADA', mensaje: '' }));
   const pat = patrimonio(() => prop(), registrar as unknown as jest.Mock);
@@ -306,7 +347,7 @@ test('ATRIBUCION_PROPUESTA_DESFASADA: vuelve al reparto con la propuesta releíd
   expect((pat.propuestaGasto as jest.Mock).mock.calls.length).toBeGreaterThan(llamadas);
   await pulsar('gprop-continuar');
   await pulsar('gprop-guardar');
-  const [a, b] = registrar.mock.calls.map((c: any[]) => (c[0] as PayloadGastoPropiedad).intencion_id);
+  const [a, b] = registrar.mock.calls.map((c: any[]) => (c[0] as PayloadGastoPropiedadV2).intencion_id);
   expect(a).not.toBe(b);
 });
 
@@ -361,10 +402,19 @@ test('chips de fecha: la mejora antigua también ofrece «Hoy · Ayer · Otra fe
   await pulsar('mh-fecha-otra');
   expect(screen.getByTestId('mh-fecha')).toBeTruthy();
 });
-test('HT2-01 (N3): el «No» no dice «a medias» y se avisa de que el pago a medias aún no se registra bien', async () => {
+// CAMBIO DE CONTRATO (L-02: «El paso "¿Quién pagó?" sustituye al aviso N3 de "pagado a medias" del tren 1») · (1) antes: se exigía el aviso
+// gprop-aviso-a-medias y el chip «No, no me debe nada (ya está saldado o le invito)»; ahora se exige «¿Quién pagó?» con «Cada uno su parte» y
+// la AUSENCIA del aviso y del chip, en el mismo cambio (sin estado intermedio). (2) Se conserva: el «No» nunca dice «a medias». (3)
+// Discriminantes: este test y MC-PAG-09. (4) Autorización: L-02 (d593a15d…) y HT2-01 (6ba8afd3…).
+test('HT2-01 sustituido por PAG: «¿Quién pagó?» ofrece «Cada uno su parte» y no queda ni el aviso N3 ni el chip antiguo', async () => {
   await montar(patrimonio(() => prop()));
-  await datosMejora();
-  expect(screen.getByTestId(`gprop-debe-${ANA}-no`).props.accessibilityLabel).toBe('No, no me debe nada (ya está saldado o le invito)');
+  await escribir('gprop-importe', '300');
+  await pulsar('gprop-continuar');
+  expect(screen.getByTestId('gprop-pago-cada-uno')).toBeTruthy();
+  await pulsar('gprop-pago-yo');
+  await pulsar(`gprop-cuenta-${C1}`);
+  await pulsar('gprop-continuar');
+  expect(screen.queryByTestId('gprop-aviso-a-medias')).toBeNull();
+  expect(screen.queryByText('No, no me debe nada (ya está saldado o le invito)')).toBeNull();
   expect(screen.queryByText(/lo pagamos a medias/)).toBeNull();
-  expect(screen.getByTestId('gprop-aviso-a-medias')).toBeTruthy();
 });

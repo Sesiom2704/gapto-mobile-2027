@@ -9,15 +9,17 @@
 //   - Confirmación (8bis): lo que se mostrará (quién, cuánto, concepto, parte atribuida, «Se creará un derecho de cobro» y la atribución que se persistirá) y el cuerpo con `derechos_confirmados` = exactamente lo mostrado.
 //   - Corrección de la clase (C-MEJ-03): solo con `intencion_correccion_id`; destinos MEJORA → gasto y gasto → MEJORA; con deuda, la limitación literal de 8quater (R-DM02-01) y nunca «anular y recrear» ni la corrección de categoría como equivalentes.
 // Versión: 0.1.0 (F06 T1-F06 B3 N1)
+// Versión: 0.2.0 (F06 T2-F06 PAG N1; L-02): `payloadGastoPropiedadV2` (C-MEJ-01 v2: `pagos[]`, `saldos[]` y `posiciones_confirmadas[]` de «¿Quién pagó?», domain/quien_pago.ts); la forma de B3 (`payloadGastoPropiedad`) sigue para la cuenta compartida. Textos de PAG: «pago sin declarar» de los hechos anteriores, ampliación de la limitación de 8quater «en cualquier sentido» (el literal del dictamen no cambia) y los rechazos PAGOS_NO_CUADRAN, SALDO_INCOHERENTE, SALDO_NO_DECLARADO y PAGO_DESDE_CUENTA_COMPARTIDA.
 // ============================================================
 
 import type {
   AtribucionB3, ClaseGasto, ComparacionImpacto, LecturaGastoPropiedad, PartePropuesta, PayloadCorregirClase, PayloadGastoPropiedad,
-  PayloadMejoraHistorica, PropuestaGasto, FilaGastoPropiedad,
+  PayloadGastoPropiedadV2, PayloadMejoraHistorica, PropuestaGasto, FilaGastoPropiedad,
 } from '../api/patrimonio_b3';
 import { diaMesAnioIso } from './fechas';
 import { formatearEur, parsearImporte } from './importe';
 import { esFechaIso } from './intencion';
+import type { PagoWire, PosicionWire, SaldoWire } from './quien_pago';
 
 export const NOMBRE_CLASE: Record<ClaseGasto, string> = {
   MEJORA: 'Mejora (aumenta el valor)',
@@ -43,6 +45,10 @@ export const TEXTO_INDETERMINADO = 'No se ha podido confirmar el registro. Revis
 export const TEXTO_LIMITACION_8QUATER =
   'Los hechos de gasto de propiedad con una posición de deuda asociada no admiten actualmente la operación Corregir clase. No existe en este alcance una vía soportada para corregir su clase conservando la posición. Esta capacidad queda pendiente de una corrección de clase para hechos con varios efectos.';
 export const TEXTO_IMPACTO_DESFASADO = 'Los datos han cambiado; revisa el impacto';
+/** PAG (anexo B §10.2, HT2-07; Q-PAG-06): ampliación en pantalla de la limitación de 8quater a la deuda en los dos sentidos. */
+export const TEXTO_LIMITACION_SENTIDO = 'Esto vale para una posición de deuda en cualquier sentido: lo que te deben y lo que debes.';
+/** PAG (Q-PAG-07): hechos registrados antes de «¿Quién pagó?»; no se reinterpretan. */
+export const TEXTO_PAGO_SIN_DECLARAR = 'Pago sin declarar: se registró antes de poder indicar quién pagó; consta pagado entero desde tu cuenta.';
 
 export type EleccionReparto = null | { modo: 'TITULARIDAD' } | { modo: 'NO_LO_SE' } | { modo: 'MANUAL'; partes: Record<string, string> };
 export interface DeudaParte { me_debe: 'SI' | 'NO' | null; importe: string }
@@ -248,6 +254,17 @@ export function payloadGastoPropiedad(intencionId: string, propiedadId: string, 
   };
 }
 
+/** C-MEJ-01 v2 (PAG): quién pagó y quién debe. `posiciones` son las que mostró la confirmación (el servidor las verifica). */
+export function payloadGastoPropiedadV2(intencionId: string, propiedadId: string, b: BorradorGastoPropiedad, prop: PropuestaGasto | null,
+  pagos: PagoWire[], saldos: SaldoWire[], posiciones: PosicionWire[]): PayloadGastoPropiedadV2 {
+  const gasto = b.clase !== 'MEJORA';
+  return {
+    intencion_id: intencionId, propiedad_id: propiedadId, clase: b.clase!, importe: importeTexto(b.importe), fecha_hecho: b.fecha,
+    nota: b.nota.trim() ? b.nota.trim() : null, categoria_id: gasto ? b.categoriaId : null, presupuestable: gasto ? b.presupuestable : null,
+    atribucion: atribucionWire(b.reparto, prop, b.fecha), pagos, saldos, posiciones_confirmadas: posiciones,
+  };
+}
+
 /** C-MEJ-02: sin pago, nunca deuda. */
 export function payloadMejoraHistorica(intencionId: string, rowVersion: number, descripcion: string, importe: string, fecha: string,
   e: EleccionReparto, prop: PropuestaGasto | null): PayloadMejoraHistorica {
@@ -323,5 +340,9 @@ const TEXTOS_ERROR: Record<string, string> = {
   PERIODO_CERRADO_SIN_POLITICA: 'Ese mes está cerrado: no se puede corregir.',
   MOTIVO_AUSENTE: 'Indica el motivo.',
   IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION: 'Este registro ya se guardó con otros datos. No se ha guardado nada nuevo.',
+  PAGOS_NO_CUADRAN: 'Lo que pagó cada uno no suma el importe del gasto.',
+  SALDO_INCOHERENTE: 'Lo que se debe no cuadra con lo que pagó cada uno.',
+  SALDO_NO_DECLARADO: 'Indica qué queda pendiente con cada cotitular.',
+  PAGO_DESDE_CUENTA_COMPARTIDA: 'Si pagaste desde una cuenta compartida, elige «Desde una cuenta compartida».',
 };
 export const textoError = (codigo: string, mensaje: string) => TEXTOS_ERROR[codigo] ?? (mensaje || TEXTO_INDETERMINADO);
