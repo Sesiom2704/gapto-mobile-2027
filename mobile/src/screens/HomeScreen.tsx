@@ -13,6 +13,8 @@
 // v0.9.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): la raíz y el scroll cierran la fila abierta a medias (patrón iOS); los lados los decide el componente común (principal a la izquierda).
 // v0.10.0 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): «Resultado» del mes usa `positiveText` / `criticalText` (sobre `surfacePrimary`, PT-04) y el icono de «Registrar» `accentText`.
 // Versión: 0.10.0
+// v0.11.0 (F06 T2-F06 PAG, §1.5 del mandato; lista cerrada de F05 autorizada por el párrafo 3 del literal de PAG (decisión 3 del lote 35, bfbba1e6…); Q-VP-02, decisión literal del paquete n.º 3): fila «Invertido en viviendas este mes» (mi parte de las reformas y mejoras del mes, sin compras), en un bloque APARTE de «Este mes» y fuera del Resultado (GET /v1/patrimonio/invertido-mes con la fecha del dispositivo). Solo se pinta si el cliente trae la lectura y responde; Ingresos, Gastos y Resultado no cambian.
+// Versión: 0.11.0
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -20,7 +22,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import type { AccionRapida, ClienteApi, FilaPrevision, GastoMes, InicioPrevisiones, Plantilla, ResultadoMes } from '../api/cliente';
+import type { AccionRapida, ClienteApi, FilaPrevision, GastoMes, InicioPrevisiones, InvertidoMes, Plantilla, ResultadoMes } from '../api/cliente';
 import { BotonTexto, EstadoDato, Seccion } from '../components/Basicos';
 import { CampanaPendientes, FilaPrevisionVista } from '../components/Prevision';
 import { propsScrollSwipe, propsZonaSwipe } from '../components/AccionRapida';
@@ -75,6 +77,7 @@ export function HomeScreen(p: {
   const hoy = p.ahora();
   const [gasto, setGasto] = useState<Lectura>({ fase: 'CARGANDO' });
   const [mes, setMes] = useState<LecturaMes>({ fase: 'CARGANDO' });
+  const [invertido, setInvertido] = useState<InvertidoMes | null>(null);
   const [nombre, setNombre] = useState<string | null>(null);
   const [accesos, setAccesos] = useState<{ plantillas: Plantilla[]; acciones: AccionRapida[]; iconos: Map<string, string | null> } | null>(null);
   const [previsiones, setPrevisiones] = useState<LecturaPrevisiones>({ fase: 'CARGANDO' });
@@ -109,6 +112,11 @@ export function HomeScreen(p: {
     setGasto(r.tipo === 'OK' ? { fase: 'OK', datos: r.datos } : { fase: 'ERROR' });
     setMes(rm.tipo === 'OK' ? { fase: 'OK', datos: rm.datos } : { fase: 'ERROR' });
     setNombre(yo.tipo === 'OK' ? yo.datos.nombre : null);
+    // T2-F06 PAG: «Invertido en viviendas este mes», aparte del Resultado. Sin la lectura (o si falla), la fila no se pinta.
+    if (p.cliente.invertidoMes) {
+      const inv = await p.cliente.invertidoMes(isoLocal(p.ahora()));
+      setInvertido(inv.tipo === 'OK' ? inv.datos : null);
+    }
     if (pl.tipo !== 'OK') return setAccesos(null);
     // Icono de la categoría de cada plantilla (solo si algún acceso no tiene icono propio).
     let iconos = new Map<string, string | null>();
@@ -236,6 +244,15 @@ export function HomeScreen(p: {
         ) : null}
         {/* D-HOME-07 (§4.5): sin línea ni barra de presupuesto mientras F08 no la alimente. */}
       </Seccion>
+
+      {/* T2-F06 PAG (Q-VP-02): mi parte de las reformas y mejoras del mes, sin compras; fuera del Resultado del mes. */}
+      {invertido ? (
+        <Seccion testID="bloque-invertido" titulo="Invertido en viviendas este mes" derecha={<Text testID="invertido-importe" style={[tipo.subheadline, { color: c.textPrimary, fontVariant: ['tabular-nums'] }]}>{formatearEur(invertido.invertido)}</Text>}>
+          <Text testID="invertido-aviso" style={[tipo.footnote, { color: c.textSecondary }]}>
+            {`Tu parte de las reformas y mejoras. No es gasto del mes ni entra en el Resultado.${invertido.sin_reparto > 0 ? ` ${invertido.sin_reparto} sin reparto indicado no suman.` : ''}`}
+          </Text>
+        </Seccion>
+      ) : null}
 
       {/* Lectura PARCIAL de VS-01 (F05-D003 §16.6): bloque separado, fuera del
              bloque «Este mes». Solo gasto atribuible a ti ya registrado. */}

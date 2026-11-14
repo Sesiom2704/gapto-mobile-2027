@@ -27,6 +27,8 @@
 // Versión: 0.20.0
 // v0.21.0 (F06 Lote 12 · B1 Propiedad, N1): la llamada clasificada (OK / RECHAZADO(codigo, detalle) / INDETERMINADO) se exporta como `crearLlamada(cfg, fetch)` para que el cliente de propiedades (`api/propiedades.ts`) la reutilice sin ampliar `ClienteApi`. Sin cambios de comportamiento ni de rutas.
 // Versión: 0.21.0
+// v0.22.0 (F06 T2-F06 PAG, §1.5 del mandato; lista cerrada de F05 autorizada por el párrafo 3 del literal de PAG (decisión 3 del lote 35, bfbba1e6…)): tipos aditivos de la fila de una reforma (`FilaActividad.propiedad`, `salida_cuentas`, `posiciones`) y de «Invertido en viviendas este mes» (`InvertidoMes`), con su lectura OPCIONAL `invertidoMes` (GET /v1/patrimonio/invertido-mes; opcional en `ClienteApi` para que los dobles de test no cambien). Ninguna llamada existente cambia.
+// Versión: 0.22.0
 // ============================================================
 
 import type { Ambito, CategoriaNodo } from '../domain/categoria';
@@ -445,6 +447,10 @@ export interface FilaActividad {
   /** F05-06 M2: origen de una devolución (null si no lo es) y estado de su abono. */
   devolucion_de?: { hecho_id: string; nota: string | null; fecha_hecho: string; tercero: string | null } | null;
   abono?: 'PENDIENTE' | 'COBRADO' | null;
+  /** T2-F06 PAG (solo reformas, MEJORA_PATRIMONIAL): vivienda, lo que salió de tus cuentas y las posiciones reales en su sentido. */
+  propiedad?: { id: string; nombre: string } | null;
+  salida_cuentas?: string | null;
+  posiciones?: { sentido: 'ME_DEBE' | 'LE_DEBO'; importe: string; tercero: string | null }[] | null;
 }
 
 export interface PaginaActividad {
@@ -536,6 +542,14 @@ export interface ConsultaActividad {
   importe?: string | null;
   cursor?: string | null;
   limite?: number;
+}
+
+/** T2-F06 PAG (Q-VP-02): mi parte de las reformas y mejoras del mes, sin compras; fuera del Resultado del mes. */
+export interface InvertidoMes {
+  mes: string;
+  moneda: 'EUR';
+  invertido: string;
+  sin_reparto: number;
 }
 
 export interface ResultadoMes {
@@ -905,6 +919,8 @@ export interface ClienteApi {
   detalleActividad(id: string): Promise<Respuesta<DetalleActividad>>;
   yo(): Promise<Respuesta<{ nombre: string | null }>>;
   resultadoMes(fecha: string): Promise<Respuesta<ResultadoMes>>;
+  /** T2-F06 PAG: «Invertido en viviendas este mes». Opcional (los dobles de test no la llevan). */
+  invertidoMes?(fecha: string): Promise<Respuesta<InvertidoMes>>;
   listarCapacidades(): Promise<Respuesta<{ cuentas: CuentaCapacidades[]; sin_configurar: number }>>;
   cuentasSinConfigurar(): Promise<Respuesta<{ sin_configurar: number }>>;
   detalleCapacidades(cuentaId: string): Promise<Respuesta<CuentaCapacidades>>;
@@ -1095,6 +1111,7 @@ export function crearCliente(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): C
     detalleActividad: (id) => llamar(`/v1/actividad/${encodeURIComponent(id)}`, { method: 'GET' }, false),
     yo: () => llamar('/v1/yo', { method: 'GET' }, false),
     resultadoMes: (fecha) => llamar(`/v1/inicio/resultado-mes?fecha=${encodeURIComponent(fecha)}`, { method: 'GET' }, false),
+    invertidoMes: (fecha) => llamar(`/v1/patrimonio/invertido-mes?fecha=${encodeURIComponent(fecha)}`, { method: 'GET' }, false),
     listarCapacidades: () => llamar('/v1/cuentas/capacidades', { method: 'GET' }, false),
     cuentasSinConfigurar: () => llamar('/v1/cuentas/sin-configurar', { method: 'GET' }, false),
     detalleCapacidades: (id) => llamar(CAP(id), { method: 'GET' }, false),

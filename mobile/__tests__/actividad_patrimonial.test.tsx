@@ -4,6 +4,9 @@
 // Ruta: mobile/__tests__/actividad_patrimonial.test.tsx
 // Descripción: B3 · fila patrimonial en Actividad (F06-01 B3, pendiente trasladado de B2; R1 v0.8 §II.5 «Actividad (fila, app)» y lámina L-6; decisión de Moisés afaac92d…, solo presentación). Para la compra (ADQUISICION_PATRIMONIAL con concepto COMPRA), un gasto de la compra (ADQUISICION_PATRIMONIAL con concepto ITP) y una mejora (MEJORA_PATRIMONIAL): nombre, icono de propiedad, signo «−» y etiqueta «no es gasto del mes», derivados del tipo del HECHO (HF-14). Control: un GASTO y un INGRESO siguen exactamente igual. Los Jest de F05 que cubren Actividad no se editan (se revalidan aparte).
 // Versión: 0.1.0 (F06 T1-F06 B3)
+// Versión: 0.1.1 (F06 T2-F06 PAG; ADAPTACIÓN por L-06 ampliada, «actividad_patrimonial.test.tsx» en la lista cerrada; §1.5 del mandato PAG con el
+//   párrafo 3 del literal): el importe principal de una MEJORA_PATRIMONIAL pasa a ser «tu parte» (−5.100 de 8.500) cuando la fila la trae;
+//   se conserva el discriminante anterior con un control sin `tu_parte` (−8.500, el total). Compra, gasto de la compra, GASTO e INGRESO no cambian.
 // ============================================================
 
 import './tiempos_rn';
@@ -52,7 +55,8 @@ test('nombre: compra, gasto de la compra y mejora (por el tipo del HECHO)', () =
 test('signo: −importe (sale de la cuenta) en compra, gasto de la compra y mejora', () => {
   expect(importeFila(COMPRA)).toBe('−200.000,00 €');
   expect(importeFila(ITP)).toBe('−12.000,00 €');
-  expect(importeFila(MEJORA)).toBe('−8.500,00 €');
+  expect(importeFila(MEJORA)).toBe('−5.100,00 €');                       // T2-F06 PAG (Q-VP-03): tu parte
+  expect(importeFila({ ...MEJORA, tu_parte: null })).toBe('−8.500,00 €');  // sin tu parte, el total (como en B3)
 });
 
 test('etiqueta «no es gasto del mes» en la línea secundaria, con la cuenta', () => {

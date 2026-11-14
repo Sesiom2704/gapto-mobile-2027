@@ -15,6 +15,9 @@
 # Version: 0.4.0 (F05-06 K-7, F05 §51.8): `CategoriaFila.icon_key` (aditivo).
 # Version: 0.5.0 (F05-06 M2 §A4): campos aditivos de la devolucion contextual:
 #   `devolucion_de` y `abono` en la fila; `devoluciones` en el detalle.
+# Version: 0.6.0 (F06 T2-F06 PAG, §1.5 del mandato; lista cerrada de F05, parrafo 3 del literal de PAG): campos
+#   ADITIVOS de la fila de una reforma (MEJORA_PATRIMONIAL; null en el resto): `propiedad` (vivienda),
+#   `salida_cuentas` (lo que salio de mis cuentas) y `posiciones` (deuda real en su sentido).
 # ============================================================
 
 from __future__ import annotations
@@ -114,6 +117,17 @@ class Referencia(_Estricto):
     enabled: bool
 
 
+class ReferenciaPropiedad(_Estricto):
+    id: uuid.UUID
+    nombre: str
+
+
+class PosicionFila(_Estricto):
+    sentido: Literal["ME_DEBE", "LE_DEBO"]
+    importe: str
+    tercero: str | None
+
+
 class CategoriaFila(Referencia):
     ruta: str
     icon_key: str | None = None
@@ -152,6 +166,9 @@ class FilaActividad(_Estricto):
     coincide_en: list[Literal["TERCERO", "CATEGORIA", "CONTEXTO", "NOTA", "IMPORTE"]] | None = None
     devolucion_de: OrigenDevolucion | None = None
     abono: Literal["PENDIENTE", "COBRADO"] | None = None
+    propiedad: ReferenciaPropiedad | None = None
+    salida_cuentas: str | None = None
+    posiciones: list[PosicionFila] | None = None
 
 
 class PaginaActividad(_Estricto):

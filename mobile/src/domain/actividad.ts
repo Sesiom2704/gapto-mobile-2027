@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-05 K3 §2.6)
 // Versión: 0.2.0 (F05-06 M2-B §B1; lámina DEV B1, D-DEV-07, P-DEV-03): una devolución se titula «Devolución · <compra>», su línea secundaria dice el tercero de la compra y la categoría, el importe va sin «+» ni «−» y bajo él «Devolución» o «Abono pendiente» (nunca la marca de reparto). Nada más cambia.
 // Versión: 0.3.0 (F06 T1-F06 B3 · fila patrimonial de Actividad, R1 v0.8 §II.5 y lámina L-6; autorizada en lista cerrada por la decisión de Moisés afaac92d…, solo presentación): para los hechos ADQUISICION_PATRIMONIAL y MEJORA_PATRIMONIAL (por el tipo del HECHO, HF-14) el importe va con signo «−» (sale de la cuenta) y la línea secundaria dice «Coste de la compra · no es gasto del mes» o «Mejora · no es gasto del mes» y la cuenta. Ni el periodo, ni los filtros, ni la búsqueda, ni el reparto, ni ningún otro tipo cambian.
+// Versión: 0.4.0 (F06 T2-F06 PAG, §1.5 del mandato; lista cerrada de F05 autorizada por el párrafo 3 del literal de PAG (decisión 3 del lote 35, bfbba1e6…); Q-VP-03): en una reforma (MEJORA_PATRIMONIAL) el importe principal es «tu parte» cuando el servidor la trae (sin ella, el total como antes) y `lineasReforma` da las líneas adicionales: «Salió de tu cuenta: −N €» solo si difiere de tu parte, y cada posición real en su sentido («<X> te debe N €» / «Le debes N € a <X>»), nunca inferida. Ningún otro tipo cambia.
 // ============================================================
 
 import type { ConsultaActividad, FilaActividad, TipoActividad } from '../api/cliente';
@@ -175,11 +176,27 @@ export function tituloTransferencia(r: FilaActividad): string | null {
 /** Importe con signo según el tipo (DAY-Q04, P-ACT-02). */
 export function importeFila(r: FilaActividad): string {
   if (esDevolucion(r)) return importeDevolucion(r);
+  if ((r.tipo as string) === 'MEJORA_PATRIMONIAL' && r.tu_parte !== null) return importePatrimonial(r.tu_parte);
   if (esPatrimonial(r.tipo)) return importePatrimonial(r.importe_total ?? '0');
   const total = formatearEur(r.importe_total ?? '0');
   if (r.tipo === 'GASTO') return `−${total}`;
   if (r.tipo === 'INGRESO') return `+${total}`;
   return total;
+}
+
+/** T2-F06 PAG (Q-VP-03): líneas adicionales de una reforma: la salida real si difiere de tu parte y las posiciones en su sentido. */
+export function lineasReforma(r: FilaActividad): string[] {
+  if ((r.tipo as string) !== 'MEJORA_PATRIMONIAL') return [];
+  const out: string[] = [];
+  const salida = r.salida_cuentas ?? null;
+  if (salida !== null && r.tu_parte !== null && Math.round(Number(salida) * 100) !== Math.round(Number(r.tu_parte) * 100)) {
+    out.push(Math.round(Number(salida) * 100) === 0 ? 'No salió de tu cuenta' : `Salió de tu cuenta: −${formatearEur(salida)}`);
+  }
+  for (const x of r.posiciones ?? []) {
+    const quien = x.tercero ?? 'otra persona';
+    out.push(x.sentido === 'ME_DEBE' ? `${x.tercero ?? 'Otra persona'} te debe ${formatearEur(x.importe)}` : `Le debes ${formatearEur(x.importe)} a ${quien}`);
+  }
+  return out;
 }
 
 /** Marca bajo el importe cuando es el total del hecho y no tu parte (P-ACT-03, R12). */

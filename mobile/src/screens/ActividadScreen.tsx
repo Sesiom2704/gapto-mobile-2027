@@ -22,6 +22,7 @@
 // Versión: 0.14.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // Versión: 0.15.0 (F06 T1 UX-1 · M-07, DM-06: la fecha usa el componente único `CampoFecha` (chips, campo dd/mm/aaaa con máscara y calendario en JS); se conservan el estado, las reglas de cada campo, los testID y los textos de validación; «Entre fechas»: solo fechas que existen y d ≤ h; el servidor ya rechaza 31/02, dt.date).
 // Versión: 0.16.0 (F06 T1-F06 B3 · fila patrimonial de Actividad, R1 v0.8 §II.5 y lámina L-6; autorizada en lista cerrada por la decisión de Moisés afaac92d…, solo presentación): la fila de un hecho ADQUISICION_PATRIMONIAL o MEJORA_PATRIMONIAL lleva el icono de propiedad (`iconoPatrimonial`, por el tipo del HECHO, HF-14). Nada más cambia.
+// Versión: 0.17.0 (F06 T2-F06 PAG, §1.5 del mandato; lista cerrada de F05 autorizada por el párrafo 3 del literal de PAG (decisión 3 del lote 35, bfbba1e6…); Q-VP-03): la fila de una reforma pinta, bajo la secundaria, las líneas de `lineasReforma` («Salió de tu cuenta: −N €» si difiere de tu parte y la posición en su sentido). Nada más cambia.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -46,6 +47,7 @@ import {
   Filtros,
   gruposActivos,
   importeFila,
+  lineasReforma,
   marcaReparto,
   mesDelPeriodo,
   NOMBRE_FILTRO_TIPO,
@@ -787,6 +789,9 @@ function FilaVista(p: { f: FilaActividad; conFecha: boolean; onPress: () => void
       <View style={{ flex: 1, gap: 2 }}>
         <Text style={[tipo.body, { color: c.textPrimary }]} numberOfLines={1}>{titulo}</Text>
         {secundaria ? <Text style={[tipo.caption, { color: c.textSecondary }]} numberOfLines={1}>{secundaria}</Text> : null}
+        {lineasReforma(f).map((l, i) => (
+          <Text key={i} testID={`fila-${f.id}-reforma-${i}`} style={[tipo.caption, { color: c.textSecondary }]} numberOfLines={1}>{l}</Text>
+        ))}
       </View>
       <View style={{ alignItems: 'flex-end', gap: 2 }}>
         <Text style={[tipo.body, { color: c.textPrimary, fontVariant: ['tabular-nums'] }]}>{importeFila(f)}</Text>

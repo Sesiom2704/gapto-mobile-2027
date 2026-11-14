@@ -48,6 +48,14 @@
 #   `devuelto`, `queda` y `neto` (derivados con las lecturas de OP-13; no se
 #   guardan) cuando el hecho tiene alguna devolucion activa. Una consulta por
 #   pagina (relaciones de los ids), sin joins que multipliquen filas.
+# Version: 0.4.0 (F06 T2-F06 PAG, §1.5 del mandato; lista cerrada de F05 autorizada por el parrafo 3 del literal de
+#   PAG, decision 3 del lote 35): para un hecho MEJORA_PATRIMONIAL el reparto y «tu parte» salen de su efecto
+#   VALOR_ACTIVO (el unico que tiene; la atribucion M-2 ya esta persistida), con las mismas reglas que GASTO e
+#   INGRESO. Campos ADITIVOS, solo para MEJORA_PATRIMONIAL (null en el resto): `propiedad` (id, nombre: la entidad
+#   PROPIEDAD de su AFECTA_A principal), `salida_cuentas` (lo que salio de mis cuentas: suma de sus movimientos
+#   conciliados, en positivo) y `posiciones` (sus posiciones de deuda reales, ME_DEBE o LE_DEBO, importe y
+#   tercero; nunca inferidas). Dos consultas mas por pagina. Ni el universo, ni el orden, ni los filtros, ni la
+#   busqueda, ni ningun otro tipo cambian; el Resultado del mes no se toca.
 # ============================================================
 
 from __future__ import annotations
@@ -284,7 +292,10 @@ def _componer(sesion: SesionMotor, ids: list[uuid.UUID]) -> dict[uuid.UUID, dict
             "(SELECT COALESCE(sum(a.importe_atribuido), 0) FROM gapto.efecto_atribuciones a WHERE a.efecto_id = e.id), "
             "(SELECT COALESCE(sum(a.importe_atribuido), 0) FROM gapto.efecto_atribuciones a "
             " WHERE a.efecto_id = e.id AND a.actor_id = %s) "
-            "FROM gapto.hecho_efectos e WHERE e.hecho_id = ANY(%s) AND e.tipo_efecto IN ('GASTO', 'INGRESO') "
+            "FROM gapto.hecho_efectos e JOIN gapto.hechos_financieros h ON h.id = e.hecho_id "
+            "JOIN gapto.tipos_hecho th ON th.id = h.tipo_hecho_id WHERE e.hecho_id = ANY(%s) "
+            "AND (e.tipo_efecto IN ('GASTO', 'INGRESO') "
+            "     OR (e.tipo_efecto = 'VALOR_ACTIVO' AND th.codigo = 'MEJORA_PATRIMONIAL')) "
             "ORDER BY e.hecho_id, e.id", (actor_self, ids))
         efectos: dict[uuid.UUID, list[tuple]] = {}
         for r in cur.fetchall():
@@ -304,6 +315,31 @@ def _componer(sesion: SesionMotor, ids: list[uuid.UUID]) -> dict[uuid.UUID, dict
         contextos: dict[uuid.UUID, dict] = {}
         for r in cur.fetchall():
             contextos.setdefault(r[0], {"id": r[1], "nombre": r[2], "enabled": r[3]})
+        # T2-F06 PAG (§1.5, lista cerrada): la vivienda de una reforma (AFECTA_A principal a una PROPIEDAD) y sus
+        # posiciones de deuda reales (nunca inferidas: solo las que el hecho tiene vinculadas a un efecto).
+        cur.execute(
+            "SELECT he.hecho_id, en.id, en.nombre FROM gapto.hecho_entidades he "
+            "JOIN gapto.entidades en ON en.id = he.entidad_id JOIN gapto.hechos_financieros h ON h.id = he.hecho_id "
+            "JOIN gapto.tipos_hecho th ON th.id = h.tipo_hecho_id "
+            "WHERE he.hecho_id = ANY(%s) AND th.codigo = 'MEJORA_PATRIMONIAL' AND en.tipo_entidad = 'PROPIEDAD' "
+            "AND he.tipo_relacion = 'AFECTA_A' AND he.principal ORDER BY he.hecho_id, en.id", (ids,))
+        propiedades: dict[uuid.UUID, dict] = {}
+        for r in cur.fetchall():
+            propiedades.setdefault(r[0], {"id": r[1], "nombre": r[2]})
+        cur.execute(
+            "SELECT v.hecho_id, d.tipo, ef.importe_delta, t.nombre FROM gapto.hecho_entidades v "
+            "JOIN gapto.derechos_obligaciones_financieras d ON d.entidad_id = v.entidad_id "
+            "JOIN gapto.hecho_efectos ef ON ef.id = v.efecto_id "
+            "LEFT JOIN gapto.actores_financieros a ON a.id = d.contraparte_actor_id "
+            "LEFT JOIN gapto.terceros t ON t.id = a.tercero_id "
+            "JOIN gapto.hechos_financieros h ON h.id = v.hecho_id JOIN gapto.tipos_hecho th ON th.id = h.tipo_hecho_id "
+            "WHERE v.hecho_id = ANY(%s) AND th.codigo = 'MEJORA_PATRIMONIAL' AND v.efecto_id IS NOT NULL "
+            "ORDER BY v.hecho_id, v.entidad_id", (ids,))
+        deudas: dict[uuid.UUID, list[dict]] = {}
+        for r in cur.fetchall():
+            deudas.setdefault(r[0], []).append({
+                "sentido": "ME_DEBE" if r[1] == "DERECHO_COBRO" else "LE_DEBO", "importe": _dinero(abs(r[2])),
+                "tercero": r[3]})
         cur.execute(
             "SELECT hm.hecho_id, c.id, c.nombre, c.enabled, m.importe FROM gapto.hecho_movimientos_tesoreria hm "
             "JOIN gapto.movimientos_tesoreria m ON m.id = hm.movimiento_tesoreria_id "
@@ -360,5 +396,9 @@ def _componer(sesion: SesionMotor, ids: list[uuid.UUID]) -> dict[uuid.UUID, dict
             "tu_parte": _dinero(tu_parte), "pendiente": _dinero(pendiente), "maestros_desactivados": desactivados,
             "devolucion_de": origenes.get(hid),
             "abono": None if hid not in origenes else ("COBRADO" if cuentas.get(hid) else "PENDIENTE"),
+            "propiedad": propiedades.get(hid),
+            "salida_cuentas": (_dinero(-sum((c["importe"] for c in cuentas.get(hid, [])), decimal.Decimal(0)))
+                               if tipo == "MEJORA_PATRIMONIAL" else None),
+            "posiciones": deudas.get(hid, []) if tipo == "MEJORA_PATRIMONIAL" else None,
         }
     return salida

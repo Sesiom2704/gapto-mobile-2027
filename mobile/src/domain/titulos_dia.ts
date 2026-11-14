@@ -5,6 +5,7 @@
 // Descripción: Títulos de Día a día por tipo de hecho (H-DIAG-02, F05 §70.2). Módulo propio, usado SOLO por ActividadScreen: `actividad.ts` y `registro.ts` (compartidos con el registro de los recorridos de G1) no cambian. Cada tipo de hecho que trae la lista tiene nombre propio: gasto, ingreso y entre cuentas los de siempre; la liquidación de una posición (REEMBOLSO) es «Cobro» si el dinero entra, «Pago» si sale y «Liquidación» sin movimiento; la condonación es «Perdón»; los demás tipos del catálogo, el suyo; un tipo desconocido usa el fallback explícito «Registro». Un cobro de derecho nunca se llama «Ingreso» ni «Entre cuentas». El título de la fila conserva la precedencia única de `tituloFila` (nota > «Tercero · Categoría» > categoría > tercero) y solo sustituye el último recurso «Tipo · importe» cuando el tipo no es de registro.
 // Versión: 0.1.0 (F05-D056 decisión 2 de Moisés del 2026-10-29: la corrección de 91cc41f sale de actividad.ts y registro.ts a este módulo)
 // Versión: 0.2.0 (F06 T1-F06 B3 · fila patrimonial de Actividad, R1 v0.8 §II.5 y lámina L-6; autorizada en lista cerrada por la decisión de Moisés afaac92d…, solo presentación): los hechos ADQUISICION_PATRIMONIAL y MEJORA_PATRIMONIAL tienen nombre propio («Compra de la propiedad», «Gasto de la compra · <concepto>», «Mejora · <nota>»; en el detalle, «Compra» y «Mejora»). La fuente es el tipo del HECHO (HF-14). Los demás tipos, sus títulos y la precedencia de `tituloFila` no cambian.
+// Versión: 0.3.0 (F06 T2-F06 PAG, §1.5 del mandato; lista cerrada de F05 autorizada por el párrafo 3 del literal de PAG (decisión 3 del lote 35, bfbba1e6…); Q-VP-03): una MEJORA_PATRIMONIAL con vivienda en la fila (`propiedad`) se titula «<nota> · <vivienda>» («Reforma · <vivienda>» sin nota). Sin `propiedad`, como antes.
 // ============================================================
 
 import type { FilaActividad } from '../api/cliente';
@@ -28,10 +29,12 @@ const NOMBRE_OTROS_TIPOS: Record<string, string> = {
 };
 
 /** Fila patrimonial (R1 v0.8 §II.5): nombre por el tipo del HECHO y el concepto que ya trae la fila (`nota` = concepto del hecho). */
-export function tituloPatrimonial(r: Pick<FilaActividad, 'tipo' | 'nota'>): string | null {
+export function tituloPatrimonial(r: Pick<FilaActividad, 'tipo' | 'nota' | 'propiedad'>): string | null {
   const t: string = r.tipo;
   if (!esPatrimonial(t)) return null;
   const nota = (r.nota ?? '').trim();
+  const vivienda = (r.propiedad?.nombre ?? '').trim();
+  if (t === 'MEJORA_PATRIMONIAL' && vivienda) return `${nota || 'Reforma'} · ${vivienda}`;
   if (t === 'MEJORA_PATRIMONIAL') return nota ? `Mejora · ${nota}` : 'Mejora';
   if (nota === 'COMPRA') return 'Compra de la propiedad';
   const concepto = (NOMBRE_CONCEPTO as Record<string, string | undefined>)[nota as ConceptoGasto];
