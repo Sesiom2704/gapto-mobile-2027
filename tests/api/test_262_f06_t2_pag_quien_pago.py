@@ -17,6 +17,9 @@
 #   Gasto de 8.000,00 de una propiedad compartida YO 50 / T 50 (fecha 2026-05-15) salvo indicacion. Cada rechazo
 #   comprueba el estado identico (huella de las tablas de B3). O-PAG-24 (Actividad de F05) va aparte, en test_264 (commit C3).
 # Version: 0.1.0 (F06 T2-F06 PAG N1)
+# Version: 0.1.1 (F06 T2-F06 PAG N1, tirada de mutantes del paso 9): QP-R con una PERSONA del owner que no es cotitular como
+#   pagador (el caso que alcanza la guarda «pagador dentro del reparto»; M-PAG-12 quedaba VIVO); O-PAG-14 mira tambien los
+#   nombres importados con «from … import» (M-PAG-24 quedaba VIVO con «from app.services import correcciones_service»).
 # ============================================================
 
 from __future__ import annotations
@@ -379,7 +382,8 @@ def test_qp_p5_mejora_pagada_por_el_cotitular_cuenta_en_el_coste(lab):
 
 
 @pytest.mark.parametrize("caso", ["no_cuadran", "le_debo_si_pague_todo", "me_debe_mas_que_su_parte",
-                                  "saldo_no_declarado", "me_debe_si_pago_el", "pagador_no_cotitular"])
+                                  "saldo_no_declarado", "me_debe_si_pago_el", "pagador_no_cotitular",
+                                  "pagador_persona_no_cotitular"])
 def test_qp_r_rechazos_sin_escritura(lab, caso):
     if caso == "no_cuadran":
         _rechazo(lab, _peticion(lab, pagos=[_yo(lab, "4000.00"), _t(lab, "3000.00")], saldos=[_saldo(lab, "NADA")]),
@@ -395,8 +399,14 @@ def test_qp_r_rechazos_sin_escritura(lab, caso):
     elif caso == "me_debe_si_pago_el":
         _rechazo(lab, _peticion(lab, pagos=[_t(lab, "8000.00")], saldos=[_saldo(lab, "ME_DEBE", "4000.00")]),
                  "SALDO_INCOHERENTE")
-    else:
+    elif caso == "pagador_no_cotitular":
         otro = h.crear_actor_tercero(lab.owner)
+        _rechazo(lab, _peticion(lab, pagos=[_yo(lab, "4000.00"), {"pagador": otro, "importe": "4000.00"}],
+                                saldos=[_saldo(lab, "NADA")]), "ENTRADA_INVALIDA")
+    else:                      # M-PAG-12: una PERSONA del owner que no es cotitular de la propiedad no paga por ella
+        persona = b.tercero(lab.cli, "Úrsula ajena")
+        otra = b.crear(lab.cli, b.alta(b.compartida([b.yo("50"), b.de(persona, "50")]), nombre="Otro piso"))
+        otro = next(x["actor_id"] for x in otra["titularidad"]["partes"] if not x["yo"])     # PERSONA con actor
         _rechazo(lab, _peticion(lab, pagos=[_yo(lab, "4000.00"), {"pagador": otro, "importe": "4000.00"}],
                                 saldos=[_saldo(lab, "NADA")]), "ENTRADA_INVALIDA")
 
@@ -515,7 +525,7 @@ def test_o_pag_14_h_pag_02_obligacion_frente_a_la_reserva_de_op21(lab, monkeypat
     for modulo in ("patrimonio/pagos.py", "patrimonio/lecturas_pag.py", "patrimonio/rutas_pag.py"):
         arbol = ast.parse((APP / modulo).read_text(encoding="utf-8"))
         importados = {n.module or "" for n in ast.walk(arbol) if isinstance(n, ast.ImportFrom)} | {
-            a.name for n in ast.walk(arbol) if isinstance(n, ast.Import) for a in n.names}
+            a.name for n in ast.walk(arbol) if isinstance(n, (ast.Import, ast.ImportFrom)) for a in n.names}
         assert not any(x in m for m in importados for x in prohibidos), (modulo, importados)
 
 
