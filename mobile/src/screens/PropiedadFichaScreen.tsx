@@ -7,6 +7,7 @@
 // Versión: 0.2.0 (F06 T1-F06 B2 N1 · D1 con adquisición y mejoras y su estado, lámina F06-01 v0.9 D1/D2): el coste de adquisición, las mejoras, la inversión acumulada (nunca completa: bajas no representadas) y tu parte atribuida salen de L-COSTE (`coste`, opcional: sin él, «No disponible» como en B1); cada uno con su estado («parcial» se etiqueta). Acciones nuevas: «Registrar la compra» (sin compra) y «Añadir un gasto de la compra» (con compra; C-COMPRA-03). Sin D4 Desglose (M-11). El resto de B1 no cambia.
 // Versión: 0.3.0 (F06 T1-F06 B3 N1): SOLO aditivo: prop opcional `onGastos` y la fila «Obras y gastos» (C1–C3 y corrección de clase de B3). Sin `onGastos` la ficha es la de B2.
 // Versión: 0.3.1 (F06 T1-F06 B3 ajuste N3 · decisión de Moisés 2026-11-13 «B3 alcance y CAT-VIV» v1.0): la fila pasa a «Reforma o mejora» (obras que suben el valor); los gastos corrientes y las reparaciones se registran desde «Registrar gasto».
+// Versión: 0.4.0 (F06 T2-F06 · B1-R (L-01/L-01b), mandato §4.6): SOLO aditivo: prop opcional `onCorregirInicio` y la fila «Corregir desde cuándo» (C-PROP-03bis) con el inicio vigente, visible solo si el servidor la ofrece (`inicio_titularidad.inicio_corregible`); el cliente no la deduce.
 // ============================================================
 
 import React from 'react';
@@ -43,6 +44,8 @@ export function PropiedadFichaScreen(p: {
   onGastoCompra?: () => void;
   /** B3: obras y gastos de la propiedad (mejora, reparación, gasto corriente y mejora antigua). */
   onGastos?: () => void;
+  /** B1-R: corregir el inicio de la titularidad (C-PROP-03bis). */
+  onCorregirInicio?: () => void;
 }) {
   const { c } = useTema();
   const inset = useSafeAreaInsets();
@@ -99,6 +102,9 @@ export function PropiedadFichaScreen(p: {
           <FilaLista testID="prop-accion-valor" titulo="Revisar valor" detalle={sinDatos ? 'Para saber lo que vale' : undefined} onPress={p.onRevisarValor} />
           <FilaLista testID="prop-accion-historico" titulo="Histórico de valoraciones" detalle={`${v.valoraciones.length} ${v.valoraciones.length === 1 ? 'valoración' : 'valoraciones'}`} onPress={p.onHistorico} />
           <FilaLista testID="prop-accion-titularidad" titulo="Titularidad" detalle={textoTitularidad(v.titularidad)} onPress={p.onTitularidad} />
+          {p.onCorregirInicio && v.inicio_titularidad?.inicio_corregible === true && v.inicio_titularidad.inicio ? (
+            <FilaLista testID="prop-accion-inicio" titulo="Corregir desde cuándo" detalle={`Ahora empieza el ${diaMesAnioIso(v.inicio_titularidad.inicio)}`} onPress={p.onCorregirInicio} />
+          ) : null}
           <FilaLista testID="prop-accion-editar" titulo="Editar datos" ultima onPress={p.onEditar} />
         </Tarjeta>
       </ScrollView>

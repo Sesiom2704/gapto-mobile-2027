@@ -5,6 +5,7 @@
 // Descripción: Alta de propiedad (F06-01 B1 · C-PROP-01; lámina F06-01 v0.9 A1–A3, desde Patrimonio «+»). Tarea inmersiva en tres pasos: A1 Datos (solo nombre y tipo obligatorios, tipo sin preseleccionar, fecha de adquisición opcional con «No la sé», «Más datos» plegados; garaje y trastero «No lo sé» = desconocido), A2 ¿De quién es? (cuatro modos, suma exacta del 100 %, «Desde» propuesta con la adquisición si se conoce) y A3 «Propiedad guardada» con los tres caminos (M-1): registrar la compra y la compra histórica llegan con B2 y aparecen como no disponibles; «Más tarde» deja el coste «no disponible». La `intencion_id` se sella al abrir: un reintento tras un resultado indeterminado reutiliza la MISMA (replay idéntico, sin duplicar). Sin dirección (B5 fuera de B1).
 // Versión: 0.1.0 (F06 Lote 12 · B1 Propiedad, N1)
 // Versión: 0.2.0 (F06 T1 UX-1 · M-07, DM-06: la fecha usa el componente único `CampoFecha` (chips, campo dd/mm/aaaa con máscara y calendario en JS); se conservan el estado, las reglas de cada campo, los testID y los textos de validación; adquisición con «No la sé» como opción del componente; vacía = desconocida).
+// Versión: 0.4.0 (F06 T2-F06 · B1-R (L-01/L-01b), mandato §4.2 y §4.4): (N3 dentro del N1, Q-B1R-06) avisos A1 («Desde» posterior a la adquisición conocida, con «Usar la fecha de adquisición», que rellena «Desde») y A2 (adquisición «No la sé» con un modo con titularidad) bajo el editor de titularidad, solo presentación: no cambian el DTO, el valor por defecto ni el contrato del alta. (L-01b) Cota «Desde» ≤ hoy: con «Desde» futuro no se puede guardar y se muestra el mismo texto que el servidor (FECHA_FUTURA). Prop opcional `ahora` (por defecto, el reloj del dispositivo).
 // Versión: 0.3.0 (F06 LOTE30 punto 1 a, observación de Moisés en ENV-DEV e1d2386; N3 de cliente): A3 dejaba «Registrar la compra» como no disponible («Llega con la compra»), resto de B1 cuando B2 aún no existía. Con `onRegistrarCompra` la fila es pulsable y abre la compra de B2 (CompraScreen) sobre la propiedad recién creada. «La compré hace tiempo» sigue sin estar en la app: queda como no disponible y un texto explica por qué y qué hacer. Nada más cambia.
 // ============================================================
 
@@ -15,11 +16,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ClienteApi } from '../api/cliente';
 import type { ClientePropiedades, VistaPropiedad } from '../api/propiedades';
-import { BotonPrimario, Chip, EstadoDato } from '../components/Basicos';
+import { BotonPrimario, BotonTexto, Chip, EstadoDato } from '../components/Basicos';
 import { CampoFecha } from '../components/CampoFecha';
 import { AvisoCaja, CabeceraTarea, Caja, Campo, CampoTexto, estilosFormulario as ef } from '../components/Formulario';
 import { EditorTitularidad } from '../components/Titularidad';
-import { ddmmaaaaAIso } from '../domain/fechas';
+import { ddmmaaaaAIso, isoLocal } from '../domain/fechas';
+import { avisoA1, avisoA2, desdeFuturo, TEXTO_DESDE_FUTURO } from '../domain/inicio_titularidad';
 import {
   datosWire,
   faltaDatos,
@@ -49,6 +51,8 @@ export function PropiedadAltaScreen(p: {
   onCerrar: (creada: VistaPropiedad | null) => void;
   /** A3 · «Registrar la compra»: abre la compra de B2 sobre la propiedad recién creada. Sin ella, la fila queda como no disponible. */
   onRegistrarCompra?: (creada: VistaPropiedad) => void;
+  /** B1-R (L-01b): reloj para la cota «Desde» ≤ hoy (por defecto, el del dispositivo). */
+  ahora?: () => Date;
 }) {
   const { c } = useTema();
   const inset = useSafeAreaInsets();
@@ -66,7 +70,11 @@ export function PropiedadAltaScreen(p: {
 
   const faltasDatos = faltaDatos(datos);
   const adquisicion = datos.adquisicion.trim() ? ddmmaaaaAIso(datos.adquisicion) : null;
+  const desdeIso = tit.desde.trim() ? ddmmaaaaAIso(tit.desde.trim()) : null;
+  const futuro = tit.modo !== null && tit.modo !== 'DESCONOCIDA' && desdeFuturo(desdeIso, isoLocal((p.ahora ?? (() => new Date()))()));
   const faltasTit = faltaTitularidad(tit, adquisicion);
+  const textoA1 = tit.modo !== null && tit.modo !== 'DESCONOCIDA' ? avisoA1(adquisicion, desdeIso) : null;
+  const textoA2 = avisoA2(adquisicion, tit.modo);
 
   const continuarDatos = () => {
     if (faltasDatos.length > 0) return;
@@ -76,7 +84,7 @@ export function PropiedadAltaScreen(p: {
   };
 
   const guardar = async () => {
-    if (ocupado || faltasTit.length > 0 || faltasDatos.length > 0) return;
+    if (ocupado || faltasTit.length > 0 || faltasDatos.length > 0 || futuro) return;
     setOcupado(true);
     setAviso(null);
     const r = await p.propiedades.altaPropiedad({ intencion_id: idAlta.current, ...datosWire(datos), titularidad: titularidadWire(tit) });
@@ -163,11 +171,19 @@ export function PropiedadAltaScreen(p: {
         ) : (
           <>
             <EditorTitularidad cliente={p.cliente} form={tit} onCambiar={setTit} nuevaClave={nuevaClave} ayudaDesde={adquisicion ? 'fecha de adquisición' : undefined} />
+            {textoA1 ? (
+              <View testID="prop-alta-aviso-a1" style={{ gap: espacio.xs }}>
+                <Text testID="prop-alta-aviso-a1-texto" style={[tipo.footnote, { color: c.warningText }]}>{textoA1}</Text>
+                <BotonTexto testID="prop-alta-usar-adquisicion" titulo="Usar la fecha de adquisición" onPress={() => setTit({ ...tit, desde: datos.adquisicion.trim() })} />
+              </View>
+            ) : null}
+            {textoA2 ? <Text testID="prop-alta-aviso-a2" style={[tipo.footnote, { color: c.textSecondary }]}>{textoA2}</Text> : null}
+            {futuro ? <Text testID="prop-alta-desde-futuro" style={[tipo.footnote, { color: c.warningText }]}>{TEXTO_DESDE_FUTURO}</Text> : null}
             <BotonPrimario
               testID="prop-alta-guardar"
               titulo={ocupado ? 'Guardando…' : 'Guardar propiedad'}
               cargando={ocupado}
-              deshabilitado={faltasTit.length > 0}
+              deshabilitado={faltasTit.length > 0 || futuro}
               ayuda={faltasTit.length > 0 ? `Falta: ${faltasTit.join(', ')}` : undefined}
               onPress={() => void guardar()}
             />

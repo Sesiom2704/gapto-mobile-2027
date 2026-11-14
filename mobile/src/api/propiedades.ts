@@ -4,6 +4,7 @@
 // Ruta: mobile/src/api/propiedades.ts
 // Descripción: Cliente HTTP de B1 · Propiedad (F06-01; contrato HTTP de B1 v1.0 del Lote 12, sobre C-PROP-01..04 y L-PROP). Lecturas GET /v1/propiedades y /v1/propiedades/{id}; escrituras POST /v1/propiedades (alta), …/{id}/editar, …/{id}/titularidad (cambio desde una fecha, con `titularidad_vista` completa: PR1-04), …/{id}/valoraciones (alta). Todas las escrituras usan la clasificación 'CAMBIO' (indeterminado = revisar el estado antes de repetir; el reintento IDÉNTICO con la misma `intencion_id` es un replay). Importes, porcentajes y superficies viajan como texto exacto. Va aparte de `ClienteApi` para no ampliar su interfaz (los dobles de los tests existentes no cambian).
 // Versión: 0.1.0 (F06 Lote 12 · B1 Propiedad, N1)
+// Versión: 0.2.0 (F06 T2-F06 · B1-R (L-01/L-01b)): el detalle trae `inicio_titularidad` (inicio, inicio_corregible —la oferta de «Corregir desde cuándo» la decide el servidor— y primera_version); `corregirInicio` (POST …/{id}/titularidad/inicio, C-PROP-03bis, clasificación 'CAMBIO') y `gastosAfectados` (GET …/{id}/titularidad/inicio/afectados, `nuevo_desde` opcional, solo lectura). Opcionales en la interfaz para que los dobles de los tests existentes no cambien.
 // ============================================================
 
 import type { MetodoValoracion, ModoTitularidad, ParteWire, TipoPropiedad, TitularidadWire, TriEstado } from '../domain/propiedad';
@@ -57,6 +58,41 @@ export interface VistaPropiedad {
   valor_compra: Valoracion | null;
   cuota_segun_titularidad: { importe: string; porcentaje: string; etiqueta: 'VISTA_ESTRUCTURAL' } | null;
   valoraciones: Valoracion[];
+  /** B1-R: inicio de la titularidad (primera versión). Opcional para los dobles anteriores a B1-R. */
+  inicio_titularidad?: InicioTitularidad;
+}
+
+export interface InicioTitularidad {
+  inicio: string | null;
+  inicio_corregible: boolean;
+  primera_version: { actor_id: string; porcentaje: string }[];
+}
+
+export interface PayloadCorregirInicio {
+  intencion_id: string;
+  row_version_esperada: number;
+  nuevo_desde: string;
+  inicio_visto: string;
+  primera_version_vista: { actor_id: string; porcentaje: string }[];
+  motivo?: string | null;
+}
+
+export interface GastoAfectado {
+  hecho_id: string;
+  fecha: string;
+  concepto: string | null;
+  importe: string | null;
+  tipo_hecho: string;
+  clase: string;
+  atribucion: 'TITULARIDAD' | 'MANUAL' | 'NO_LO_SE' | 'OTRO';
+}
+
+export interface Afectados {
+  propiedad_id: string;
+  inicio_vigente: string | null;
+  nuevo_desde: string | null;
+  hechos: GastoAfectado[];
+  recuento: number;
 }
 
 export interface FilaPropiedad {
@@ -127,6 +163,8 @@ export interface ClientePropiedades {
   editarPropiedad(id: string, p: PayloadEditarPropiedad): Promise<Respuesta<ResultadoPropiedad>>;
   cambiarTitularidad(id: string, p: PayloadCambioTitularidad): Promise<Respuesta<ResultadoPropiedad>>;
   altaValoracion(id: string, p: PayloadValoracion): Promise<Respuesta<ResultadoPropiedad>>;
+  corregirInicio?(id: string, p: PayloadCorregirInicio): Promise<Respuesta<ResultadoPropiedad>>;
+  gastosAfectados?(id: string, nuevoDesde: string | null): Promise<Respuesta<{ afectados: Afectados }>>;
 }
 
 const PROP = '/v1/propiedades';
@@ -142,6 +180,9 @@ export function crearClientePropiedades(cfg: ConfigApi, fetchImpl: typeof fetch 
     editarPropiedad: (id, p) => llamar(`${una(id)}/editar`, post(p), 'CAMBIO'),
     cambiarTitularidad: (id, p) => llamar(`${una(id)}/titularidad`, post(p), 'CAMBIO'),
     altaValoracion: (id, p) => llamar(`${una(id)}/valoraciones`, post(p), 'CAMBIO'),
+    corregirInicio: (id, p) => llamar(`${una(id)}/titularidad/inicio`, post(p), 'CAMBIO'),
+    gastosAfectados: (id, nuevoDesde) =>
+      llamar(`${una(id)}/titularidad/inicio/afectados${nuevoDesde ? `?nuevo_desde=${encodeURIComponent(nuevoDesde)}` : ''}`, { method: 'GET' }, false),
   };
 }
 
