@@ -46,6 +46,9 @@
 #              DISCRIMINACIÓN CONTRA 0350 (WM 12C.2). Sobre head 0350 fallan la
 #              huella, el contrato, los negativos que dependen de columnas nuevas
 #              y la denegación de DELETE.
+# Versión: 0.6.0  -- T2-F06 CAT-VIV N1 (literal de autorizacion v1.1): la huella CURRENT distingue
+#                   tambien el head 0353 por su marca (categorias_financieras.asociada_vivienda);
+#                   0351 y 0352 siguen exigidas exactas en bases detenidas en esos heads.
 # Versión: 0.5.0  -- F03 · N1 de 0352 (mandato v1.4, AJ-0352-06): la huella CURRENT
 #                   distingue el head esperado (0351 o 0352) por su marca; 0351 sigue exigida en
 #                   una base detenida en 0351.
@@ -143,11 +146,20 @@ def _head_0352(db: psycopg.Connection) -> bool:
                     "AND NOT attisdropped") == 1
 
 
+def _head_0353(db: psycopg.Connection) -> bool:
+    """0353 aplicada (marca: categorias_financieras.asociada_vivienda)."""
+    return _uno(db, "SELECT count(*) FROM pg_catalog.pg_attribute WHERE attrelid = "
+                    "'gapto.categorias_financieras'::regclass AND attname = 'asociada_vivienda' "
+                    "AND NOT attisdropped") == 1
+
+
 def test_0351_huella_d111_current(db: psycopg.Connection) -> None:
     # 0352 (AJ-0352-06, R-0352-14): el head esperado se DISTINGUE por su marca; sobre una
     # base detenida en 0351 se sigue exigiendo exactamente la referencia de 0351, y sobre 0352
     # la de 0352 (que test_047 compara ademas campo a campo con 0351).
-    referencia = _runner().HUELLAS_D111_POR_HEAD["0352" if _head_0352(db) else "0351"]
+    # T2-F06 CAT-VIV: con 0353 aplicada, la de 0353 (test_048 la compara con 0352).
+    head = "0353" if _head_0353(db) else ("0352" if _head_0352(db) else "0351")
+    referencia = _runner().HUELLAS_D111_POR_HEAD[head]
     sql = (RAIZ / "scripts" / "postgres" / "huellas_d111.sql").read_text(encoding="utf-8")
     cursor = db.execute(sql)
     observadas = dict(zip([d.name for d in cursor.description], cursor.fetchone()))

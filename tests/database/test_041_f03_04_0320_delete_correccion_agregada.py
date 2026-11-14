@@ -31,6 +31,8 @@
 #              y bajo FORCE ROW LEVEL SECURITY. Si el rol de conexión del arnés
 #              no puede asumir gapto_runtime, esos tests SE SALTAN con mensaje
 #              explícito, nunca en silencio (mismo criterio que test_038).
+# Versión: 0.1.6  -- T2-F06 CAT-VIV N1 (literal de autorizacion v1.1, ampliacion de L-06 solo para este
+#                   bloque): el conjunto finito admite 788 (0353, asociada_vivienda); 787 se conserva.
 # Versión: 0.1.5  -- F03 · N1 de 0352 (mandato v1.4, AJ-0352-06): el conjunto finito de
 #                   columnas admite 787 (0351 + 6 de 0352); 781 se conserva para bases en 0351.
 # Versión: 0.1.4  -- F06-01 B0 (F06-D002): matriz DELETE finita por head (41 en 0351) y recuento
@@ -370,7 +372,8 @@ def test_0320_matriz_efectiva_de_runtime(db: psycopg.Connection) -> None:
 #   indices  285 estado de 0320 / 287 con los dos parciales de 0330
 # F06-D002 / 0351: +3 columnas (causa_valor_activo, habitacion, modo_reparto).
 # F06-01 B2-B3 / 0352: +6 columnas de declaracion de completitud en propiedades.
-COLUMNAS_AUTORIZADAS = (772, 777, 778, 781, 787)
+# T2-F06 CAT-VIV / 0353: +1 columna (categorias_financieras.asociada_vivienda).
+COLUMNAS_AUTORIZADAS = (772, 777, 778, 781, 787, 788)
 INDICES_AUTORIZADOS = (285, 287)
 
 

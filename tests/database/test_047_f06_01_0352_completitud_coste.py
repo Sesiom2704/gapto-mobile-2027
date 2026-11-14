@@ -27,6 +27,9 @@
 #              DISCRIMINACIÓN CONTRA 0351 (WM 12C.2). Sobre head 0351 fallan la
 #              huella, el contrato y todos los negativos (no existen las
 #              columnas): el módulo solo pasa con 0352 aplicada.
+# Versión: 0.2.0  -- T2-F06 CAT-VIV N1 (literal de autorizacion v1.1): la huella CURRENT distingue el
+#                   head 0353 por su marca (asociada_vivienda) y exige la de 0353; sobre una base
+#                   detenida en 0352 sigue exigiendo exactamente la de 0352.
 # Versión: 0.1.0  -- F03 · N1 de 0352 (mandato v1.4, lote 22; AJ-0352-06). Procede del prototipo
 #                   del lote 18 (Parte C), revisado y reejecutado en este N1. Nuevo:
 #                   test_0352_force_rls_restaurado (el mutante M-DDL-01 sobrevivia sin el).
@@ -92,8 +95,15 @@ def _huellas(db: psycopg.Connection) -> dict:
 
 
 # ------------------------------------------------------------------ huella y desviación
+def _head_0353(db: psycopg.Connection) -> bool:
+    """0353 aplicada (marca: categorias_financieras.asociada_vivienda)."""
+    return _uno(db, "SELECT count(*) FROM pg_catalog.pg_attribute WHERE attrelid = "
+                    "'gapto.categorias_financieras'::regclass AND attname = 'asociada_vivienda' "
+                    "AND NOT attisdropped") == 1
+
+
 def test_0352_huella_d111_current(db: psycopg.Connection) -> None:
-    referencia = _runner().HUELLAS_D111_POR_HEAD["0352"]
+    referencia = _runner().HUELLAS_D111_POR_HEAD["0353" if _head_0353(db) else "0352"]
     observadas = _huellas(db)
     assert {k: observadas[k] for k in referencia} == referencia
 

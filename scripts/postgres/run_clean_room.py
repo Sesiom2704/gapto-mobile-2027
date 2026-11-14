@@ -56,6 +56,17 @@
 # ROLE DRIFT, que es correcto y deliberado. En ese caso se usa --desde 0002
 # y el clean-room demuestra reproducibilidad DE LA BASE, no de la instancia.
 # Reproducir tambien la instancia exige un proyecto nuevo.
+# Versión: 0.19.0 -- F06 T2-F06 · CAT-VIV N1 (mandato v1.1 §2.1.8; L-03, reapertura
+#                    parcial de F03 por 0353). Se DECLARA el head 0353:
+#                    CONTRATO_0353 = 0352 (la columna NOT NULL DEFAULT false la
+#                    cubre h1; ningun CHECK, indice, ACL ni trigger), tests de
+#                    0352 + test_048 exigidos, y referencia D-111 medida en
+#                    laboratorio local 17.5 UTC (provisional hasta que la
+#                    confirme el humo de Neon). Cambia solo h1 y los recuentos
+#                    (788 columnas); h2 identica en PostgreSQL <= 17 (los NOT
+#                    NULL no estan en pg_constraint). Se CONSERVAN intactos el
+#                    contrato, los tests y la referencia de 0352 (R-0352-14).
+#                    Sin --head el contrato por defecto pasa a 0353.
 # Versión: 0.18.0 -- F03 · N1 de 0352 (mandato v1.4, lote 22; D-208; dictamen de
 #                    diseno 0352 AJ-0352-06). Se DECLARA el head 0352:
 #                    CONTRATO_0352 = 0351 (6 columnas y 3 CHECK los cubren h1/h2;
@@ -356,6 +367,11 @@ CONTRATO_0351 = {**CONTRATO_0350, "runtime_delete": 41}
 # h1 y h2; ACL (h7), policies, triggers, funciones e indices identicos a 0351.
 CONTRATO_0352 = {**CONTRATO_0351}
 
+# T2-F06 CAT-VIV / 0353 (L-03): una columna boolean NOT NULL DEFAULT false en
+# categorias_financieras. Ningun campo del CONTRATO cambia: la columna la cubre
+# h1; sin CHECK, indice, ACL, policy, trigger ni funcion.
+CONTRATO_0353 = {**CONTRATO_0352}
+
 CONTRATOS_POR_HEAD = {
     "0300": CONTRATO_0300,
     "0310": CONTRATO_0310,
@@ -365,10 +381,11 @@ CONTRATOS_POR_HEAD = {
     "0350": CONTRATO_0350,
     "0351": CONTRATO_0351,
     "0352": CONTRATO_0352,
+    "0353": CONTRATO_0353,
 }
 
 # Head vigente de la cadena cuando no se declara --head.
-CONTRATO_POR_DEFECTO = CONTRATO_0352
+CONTRATO_POR_DEFECTO = CONTRATO_0353
 
 
 # ------------------------------------------------------------
@@ -399,11 +416,18 @@ TESTS_EXIGIDOS_POR_HEAD = {
              "test_045_f03_06_0350_tipo_hecho_condonacion",
              "test_046_f06_01_0351_base_patrimonial",
              "test_047_f06_01_0352_completitud_coste"),
+    "0353": ("test_041_f03_04_0320_delete_correccion_agregada",
+             "test_042_f03_04_0330_geolocalizacion_y_presentacion",
+             "test_043_f03_05_0340_categoria_icon_key",
+             "test_045_f03_06_0350_tipo_hecho_condonacion",
+             "test_046_f06_01_0351_base_patrimonial",
+             "test_047_f06_01_0352_completitud_coste",
+             "test_048_f06_cat_viv_0353"),
 }
 
 # Heads cuya certificacion exige comparar las ocho huellas D-111 contra una
 # REFERENCIA aprobada. Sin referencia declarada NO hay PASS: fail-closed.
-HEADS_QUE_EXIGEN_REFERENCIA_D111 = ("0330", "0340", "0350", "0351", "0352")
+HEADS_QUE_EXIGEN_REFERENCIA_D111 = ("0330", "0340", "0350", "0351", "0352", "0353")
 
 # Referencia aprobada de las ocho huellas D-111 por head (D-187 DEC-8).
 #
@@ -492,6 +516,22 @@ HUELLAS_D111_POR_HEAD = {
         "h7_grants":      "933a65b3869cc2030163e60c34e9b163",
         "h8_vistas":      "bc29f409364899f99402b8ed06f77149",
         "recuentos":      "787/652/287/82/58/28/1024/3",
+    },
+    # T2-F06 CAT-VIV / 0353 (L-03). Medida en laboratorio local 17.5 en UTC sobre
+    # 0001..0352 + 0353; provisional hasta que la confirme el humo de Neon.
+    # Cambia h1 (+ asociada_vivienda boolean NOT NULL DEFAULT false); h2 igual a
+    # 0352 (en PostgreSQL <= 17 el NOT NULL no esta en pg_constraint y el DEFAULT
+    # lo cubre h1); h3..h8 = 0352.
+    "0353": {
+        "h1_columnas":    "5139e53d2f4a86e66ce588c7b782bc74",
+        "h2_constraints": "ec064731abc0de593f10c9219ef9c5b9",
+        "h3_indices":     "aceb34183f2156348a3c58ff033c1d53",
+        "h4_policies":    "e1b1dd81a40b8e10c7f1744b25611fb1",
+        "h5_triggers":    "db650e488abe0226eb33cbd1e0f63c33",
+        "h6_funciones":   "84f053df8ccca616b88bdd9ff8ceb532",
+        "h7_grants":      "933a65b3869cc2030163e60c34e9b163",
+        "h8_vistas":      "bc29f409364899f99402b8ed06f77149",
+        "recuentos":      "788/652/287/82/58/28/1024/3",
     },
 }
 
