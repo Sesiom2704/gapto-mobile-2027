@@ -55,6 +55,10 @@
 #   barrido (lista cerrada): C-MEJ-01 con derecho de cobro confirmado (OP-22 + posicion + auditoria), C-MEJ-02 (OP-22
 #   sin pago) y C-MEJ-03 (tipo del hecho, efecto destino, atribuciones, vinculo y retiradas, con auditoria por paso).
 #   Ninguna ruta ni comando previo cambia.
+# Version: 0.5.1 (F06 T2-F06 · B1-R; adaptacion declarada y minima por L-06 ampliada, decision de Moises del lote 34
+#   `d593a15d…`, solo test_inventario_post_cerrado): la ruta POST nueva de C-PROP-03bis se clasifica en el
+#   inventario cerrado como ajena a F05-06, con su bateria de atomicidad propia (test_260, O-B1R-19). Ninguna ruta
+#   ni comando previo cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -561,6 +565,8 @@ AJENAS_A_F05_06 = {
     "/v1/afinidades": "F05-05", "/v1/afinidades/{afinidad_id}/retirar": "F05-05",
     "/v1/propiedades/{propiedad_id}/completitud": "F06-01 B2 C-PROP-05: consumidor de 0352 no habilitado (404, O10.29; "
                                                   "test_252)",
+    "/v1/propiedades/{propiedad_id}/titularidad/inicio": "F06 T2-F06 B1-R C-PROP-03bis: atomicidad propia (savepoint "
+                                                          "de comando; test_260 O-B1R-19 y O-B1R-05..08)",
 }
 
 

@@ -14,6 +14,10 @@
 #   - O10.28: inventario cerrado de los writers de las columnas de 0352 (solo C-PROP-05 y C-COMPRA-01/03, en el
 #     modulo propio de B2) y O11.22 de B2 (la funcion unica del 0P, importada; cinco llamadas en backend/app).
 # Version: 0.1.0 (F06 T1-F06 B2 N1)
+# Version: 0.1.1 (F06 T2-F06 · B1-R; adaptacion declarada y minima por L-06 ampliada, decision de Moises del lote 34
+#   `d593a15d…`): O11.22 admite la SEXTA llamada productiva al 0P, la de C-PROP-03bis (servicio.py: 4 -> 5), cada
+#   una como primera llamada de su writer (lo comprueba test_233). El nombre de la funcion se conserva: lo citan
+#   los arneses de B1 y B2 como discriminante. Nada mas cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -446,7 +450,8 @@ def test_o10_28_writers_de_las_columnas_de_0352():
 
 
 def test_o11_22_cinco_llamadas_a_la_funcion_unica_del_0p():
-    assert _llamadas("bloquear_intencion_propiedad") == {"backend/app/propiedades/servicio.py": 4,
+    # B1-R (L-06): seis llamadas productivas; el nombre de la funcion se conserva (discriminante de los arneses)
+    assert _llamadas("bloquear_intencion_propiedad") == {"backend/app/propiedades/servicio.py": 5,
                                                          "backend/app/patrimonio/completitud.py": 1}
     texto = (RAIZ / "backend" / "app" / "patrimonio" / "completitud.py").read_text(encoding="utf-8")
     assert "from app.propiedades.servicio import bloquear_intencion_propiedad" in texto

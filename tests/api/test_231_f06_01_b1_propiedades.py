@@ -28,6 +28,10 @@
 #       texto, lista.
 #     - B1 no escribe hechos, efectos, movimientos ni atribuciones.
 # Version: 0.1.0 (F06-01 B1, lote 12)
+# Version: 0.1.1 (F06 T2-F06 · B1-R; cambio por la reapertura L-01b, mandato B1-R §6.2 a): en
+#   test_titularidad_negativos, la propiedad `futura` (primera version desde 2026-11-01, posterior a hoy) ya no se
+#   crea por el alta, que rechaza «Desde» futuro: el mismo estado se fija con SQL bajo gapto_owner. Las aserciones no
+#   cambian.
 # ============================================================
 
 from __future__ import annotations
@@ -401,7 +405,14 @@ def test_titularidad_negativos(t):
     owner, _, cli = t
     ana = b.tercero(cli, "Ana")
     p = b.crear(cli, b.alta(b.solo_mia("2026-01-01")))
-    futura = b.crear(cli, b.alta(b.solo_mia("2026-11-01"), fecha_adquisicion="2026-11-01"))
+    # B1-R (L-01b, mandato §6.2 a): el alta ya no admite «Desde» futuro; el MISMO estado (primera version desde
+    # 2026-11-01 y adquisicion 2026-11-01) se fija con SQL bajo gapto_owner sobre un alta con «Desde» = hoy.
+    futura = b.crear(cli, b.alta(b.solo_mia(b.HOY), fecha_adquisicion=b.HOY))
+    h.como_owner(owner, "UPDATE gapto.entidad_participaciones SET vigente_desde = DATE '2026-11-01' "
+                        "WHERE entidad_id = %s", (futura["id"],))
+    h.como_owner(owner, "UPDATE gapto.propiedades SET fecha_adquisicion = DATE '2026-11-01' "
+                        "WHERE entidad_id = %s", (futura["id"],))
+    futura = b.leer(cli, futura["id"])
     desconocida = b.crear(cli, b.alta({"modo": "DESCONOCIDA"}))
     casos = [
         (p, b.cambio(p, b.solo_mia("2026-10-09")), 422, "CAMBIO_RETROACTIVO_SIN_POLITICA"),

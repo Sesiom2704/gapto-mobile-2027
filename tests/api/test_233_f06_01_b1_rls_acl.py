@@ -21,6 +21,10 @@
 #   cada una como primera llamada con `sesion` de su writer (O11.22); sigue prohibiendo DELETE, SET ROLE y
 #   cualquier otro advisory en backend/app/propiedades; el literal 'gapto:INTENCION' solo vive en esa funcion
 #   dentro de backend/app y su espacio es distinto del de OP-22 (O11.24).
+# Version: 0.2.1 (F06 T2-F06 · B1-R; adaptacion declarada y minima por L-06 ampliada, decision de Moises del lote 34
+#   `d593a15d…`): O11.22 admite el QUINTO writer de B1, C-PROP-03bis `corregir_inicio` (clave intencion_id), con
+#   el 0P como primera llamada con `sesion`, igual que los otros cuatro. El nombre del test se conserva: lo citan
+#   los arneses de B1 y B2. DELETE, SET ROLE y cualquier otro advisory siguen prohibidos. Nada mas cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -100,7 +104,8 @@ SQL_0P = ("SELECT pg_advisory_xact_lock(hashtext('gapto:INTENCION'), "
           "hashtext(current_setting('gapto.owner_user_id') || ':' || %s::text))")
 #: writer de B1 -> argumento que es la clave del 0P (§I.5.4, punto 2)
 CLAVES_0P = {"alta": "entidad_id", "editar": "intencion_id", "cambiar_titularidad": "intencion_id",
-             "alta_valoracion": "valoracion_id"}
+             "alta_valoracion": "valoracion_id",
+             "corregir_inicio": "intencion_id"}  # B1-R (L-06): C-PROP-03bis
 
 
 def _definicion_0p() -> ast.FunctionDef:
@@ -125,7 +130,8 @@ def test_codigo_de_b1_sin_delete_set_role_ni_advisory():
 
 
 def test_o11_22_funcion_unica_del_0p_y_cuatro_llamadas_en_primer_lugar():
-    """O11.22: una definicion con la sentencia exacta y cuatro llamadas, una por writer y antes que nada."""
+    """O11.22: una definicion con la sentencia exacta y una llamada por writer (cinco con C-PROP-03bis de B1-R; el
+    nombre del test se conserva), antes que nada."""
     d = _definicion_0p()
     llamadas_bd = [n for n in ast.walk(d) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
     assert len(llamadas_bd) == 1 and llamadas_bd[0].func.attr == "uno", ast.dump(d)
