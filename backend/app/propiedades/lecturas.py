@@ -17,6 +17,12 @@
 #     100, redondeo determinista ROUND_HALF_UP a centimos (PR1-04).
 #   - Importes, porcentajes y superficies como TEXTO exacto (v0.8 §1.2).
 # Version: 0.1.0 (F06-01 B1, lote 12)
+# Version: 0.2.0 (F06 T2-F06 · B1-R, reapertura de B1 por L-01; mandato §4.5-§4.6):
+#   - el detalle gana `inicio_titularidad` = {inicio (min vigente_desde), inicio_corregible, primera_version
+#     (actor_id, porcentaje)}: la oferta de «Corregir desde cuando» la decide el servidor (con titularidad y sin
+#     cambio programado ajeno a la primera version, HT2-17). Va fuera de `titularidad`, que no cambia de forma;
+#   - `afectados_inicio`: gastos ya registrados con fecha en [nuevo_desde, inicio vigente) (sin nuevo_desde: todos
+#     los anteriores al inicio), con su atribucion de hoy. Solo lectura: no reatribuye nada (Q-B1R-09; HT2-18).
 # ============================================================
 
 from __future__ import annotations
@@ -76,6 +82,48 @@ def _programadas(filas: list[dict[str, Any]], hoy: dt.date) -> list[dict[str, An
     return [f for f in futuras if f["vigente_desde"] == primera]
 
 
+def inicio_titularidad(filas: list[dict[str, Any]], hoy: dt.date) -> dict[str, Any]:
+    """B1-R: inicio de la titularidad (primera version) y si se ofrece corregirlo (C-PROP-03bis, guardas 6 y 11)."""
+    if not filas:
+        return {"inicio": None, "inicio_corregible": False, "primera_version": []}
+    inicio = min(f["vigente_desde"] for f in filas)
+    primera = sorted((f for f in filas if f["vigente_desde"] == inicio), key=lambda f: str(f["actor_id"]))
+    programado = any(f["vigente_desde"] > hoy for f in filas if f["vigente_desde"] != inicio)
+    return {"inicio": inicio, "inicio_corregible": not programado,
+            "primera_version": [{"actor_id": f["actor_id"], "porcentaje": str(f["porcentaje"].quantize(DIEZMILESIMA))}
+                                for f in primera]}
+
+
+def _atribucion_hoy(criterios: list[str] | None) -> str:
+    if not criterios:
+        return "NO_LO_SE"
+    if "MANUAL" in criterios:
+        return "MANUAL"
+    return "TITULARIDAD" if set(criterios) == {"PARTICIPACION_ENTIDAD"} else "OTRO"
+
+
+def _clase(tipo_hecho: str, tipos_efecto: list[str] | None) -> str:
+    tipos = set(tipos_efecto or [])
+    if tipos == {"VALOR_ACTIVO"}:
+        return "MEJORA"
+    return "GASTO" if tipos == {"GASTO"} else tipo_hecho
+
+
+def afectados_inicio(sesion: SesionMotor, entidad_id: uuid.UUID, nuevo_desde: dt.date | None) -> dict[str, Any] | None:
+    """Q-B1R-09: gastos ya registrados que quedarian dentro del periodo que gana titularidad. Nunca escribe."""
+    if repo.leer(sesion, entidad_id) is None:
+        return None
+    filas = repo.participaciones(sesion, entidad_id)
+    inicio = min((f["vigente_desde"] for f in filas), default=None)
+    hechos = [] if inicio is None else [
+        {"hecho_id": hid, "fecha": fecha, "concepto": concepto, "importe": _importe(importe),
+         "tipo_hecho": tipo, "clase": _clase(tipo, tipos), "atribucion": _atribucion_hoy(criterios)}
+        for hid, fecha, concepto, tipo, importe, tipos, criterios
+        in repo.hechos_afectados_inicio(sesion, entidad_id, inicio, nuevo_desde)]
+    return {"propiedad_id": entidad_id, "inicio_vigente": inicio, "nuevo_desde": nuevo_desde,
+            "hechos": hechos, "recuento": len(hechos)}
+
+
 def cuota(valor: Decimal, porcentaje: Decimal) -> Decimal:
     """Vista estructural: valor x porcentaje / 100, ROUND_HALF_UP a centimos."""
     return (valor * porcentaje / Decimal(100)).quantize(CENTIMO, rounding=ROUND_HALF_UP)
@@ -105,6 +153,7 @@ def detalle(sesion: SesionMotor, entidad_id: uuid.UUID, hoy: dt.date) -> dict[st
         "fecha_consulta": hoy,
         "titularidad": _titularidad(vigentes),
         "cambio_programado": _titularidad(programadas) if programadas else None,
+        "inicio_titularidad": inicio_titularidad(filas, hoy),
         "valor_estimado": None if estimado is None else _valoracion(estimado),
         "referencia_fiscal": None if fiscal is None else _valoracion(fiscal),
         "valor_compra": None if compra is None else _valoracion(compra),

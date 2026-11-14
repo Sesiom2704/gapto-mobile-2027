@@ -267,6 +267,11 @@
 #   C-MEJ-03 correccion de clase, propuesta de reparto en la fecha del hecho, L-GASTO-PROPIEDAD, lista de gastos
 #   e impacto de la correccion) registradas con UNA llamada a app.patrimonio.rutas_b3.registrar; ninguna ruta
 #   existente cambia.
+# Version: 0.34.0 (F06 T2-F06 · B1-R, reapertura de B1 por L-01; mandato §4.3.1 y §4.5): dos rutas de B1-R con el
+#   mismo patron que el resto de B1:
+#     POST /v1/propiedades/{propiedad_id}/titularidad/inicio            C-PROP-03bis (_comando_propiedad)
+#     GET  /v1/propiedades/{propiedad_id}/titularidad/inicio/afectados  gastos afectados (nuevo_desde opcional)
+#   Ninguna ruta existente cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -395,6 +400,7 @@ from app.api.dto_propiedades import (
     AltaPropiedad,
     AltaValoracion,
     CambioTitularidad,
+    CorregirInicio,
     EditarPropiedad,
     presentes,
 )
@@ -1034,6 +1040,23 @@ def create_app(
             s, entidad_id=propiedad_id, intencion_id=c.intencion_id, row_version=c.row_version_esperada,
             modo=c.modo, desde=c.desde, partes=_partes(c.partes), vista_cliente=vista_cliente, motivo=c.motivo,
             reloj=reloj))
+
+    @app.post("/v1/propiedades/{propiedad_id}/titularidad/inicio", dependencies=[Depends(autorizar)])
+    def corregir_inicio_propiedad(propiedad_id: uuid.UUID, c: CorregirInicio):
+        vista = [(p.actor_id, p.porcentaje) for p in c.primera_version_vista]
+        return _comando_propiedad("propiedad_inicio", c.intencion_id, lambda s: serv_prop.corregir_inicio(
+            s, entidad_id=propiedad_id, intencion_id=c.intencion_id, row_version=c.row_version_esperada,
+            nuevo_desde=c.nuevo_desde, inicio_visto=c.inicio_visto, primera_version_vista=vista, motivo=c.motivo,
+            reloj=reloj))
+
+    @app.get("/v1/propiedades/{propiedad_id}/titularidad/inicio/afectados", dependencies=[Depends(autorizar)])
+    def afectados_inicio_propiedad(propiedad_id: uuid.UUID, nuevo_desde: dt.date | None = None):
+        salida = unidad.ejecutar(contexto(), lambda s: lect_prop.afectados_inicio(s, propiedad_id, nuevo_desde),
+                                 nombre="F06 T2 B1-R gastos afectados")
+        if salida is None:
+            status, cuerpo = eh.rechazo_propiedad("AGREGADO_NO_ENCONTRADO")
+            return JSONResponse(cuerpo, status_code=status)
+        return {"afectados": salida}
 
     @app.post("/v1/propiedades/{propiedad_id}/valoraciones", dependencies=[Depends(autorizar)])
     def alta_valoracion_propiedad(propiedad_id: uuid.UUID, c: AltaValoracion):

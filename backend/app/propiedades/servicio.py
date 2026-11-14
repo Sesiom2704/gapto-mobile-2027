@@ -56,12 +56,26 @@
 #   cambiar_titularidad (intencion_id) y alta_valoracion (valoracion_id). C-PROP-05 (B2) la importa. Cierra
 #   R-R1V093-01 (misma intencion en dos propiedades a la vez). Nada mas cambia: ni codigos, ni DTO, ni HTTP,
 #   ni 0352, ni el resto del orden de locks (que sigue en el nivel 2 tras 0P).
+# Version: 0.4.0 (F06 T2-F06 · B1-R, reapertura de B1 autorizada por L-01 y L-01b; mandato §4, contrato operativo
+#   unico AJ-T2-12):
+#   - C-PROP-03bis `corregir_inicio` (P13 bis): adelanta el `vigente_desde` de TODAS las filas de la primera
+#     version, sin cambiar partes ni porcentajes. Guardas en el orden del §4.3.2, todas antes de escribir: 0P
+#     (sexta llamada productiva, primer recurso) -> entidad NK -> filas FOR UPDATE -> replay -> version ->
+#     SIN_TITULARIDAD -> inicio y primera version vistos (VERSION_DESFASADA, TITULARIDAD_CAMBIADA) ->
+#     INICIO_NO_ANTERIOR -> FECHA_FUTURA -> FECHA_ANTERIOR_INICIO (adquisicion conocida) -> CAMBIO_PROGRAMADO
+#     (salvo la propia primera version, HT2-17). Composicion: UN UPDATE por id de las filas de la primera version
+#     dentro de un savepoint de comando con la suma 100 en IMMEDIATE; un P0001 de fn_check_participacion_suma
+#     (por su FIRMA, R-LOCALE), el EXCLUDE de solape o el CHECK de vigencia se devuelven como SUMA_NO_CUADRA con
+#     su motivo, sin cambios y sin auditoria (Q-B1R-07). No escribe hechos, efectos, atribuciones ni posiciones.
+#   - L-01b: el alta (C-PROP-01) rechaza «Desde» posterior a hoy del owner con FECHA_FUTURA, antes de escribir.
+#     Las propiedades ya creadas con «Desde» futuro no cambian.
 # ============================================================
 
 from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 import uuid
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -125,17 +139,31 @@ NO_PERMITIDA_EN_ESTADO = "OPERACION_NO_PERMITIDA_EN_ESTADO"
 METODO_RESERVADO = "METODO_RESERVADO_A_LA_COMPRA"
 ACTOR_SELF_AUSENTE = "ACTOR_DESCONOCIDO"
 TITULARIDAD_CAMBIADA = "TITULARIDAD_CAMBIADA"
+SIN_TITULARIDAD = "SIN_TITULARIDAD"            # B1-R (Q-B1R-05)
+INICIO_NO_ANTERIOR = "INICIO_NO_ANTERIOR"      # B1-R (Q-B1R-05)
+FECHA_FUTURA = "FECHA_FUTURA"                  # B1-R y L-01b (Q-B1R-05)
+PRIMERA_VERSION_INCOMPLETA = "PRIMERA_VERSION_INCOMPLETA"
 
 OP_ALTA = "PROPIEDAD_ALTA"
 OP_EDITAR = "PROPIEDAD_EDITAR"
 OP_TITULARIDAD = "PROPIEDAD_TITULARIDAD"
 OP_VALORACION = "PROPIEDAD_VALORACION_ALTA"
+OP_INICIO = "PROPIEDAD_INICIO_TITULARIDAD"
 MOTIVOS = {
     OP_ALTA: "F06-01 B1 PROPIEDAD ALTA",
     OP_EDITAR: "F06-01 B1 PROPIEDAD EDITAR",
     OP_TITULARIDAD: "F06-01 B1 PROPIEDAD CAMBIO DE TITULARIDAD",
     OP_VALORACION: "F06-01 B1 VALORACION ALTA",
+    OP_INICIO: "F06 T2 B1-R CORREGIR INICIO DE TITULARIDAD",
 }
+#: B1-R (§4.3.3): la suma 100 de la titularidad se evalua DENTRO del savepoint del comando.
+TRIGGER_SUMA_100 = "gapto.trg_entidad_participaciones__suma_100"
+#: Identidad de la funcion del trigger = su FIRMA calificada en el contexto PL/pgSQL del P0001 (nunca el texto
+#: localizable; R-LOCALE; patron de backend/app/categorias/servicio.py).
+_FIRMA_SUMA_100 = re.compile(r"(?<![\w$.])" + re.escape("gapto.fn_check_participacion_suma()"))
+#: Restricciones fisicas de entidad_participaciones -> motivo de SUMA_NO_CUADRA (defensivas: las guardas las evitan).
+_RESTRICCIONES_INICIO = {"ex_entidad_participaciones__entidad_actor": "SOLAPE",
+                         "ck_entidad_participaciones__vigencia": "INTERVALO"}
 MOTIVO_ACTOR = "F06-01 B1: alta del actor financiero de un cotitular"
 
 
@@ -329,6 +357,8 @@ def alta(sesion: SesionMotor, *, entidad_id: uuid.UUID, nombre: str, datos: dict
         return Resultado(propiedad=_vista(sesion, entidad_id, hoy), idempotente=True)
     if isinstance(replay, Rechazo):
         return replay
+    if desde is not None and desde > hoy:
+        return Rechazo(FECHA_FUTURA)  # L-01b: «Desde» <= hoy del owner; antes de escribir nada
     if repo.existe_entidad(sesion, entidad_id):
         return Rechazo(IDENTIDAD_REUTILIZADA)
     self_id = repo.actor_self(sesion)
@@ -476,6 +506,77 @@ def cambiar_titularidad(sesion: SesionMotor, *, entidad_id: uuid.UUID, intencion
         return Rechazo(IDENTIDAD_REUTILIZADA)  # filas derivadas de una intencion de otro owner
     repo.subir_version(sesion, entidad_id)
     _auditar(sesion, entidad_id, OP_TITULARIDAD, antes, contenido, motivo)
+    return Resultado(propiedad=_vista(sesion, entidad_id, hoy), modificadas=(entidad_id,))
+
+
+# ------------------------------------------------------------------ C-PROP-03bis corregir el inicio (B1-R)
+class _PrimeraVersionIncompleta(Exception):
+    """Sale del savepoint de C-PROP-03bis cuando el UPDATE no movio TODAS las filas de la primera version."""
+
+
+def _motivo_fisico_inicio(exc: psycopg.Error) -> str | None:
+    """P0001 de la suma 100 (por la firma de su funcion), EXCLUDE de solape o CHECK de vigencia -> motivo."""
+    if exc.sqlstate == "P0001" and exc.diag.context and _FIRMA_SUMA_100.search(exc.diag.context):
+        return PRIMERA_VERSION_INCOMPLETA
+    return _RESTRICCIONES_INICIO.get(exc.diag.constraint_name or "")
+
+
+def corregir_inicio(sesion: SesionMotor, *, entidad_id: uuid.UUID, intencion_id: uuid.UUID, row_version: int,
+                    nuevo_desde: dt.date, inicio_visto: dt.date,
+                    primera_version_vista: list[tuple[uuid.UUID, Decimal]], motivo: str | None = None,
+                    reloj: Reloj = reloj_sistema) -> Resultado | Rechazo:
+    """C-PROP-03bis «Corregir el inicio de la titularidad» (P13 bis; solo ADELANTA la primera version)."""
+    contenido = {"row_version_esperada": row_version, "motivo": motivo, "nuevo_desde": _texto(nuevo_desde),
+                 "inicio_visto": _texto(inicio_visto),
+                 "primera_version_vista": sorted([str(a), _texto(p, DIEZMILESIMA)] for a, p in primera_version_vista)}
+    bloquear_intencion_propiedad(sesion, intencion_id)  # 0P, primer recurso (F06-D009; B1-R)
+    hoy = hoy_owner(sesion, reloj)
+    raiz = repo.bloquear(sesion, entidad_id)
+    if raiz is None:
+        return Rechazo(NO_ENCONTRADA)
+    filas = repo.participaciones(sesion, entidad_id, bloquear_filas=True)
+    replay = _replay(sesion, intencion_id, OP_INICIO, entidad_id, contenido)
+    if replay is True:
+        return Resultado(propiedad=_vista(sesion, entidad_id, hoy), idempotente=True)
+    if isinstance(replay, Rechazo):
+        return replay
+    if raiz["row_version"] != row_version:
+        return Rechazo(VERSION_DESFASADA)
+    if not filas:
+        return Rechazo(SIN_TITULARIDAD)
+    inicio = min(f["vigente_desde"] for f in filas)
+    primera = [f for f in filas if f["vigente_desde"] == inicio]
+    if inicio_visto != inicio or sorted((f["actor_id"], f["porcentaje"]) for f in primera) != sorted(primera_version_vista):
+        return Rechazo(VERSION_DESFASADA, {"motivo": TITULARIDAD_CAMBIADA})
+    if nuevo_desde >= inicio:
+        return Rechazo(INICIO_NO_ANTERIOR)  # solo adelantar (Q-B1R-03)
+    if nuevo_desde > hoy:
+        return Rechazo(FECHA_FUTURA)
+    if raiz["fecha_adquisicion"] is not None and nuevo_desde < raiz["fecha_adquisicion"]:
+        return Rechazo(FECHA_ANTERIOR_INICIO)
+    if any(f["vigente_desde"] > hoy for f in filas if f["vigente_desde"] != inicio):
+        return Rechazo(CAMBIO_PROGRAMADO)  # la propia primera version no es cambio programado (HT2-17)
+    ids = sorted((f["id"] for f in primera), key=str)
+    if sum((f["porcentaje"] for f in primera), Decimal(0)) != CIEN:
+        return Rechazo(SUMA_NO_CUADRA, {"motivo": PRIMERA_VERSION_INCOMPLETA})  # HT2-16, sobre filas bloqueadas
+    antes = repo.snapshot(sesion, entidad_id)
+    conexion = sesion.conexion
+    try:
+        with conexion.transaction():  # savepoint de comando: todo o nada
+            if repo.adelantar_inicio_participaciones(sesion, ids, nuevo_desde) != len(ids):
+                raise _PrimeraVersionIncompleta()
+            conexion.execute(f"SET CONSTRAINTS {TRIGGER_SUMA_100} IMMEDIATE")
+    except _PrimeraVersionIncompleta:
+        return Rechazo(SUMA_NO_CUADRA, {"motivo": PRIMERA_VERSION_INCOMPLETA})
+    except psycopg.Error as exc:
+        causa = _motivo_fisico_inicio(exc)
+        if causa is None:
+            raise
+        return Rechazo(SUMA_NO_CUADRA, {"motivo": causa})
+    finally:
+        conexion.execute(f"SET CONSTRAINTS {TRIGGER_SUMA_100} DEFERRED")
+    repo.subir_version(sesion, entidad_id)
+    _auditar(sesion, entidad_id, OP_INICIO, antes, contenido, motivo)
     return Resultado(propiedad=_vista(sesion, entidad_id, hoy), modificadas=(entidad_id,))
 
 

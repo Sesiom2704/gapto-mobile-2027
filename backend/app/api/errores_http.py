@@ -196,6 +196,10 @@
 #   ADQUISICION_POSTERIOR_AL_CORTE_DECLARADO (422) en _RECHAZOS_PROPIEDAD, guarda de C-PROP-02 frente a
 #   una declaracion de adquisicion de 0352. Ningun codigo existente cambia de status.
 # Version: 0.30.0
+#   0.31.0 (F06 T2-F06 · B1-R, reapertura de B1 por L-01 y L-01b; mandato §4.7, Q-B1R-05): SIN_TITULARIDAD,
+#   INICIO_NO_ANTERIOR y FECHA_FUTURA (422) en _RECHAZOS_PROPIEDAD, de C-PROP-03bis y de la cota del alta. El
+#   P0001 de la suma 100 reutiliza SUMA_NO_CUADRA con su motivo en el detalle. Ningun codigo existente cambia.
+# Version: 0.31.0
 # ============================================================
 
 from __future__ import annotations
@@ -665,6 +669,10 @@ _RECHAZOS_PROPIEDAD: dict[str, tuple[int, str]] = {
     "OPERACION_NO_PERMITIDA_EN_ESTADO": (422, "La titularidad no puede volver a «No lo sé»."),
     "METODO_RESERVADO_A_LA_COMPRA": (422, "El valor de compra sale de la compra registrada."),
     "ACTOR_DESCONOCIDO": (409, "No se ha podido identificar tu perfil. No se ha guardado nada."),
+    # F06 T2-F06 · B1-R (C-PROP-03bis y cota del alta, L-01b)
+    "SIN_TITULARIDAD": (422, "Esta propiedad no tiene titularidad registrada: no hay inicio que corregir."),
+    "INICIO_NO_ANTERIOR": (422, "Solo se puede adelantar el inicio: elige una fecha anterior a la actual."),
+    "FECHA_FUTURA": (422, "La fecha «Desde» no puede ser posterior a hoy."),
 }
 
 

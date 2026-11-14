@@ -21,6 +21,10 @@
 #   funciones de acceso a las seis columnas de 0352 para los consumidores provisionales de B2 (conjunto_completitud,
 #   declaracion_completitud, escribir_declaracion_completitud, leer_coste) y el predicado de componente de L-COSTE
 #   (nivel efecto, HF-08; escala 4, HF-04; huella en PostgreSQL, HF-11). Nada de B1 cambia.
+# Version: 0.4.0 (F06 T2-F06 · B1-R, reapertura de B1 por L-01; mandato §4.3.3 y §4.5): UNA funcion nueva de
+#   escritura, `adelantar_inicio_participaciones` (un unico UPDATE de `vigente_desde` POR ID, nunca por rango,
+#   que devuelve las filas afectadas), y la consulta de solo lectura `hechos_afectados_inicio` (gastos vinculados
+#   a la propiedad con fecha en [nuevo_desde, inicio vigente)). Sin DDL, sin GRANT; nada mas cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -164,6 +168,41 @@ def insertar_participacion(sesion: SesionMotor, *, fila_id: uuid.UUID, entidad_i
 
 def cerrar_participacion(sesion: SesionMotor, fila_id: uuid.UUID, hasta: dt.date) -> None:
     sesion.ejecutar("UPDATE gapto.entidad_participaciones SET vigente_hasta = %s WHERE id = %s", (hasta, fila_id))
+
+
+def adelantar_inicio_participaciones(sesion: SesionMotor, ids: list[uuid.UUID], nuevo_desde: dt.date) -> int:
+    """C-PROP-03bis (B1-R): UNICO writer de `vigente_desde` de una fila existente. Un solo UPDATE por id (todas las
+    filas de la primera version a la vez, nunca por rango de fechas); devuelve las filas afectadas para que el
+    servicio exija que sean todas. La suma 100, el EXCLUDE de solape y el CHECK de vigencia los valida la base."""
+    return sesion.ejecutar("UPDATE gapto.entidad_participaciones SET vigente_desde = %s WHERE id = ANY(%s)",
+                           (nuevo_desde, list(ids)))
+
+
+#: Lectura de B1-R (Q-B1R-09; HT2-18): hechos ACTIVOS vinculados a la propiedad (AFECTA_A de nivel hecho o efecto)
+#: con fecha en [desde, inicio). Importe y clase del efecto vinculado si el vinculo es de nivel efecto; atribucion
+#: actual por los criterios de sus efectos. Solo lectura.
+_AFECTADOS = (
+    "WITH v AS (SELECT x.hecho_id, array_agg(x.efecto_id) FILTER (WHERE x.efecto_id IS NOT NULL) AS efectos "
+    "FROM gapto.hecho_entidades x WHERE x.entidad_id = %(p)s AND x.tipo_relacion = 'AFECTA_A' GROUP BY x.hecho_id) "
+    "SELECT h.id, h.fecha_hecho, h.concepto, th.codigo, "
+    "coalesce((SELECT sum(e.importe_delta) FROM gapto.hecho_efectos e WHERE e.id = ANY(v.efectos)), h.importe_total), "
+    "(SELECT array_agg(DISTINCT e.tipo_efecto) FROM gapto.hecho_efectos e WHERE e.id = ANY(v.efectos)), "
+    "(SELECT array_agg(DISTINCT t.criterio_atribucion) FROM gapto.efecto_atribuciones t "
+    " JOIN gapto.hecho_efectos e ON e.id = t.efecto_id WHERE e.hecho_id = h.id "
+    " AND (v.efectos IS NULL OR e.id = ANY(v.efectos))) "
+    "FROM v JOIN gapto.hechos_financieros h ON h.id = v.hecho_id AND h.estado = 'ACTIVO' "
+    "JOIN gapto.tipos_hecho th ON th.id = h.tipo_hecho_id "
+    "WHERE h.fecha_hecho < %(inicio)s AND (%(desde)s::date IS NULL OR h.fecha_hecho >= %(desde)s::date) "
+    "ORDER BY h.fecha_hecho, h.id"
+)
+
+
+def hechos_afectados_inicio(sesion: SesionMotor, entidad_id: uuid.UUID, inicio: dt.date,
+                            desde: dt.date | None) -> list[tuple]:
+    """(hecho_id, fecha, concepto, tipo_hecho, importe, tipos de efecto, criterios de atribucion) por fecha."""
+    with sesion.conexion.cursor() as cur:
+        cur.execute(_AFECTADOS, {"p": entidad_id, "inicio": inicio, "desde": desde})
+        return cur.fetchall()
 
 
 def subir_version(sesion: SesionMotor, entidad_id: uuid.UUID) -> int:

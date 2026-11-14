@@ -14,6 +14,9 @@
 #   explicito = borrar (solo donde se admite); la presencia se lee de
 #   `model_fields_set`.
 # Version: 0.1.0 (F06-01 B1, lote 12)
+# Version: 0.2.0 (F06 T2-F06 · B1-R, reapertura de B1 por L-01; mandato §4.3.1): DTO `CorregirInicio` de
+#   C-PROP-03bis (intencion_id, row_version_esperada, nuevo_desde, inicio_visto, primera_version_vista <= 50 y motivo
+#   opcional). Ningun DTO existente cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -94,6 +97,16 @@ class CambioTitularidad(_Estricto):
     desde: dt.date
     partes: list[ParteTitularidad] | None = Field(default=None, max_length=50)
     titularidad_vista: list[ParteVista] = Field(max_length=50)
+    motivo: str | None = Field(default=None, max_length=LONGITUD_MOTIVO)
+
+
+class CorregirInicio(_Estricto):
+    """C-PROP-03bis (B1-R): adelantar el inicio de la primera version de la titularidad."""
+    intencion_id: uuid.UUID
+    row_version_esperada: int = Field(ge=1)
+    nuevo_desde: dt.date
+    inicio_visto: dt.date
+    primera_version_vista: list[ParteVista] = Field(max_length=50)
     motivo: str | None = Field(default=None, max_length=LONGITUD_MOTIVO)
 
 
