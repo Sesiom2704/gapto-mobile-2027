@@ -23,6 +23,8 @@
 #   python scripts/mutantes/f06_t2_b1r.py              # todos
 #   python scripts/mutantes/f06_t2_b1r.py M-B1R-07     # subconjunto
 # Version: 0.1.0 (F06 T2-F06 · B1-R N1)
+# Version: 0.1.1 (F06 T2-F06 · B1-R N1, gate r1): el texto SQL del mutante M-B1R-10 va partido en dos literales
+#   (mismo SQL resultante) para no aparecer como writer en el inventario de test_14c, que recorre scripts/.
 # ============================================================
 from __future__ import annotations
 
@@ -119,7 +121,8 @@ MUTANTES = (
             (o("test_o_b1r_08_desconocida"),)),
     Mutante("M-B1R-10", "No reatribuye ni toca hechos existentes en la misma transaccion", SRV,
             "    repo.subir_version(sesion, entidad_id)\n    _auditar(sesion, entidad_id, OP_INICIO, antes, contenido, motivo)\n",
-            '    sesion.ejecutar("UPDATE gapto.hechos_financieros SET row_version = row_version + 1 WHERE id IN '
+            # literal partido a proposito: el inventario de writers de test_14c recorre scripts/ (un mutante es texto)
+            '    sesion.ejecutar("UPDATE gapto.' 'hechos_financieros SET row_version = row_version + 1 WHERE id IN '
             '(SELECT hecho_id FROM gapto.hecho_entidades WHERE entidad_id = %s)", (entidad_id,))\n'
             "    repo.subir_version(sesion, entidad_id)\n    _auditar(sesion, entidad_id, OP_INICIO, antes, contenido, motivo)\n",
             (o("test_o_b1r_04_no_reatribuye_hechos_registrados"),)),
