@@ -16,6 +16,10 @@
 #   Ninguna ruta expone OP-21 ni OP-03 sobre PROPIEDAD ni sobre H0/Hk (Parte IV-bis; O10.23). Una transaccion de
 #   UnidadDeTrabajo por comando, con request_id = intencion_id. Rechazos con el mapa propio de B3.
 # Version: 0.1.0 (F06 T1-F06 B3 N1)
+# Version: 0.2.0 (F06 T2-F06 PAG N1; L-02): rechazos de C-MEJ-01 v2, cada uno en su plano (AJ-T2-03):
+#   PAGOS_NO_CUADRAN (tesoreria), SALDO_INCOHERENTE y SALDO_NO_DECLARADO (posiciones), PAGO_DESDE_CUENTA_COMPARTIDA
+#   (tesoreria: la cuenta compartida sigue la via de B3). Sin rutas nuevas aqui: las lecturas de PAG van en
+#   patrimonio/rutas_pag.py.
 # ============================================================
 
 from __future__ import annotations
@@ -45,6 +49,10 @@ RECHAZOS: dict[str, tuple[int, str]] = {
     "IMPACTO_CORRECCION_DESFASADO": (409, "Los datos han cambiado; revisa el impacto."),
     "PERIODO_CERRADO_SIN_POLITICA": (422, "Ese mes está cerrado."),
     "MOTIVO_AUSENTE": (422, "Indica el motivo de la corrección."),
+    "PAGOS_NO_CUADRAN": (422, "Lo que pagó cada uno no suma el importe del gasto."),
+    "SALDO_INCOHERENTE": (422, "Lo que se debe no cuadra con lo que pagó cada uno."),
+    "SALDO_NO_DECLARADO": (422, "Indica qué queda pendiente con cada cotitular."),
+    "PAGO_DESDE_CUENTA_COMPARTIDA": (422, "Si pagaste desde una cuenta compartida, elige «Desde una cuenta compartida»."),
 }
 
 

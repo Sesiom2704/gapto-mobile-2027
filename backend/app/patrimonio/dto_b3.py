@@ -16,6 +16,9 @@
 #     `comparacion_vista` como texto (§III.3.5).
 #   Importes EUR > 0 con 2 decimales; porcentajes con 4; nunca float en las respuestas.
 # Version: 0.1.0 (F06 T1-F06 B3 N1)
+# Version: 0.2.0 (F06 T2-F06 PAG N1; L-02): C-MEJ-01 v2 con `pagos[]` (PagoGasto), `saldos[]` (SaldoCotitular) y
+#   `posiciones_confirmadas[]` (PosicionConfirmada); `cuenta_id` pasa a opcional (obligatoria sin `pagos`, prohibida
+#   con `pagos`: lo decide la capa con ENTRADA_INVALIDA, sin mezclar las dos formas).
 # ============================================================
 
 from __future__ import annotations
@@ -59,13 +62,34 @@ class DerechoConfirmado(_Estricto):
     importe: Importe
 
 
+class PagoGasto(_Estricto):
+    """PAG: quien pago y cuanto. «YO» desde una cuenta Gapto; un cotitular, por fuera de mis cuentas."""
+    pagador: Literal["YO"] | uuid.UUID
+    cuenta_id: uuid.UUID | None = None
+    importe: Importe
+
+
+class SaldoCotitular(_Estricto):
+    """PAG: lo que queda entre el usuario y cada cotitular, declarado (INV-04); importe salvo NADA."""
+    actor_id: uuid.UUID
+    sentido: Literal["ME_DEBE", "LE_DEBO", "NADA"]
+    importe: Importe | None = None
+
+
+class PosicionConfirmada(_Estricto):
+    """PAG: la posicion que el usuario ha visto y confirmado (§1.1.7); identica al saldo en actor, tipo e importe."""
+    actor_id: uuid.UUID
+    tipo: Literal["DERECHO_COBRO", "OBLIGACION_PAGO"]
+    importe: Importe
+
+
 class GastoPropiedad(_Estricto):
     intencion_id: uuid.UUID
     propiedad_id: uuid.UUID
     clase: Clase | None = None
     importe: Importe
     fecha_hecho: dt.date
-    cuenta_id: uuid.UUID
+    cuenta_id: uuid.UUID | None = None
     nota: str | None = Field(default=None, max_length=200)
     categoria_id: uuid.UUID | None = None
     presupuestable: bool | None = None
@@ -73,6 +97,9 @@ class GastoPropiedad(_Estricto):
     deuda: list[DeudaParte] = Field(default_factory=list, max_length=50)
     aportacion_indicada: Literal["MANUAL"] | None = None
     derechos_confirmados: list[DerechoConfirmado] = Field(default_factory=list, max_length=50)
+    pagos: list[PagoGasto] | None = Field(default=None, min_length=1, max_length=50)
+    saldos: list[SaldoCotitular] = Field(default_factory=list, max_length=50)
+    posiciones_confirmadas: list[PosicionConfirmada] = Field(default_factory=list, max_length=50)
 
 
 class MejoraHistorica(_Estricto):

@@ -32,10 +32,24 @@
 #     sellada (partes enviadas) y no revalida; tras un C-MEJ-03 responde IDENTIDAD_REUTILIZADA (O5.22).
 #   M-8: propiedad DE_OTROS -> OPERACION_NO_PERMITIDA_EN_ESTADO (§III.2).
 # Version: 0.1.0 (F06 T1-F06 B3 N1)
+# Version: 0.2.0 (F06 T2-F06 PAG N1; reapertura acotada de B3 por L-02; contrato operativo unico del mandato PAG
+#   §1.1): C-MEJ-01 v2 con `pagos[]`, `saldos[]` y `posiciones_confirmadas[]` (componedor comun patrimonio/pagos.py:
+#   P1, P2, P3 y mixto bilateral; ME_DEBE -> DERECHO_COBRO, LE_DEBO -> OBLIGACION_PAGO; aportaciones MANUAL con y sin
+#   movimiento). La forma de B3 (`cuenta_id`, `deuda`, `aportacion_indicada`, `derechos_confirmados`) sigue admitida
+#   (replay idempotente de intenciones de B3 y via de la cuenta compartida, 8ter); las dos formas no se mezclan
+#   (ENTRADA_INVALIDA). UN unico punto de llamada a OP-22 para v1 y v2. Locks de v2: 0 raiz -> 1 INVERSIONES ->
+#   2 propiedad FOR SHARE -> 3 cuenta de mi pago (si pago yo) -> 4 categoria (C-a) -> 5 terceros de pagadores y
+#   saldos FOR SHARE -> relectura M-2 -> OP-22. Un pago mio desde una cuenta compartida en `pagos[]` se rechaza
+#   (PAGO_DESDE_CUENTA_COMPARTIDA); nunca hay posicion frente a una EMPRESA; NO_LO_SE admite pagadores validados
+#   contra la titularidad en la fecha bajo lock y ninguna deuda. L-GASTO-PROPIEDAD anade el bloque `pago` (quien
+#   pago, salida real y posiciones en su sentido; «pago sin declarar» para B3 del tren 1, sin reinterpretar). Con
+#   una posicion de deuda en cualquier sentido no hay intencion de C-MEJ-03 (R-DM02-01 sin resolver; la guarda 2bis
+#   no cambia; el literal de la limitacion tampoco).
 # ============================================================
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import uuid
 from decimal import Decimal
@@ -54,6 +68,7 @@ from app.core.modelos_tesoreria import DatosConciliacion, DatosMovimiento
 from app.core.unidad_adscrita import UnidadDeTrabajoAdscrita
 from app.core.unidad_trabajo import SesionMotor
 from app.patrimonio import atribucion as m2
+from app.patrimonio import pagos as pag
 from app.patrimonio.completitud import Rechazo
 from app.propiedades import repositorio as repo
 from app.repositories import compuesto_repository as repo_comp
@@ -82,7 +97,9 @@ CUENTA_DESCONOCIDA = "CUENTA_DESCONOCIDA"
 FECHA_FUTURA = "FECHA_FUTURA"
 VERSION_DESFASADA = "VERSION_DESFASADA"
 
-#: §III.1bis 8quater: texto contractual LITERAL del dictamen (Q-R1-07, condicion obligatoria 2).
+#: §III.1bis 8quater: texto contractual LITERAL del dictamen (Q-R1-07, condicion obligatoria 2). PAG no lo cambia:
+#: «una posicion de deuda asociada» ya cubre los dos sentidos (DERECHO_COBRO y OBLIGACION_PAGO); la ampliacion
+#: «en cualquier sentido» de HT2-07 es del texto en pantalla (cliente).
 LIMITACION_R_DM02_01 = (
     "Los hechos de gasto de propiedad con una posición de deuda asociada no admiten actualmente la operación "
     "Corregir clase. No existe en este alcance una vía soportada para corregir su clase conservando la posición. "
@@ -195,6 +212,7 @@ def naturalezas(sesion: SesionMotor, actores: list[uuid.UUID], *, bloquear: bool
 # ------------------------------------------------------------------ composicion
 def _posiciones(iid: uuid.UUID, fecha: dt.date, nota: str | None, confirmados: dict[uuid.UUID, Decimal]
                 ) -> list[DatosAltaPosicion]:
+    """C-MEJ-01 v1 (B3): un DERECHO_COBRO por derecho confirmado (las posiciones de v2 las compone pagos.py)."""
     return [DatosAltaPosicion(
         entidad_id=ident(iid, PREFIJO_GP, f"posicion:{actor}"), nombre=nota or NOMBRE_POSICION, tipo=TIPO_DERECHO,
         contraparte_actor_id=actor, moneda=EUR, justificacion=JUSTIFICACION_DECISION, fecha_inicio_seguimiento=fecha,
@@ -260,8 +278,66 @@ def _respuesta(sesion: SesionMotor, propiedad_id: uuid.UUID, d: DatosHechoCompue
 
 
 # ------------------------------------------------------------------ C-MEJ-01
+def _forma_mezclada(p: dict) -> bool:
+    """True si la peticion mezcla la forma de B3 (v1) y la de PAG (v2), o a la de v1 le falta la cuenta."""
+    if p.get("pagos") is not None:
+        return (p.get("cuenta_id") is not None or bool(p.get("deuda")) or bool(p.get("derechos_confirmados"))
+                or p.get("aportacion_indicada") is not None)
+    return p.get("cuenta_id") is None or bool(p.get("saldos")) or bool(p.get("posiciones_confirmadas"))
+
+
+def _guardas_v1_terceros(sesion: SesionMotor, p: dict, yo: uuid.UUID, fecha: dt.date,
+                        confirmados: dict[uuid.UUID, Decimal]) -> str | None:
+    """B3 (8ter) bajo los locks, nivel 5: con derechos, PERSONA y la regla de la cuenta compartida."""
+    if confirmados:                                                               # 5: 8ter bajo locks
+        nat = naturalezas(sesion, list(confirmados), bloquear=True)
+        if any(nat.get(a) != "PERSONA" for a in confirmados):                     # EMPRESA (O9.18)
+            return ENTRADA_INVALIDA
+        solo_mia = participacion_self_100(sesion, p["cuenta_id"], yo, fecha)
+        if solo_mia == (p.get("aportacion_indicada") is not None):                # O9.16
+            return ENTRADA_INVALIDA
+    return None
+
+
+def _guardas_v2_cuenta(sesion: SesionMotor, p: dict, yo: uuid.UUID, fecha: dt.date) -> str | None:
+    """PAG (§1.1.9): la cuenta de mi pago es elegible y SOLO mia; la cuenta compartida sigue la via de B3."""
+    mio = pag.mi_pago(p["pagos"])
+    if mio is None:
+        return None
+    if motivo_cuenta(sesion, mio["cuenta_id"], "GASTO", fecha, bloquear=True) is not None:
+        return CUENTA_DESCONOCIDA
+    if not participacion_self_100(sesion, mio["cuenta_id"], yo, fecha):           # Q-PAG-03 / Q-VP-03
+        return pag.PAGO_DESDE_CUENTA_COMPARTIDA
+    return None
+
+
+def _guardas_v2_terceros(sesion: SesionMotor, p: dict) -> str | None:
+    """PAG nivel 5: terceros de pagadores y saldos FOR SHARE (fila del tercero y de su actor). Nunca hay posicion
+    frente a una EMPRESA (Q-PAG-05); un actor ajeno o sin tercero no paga ni debe."""
+    con_posicion = pag.actores_saldo(p.get("saldos") or [])
+    actores = sorted(set(con_posicion) | set(pag.pagadores_otros(p["pagos"])), key=str)
+    if not actores:
+        return None
+    # Primero los terceros (FOR SHARE): un cambio de naturaleza concurrente (p. ej. a EMPRESA) se serializa con este
+    # registro y la naturaleza se lee despues, ya confirmada.
+    with sesion.conexion.cursor() as cur:
+        cur.execute("SELECT t.id FROM gapto.actores_financieros a JOIN gapto.terceros t ON t.id = a.tercero_id "
+                    "WHERE a.id = ANY(%s) AND a.owner_user_id = current_setting('gapto.owner_user_id')::uuid "
+                    "ORDER BY t.id FOR SHARE OF t", (actores,))
+    nat = naturalezas(sesion, actores, bloquear=True)
+    if any(nat.get(a) is None for a in actores):
+        return ENTRADA_INVALIDA
+    if any(nat.get(a) != "PERSONA" for a in con_posicion):                       # sin posicion frente a EMPRESA
+        return ENTRADA_INVALIDA
+    return None
+
+
 def registrar_gasto(sesion: SesionMotor, *, peticion: dict, reloj: Reloj = reloj_sistema) -> dict | Rechazo:
+    """C-MEJ-01: v2 (PAG) con `pagos[]`; v1 (B3) sin ella. Un unico punto de llamada a OP-22 para las dos."""
     p = peticion
+    v2 = p.get("pagos") is not None
+    if _forma_mezclada(p):
+        return Rechazo(ENTRADA_INVALIDA)                                          # v1 y v2 no se mezclan
     iid, propiedad_id, clase = p["intencion_id"], p["propiedad_id"], p.get("clase")
     rechazo = validar_clase(clase, p.get("categoria_id"), p.get("presupuestable"))
     if rechazo:
@@ -272,55 +348,76 @@ def registrar_gasto(sesion: SesionMotor, *, peticion: dict, reloj: Reloj = reloj
         return Rechazo(forma)
     importe = Decimal(str(p["importe"])).quantize(CENT)
     yo = actor_self(sesion)
-    rechazo = validar_deuda(importe=importe, atribucion=atr, deuda=p["deuda"], aportacion=p.get("aportacion_indicada"),
-                            derechos=p["derechos_confirmados"], actor_self=yo, con_pago=True)
+    partes_peticion = None if atr["modo"] == m2.NO_LO_SE else _partes_peticion(atr)
+    if v2:
+        confirmados: dict[uuid.UUID, Decimal] = {}
+        rechazo = pag.validar(importe=importe, partes=partes_peticion, yo=yo, pagos=p["pagos"],
+                              saldos=p.get("saldos") or [], confirmadas=p.get("posiciones_confirmadas") or [])
+        mio = pag.mi_pago(p["pagos"])
+        cuenta_lock = None if mio is None else mio["cuenta_id"]
+    else:
+        rechazo = validar_deuda(importe=importe, atribucion=atr, deuda=p["deuda"],
+                                aportacion=p.get("aportacion_indicada"), derechos=p["derechos_confirmados"],
+                                actor_self=yo, con_pago=True)
+        confirmados = _confirmados(p["derechos_confirmados"], p["deuda"])
+        cuenta_lock = p["cuenta_id"]
     if rechazo:
         return Rechazo(rechazo)
-    confirmados = _confirmados(p["derechos_confirmados"], p["deuda"])
     # 0 -> 1 -> 2
     repo_comp.tomar_advisory_raiz(sesion, iid)
     tomar_inversiones(sesion)
     raiz = bloquear_propiedad_compartida(sesion, propiedad_id)
     if raiz is None:
         return Rechazo(NO_ENCONTRADA)
-    # 3: cuenta (lock contractual antes de la identidad, como VS-01)
-    sesion.uno("SELECT id FROM gapto.cuentas WHERE id = %s FOR NO KEY UPDATE", (p["cuenta_id"],))
+    # 3: cuenta (lock contractual antes de la identidad, como VS-01); en v2 solo si pago yo
+    if cuenta_lock is not None:
+        sesion.uno("SELECT id FROM gapto.cuentas WHERE id = %s FOR NO KEY UPDATE", (cuenta_lock,))
 
     def datos(partes):
-        return componer_gasto(iid=iid, prefijo=PREFIJO_GP, clase=clase, propiedad_id=propiedad_id, fecha=p["fecha_hecho"],
-                        importe=importe, nota=p.get("nota"), categoria_id=p.get("categoria_id"),
-                        presupuestable=p.get("presupuestable"), cuenta_id=p["cuenta_id"], atribucion=atr,
-                        partes=partes, confirmados=confirmados)
+        base = componer_gasto(iid=iid, prefijo=PREFIJO_GP, clase=clase, propiedad_id=propiedad_id,
+                              fecha=p["fecha_hecho"], importe=importe, nota=p.get("nota"),
+                              categoria_id=p.get("categoria_id"), presupuestable=p.get("presupuestable"),
+                              cuenta_id=None if v2 else p["cuenta_id"], atribucion=atr, partes=partes,
+                              confirmados=confirmados)
+        if not v2:
+            return base
+        pg, ap, po = pag.componer(iid=iid, ident=lambda rol: ident(iid, PREFIJO_GP, rol), fecha=p["fecha_hecho"],
+                                  nota=p.get("nota"), pagos=p["pagos"], saldos=p.get("saldos") or [], yo=yo)
+        return dataclasses.replace(base, pagos=pg, aportaciones=ap, posiciones=po)
 
     if repo_comp.leer(sesion, "hechos_financieros", iid) is not None:            # identidad: OP-22 decide
-        d = datos(None if atr["modo"] == m2.NO_LO_SE else _partes_peticion(atr))
-        r = _op22(sesion).registrar_hecho_compuesto(sesion.contexto, d)
-        return _respuesta(sesion, propiedad_id, d, clase, r.idempotente)
-    fecha = p["fecha_hecho"]
-    if es_futura(sesion, fecha, reloj):
-        return Rechazo(FECHA_FUTURA)
-    if not disponible(raiz):
-        return Rechazo(PROPIEDAD_NO_DISPONIBLE)
-    if de_otros(sesion, propiedad_id, hoy_owner(sesion, reloj)):
-        return Rechazo(NO_PERMITIDA_EN_ESTADO)
-    if motivo_cuenta(sesion, p["cuenta_id"], "GASTO", fecha, bloquear=True) is not None:
-        return Rechazo(CUENTA_DESCONOCIDA)
-    if clase != "MEJORA":                                                         # 4: guarda C-a
-        rechazo = validar_seleccion_categoria(sesion, p["categoria_id"], "GASTO")
+        partes = partes_peticion
+    else:
+        fecha = p["fecha_hecho"]
+        if es_futura(sesion, fecha, reloj):
+            return Rechazo(FECHA_FUTURA)
+        if not disponible(raiz):
+            return Rechazo(PROPIEDAD_NO_DISPONIBLE)
+        if de_otros(sesion, propiedad_id, hoy_owner(sesion, reloj)):
+            return Rechazo(NO_PERMITIDA_EN_ESTADO)
+        if v2:
+            rechazo = _guardas_v2_cuenta(sesion, p, yo, fecha)
+        elif motivo_cuenta(sesion, p["cuenta_id"], "GASTO", fecha, bloquear=True) is not None:
+            rechazo = CUENTA_DESCONOCIDA
         if rechazo:
             return Rechazo(rechazo)
-    if confirmados:                                                               # 5: 8ter bajo locks
-        nat = naturalezas(sesion, list(confirmados), bloquear=True)
-        if any(nat.get(a) != "PERSONA" for a in confirmados):                     # EMPRESA (O9.18)
+        if clase != "MEJORA":                                                     # 4: guarda C-a
+            rechazo = validar_seleccion_categoria(sesion, p["categoria_id"], "GASTO")
+            if rechazo:
+                return Rechazo(rechazo)
+        # 5: terceros FOR SHARE (v2: pagadores y saldos; v1: derechos de 8ter)
+        rechazo = _guardas_v2_terceros(sesion, p) if v2 else _guardas_v1_terceros(sesion, p, yo, fecha, confirmados)
+        if rechazo:
+            return Rechazo(rechazo)
+        partes = m2.resolver(sesion, propiedad_id, atr)                          # relectura M-2 bajo lock
+        if isinstance(partes, str):
+            return Rechazo(partes)
+        if not v2 and partes is not None and not {a for a, _ in partes} >= set(confirmados):
             return Rechazo(ENTRADA_INVALIDA)
-        solo_mia = participacion_self_100(sesion, p["cuenta_id"], yo, fecha)
-        if solo_mia == (p.get("aportacion_indicada") is not None):                # O9.16
-            return Rechazo(ENTRADA_INVALIDA)
-    partes = m2.resolver(sesion, propiedad_id, atr)                              # relectura M-2 bajo lock
-    if isinstance(partes, str):
-        return Rechazo(partes)
-    if partes is not None and not {a for a, _ in partes} >= set(confirmados):
-        return Rechazo(ENTRADA_INVALIDA)
+        if v2 and partes is None:            # NO_LO_SE: pagadores contra la titularidad en la fecha (Q-PAG-09)
+            titulares = {x["actor_id"] for x in m2.titularidad_en_fecha(sesion, propiedad_id, fecha)}
+            if not set(pag.pagadores_otros(p["pagos"])) <= titulares:
+                return Rechazo(ENTRADA_INVALIDA)
     d = datos(partes)
     r = _op22(sesion).registrar_hecho_compuesto(sesion.contexto, d)
     return _respuesta(sesion, propiedad_id, d, clase, r.idempotente)
@@ -407,7 +504,8 @@ _LECTURA = (
     "(SELECT e.categoria_id FROM gapto.hecho_efectos e WHERE e.id = x.efecto_id), "
     "(SELECT e.tipo_efecto FROM gapto.hecho_efectos e WHERE e.id = x.efecto_id), "
     "(SELECT coalesce(json_agg(json_build_object('entidad_id', v.entidad_id, 'actor_id', d.contraparte_actor_id, "
-    "  'tercero_id', a.tercero_id, 'tipo', d.tipo, 'importe', ef.importe_delta::text) ORDER BY v.entidad_id), '[]') "
+    "  'tercero_id', a.tercero_id, 'tipo', d.tipo, 'importe', ef.importe_delta::text, 'estado', d.estado) "
+    "  ORDER BY v.entidad_id), '[]') "
     "  FROM gapto.hecho_entidades v JOIN gapto.derechos_obligaciones_financieras d ON d.entidad_id = v.entidad_id "
     "  JOIN gapto.hecho_efectos ef ON ef.id = v.efecto_id "
     "  LEFT JOIN gapto.actores_financieros a ON a.id = d.contraparte_actor_id "
@@ -449,6 +547,7 @@ def leer_gasto(sesion: SesionMotor, propiedad_id: uuid.UUID, hecho_id: uuid.UUID
         "atribuciones": atribuciones,
         "intencion_correccion_id": intencion_vigente(efectos[0]) if unico else None,
         "limitacion": LIMITACION_R_DM02_01 if con_deuda else None,
+        "pago": pag.lectura_pagos(sesion, hid, posiciones),
     }
 
 

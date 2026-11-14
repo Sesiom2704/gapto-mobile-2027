@@ -272,6 +272,9 @@
 #     POST /v1/propiedades/{propiedad_id}/titularidad/inicio            C-PROP-03bis (_comando_propiedad)
 #     GET  /v1/propiedades/{propiedad_id}/titularidad/inicio/afectados  gastos afectados (nuevo_desde opcional)
 #   Ninguna ruta existente cambia.
+# Version: 0.35.0 (F06 T2-F06 · PAG N1, mandato §1.3.2-3): dos lecturas de PAG registradas con UNA llamada a
+#   app.patrimonio.rutas_pag.registrar (GET /v1/patrimonio/invertido-mes y GET /v1/cuentas/{cuenta_id}/movimientos,
+#   L-MOV-CUENTA sin punteo). Ninguna ruta existente cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -473,6 +476,7 @@ from app.propiedades import lecturas as lect_prop
 from app.propiedades import servicio as serv_prop
 from app.patrimonio import rutas as rutas_patrimonio
 from app.patrimonio import rutas_b3 as rutas_patrimonio_b3
+from app.patrimonio import rutas_pag as rutas_patrimonio_pag
 from app.terceros import lecturas as lect_ter
 from app.terceros import servicio as serv_ter
 from app.comun import elegibilidad_cuentas as eleg
@@ -1071,6 +1075,8 @@ def create_app(
     # ------------------------------------------------------------ F06-01 B3 obras y gastos (modulo patrimonio)
     rutas_patrimonio_b3.registrar(app, unidad=unidad, owner=lambda: cfg.owner_user_id, contexto=contexto,
                                   autorizar=autorizar, reloj=reloj)
+    # ------------------------------------------------------------ T2-F06 PAG lecturas (modulo patrimonio)
+    rutas_patrimonio_pag.registrar(app, unidad=unidad, contexto=contexto, autorizar=autorizar)
 
     # ------------------------------------------------------------ F05-03 J2 §1.6 plantillas y acciones
     def _comando_plantilla(nombre_op: str, operacion, clave: str) -> dict | JSONResponse:
