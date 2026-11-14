@@ -19,6 +19,10 @@
 //   ambos sentidos (aportaciones) pasa al diseño del tren 2 con CAT-VIV. Sin cambios de comportamiento, contrato ni testID.
 // Versión: 0.2.1 (F06 T1-F06 B3 ajuste N3 · KO visual iPhone casilla 7): las fechas de B3 (alta de reforma y mejora antigua)
 //   muestran los chips «Hoy · Ayer · Otra fecha» con el patrón de RegistroGasto/PropiedadValor (Hoy por defecto, ≤ hoy).
+// Versión: 0.2.3 (F06 T1-F06 B3 ajuste N3 · HT2-01 · decisión 1 de Moisés del 2026-11-14, F06-00_Decisiones_Moises_2026-11-14_HT2-01_y_Q-29_v1.0
+//   SHA 6ba8afd3…a9cbc0; parche del laboratorio lote 30): el «No» de «¿Te debe su parte?» deja de decir «lo pagamos a medias»
+//   («No, no me debe nada (ya está saldado o le invito)») y se avisa de que el pago a medias aún no se puede registrar bien
+//   (testID gprop-aviso-a-medias). Solo texto; sin backend, contrato ni DDL. R-L29-05 / HT2-01 sigue ALTO y abierto (receptor PAG, tren 2).
 // ============================================================
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -257,6 +261,11 @@ export function GastoPropiedadScreen(p: {
           <>
             <Reparto testID="gprop-rep" propiedad={p.vista.nombre} prop={prop} eleccion={b.reparto} actores={actores} onCambiar={cambiarReparto} aviso={avisoRep} />
             {partes.some((x) => !x.yo) ? <RotuloGrupo texto="¿Te debe su parte?" /> : null}
+            {partes.some((x) => !x.yo) ? (
+              <Text testID="gprop-aviso-a-medias" style={[tipo.footnote, { color: c.warningText }]}>
+                Si lo pagasteis entre los dos, todavía no se puede registrar bien: registra solo los gastos que pagaste tú entero. Llegará en una próxima versión.
+              </Text>
+            ) : null}
             {cuentaCompartida(prop) && partes.some((x) => ofreceDeuda(x, imp[x.actor_id], prop, false)) ? (
               <Text testID="gprop-compartida" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_CUENTA_COMPARTIDA}</Text>
             ) : null}
@@ -267,7 +276,7 @@ export function GastoPropiedadScreen(p: {
                     <Text style={[tipo.body, { color: c.textPrimary }]}>{`${x.nombre ?? 'Otra persona'} te debe su parte (${formatearEur(imp[x.actor_id] ?? '0')})`}</Text>
                     <View style={ef.chips}>
                       <Chip testID={`gprop-debe-${x.actor_id}-si`} etiqueta="Sí" seleccionado={b.deuda[x.actor_id]?.me_debe === 'SI'} onPress={() => cambiarDeuda(x.actor_id, 'SI')} />
-                      <Chip testID={`gprop-debe-${x.actor_id}-no`} etiqueta="No, no me debe nada (lo pagamos a medias o ya está saldado)" seleccionado={b.deuda[x.actor_id]?.me_debe === 'NO'} onPress={() => cambiarDeuda(x.actor_id, 'NO')} />
+                      <Chip testID={`gprop-debe-${x.actor_id}-no`} etiqueta="No, no me debe nada (ya está saldado o le invito)" seleccionado={b.deuda[x.actor_id]?.me_debe === 'NO'} onPress={() => cambiarDeuda(x.actor_id, 'NO')} />
                     </View>
                     {cuentaCompartida(prop) && b.deuda[x.actor_id]?.me_debe === 'SI' ? (
                       <CampoTexto testID={`gprop-debe-${x.actor_id}-importe`} etiqueta={`¿Cuánto te debe ${x.nombre ?? 'esa persona'}?`} marcador="Indícalo tú"

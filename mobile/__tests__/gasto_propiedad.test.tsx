@@ -11,6 +11,8 @@
 //   «Reforma o mejora» (MEJORA fijada, sin chips de clase ni categoría/presupuesto). El test C1 de las tres clases pasa a fijar ese alcance; la
 //   regla de dominio de las tres clases (faltasDatos) sigue cubierta y la corrección de clase (C-MEJ-03) no cambia.
 // Versión: 0.2.1 (F06 T1-F06 B3 ajuste N3 · KO visual iPhone casilla 7): «chips de fecha» en el alta y en la mejora antigua (Hoy por defecto, Ayer, Otra fecha).
+// Versión: 0.2.2 (F06 T1-F06 B3 ajuste N3 · HT2-01 · decisión 1 de Moisés del 2026-11-14, F06-00_Decisiones_Moises_2026-11-14_HT2-01_y_Q-29_v1.0):
+//   el «No» de «¿Te debe su parte?» no dice «a medias» y se muestra el aviso gprop-aviso-a-medias.
 // ============================================================
 
 import './tiempos_rn';
@@ -358,4 +360,11 @@ test('chips de fecha: la mejora antigua también ofrece «Hoy · Ayer · Otra fe
   expect(pat.propuestaGasto).toHaveBeenLastCalledWith('p1', '2026-10-09');
   await pulsar('mh-fecha-otra');
   expect(screen.getByTestId('mh-fecha')).toBeTruthy();
+});
+test('HT2-01 (N3): el «No» no dice «a medias» y se avisa de que el pago a medias aún no se registra bien', async () => {
+  await montar(patrimonio(() => prop()));
+  await datosMejora();
+  expect(screen.getByTestId(`gprop-debe-${ANA}-no`).props.accessibilityLabel).toBe('No, no me debe nada (ya está saldado o le invito)');
+  expect(screen.queryByText(/lo pagamos a medias/)).toBeNull();
+  expect(screen.getByTestId('gprop-aviso-a-medias')).toBeTruthy();
 });
