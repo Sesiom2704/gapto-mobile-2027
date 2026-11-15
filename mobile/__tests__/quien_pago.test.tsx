@@ -13,6 +13,8 @@
 //     cuenta»; movimientos de la cuenta sin punteo.
 //   Código de partida: laboratorio lab-t2 43a71c4 (quien_pago.test.tsx), ampliado.
 // Versión: 0.1.0 (F06 T2-F06 PAG N1)
+// Versión: 0.1.1 (F06 T2-F06 ajuste N3 · KO-1, KO-2 y KO-3 de la prueba en iPhone; decisión de Moisés del 2026-11-15, 022b115a…):
+//   texto de la falta de cuenta solo tuya, relectura silenciosa con respuestas atrasadas descartadas y etiquetas visibles del mixto.
 // ============================================================
 
 import './tiempos_rn';
@@ -82,7 +84,9 @@ test('exclusiones: EMPRESA y «No lo sé» sin deuda; la cuenta compartida va po
   expect(propuestas(e({ modo: 'COTITULAR_TODO', pagadorId: ANA }), '1500', [yo(), ana('50.0000', 'EMPRESA')])).toEqual([]);
   expect(propuestas(e({ modo: 'COTITULAR_TODO', pagadorId: ANA }), '1500', [])).toEqual([]);
   expect(propuestas(e({ modo: 'COMPARTIDA' }), '1500', [yo(), ana()])).toEqual([]);
-  expect(faltasPago(e({ modo: 'YO_TODO' }), '1500', [yo(), ana()], false, C1, true, {}, 2)[0]).toContain('cuenta solo tuya');
+  // KO-1 (prueba en iPhone del tren 2, reclasificado como KO de texto): la causa es la fecha y se remite a la vía compartida.
+  expect(faltasPago(e({ modo: 'YO_TODO' }), '1500', [yo(), ana()], false, C1, true, {}, 2)[0])
+    .toBe('una cuenta que fuera solo tuya en esa fecha (esta no lo era: si la compartías, elige «Desde una cuenta compartida»)');
 });
 
 test('tres titulares: sin posiciones entre terceros (P3 → solo le debo yo a quien pagó; P1 → cada uno me debe su parte)', () => {
@@ -143,11 +147,11 @@ function patrimonio(tres = false) {
   } as unknown as ClientePatrimonioB3 & Record<string, jest.Mock>;
 }
 
-async function montar(pat: ClientePatrimonioB3) {
+async function montar(pat: ClientePatrimonioB3, cli: ClienteApi = cliente()) {
   render(
     <SafeAreaProvider initialMetrics={METRICAS}>
       <ProveedorTema forzar="light">
-        <GastoPropiedadScreen cliente={cliente()} patrimonio={pat} vista={vista()} nuevoId={nuevoId} ahora={AHORA} onCerrar={jest.fn()} />
+        <GastoPropiedadScreen cliente={cli} patrimonio={pat} vista={vista()} nuevoId={nuevoId} ahora={AHORA} onCerrar={jest.fn()} />
       </ProveedorTema>
     </SafeAreaProvider>,
   );
@@ -219,6 +223,9 @@ test('«Otra combinación» (mixto bilateral): lo que puso cada uno debe sumar e
   const pat = patrimonio();
   await montar(pat);
   await pulsar('gprop-pago-mixto');
+  // KO-3: las dos cantidades llevan su etiqueta visible, no solo la accesible.
+  expect(screen.getByText('Lo que pusiste tú (desde tu cuenta)')).toBeTruthy();
+  expect(screen.getByText('Lo que puso Ana (por su cuenta)')).toBeTruthy();
   await pulsar(`gprop-cuenta-${C1}`);
   await escribir('gprop-pago-mio', '1000');
   await escribir('gprop-pago-suyo', '400');
@@ -229,6 +236,32 @@ test('«Otra combinación» (mixto bilateral): lo que puso cada uno debe sumar e
   await pulsar('gprop-continuar');
   await pulsar('gprop-guardar');
   expect(cuerpo(pat).pagos).toEqual([{ pagador: 'YO', cuenta_id: C1, importe: '1000.00' }, { pagador: ANA, importe: '500.00' }]);
+});
+
+test('KO-2: al cambiar de cuenta la relectura es silenciosa y se ignoran las respuestas atrasadas', async () => {
+  const C2 = 'c0000000-0000-4000-8000-0000000000c2';
+  const compartida: PropuestaGasto = { ...propuesta(), cuenta: { cuenta_id: C1, solo_mia: false, compartida_con: [] } };
+  const pat = patrimonio();
+  const leer = pat.propuestaGasto as unknown as jest.Mock;
+  leer.mockImplementation(async () => ok(compartida));
+  const cli = { ...cliente(), cuentasElegibles: jest.fn(async () => ok({ operacion: 'GASTO', cuentas: [
+    { cuenta_id: C1, nombre: 'Cuenta Nómina', moneda: 'EUR' }, { cuenta_id: C2, nombre: 'Cuenta Ahorro', moneda: 'EUR' }] })) } as unknown as ClienteApi;
+  await montar(pat, cli);
+  const faltas = () => String(screen.queryByTestId('gprop-faltas')?.props.children ?? '');
+  await pulsar('gprop-pago-yo');
+  await pulsar(`gprop-cuenta-${C1}`);
+  expect(faltas()).toContain('solo tuya');
+  // Relectura pendiente: se conserva la propuesta mostrada (sin «cargando» y sin que el aviso parpadee).
+  const pendientes: ((r: Respuesta<PropuestaGasto>) => void)[] = [];
+  leer.mockImplementation(() => new Promise((r) => { pendientes.push(r); }));
+  await pulsar(`gprop-cuenta-${C2}`);
+  expect(faltas()).toContain('solo tuya');
+  expect(screen.queryByTestId('gprop-rep-cargando')).toBeNull();
+  // Vuelta a C1 antes de que llegue la respuesta de C2: la de C2 (atrasada) no se aplica.
+  await pulsar(`gprop-cuenta-${C1}`);
+  await act(async () => { pendientes[1](ok(compartida)); });
+  await act(async () => { pendientes[0](ok(propuesta())); });
+  expect(faltas()).toContain('solo tuya');
 });
 
 test('con tres titulares no se ofrece «Otra combinación»', async () => {

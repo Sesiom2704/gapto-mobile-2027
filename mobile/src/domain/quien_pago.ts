@@ -10,6 +10,9 @@
 //   - Wire de C-MEJ-01 v2: `pagos[]` (YO con cuenta, o el actor del cotitular sin cuenta) y `saldos[]` (uno por cotitular del reparto; vacío con «No lo sé»).
 //   Código de partida: laboratorio lab-t2 05dec08 (quien_pago.ts 0.1.0-lab), copia revisada; añadidos: mixto bilateral, LE_DEBO preseleccionado, deuda parcial editable, confirmación por posición y exclusiones.
 // Versión: 0.1.0 (F06 T2-F06 PAG N1)
+// Versión: 0.1.1 (F06 T2-F06 ajuste N3 · KO-1 de la prueba en iPhone, reclasificado como KO de texto; decisión de Moisés del 2026-11-15,
+//   F06-00_Decisiones_Moises_2026-11-15_KO1_reclasificacion_N3_v1.0.md, 022b115a…): la falta de cuenta solo tuya se explica por la fecha
+//   y remite a «Desde una cuenta compartida». Sin cambio de comportamiento.
 // ============================================================
 
 import type { ParteEfectiva } from './gasto_propiedad';
@@ -145,7 +148,7 @@ export function faltasPago(e: EleccionPago, importe: string, partes: ParteEfecti
     else if (a + b !== cent(importe)) r.push('que lo que puso cada uno sume el importe');
   }
   if (necesitaCuenta(e) && !cuentaId) r.push(e.modo === 'COMPARTIDA' ? 'la cuenta compartida' : 'la cuenta');
-  if (necesitaCuenta(e) && cuentaId && e.modo !== 'COMPARTIDA' && cuentaEsCompartida) r.push('una cuenta solo tuya (si pagaste desde una compartida, elige «Desde una cuenta compartida»)');
+  if (necesitaCuenta(e) && cuentaId && e.modo !== 'COMPARTIDA' && cuentaEsCompartida) r.push('una cuenta que fuera solo tuya en esa fecha (esta no lo era: si la compartías, elige «Desde una cuenta compartida»)');
   if (e.modo === 'COMPARTIDA' && cuentaId && !cuentaEsCompartida) r.push('una cuenta compartida (esa cuenta es solo tuya)');
   const ps = propuestas(e, importe, partes);
   for (const x of ps) {

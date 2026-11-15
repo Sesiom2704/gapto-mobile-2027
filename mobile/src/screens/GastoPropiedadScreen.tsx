@@ -35,6 +35,9 @@
 //     los hechos anteriores, la limitación de 8quater con su ampliación «en cualquier sentido» y «Ver el movimiento en la cuenta»
 //     (L-MOV-CUENTA, pantalla nueva `MovimientosCuentaScreen`).
 //   Código de partida: laboratorio lab-t2 (43a71c4, a0d1af4, 10b9596), copia revisada.
+// Versión: 0.3.1 (F06 T2-F06 ajuste N3 · KO-2 y KO-3 de la prueba en iPhone; decisión de Moisés del 2026-11-15,
+//   F06-00_Decisiones_Moises_2026-11-15_KO1_reclasificacion_N3_v1.0.md, 022b115a…): la relectura de la propuesta al cambiar fecha o
+//   cuenta es silenciosa (sin «cargando», descarta respuestas atrasadas) y los importes de «Otra combinación» llevan su etiqueta visible.
 // ============================================================
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -202,10 +205,14 @@ export function GastoPropiedadScreen(p: {
     if (!esFechaIso(b.fecha)) return;
     void p.cliente.cuentasElegibles('GASTO', b.fecha).then((r) => { if (r.tipo === 'OK') setCuentas(r.datos.cuentas); });
   }, [b.fecha]);
+  // KO-2 (prueba en iPhone del tren 2, 2026-11-15): la relectura es silenciosa; se conserva la propuesta mostrada
+  // hasta que llega la nueva (sin «cargando» ni recarga de la pantalla) y se descartan las respuestas atrasadas.
+  const lectura = useRef(0);
   const leerPropuesta = async () => {
     if (!esFechaIso(b.fecha)) return;
-    setProp(null);
+    const n = ++lectura.current;
     const r = await p.patrimonio.propuestaGasto(p.vista.id, b.fecha, b.cuentaId);
+    if (n !== lectura.current) return;
     const nueva: PropuestaGasto = r.tipo === 'OK' ? r.datos : { fecha: b.fecha, propiedad_id: p.vista.id, nombre: p.vista.nombre, titularidad_disponible: false, partes: [], cuenta: null };
     setProp(nueva);
     setB((x) => alCambiarPropuesta(x, nueva, actoresDe(p.vista, nueva)));
@@ -320,9 +327,13 @@ export function GastoPropiedadScreen(p: {
             </View>
             {pago.modo === 'MIXTO' ? (
               <>
-                <CampoTexto testID="gprop-pago-mio" etiqueta="Lo que pusiste tú (desde tu cuenta)" marcador="0,00" valor={pago.mio} onCambiar={(t) => setPago({ ...pago, mio: t })} />
-                <CampoTexto testID="gprop-pago-suyo" etiqueta={`Lo que puso ${cotitulares[0]?.nombre ?? 'el otro titular'} (por su cuenta)`} marcador="0,00" valor={pago.suyo}
-                  onCambiar={(t) => setPago({ ...pago, suyo: t })} />
+                <Campo etiqueta="Lo que pusiste tú (desde tu cuenta)">
+                  <CampoTexto testID="gprop-pago-mio" etiqueta="Lo que pusiste tú (desde tu cuenta)" marcador="0,00" valor={pago.mio} onCambiar={(t) => setPago({ ...pago, mio: t })} />
+                </Campo>
+                <Campo etiqueta={`Lo que puso ${cotitulares[0]?.nombre ?? 'el otro titular'} (por su cuenta)`}>
+                  <CampoTexto testID="gprop-pago-suyo" etiqueta={`Lo que puso ${cotitulares[0]?.nombre ?? 'el otro titular'} (por su cuenta)`} marcador="0,00" valor={pago.suyo}
+                    onCambiar={(t) => setPago({ ...pago, suyo: t })} />
+                </Campo>
               </>
             ) : null}
             {pago.modo === 'COTITULAR_TODO' ? <Text testID="gprop-pago-sin-movimiento" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_SIN_MOVIMIENTO}</Text> : null}
