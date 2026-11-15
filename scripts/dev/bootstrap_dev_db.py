@@ -57,6 +57,11 @@
 #     python scripts/dev/bootstrap_dev_db.py --seed-categorias \
 #       --dev-dsn "host=127.0.0.1 port=5434 dbname=gapto2027_dev user=<rol>" \
 #       --api-url http://192.168.1.10:8027
+# Version: 0.11.0 -- T2-F06 · cierre (C7 del tren; autorizacion de Moises del
+#                   2026-11-14, decision 1 de F06-00_Decisiones_Moises_2026-11-14_
+#                   autorizaciones_anticipadas_T2_v1.0.md 4a9d1947…):
+#                   HEAD_AUTORIZADO_ENVDEV pasa de "0352" a "0353". 0353 se aplica
+#                   en ENV-DEV con el runbook C7 del tren.
 # Version: 0.10.0 -- T1-F06 · lote 29 (C7 del tren; autorizacion de Moises del
 #                   2026-11-13, F06-00_Decisiones_Moises_2026-11-13_ENVDEV_y_
 #                   Supabase_0352_v1.0.md f2593219…): HEAD_AUTORIZADO_ENVDEV pasa
@@ -138,7 +143,7 @@ HOSTS_LOCALES = {"localhost", "127.0.0.1", "::1"}
 
 # Head maximo que ENV-DEV puede materializar. Cambiarlo es una decision
 # revisada (commit propio), nunca un efecto lateral de publicar migrations.
-HEAD_AUTORIZADO_ENVDEV = "0352"
+HEAD_AUTORIZADO_ENVDEV = "0353"
 PATRON_MIGRATION = re.compile(r"^(\d{4})_[a-z0-9_]+\.sql$")
 
 
