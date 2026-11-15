@@ -31,7 +31,10 @@
 #   incluye `asociacion_id` (PK de la fila de categoria_magnitudes), la
 #   identidad estable que los comandos de asociaciones exigen bajo lock. Campo
 #   aditivo: ni el orden ni `capturable` cambian.
-# Version: 0.3.0
+#
+#   v0.4.0 (F06 T2-F06 CAT-VIV N1; 0353): `arbol` devuelve `asociada_vivienda` (campo aditivo; la marca
+#   de la categoria elegida, sin herencia).
+# Version: 0.4.0
 # ============================================================
 
 from __future__ import annotations
@@ -53,6 +56,7 @@ _COLUMNAS = (
     "icon_key",
     "presupuestable_default",
     "row_version",
+    "asociada_vivienda",
 )
 
 
@@ -104,7 +108,7 @@ def arbol(sesion: SesionMotor) -> list[dict[str, Any]]:
     with sesion.conexion.cursor() as cur:
         cur.execute(
             "SELECT id, parent_id, nombre, codigo, ambito, enabled, orden, icon_key, "
-            "presupuestable_default, row_version "
+            "presupuestable_default, row_version, asociada_vivienda "
             "FROM gapto.categorias_financieras "
             "WHERE owner_user_id = current_setting('gapto.owner_user_id')::uuid "
             "ORDER BY orden, nombre, id"

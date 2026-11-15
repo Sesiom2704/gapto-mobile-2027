@@ -275,6 +275,8 @@
 # Version: 0.35.0 (F06 T2-F06 · PAG N1, mandato §1.3.2-3): dos lecturas de PAG registradas con UNA llamada a
 #   app.patrimonio.rutas_pag.registrar (GET /v1/patrimonio/invertido-mes y GET /v1/cuentas/{cuenta_id}/movimientos,
 #   L-MOV-CUENTA sin punteo). Ninguna ruta existente cambia.
+# Version: 0.36.0 (F06 T2-F06 · CAT-VIV N1, L-04; C-CAT-VIV-01): POST /v1/categorias/{categoria_id}/vivienda
+#   (marcar_vivienda). Ninguna ruta existente cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -318,6 +320,7 @@ from app.api.dto_categorias import (
     CategoriasSugeridas,
     DesactivarCategoria,
     IconoCategoria,
+    ViviendaCategoria,
     MoverCategoria,
     OrdenCategoria,
     ReactivarCategoria,
@@ -715,6 +718,11 @@ def create_app(
             status, cuerpo = eh.rechazo_categoria(salida.codigo, salida.detalle)
             return JSONResponse(cuerpo, status_code=status)
         return {"creadas": len(salida.creadas), "idempotente": salida.idempotente}
+
+    @app.post("/v1/categorias/{categoria_id}/vivienda", **_R)
+    def vivienda_categoria(categoria_id: uuid.UUID, c: ViviendaCategoria):  # T2-F06 CAT-VIV, C-CAT-VIV-01
+        return _comando("vivienda", lambda s: serv_cat.marcar_vivienda(
+            s, categoria_id=categoria_id, asociada=c.asociada_vivienda, row_version=c.row_version))
 
     @app.post("/v1/categorias/{categoria_id}/icono", **_R)
     def icono_categoria(categoria_id: uuid.UUID, c: IconoCategoria):

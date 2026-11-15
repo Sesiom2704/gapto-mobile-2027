@@ -27,7 +27,10 @@
 #   habilitados o no, FOR NO KEY UPDATE en orden por id) para el comando
 #   `reordenar`. Ningun escritor nuevo: la reordenacion escribe con
 #   `actualizar`. Cosmetico §30.6: el mensaje de `actualizar` ya no alude a S4.
-# Version: 0.3.0
+#
+#   v0.4.0 (F06 T2-F06 CAT-VIV N1; 0353): `leer` devuelve `asociada_vivienda`; la columna entra en
+#   COLUMNAS_EDITABLES SOLO para `servicio.marcar_vivienda` (el inventario I8 de test_154 lo comprueba).
+# Version: 0.4.0
 # ============================================================
 
 from __future__ import annotations
@@ -55,7 +58,7 @@ def tomar_advisory(sesion: SesionMotor) -> None:
 def leer(sesion: SesionMotor, categoria_id: uuid.UUID, *, bloquear: bool = False) -> dict[str, Any] | None:
     sql = (
         "SELECT id, owner_user_id, parent_id, nombre, codigo, ambito, presupuestable_default, "
-        "orden, enabled, icon_key, row_version FROM gapto.categorias_financieras "
+        "orden, enabled, icon_key, row_version, asociada_vivienda FROM gapto.categorias_financieras "
         "WHERE id = %s AND owner_user_id = current_setting('gapto.owner_user_id')::uuid"
     )
     if bloquear:
@@ -64,7 +67,7 @@ def leer(sesion: SesionMotor, categoria_id: uuid.UUID, *, bloquear: bool = False
     if fila is None:
         return None
     claves = ("id", "owner_user_id", "parent_id", "nombre", "codigo", "ambito",
-              "presupuestable_default", "orden", "enabled", "icon_key", "row_version")
+              "presupuestable_default", "orden", "enabled", "icon_key", "row_version", "asociada_vivienda")
     return dict(zip(claves, fila))
 
 
@@ -169,7 +172,8 @@ def insertar(
 
 #: Columnas que los comandos pueden modificar. icon_key SI desde S6-ICONO
 #: (F05-D013 supera F05-D010 Q4); presupuestable_default NO (Q6: no editable).
-COLUMNAS_EDITABLES = frozenset({"nombre", "parent_id", "orden", "enabled", "ambito", "icon_key"})
+#: T2-F06 CAT-VIV (0353): asociada_vivienda, editable SOLO por servicio.marcar_vivienda.
+COLUMNAS_EDITABLES = frozenset({"nombre", "parent_id", "orden", "enabled", "ambito", "icon_key", "asociada_vivienda"})
 
 
 def actualizar(sesion: SesionMotor, categoria_id: uuid.UUID, cambios: dict[str, Any]) -> None:

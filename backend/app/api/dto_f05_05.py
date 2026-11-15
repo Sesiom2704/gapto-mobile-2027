@@ -18,6 +18,8 @@
 # Version: 0.6.0 (F06 T2-F06 PAG, §1.5 del mandato; lista cerrada de F05, parrafo 3 del literal de PAG): campos
 #   ADITIVOS de la fila de una reforma (MEJORA_PATRIMONIAL; null en el resto): `propiedad` (vivienda),
 #   `salida_cuentas` (lo que salio de mis cuentas) y `posiciones` (deuda real en su sentido).
+# Version: 0.7.0 (F06 T2-F06 CAT-VIV N1; L-04, OBL-VIV-01.6, lamina R07): campo ADITIVO del detalle
+#   `aviso_vivienda_sin_propiedad` (gasto con categoria marcada sin propiedad, p. ej. tras corregir la categoria).
 # ============================================================
 
 from __future__ import annotations
@@ -202,6 +204,7 @@ class DetalleActividad(FilaActividad):
     presupuestable: bool
     magnitudes: list[MagnitudHecho]
     devoluciones: DevolucionesOrigen | None = None
+    aviso_vivienda_sin_propiedad: bool = False
 
 
 # ------------------------------------------------------------------ Inicio (§1.6)

@@ -30,7 +30,9 @@
 #   (CategoriaNodo) en el orden persistido resultante.
 #   v0.6.0 (F05-03 J2 §1.8): DTO de lectura del arbol sugerido (NodoSugerido,
 #   CategoriasSugeridas) y resultado del onboarding (ResultadoOnboarding).
-# Version: 0.6.0
+#   v0.7.0 (F06 T2-F06 CAT-VIV N1; C-CAT-VIV-01): `CategoriaNodo.asociada_vivienda` y DTO
+#   `ViviendaCategoria` ({asociada_vivienda, row_version}) de POST /v1/categorias/{id}/vivienda.
+# Version: 0.7.0
 # ============================================================
 
 from __future__ import annotations
@@ -56,6 +58,7 @@ class CategoriaNodo(_Estricto):
     icon_key: str | None
     presupuestable_default: bool
     row_version: int
+    asociada_vivienda: bool
 
 
 class MagnitudCategoria(_Estricto):
@@ -152,6 +155,11 @@ class AmbitoCambio(_ConVersion):
 class IconoCategoria(_ConVersion):
     # Sin default: la clave debe venir; null es un valor valido (sin icono).
     icon_key: str | None
+
+
+class ViviendaCategoria(_ConVersion):
+    """C-CAT-VIV-01: «Asociada a vivienda» (solo GASTO y AMBOS; Q-CV-11)."""
+    asociada_vivienda: bool
 
 
 class ResultadoComandoCategoria(_Estricto):

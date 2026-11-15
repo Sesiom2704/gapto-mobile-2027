@@ -62,6 +62,11 @@
 #   aditiva `posiciones_vinculadas`: las posiciones del hecho que no cuelgan de
 #   ninguna parte (derecho de cobro de C-03), separadas de partes y
 #   atribuciones; nunca se fabrica una parte ni se duplica una posicion.
+# Version: 0.6.0 (F06 T2-F06 CAT-VIV N1; L-04, OBL-VIV-01, mandato v1.1 §2.4.2): `exigir_propiedad` tras C-a/C07
+#   y antes de componer (tambien al registrar desde una prevision); bloque OPCIONAL `propiedad` (L-04b NO firmada:
+#   un solo pagador y las reglas propias de M3): INVERSIONES y propiedad FOR SHARE antes de la cuenta; intencion
+#   nueva: propiedad disponible y no DE_OTROS y propuesta vista de la titularidad vigente; composicion de M3 +
+#   AFECTA_A principal de nivel efecto. Sin el bloque, nada cambia (O-CV-20).
 # ============================================================
 
 from __future__ import annotations
@@ -95,7 +100,9 @@ from app.api.ejecucion_registro import (
 )
 from app.api.traductor_gasto_pagado import id_magnitud_hecho, leer_actor_self
 from app.api.traductor_registro import ESCALA, contexto_hecho, prevision_compuesta
-from app.comun.fecha_funcional import CODIGO_FECHA_FUTURA, Reloj, es_futura, reloj_sistema
+from app.api import propiedad_registro as pr
+from app.api.elegibilidad_categoria import exigir_propiedad
+from app.comun.fecha_funcional import CODIGO_FECHA_FUTURA, Reloj, es_futura, hoy_owner, reloj_sistema
 from app.core.contexto import ContextoOperacion
 from app.core.errores import CodigoError, ErrorMotor
 from app.core.modelos import DatosCreacionHecho
@@ -302,8 +309,17 @@ def registrar_gasto_compartido(
         repo_comp.tomar_advisory_raiz(sesion, intencion.intencion_id)
         # 0. Advisory INVERSIONES ANTES de la cuenta si habra posiciones
         #    (hecho_entidades GENERADO_POR): R-M3PRE2-01.
-        if declaradas:
+        bloque = intencion.propiedad
+        if declaradas or bloque is not None:
             tomar_inversiones(sesion)
+        raiz_propiedad = None
+        if bloque is not None:  # CAT-VIV: validacion pura y propiedad FOR SHARE antes de la cuenta
+            rechazo = pr.validar_pura_m3(bloque, intencion.fecha_hecho)
+            if rechazo is not None:
+                return RechazoRegistro(rechazo)
+            raiz_propiedad = pr.bloquear(sesion, bloque.propiedad_id)
+            if raiz_propiedad is None:
+                return RechazoRegistro("AGREGADO_NO_ENCONTRADO")
         # 1. Cuenta FNKU (solo si pague yo).
         if isinstance(intencion.pagado_por, PagadoConCuenta):
             bloquear_cuentas(sesion, intencion.pagado_por.cuenta_id)
@@ -319,10 +335,19 @@ def registrar_gasto_compartido(
         if not ya_materializada:
             if es_futura(sesion, intencion.fecha_hecho, reloj):
                 return RechazoRegistro(CODIGO_FECHA_FUTURA)
+            if bloque is not None:
+                rechazo = pr.revalidar_propiedad(sesion, raiz_propiedad, bloque.propiedad_id, hoy_owner(sesion, reloj))
+                if rechazo is not None:
+                    return RechazoRegistro(rechazo)
             if isinstance(intencion.pagado_por, PagadoConCuenta):
                 rechazo_cuenta(sesion, intencion.pagado_por.cuenta_id, "GASTO", intencion.fecha_hecho)
             rechazo = validar_categoria_y_magnitudes(
                 sesion, intencion.categoria_id, "GASTO", intencion.magnitudes, intencion.magnitudes_desconocidas)
+            if rechazo is not None:
+                return RechazoRegistro(rechazo)
+            # OBL-VIV-01: categoria «Asociada a vivienda» exige propiedad (FOR SHARE de C-a, ya tomado).
+            rechazo = exigir_propiedad(sesion, intencion.categoria_id, "GASTO",
+                                       None if bloque is None else bloque.propiedad_id)
             if rechazo is not None:
                 return RechazoRegistro(rechazo)
             # 3. Terceros FOR SHARE por UUID: el comercio (owner y habilitado)
@@ -341,10 +366,16 @@ def registrar_gasto_compartido(
             rechazo = validar_tipo_prevision(sesion, intencion.prevision, "GASTO")  # F05-06 M5
             if rechazo is not None:
                 return RechazoRegistro(rechazo)
+            if bloque is not None:  # CAT-VIV: la propuesta vista de la titularidad sigue vigente
+                rechazo = pr.revalidar_m3(sesion, bloque, intencion.fecha_hecho)
+                if rechazo is not None:
+                    return RechazoRegistro(rechazo)
             actores_de = {t: actores.actor_de_tercero(sesion, t) for t in sorted(personas, key=str)}
         # 4. OP-22 adscrito: hecho -> efectos/atribuciones -> participantes ->
         #    posiciones -> pago -> aportaciones -> contexto, todo o nada.
         datos = componer_gasto_compartido(intencion, actor_self, actores_de)
+        if bloque is not None:
+            datos = pr.afecta_a(datos, intencion.intencion_id, bloque.propiedad_id)
         if intencion.prevision is not None:  # F05-06 M5: ... -> regla -> prevision (OP-17 al final)
             datos = dataclasses.replace(datos, prevision=prevision_compuesta(
                 intencion.intencion_id, intencion.prevision, intencion.importe.quantize(ESCALA)))

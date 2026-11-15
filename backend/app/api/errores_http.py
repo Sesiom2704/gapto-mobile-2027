@@ -200,6 +200,15 @@
 #   INICIO_NO_ANTERIOR y FECHA_FUTURA (422) en _RECHAZOS_PROPIEDAD, de C-PROP-03bis y de la cota del alta. El
 #   P0001 de la suma 100 reutiliza SUMA_NO_CUADRA con su motivo en el detalle. Ningun codigo existente cambia.
 # Version: 0.31.0
+#   0.32.0 (F06 T2-F06 · CAT-VIV N1, L-04; OBL-VIV-01): CATEGORIA_EXIGE_PROPIEDAD (422) en
+#   _RECHAZOS_INTEGRACION (gasto real de categoria «Asociada a vivienda» sin propiedad) y los rechazos del
+#   bloque `propiedad` de VS-01 y M3 con el status de B3 (patrimonio/rutas.py y rutas_b3.py):
+#   OPERACION_NO_PERMITIDA_EN_ESTADO (422, M-8), PROPIEDAD_NO_DISPONIBLE (409), AGREGADO_NO_ENCONTRADO
+#   (404), ATRIBUCION_PROPUESTA_DESFASADA (409), TITULARIDAD_NO_DISPONIBLE_EN_FECHA (422), SUMA_NO_CUADRA,
+#   PARTICIPANTE_DUPLICADO, PAGOS_NO_CUADRAN, SALDO_INCOHERENTE, SALDO_NO_DECLARADO,
+#   PAGO_DESDE_CUENTA_COMPARTIDA y ENTRADA_INVALIDA (422). CATEGORIA_AMBITO_NO_ADMITE_VIVIENDA
+#   (422) en _RECHAZOS_CATEGORIA. Ningun codigo existente cambia de status.
+# Version: 0.32.0
 # ============================================================
 
 from __future__ import annotations
@@ -402,6 +411,26 @@ _RECHAZOS_INTEGRACION: dict[str, tuple[int, str]] = {
     "GASTO_CON_DERECHO_DE_COBRO": (
         409, "Este gasto tiene un importe que te deben vinculado: una devolución no se registra aquí, para no "
              "cambiar lo que te deben ni lo ya cobrado. No se ha guardado nada."),
+    # T2-F06 CAT-VIV (OBL-VIV-01): gasto real de categoria marcada sin propiedad.
+    "CATEGORIA_EXIGE_PROPIEDAD": (
+        422, "Esta categoría está asociada a una vivienda: elige la propiedad. No se ha guardado nada."),
+    # T2-F06 CAT-VIV: bloque `propiedad` de VS-01 y M3, con el status de B3 (patrimonio/rutas.py, rutas_b3.py).
+    "AGREGADO_NO_ENCONTRADO": (404, "No encontramos esa propiedad. No se ha guardado nada."),
+    "PROPIEDAD_NO_DISPONIBLE": (409, "Esta propiedad no está disponible. No se ha guardado nada."),
+    "OPERACION_NO_PERMITIDA_EN_ESTADO": (
+        422, "Esta propiedad no es tuya: no puedes registrar gastos en ella. No se ha guardado nada."),
+    "ATRIBUCION_PROPUESTA_DESFASADA": (
+        409, "La titularidad ha cambiado. Revisa de quién es el gasto. No se ha guardado nada."),
+    "TITULARIDAD_NO_DISPONIBLE_EN_FECHA": (
+        422, "No hay titularidad registrada en esa fecha. Elige otro reparto o «No lo sé»."),
+    "SUMA_NO_CUADRA": (422, "El reparto tiene que sumar 100 %. No se ha guardado nada."),
+    "PARTICIPANTE_DUPLICADO": (422, "Hay una persona repetida en el reparto. No se ha guardado nada."),
+    "PAGOS_NO_CUADRAN": (422, "Lo que pagó cada uno no suma el importe del gasto."),
+    "SALDO_INCOHERENTE": (422, "Lo que se debe no cuadra con lo que pagó cada uno."),
+    "SALDO_NO_DECLARADO": (422, "Indica qué queda pendiente con cada cotitular."),
+    "PAGO_DESDE_CUENTA_COMPARTIDA": (
+        422, "Si pagaste desde una cuenta compartida, regístralo desde la ficha de la propiedad."),
+    "ENTRADA_INVALIDA": (422, "Revisa la propiedad, quién pagó y el reparto. No se ha guardado nada."),
 }
 
 #: F05-D052: validaciones del DTO con codigo estable (422) y su texto propio.
@@ -524,6 +553,8 @@ def rechazo_capacidad(codigo: str, detalle: dict | None = None) -> tuple[int, di
 
 _RECHAZOS_CATEGORIA: dict[str, tuple[int, str]] = {
     "CATEGORIA_NOMBRE_DUPLICADO": (409, "Ya hay una categoría activa con ese nombre en el mismo nivel."),
+    "CATEGORIA_AMBITO_NO_ADMITE_VIVIENDA": (  # T2-F06 CAT-VIV (Q-CV-11)
+        422, "Solo las categorías de gasto se pueden asociar a una vivienda."),
     "CATEGORIA_PADRE_NO_VALIDO": (422, "La categoría superior elegida no es válida."),
     "CATEGORIA_PADRE_DESHABILITADO": (409, "La categoría superior (o alguna por encima) está desactivada."),
     "CATEGORIA_TIENE_HIJOS_ACTIVOS": (409, "Tiene subcategorías activas: desactiva la rama completa o desactívalas antes."),

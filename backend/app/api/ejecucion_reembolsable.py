@@ -46,6 +46,10 @@
 #   compara en el replay. Un replay NO revalida la disponibilidad del tercero
 #   ni su naturaleza, no recrea el actor y no duplica la posicion.
 # Version: 0.1.0 (F05-D052 paso 2; F05 §66.A.1-§66.A.7)
+# Version: 0.2.0 (F06 T2-F06 CAT-VIV N1; L-04, OBL-VIV-01, mandato v1.1 §2.4.2): `exigir_propiedad` tras C-a/C07 y
+#   antes de componer; bloque OPCIONAL `propiedad`: propiedad FOR SHARE tras INVERSIONES y antes de la cuenta;
+#   intencion nueva: disponible y no DE_OTROS y propuesta vista vigente; composicion de C-03 + AFECTA_A principal de
+#   nivel efecto (el gasto sigue siendo 100 % mio con su derecho de cobro). Sin el bloque, nada cambia (O-CV-20).
 # ============================================================
 
 from __future__ import annotations
@@ -70,7 +74,9 @@ from app.api.ejecucion_registro import (
 )
 from app.api.traductor_gasto_pagado import id_magnitud_hecho, leer_actor_self, participacion_self_100
 from app.api.traductor_registro import contexto_hecho
-from app.comun.fecha_funcional import CODIGO_FECHA_FUTURA, Reloj, es_futura, reloj_sistema
+from app.api import propiedad_registro as pr
+from app.api.elegibilidad_categoria import exigir_propiedad
+from app.comun.fecha_funcional import CODIGO_FECHA_FUTURA, Reloj, es_futura, hoy_owner, reloj_sistema
 from app.core.contexto import ContextoOperacion
 from app.core.errores import CodigoError, ErrorMotor
 from app.core.modelos import DatosCreacionHecho
@@ -199,6 +205,15 @@ def registrar_gasto_reembolsable(
         repo_comp.tomar_advisory_raiz(sesion, iid)
         # 2. INVERSIONES siempre: la posicion escribe hecho_entidades (GENERADO_POR).
         tomar_inversiones(sesion)
+        bloque = intencion.propiedad
+        raiz_propiedad = None
+        if bloque is not None:  # CAT-VIV: validacion pura y propiedad FOR SHARE antes de la cuenta
+            rechazo = pr.validar_pura_m3(bloque, intencion.fecha_hecho)
+            if rechazo is not None:
+                return RechazoRegistro(rechazo)
+            raiz_propiedad = pr.bloquear(sesion, bloque.propiedad_id)
+            if raiz_propiedad is None:
+                return RechazoRegistro("AGREGADO_NO_ENCONTRADO")
         # 3. Cuenta pagadora FNKU.
         bloquear_cuentas(sesion, intencion.cuenta_id)
         actor_self = leer_actor_self(sesion)
@@ -213,6 +228,10 @@ def registrar_gasto_reembolsable(
         else:
             if es_futura(sesion, intencion.fecha_hecho, reloj):
                 return RechazoRegistro(CODIGO_FECHA_FUTURA)
+            if bloque is not None:
+                rechazo = pr.revalidar_propiedad(sesion, raiz_propiedad, bloque.propiedad_id, hoy_owner(sesion, reloj))
+                if rechazo is not None:
+                    return RechazoRegistro(rechazo)
             # 4. Bajo FOR SHARE: capacidad, propuesta de financiacion, categoria, C07 y contexto.
             rechazo_cuenta(sesion, intencion.cuenta_id, "GASTO", intencion.fecha_hecho)
             if intencion.financiacion.estado == "PROPUESTA_ACEPTADA" and not participacion_self_100(
@@ -220,6 +239,11 @@ def registrar_gasto_reembolsable(
                 return RechazoRegistro(CODIGO_PROPUESTA_OBSOLETA)
             rechazo = validar_categoria_y_magnitudes(
                 sesion, intencion.categoria_id, "GASTO", intencion.magnitudes, intencion.magnitudes_desconocidas)
+            if rechazo is not None:
+                return RechazoRegistro(rechazo)
+            # OBL-VIV-01: categoria «Asociada a vivienda» exige propiedad (FOR SHARE de C-a, ya tomado).
+            rechazo = exigir_propiedad(sesion, intencion.categoria_id, "GASTO",
+                                       None if bloque is None else bloque.propiedad_id)
             if rechazo is not None:
                 return RechazoRegistro(rechazo)
             rechazo = validar_contexto(sesion, intencion.contexto_id)
@@ -237,11 +261,17 @@ def registrar_gasto_reembolsable(
                     codigo = validar_tercero(sesion, tercero)
                     if codigo is not None:
                         return RechazoRegistro(codigo)
+            if bloque is not None:  # CAT-VIV: la propuesta vista de la titularidad sigue vigente
+                rechazo = pr.revalidar_m3(sesion, bloque, intencion.fecha_hecho)
+                if rechazo is not None:
+                    return RechazoRegistro(rechazo)
             # 6. Writer de actor (despues de TODAS las validaciones).
             actor_contraparte = actores.actor_de_tercero(sesion, contraparte, motivo=actores.MOTIVO_ALTA_REEMBOLSO)
         # 7-9. OP-22 adscrito, UNA sola llamada: hecho -> posicion -> hijas, todo o nada.
         nombre = nombre_posicion(sesion, intencion.categoria_id)
         datos = componer_gasto_reembolsable(intencion, actor_self, actor_contraparte, nombre)
+        if bloque is not None:
+            datos = pr.afecta_a(datos, iid, bloque.propiedad_id)
         op22 = HechosCompuestosService(UnidadDeTrabajoAdscrita(sesion), impacto_ancla=impacto_correccion_ancla)
         resultado = op22.registrar_hecho_compuesto(contexto, datos)
         # Estado de la posicion, leido una vez (en un replay posterior a cobros refleja el actual).

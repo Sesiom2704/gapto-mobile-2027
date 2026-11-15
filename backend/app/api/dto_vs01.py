@@ -88,6 +88,11 @@
 #   (dto_prevision.BloquePrevision) en IntencionGastoPagado: registro desde la
 #   prevision por OP-22. Sin el bloque, nada cambia.
 # Version: 0.10.0
+#   v0.11.0 (F06 T2-F06 CAT-VIV N1; L-04, Q-CV-02 variante (a), Q-CV-05): bloque OPCIONAL `propiedad`
+#   (dto_propiedad_registro.BloquePropiedadVs01). Con el bloque, la atribucion de VS-01 es SIN_INDICAR y la
+#   financiacion NO_DETERMINADA (el reparto y las aportaciones salen del bloque: no hay dos fuentes para lo
+#   mismo). Ningun campo ni validacion de VS-01 se retira. Sin el bloque, nada cambia.
+# Version: 0.11.0
 # ============================================================
 
 from __future__ import annotations
@@ -101,6 +106,7 @@ from typing import Annotated, Literal, Union
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator, model_validator
 
 from app.api.dto_prevision import BloquePrevision
+from app.api.dto_propiedad_registro import BloquePropiedadVs01
 
 AtribucionVs01 = Literal["SOLO_MIO", "SIN_INDICAR"]
 
@@ -217,6 +223,8 @@ class IntencionGastoPagado(_Estricto):
     contexto_id: uuid.UUID | None = None
     # F05-06 M5: registro desde la prevision (OP-22 con DatosPrevisionCompuesta).
     prevision: BloquePrevision | None = None
+    # T2-F06 CAT-VIV: gasto de una propiedad (obligatorio con categoria «Asociada a vivienda», OBL-VIV-01).
+    propiedad: BloquePropiedadVs01 | None = None
 
     @property
     def estado_categorial(self) -> str:
@@ -241,6 +249,14 @@ class IntencionGastoPagado(_Estricto):
         if isinstance(self.categoria, CategoriaSeleccionada):
             return self.categoria.desconocidas
         return ()
+
+    @model_validator(mode="after")
+    def _propiedad_coherente(self) -> "IntencionGastoPagado":
+        if self.propiedad is not None and (
+            self.atribucion != "SIN_INDICAR" or isinstance(self.financiacion, FinanciacionPropuestaAceptada)
+        ):
+            raise ValueError("con `propiedad`, atribucion SIN_INDICAR y financiacion NO_DETERMINADA")
+        return self
 
     @model_validator(mode="after")
     def _importe_financiacion(self) -> "IntencionGastoPagado":

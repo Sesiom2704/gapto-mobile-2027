@@ -56,6 +56,10 @@
 #   conciliados, en positivo) y `posiciones` (sus posiciones de deuda reales, ME_DEBE o LE_DEBO, importe y
 #   tercero; nunca inferidas). Dos consultas mas por pagina. Ni el universo, ni el orden, ni los filtros, ni la
 #   busqueda, ni ningun otro tipo cambian; el Resultado del mes no se toca.
+# Version: 0.5.0 (F06 T2-F06 CAT-VIV N1; L-04 «Corregir la categoria de un gasto anterior no exige propiedad: se avisa
+#   en la lectura»; OBL-VIV-01.6, lamina REG-CAT R07): campo ADITIVO del detalle `aviso_vivienda_sin_propiedad`
+#   (true si el hecho tiene un efecto GASTO con categoria «Asociada a vivienda» y ningun vinculo AFECTA_A a una
+#   PROPIEDAD). Solo lectura: no crea ni propone vinculos.
 # ============================================================
 
 from __future__ import annotations
@@ -244,7 +248,19 @@ def detalle(sesion: SesionMotor, hecho_id: uuid.UUID) -> dict[str, Any] | None:
                               for r in cur.fetchall()]
     item["presupuestable"] = existe[0]
     item["devoluciones"] = devoluciones_de_origen(sesion, hecho_id)
+    item["aviso_vivienda_sin_propiedad"] = aviso_vivienda_sin_propiedad(sesion, hecho_id)
     return item
+
+
+def aviso_vivienda_sin_propiedad(sesion: SesionMotor, hecho_id: uuid.UUID) -> bool:
+    """OBL-VIV-01.6 (R07): gasto con categoria marcada y sin propiedad (p. ej. corregido a una categoria marcada)."""
+    fila = sesion.uno(
+        "SELECT EXISTS (SELECT 1 FROM gapto.hecho_efectos e JOIN gapto.categorias_financieras c ON c.id = e.categoria_id "
+        "WHERE e.hecho_id = %s AND e.tipo_efecto = 'GASTO' AND c.asociada_vivienda) "
+        "AND NOT EXISTS (SELECT 1 FROM gapto.hecho_entidades v JOIN gapto.entidades x ON x.id = v.entidad_id "
+        "WHERE v.hecho_id = %s AND v.tipo_relacion = 'AFECTA_A' AND x.tipo_entidad = 'PROPIEDAD')",
+        (hecho_id, hecho_id))
+    return bool(fila[0])
 
 
 def devoluciones_de_origen(sesion: SesionMotor, origen_id: uuid.UUID) -> dict[str, Any] | None:

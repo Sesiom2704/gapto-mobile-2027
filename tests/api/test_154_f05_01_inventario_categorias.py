@@ -408,6 +408,16 @@
 #     (C-MEJ-03) y patrimonio/dto_b3.py. I7: mobile/src/api/patrimonio_b3.ts y mobile/src/domain/gasto_propiedad.ts.
 #     Las guardas C-a de B3 (validar_seleccion_categoria) se invocan tras la identidad y antes de componer/escribir.
 #     Ninguna regla (I1..I13) ni entrada previa cambia; `componer` sigue con un unico llamador (I4).
+# Version: 0.40.0 (F06 T2-F06 CAT-VIV N1; adaptacion declarada y minima por L-06 ampliada, lista cerrada de la
+#     declaracion v1.1 §4; mandato CAT-VIV §7.2): I1 registra SOLO altas de CAT-VIV que mencionan categoria_id
+#     (exigir_propiedad GUARDA, marcar_vivienda CATALOGO, su ruta y el aviso de lectura R07). I8: `marcar_vivienda`
+#     entra en COMANDOS (advisory primero, como cambiar_icono) y COLUMNAS_EDITABLES admite `asociada_vivienda`
+#     con discriminante nuevo: ninguna funcion del servicio salvo marcar_vivienda menciona la columna y esta solo
+#     escribe esa clave. Ninguna regla ni entrada previa cambia.
+# Version: 0.41.0 (F06 T2-F06 CAT-VIV N1; L-06, lista cerrada de la declaracion v1.1 §4, fila test_i13_a | CAT-VIV):
+#     I13a registra SOLO las altas de imports de RegistroGastoScreen del bloque «Propiedad» (api/config,
+#     api/patrimonio_b3, api/propiedades, components/BloquePropiedad, domain/propiedad_registro). El discriminante
+#     (igualdad exacta del conjunto de imports) se conserva. Ninguna regla ni entrada previa cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -597,6 +607,17 @@ REGISTRO.update({
 })
 
 CLASES = {"A_FRONTERA", "GUARDA", "A_MOTOR", "B", "P", "R", "CATALOGO", "SEED_DEV", "PREFERENCIA"}
+# v0.40.0 (T2-F06 CAT-VIV; L-06): altas de CAT-VIV, ninguna entrada previa cambia.
+REGISTRO.update({
+    ("backend/app/api/elegibilidad_categoria.py", "exigir_propiedad"): (
+        "GUARDA", "OBL-VIV-01", "lee asociada_vivienda bajo el FOR SHARE de C-a; invocada tras C-a y antes de componer"),
+    ("backend/app/categorias/servicio.py", "marcar_vivienda"): (
+        "CATALOGO", "C-CAT-VIV-01", "comando del arbol bajo advisory (I8); unico escritor de asociada_vivienda"),
+    ("backend/app/api/app.py", "create_app.vivienda_categoria"): (
+        "CATALOGO", "ruta C-CAT-VIV-01", "parametro de ruta del comando"),
+    ("backend/app/actividad/lecturas.py", "aviso_vivienda_sin_propiedad"): (
+        "R", "aviso R07 (OBL-VIV-01.6)", "lee la marca de la categoria de los efectos GASTO; no escribe"),
+})
 #: v0.12.0 (J2 §1.6): alta aditiva de la clase PLANTILLA.
 CLASES = CLASES | {"PLANTILLA"}
 
@@ -759,7 +780,7 @@ ESCRITORES_CATALOGO: dict[tuple[str, str], str] = {
 SERVICIO = "backend/app/categorias/servicio.py"
 PRIMITIVAS_ESCRITURA = {"insertar", "actualizar"}
 COMANDOS = ("alta", "renombrar", "mover", "ordenar", "cambiar_ambito", "desactivar", "reactivar", "cambiar_icono",
-            "reordenar")
+            "reordenar", "marcar_vivienda")  # v0.40.0: T2-F06 CAT-VIV (C-CAT-VIV-01)
 ICONOS = "backend/app/categorias/iconos.py"
 
 
@@ -1260,7 +1281,19 @@ def test_i8_magnitudes_solo_advisory_y_lectura_bloqueante_de_categorias():
 
 def test_i8_columnas_editables_incluyen_icon_key():
     repo = importlib.import_module("app.categorias.repositorio")
-    assert repo.COLUMNAS_EDITABLES == frozenset({"nombre", "parent_id", "orden", "enabled", "ambito", "icon_key"})
+    # v0.40.0 (T2-F06 CAT-VIV, 0353): asociada_vivienda, SOLO para marcar_vivienda (discriminante abajo).
+    assert repo.COLUMNAS_EDITABLES == frozenset({"nombre", "parent_id", "orden", "enabled", "ambito", "icon_key",
+                                                 "asociada_vivienda"})
+    texto = (RAIZ / SERVICIO).read_bytes().decode("utf-8")
+    lineas = texto.splitlines()
+    for q, n in _funciones(ast.parse(texto)):
+        cuerpo = "\n".join(lineas[n.lineno - 1:n.end_lineno])
+        if q != "marcar_vivienda":
+            assert "asociada_vivienda" not in cuerpo, f"{q} toca asociada_vivienda (solo marcar_vivienda)"
+    fn = _nodo(SERVICIO, "marcar_vivienda")
+    escrituras = [c for c in ast.walk(fn) if isinstance(c, ast.Call) and _nombre_llamada(c) == "actualizar"]
+    assert len(escrituras) == 1 and isinstance(escrituras[0].args[2], ast.Dict)
+    assert [k.value for k in escrituras[0].args[2].keys] == ["asociada_vivienda"]
 
 
 # ------------------------------------------------------------------ I10
@@ -1717,6 +1750,19 @@ IMPORTS_CAMINO[SEL] = IMPORTS_CAMINO[SEL] | {
 }
 IMPORTS_CAMINO[CLI] = IMPORTS_CAMINO[CLI] | {
     ("../domain/senales", "type SenalesCategorias"), ("../domain/senales", "type SenalesTerceros"),
+}
+# v0.41.0 (T2-F06 CAT-VIV; L-06, lista cerrada de la declaracion v1.1 §4 fila test_i13_a | CAT-VIV): altas del bloque
+# «Propiedad» del registro (lamina REG-CAT R01-R05). Ninguno resuelve, propone ni completa la categoria: leen la
+# marca de la categoria YA elegida (exigePropiedad) y componen el bloque `propiedad` de VS-01.
+IMPORTS_CAMINO[REG] = IMPORTS_CAMINO[REG] | {
+    ("../api/config", "configApi"), ("../api/patrimonio_b3", "ClientePatrimonioB3"),
+    ("../api/patrimonio_b3", "PropuestaGasto"), ("../api/patrimonio_b3", "crearClientePatrimonioB3"),
+    ("../api/propiedades", "ClientePropiedades"), ("../api/propiedades", "crearClientePropiedades"),
+    ("../components/BloquePropiedad", "BloquePropiedad"),
+    *{("../domain/propiedad_registro", n) for n in (
+        "MOTIVO_RECHAZO_PROPIEDAD", "NOMBRE_CLASE_REGISTRO", "SeleccionPropiedad", "TEXTO_NO_SUMA_COSTE",
+        "TEXTO_RETIRADO_VIVIENDA", "TEXTO_SOLO_TUS_CUENTAS", "bloqueWire", "conDeudas", "conPropuesta",
+        "exigePropiedad", "faltasPropiedad", "miParte", "pagaYo", "textoRepartoExito")},
 }
 
 # F05-06 M4 (alta aditiva, adenda LANZAMIENTO_M4_CORR-F4-ENVDEV §1.2): aviso B2 y texto de B3.

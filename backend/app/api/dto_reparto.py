@@ -26,6 +26,8 @@
 #   igual al total -> codigo estable REPARTO_SIN_MARGEN_PARA_DESCONOCIDO; el
 #   exceso conserva su error y la suma incompleta sigue admitida) y coleccion
 #   aditiva `posiciones_vinculadas` en RepartoDeHecho, separada de las partes.
+# Version: 0.5.0 (F06 T2-F06 CAT-VIV N1; L-04, §2.4.2): bloque OPCIONAL `propiedad`
+#   (dto_propiedad_registro.BloquePropiedadM3) en el gasto compartido. Sin el bloque, nada cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -39,6 +41,7 @@ from pydantic import Field, model_validator
 from pydantic_core import PydanticCustomError
 
 from app.api.dto_prevision import BloquePrevision
+from app.api.dto_propiedad_registro import BloquePropiedadM3
 from app.api.dto_registro import _ConNota, _Estricto
 from app.api.dto_vs01 import CategoriaSeleccionada, CategoriaVs01
 
@@ -103,6 +106,7 @@ class IntencionGastoCompartido(_ConNota):
     pagado_por: Pagador
     reparto: Reparto
     prevision: BloquePrevision | None = None  # F05-06 M5
+    propiedad: BloquePropiedadM3 | None = None  # T2-F06 CAT-VIV (OBL-VIV-01)
 
     @property
     def categoria_id(self) -> uuid.UUID | None:

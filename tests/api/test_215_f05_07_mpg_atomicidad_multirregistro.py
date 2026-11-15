@@ -59,6 +59,10 @@
 #   `d593a15d…`, solo test_inventario_post_cerrado): la ruta POST nueva de C-PROP-03bis se clasifica en el
 #   inventario cerrado como ajena a F05-06, con su bateria de atomicidad propia (test_260, O-B1R-19). Ninguna ruta
 #   ni comando previo cambia.
+# Version: 0.5.2 (F06 T2-F06 · CAT-VIV; adaptacion declarada y minima por L-06 ampliada, solo
+#   test_inventario_post_cerrado): la ruta POST nueva de C-CAT-VIV-01 (/v1/categorias/{categoria_id}/vivienda) se
+#   clasifica como ajena a F05-06 junto a las de F05-01 (una sola escritura de catalogo bajo advisory, como /icono;
+#   O-CV-02 en test_280). Ninguna ruta ni comando previo cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -565,6 +569,8 @@ AJENAS_A_F05_06 = {
     "/v1/afinidades": "F05-05", "/v1/afinidades/{afinidad_id}/retirar": "F05-05",
     "/v1/propiedades/{propiedad_id}/completitud": "F06-01 B2 C-PROP-05: consumidor de 0352 no habilitado (404, O10.29; "
                                                   "test_252)",
+    "/v1/categorias/{categoria_id}/vivienda": "F06 T2-F06 CAT-VIV C-CAT-VIV-01: una escritura de catalogo (test_280 "
+                                              "O-CV-02)",
     "/v1/propiedades/{propiedad_id}/titularidad/inicio": "F06 T2-F06 B1-R C-PROP-03bis: atomicidad propia (savepoint "
                                                           "de comando; test_260 O-B1R-19 y O-B1R-05..08)",
 }

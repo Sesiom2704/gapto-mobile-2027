@@ -48,7 +48,18 @@
 #   v0.2.1 (F05-02 B3, AJ-B2-01; F05-D028 §43.4): SOLO cabecera. Registra el
 #   segundo llamante, de lectura (propuesta de preferencias), y su orden de
 #   locks. El cuerpo de la guarda no cambia.
-# Version: 0.2.1
+#
+#   v0.3.0 (F06 T2-F06 CAT-VIV N1; L-04, OBL-VIV-01 de AJ-T2 §2.1; Q-CV-06, Q-CV-07, Q-CV-11): funcion UNICA
+#   `exigir_propiedad(sesion, categoria_id, tipo_efecto, propiedad_id)`. Todo writer que cree un hecho REAL con
+#   efecto GASTO y categoria la llama DESPUES de la identidad y ANTES de componer, en su transaccion; lee
+#   `asociada_vivienda` (0353) bajo el MISMO `FOR SHARE` de la fila que toma C-a: decide la marca del momento
+#   del registro, nunca la que mostro la UI. Categoria marcada y sin propiedad -> CATEGORIA_EXIGE_PROPIEDAD
+#   (422, sin escritura). Solo GASTO (Q-CV-11): un INGRESO, aunque su categoria sea AMBOS, no queda sujeto. Sin
+#   exenciones: no hay parametro, bandera ni ruta que la apague (OBL-VIV-01.5). La comprobacion de que la
+#   propiedad existe, es del owner y no es DE_OTROS es del writer (bloque `propiedad`), bajo su propio lock.
+#   Inventario discriminante: tests/api/test_280_f06_t2_cat_viv_inventario.py. `validar_seleccion_categoria`
+#   no cambia.
+# Version: 0.3.0
 # ============================================================
 
 from __future__ import annotations
@@ -58,6 +69,8 @@ import uuid
 from app.core.unidad_trabajo import SesionMotor
 
 CODIGO_CATEGORIA_NO_ELEGIBLE = "CATEGORIA_NO_ELEGIBLE"
+#: T2-F06 CAT-VIV (OBL-VIV-01.2): gasto real de categoria «Asociada a vivienda» sin propiedad.
+CODIGO_EXIGE_PROPIEDAD = "CATEGORIA_EXIGE_PROPIEDAD"
 
 #: Matriz C02 (F05-D009 §23.2). Naturaleza -> ambitos admitidos. Una
 #: naturaleza con conjunto vacio solo admite categoria NULL.
@@ -69,6 +82,22 @@ AMBITOS_ADMITIDOS: dict[str, frozenset[str]] = {
     "INVERSION": frozenset(),
     "VALOR_ACTIVO": frozenset(),
 }
+
+
+def exigir_propiedad(sesion: SesionMotor, categoria_id: uuid.UUID | None, tipo_efecto: str,
+                     propiedad_id: uuid.UUID | None) -> str | None:
+    """OBL-VIV-01. None si se admite; CATEGORIA_EXIGE_PROPIEDAD si la categoria del GASTO esta marcada y no
+    hay propiedad. No escribe. Bajo el FOR SHARE de la fila de la categoria (el mismo de C-a)."""
+    if tipo_efecto != "GASTO" or categoria_id is None:
+        return None
+    fila = sesion.uno(
+        "SELECT asociada_vivienda FROM gapto.categorias_financieras WHERE id = %s "
+        "AND owner_user_id = current_setting('gapto.owner_user_id')::uuid FOR SHARE",
+        (categoria_id,),
+    )
+    if fila is not None and fila[0] and propiedad_id is None:
+        return CODIGO_EXIGE_PROPIEDAD
+    return None
 
 
 def ambito_compatible(tipo_efecto: str, ambito: str) -> bool:

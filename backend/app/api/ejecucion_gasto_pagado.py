@@ -117,6 +117,17 @@
 #   OP-22 lo vuelve a pedir (reentrante). Quien lo espera no retiene ningun
 #   otro lock: no crea aristas de espera nuevas (NOTA_ORDEN_LOCKS_IL1B).
 # Version: 0.11.0 (F04-R3)
+#   v0.12.0 (F06 T2-F06 CAT-VIV N1; L-04, OBL-VIV-01, mandato v1.1 §2.3-§2.4):
+#   - 3b-bis: `exigir_propiedad` tras C-a y antes de C07, bajo el mismo FOR SHARE de la categoria: categoria
+#     «Asociada a vivienda» sin bloque `propiedad` -> CATEGORIA_EXIGE_PROPIEDAD (sin escritura). Tambien al
+#     registrar desde una prevision (M5: el bloque `prevision` crea el hecho; sin exencion, OBL-VIV-01.4).
+#   - bloque OPCIONAL `propiedad` (propiedad_registro.py): validacion pura antes de los locks; INVERSIONES y
+#     propiedad FOR SHARE ANTES de la cuenta; para una intencion nueva, propiedad disponible y no DE_OTROS, la
+#     cuenta de mi pago solo mia (PAGO_DESDE_CUENTA_COMPARTIDA, Q-PAG-03) y, tras tercero/contexto/prevision,
+#     terceros de pagos y saldos y relectura M-2; composicion VS-01 + M-2 + PAG + AFECTA_A. Con el bloque, la
+#     cuenta de VS-01 solo se revalida si pago yo.
+#   - SIN el bloque, el orden de locks, la composicion y las respuestas son los de 0.11.0 (O-CV-20).
+# Version: 0.12.0
 # ============================================================
 
 from __future__ import annotations
@@ -124,9 +135,10 @@ from __future__ import annotations
 import dataclasses
 from dataclasses import dataclass
 
+from app.api import propiedad_registro as pr
 from app.api.captura_magnitudes import validar_magnitudes
 from app.api.dto_vs01 import IntencionGastoPagado
-from app.api.elegibilidad_categoria import validar_seleccion_categoria
+from app.api.elegibilidad_categoria import exigir_propiedad, validar_seleccion_categoria
 from app.api.traductor_gasto_pagado import ESCALA, componer, leer_actor_self, participacion_self_100
 from app.api.traductor_registro import prevision_compuesta
 from app.api.ejecucion_registro import (
@@ -139,7 +151,7 @@ from app.api.ejecucion_registro import (
     validar_tipo_prevision,
 )
 from app.comun.elegibilidad_cuentas import MONEDA, SIN_CAPACIDAD, motivo_cuenta
-from app.comun.fecha_funcional import CODIGO_FECHA_FUTURA, Reloj, es_futura, reloj_sistema
+from app.comun.fecha_funcional import CODIGO_FECHA_FUTURA, Reloj, es_futura, hoy_owner, reloj_sistema
 from app.core.contexto import ContextoOperacion
 from app.core.errores import CodigoError, ErrorMotor
 from app.core.modelos_compuesto import DatosHechoCompuesto, ResultadoHechoCompuesto
@@ -198,12 +210,22 @@ def registrar_gasto_pagado(
     def operacion(sesion: SesionMotor) -> Registrado | RechazoIntegracion:
         # F04-R3 il1b: advisory por raiz, primer recurso de la transaccion.
         repo_comp.tomar_advisory_raiz(sesion, intencion.intencion_id)
-        # 0. INVERSIONES antes que la cuenta, solo con contexto (D-080).
-        if intencion.contexto_id is not None:
+        con_propiedad = intencion.propiedad is not None
+        # 0. INVERSIONES antes que la cuenta, con contexto o con propiedad (D-080).
+        if intencion.contexto_id is not None or con_propiedad:
             tomar_inversiones(sesion)
+        raiz_propiedad = None
+        if con_propiedad:  # CAT-VIV: validacion pura y propiedad FOR SHARE antes de la cuenta (orden de B3)
+            rechazo = pr.validar_pura_vs01(intencion, leer_actor_self(sesion))
+            if rechazo is not None:
+                return RechazoIntegracion(rechazo)
+            raiz_propiedad = pr.bloquear(sesion, intencion.propiedad.propiedad_id)
+            if raiz_propiedad is None:
+                return RechazoIntegracion("AGREGADO_NO_ENCONTRADO")
         # 1. Lock contractual de la cuenta.
         bloquear_cuenta(sesion, intencion.cuenta_id)
         actor = leer_actor_self(sesion)
+        partes = pr.partes_peticion(intencion) if con_propiedad else None
 
         # 2. Identidad antes que cualquier revalidacion contextual.
         ya_materializada = repo_hechos.leer_estado(sesion, intencion.intencion_id) is not None
@@ -212,8 +234,18 @@ def registrar_gasto_pagado(
             # 3.0 Fecha funcional del owner (C6): nada futuro.
             if es_futura(sesion, intencion.fecha_hecho, reloj):
                 return RechazoIntegracion(CODIGO_FECHA_FUTURA)
-            # 3. Intencion nueva: relectura bajo el lock.
-            _validar_cuenta_nueva(sesion, intencion)
+            # 3. Intencion nueva: relectura bajo el lock (con propiedad, solo si pago yo).
+            if con_propiedad:
+                rechazo = pr.revalidar_propiedad(sesion, raiz_propiedad, intencion.propiedad.propiedad_id,
+                                                 hoy_owner(sesion, reloj))
+                if rechazo is not None:
+                    return RechazoIntegracion(rechazo)
+            if not con_propiedad or pr.yo_pago(intencion):
+                _validar_cuenta_nueva(sesion, intencion)
+            if con_propiedad and pr.yo_pago(intencion) and not participacion_self_100(
+                sesion, intencion.cuenta_id, actor, intencion.fecha_hecho
+            ):
+                return RechazoIntegracion("PAGO_DESDE_CUENTA_COMPARTIDA")  # Q-PAG-03
             # 4. Revalidacion de la propuesta sellada, en la fecha del pago.
             if intencion.financiacion.estado == "PROPUESTA_ACEPTADA" and not participacion_self_100(
                 sesion, intencion.cuenta_id, actor, intencion.fecha_hecho
@@ -222,6 +254,11 @@ def registrar_gasto_pagado(
             # 3b. Guarda categorial C-a, solo para seleccion nueva explicita.
             if intencion.categoria_id is not None:
                 rechazo = validar_seleccion_categoria(sesion, intencion.categoria_id, "GASTO")
+                if rechazo is not None:
+                    return RechazoIntegracion(rechazo)
+                # 3b-bis. OBL-VIV-01: categoria «Asociada a vivienda» exige propiedad (mismo FOR SHARE de C-a).
+                rechazo = exigir_propiedad(sesion, intencion.categoria_id, "GASTO",
+                                           intencion.propiedad.propiedad_id if con_propiedad else None)
                 if rechazo is not None:
                     return RechazoIntegracion(rechazo)
                 # 3c. C07: magnitudes de la categoria elegida (servidor autoridad).
@@ -237,11 +274,19 @@ def registrar_gasto_pagado(
             rechazo = validar_tipo_prevision(sesion, intencion.prevision, "GASTO")
             if rechazo is not None:
                 return RechazoIntegracion(rechazo)
+            # 3f. CAT-VIV: terceros de pagos y saldos (FOR SHARE) y relectura M-2 de la titularidad.
+            if con_propiedad:
+                r = pr.revalidar_vs01(sesion, intencion, actor)
+                if isinstance(r, str):
+                    return RechazoIntegracion(r)
+                partes = r[1]
 
         # 5. OP-22 adscrito a esta transaccion. La composicion sale SOLO del
         #    payload sellado; si la raiz existe, OP-22 exige igualdad EXACTA
         #    del agregado (F04-D050/F04-D051): la capa F05 no la duplica.
         datos = componer(intencion, actor)
+        if con_propiedad:
+            datos = pr.componer_vs01(datos, intencion, actor, partes)
         if intencion.prevision is not None:
             datos = dataclasses.replace(datos, prevision=prevision_compuesta(
                 intencion.intencion_id, intencion.prevision, intencion.importe.quantize(ESCALA)))

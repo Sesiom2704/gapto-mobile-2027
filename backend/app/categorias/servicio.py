@@ -68,7 +68,16 @@
 #   para el onboarding (recuento de cero categorias bajo el advisory antes de
 #   la primera alta) sin que el onboarding importe el repositorio. No
 #   escribe; los comandos no cambian.
-# Version: 0.6.0
+#
+#   v0.7.0 (F06 T2-F06 CAT-VIV N1; L-04, C-CAT-VIV-01; Q-CV-03, Q-CV-11, Q-CV-12): comando
+#   `marcar_vivienda` con el patron de `cambiar_icono`: advisory CATEGORIAS -> nodo FOR NO KEY UPDATE y
+#   row_version (VERSION_DESFASADA) -> ambito (INGRESO no admite la marca:
+#   CATEGORIA_AMBITO_NO_ADMITE_VIVIENDA) -> igual a lo persistido: exito idempotente sin escritura ni
+#   auditoria -> UPDATE (row_version + 1) -> auditoria VIVIENDA. Es el UNICO escritor de
+#   `asociada_vivienda` (0353). Solo cambia la marca: no toca hechos, efectos, atribuciones, vinculos,
+#   posiciones ni previsiones (marcar o desmarcar no reinterpreta; decision 2 de Moises 2026-11-13). La
+#   marca no se hereda: solo cambia el nodo indicado.
+# Version: 0.7.0
 # ============================================================
 
 from __future__ import annotations
@@ -102,6 +111,7 @@ MOTIVOS = {
     "REACTIVAR": "F05-01 REACTIVAR",
     "ICONO": "F05-01 ICONO",
     "REORDENAR": "F05-01 REORDENAR",
+    "VIVIENDA": "F06 T2 CAT-VIV ASOCIADA_VIVIENDA",
 }
 
 # Codigos de capa F05 (no forman parte de la taxonomia F04).
@@ -113,6 +123,8 @@ MOVIMIENTO_BLOQUEADO = "CATEGORIA_MOVIMIENTO_BLOQUEADO_POR_PRESUPUESTO"
 AMBITO_REQUIERE_CONFIRMACION = "CAMBIO_AMBITO_REQUIERE_CONFIRMACION"
 ICONO_NO_VALIDO = "ICONO_CATEGORIA_NO_VALIDO"
 CONJUNTO_DESFASADO = "CONJUNTO_HERMANOS_DESFASADO"
+#: T2-F06 CAT-VIV (Q-CV-11): la marca «Asociada a vivienda» solo en categorias de ambito GASTO o AMBOS.
+AMBITO_NO_ADMITE_VIVIENDA = "CATEGORIA_AMBITO_NO_ADMITE_VIVIENDA"
 # Codigos F04 reutilizados (contrato cerrado).
 NO_ENCONTRADO = "AGREGADO_NO_ENCONTRADO"
 VERSION_DESFASADA = "VERSION_DESFASADA"
@@ -444,6 +456,25 @@ def cambiar_icono(sesion: SesionMotor, *, categoria_id, icon_key: str | None, ro
     if rechazo is not None:
         return rechazo
     _auditar(sesion, categoria_id, "ICONO", antes)
+    return _resultado(sesion, categoria_id, modificadas=(categoria_id,))
+
+
+# C-CAT-VIV-01: «Asociada a vivienda: si/no» (Ajustes > Categorias). Unico escritor de la marca; el advisory
+# va primero (I8 de test_154), como en cambiar_icono.
+def marcar_vivienda(sesion: SesionMotor, *, categoria_id, asociada: bool, row_version: int) -> Resultado | Rechazo:
+    repo.tomar_advisory(sesion)
+    nodo = _nodo(sesion, categoria_id, row_version)
+    if isinstance(nodo, Rechazo):
+        return nodo
+    if asociada and nodo["ambito"] == "INGRESO":
+        return Rechazo(AMBITO_NO_ADMITE_VIVIENDA)
+    if bool(nodo["asociada_vivienda"]) == asociada:
+        return Resultado(categoria=nodo, idempotente=True)
+    antes = repo.snapshot(sesion, categoria_id)
+    rechazo = _escribir(sesion, lambda: repo.actualizar(sesion, categoria_id, {"asociada_vivienda": asociada}))
+    if rechazo is not None:
+        return rechazo
+    _auditar(sesion, categoria_id, "VIVIENDA", antes)
     return _resultado(sesion, categoria_id, modificadas=(categoria_id,))
 
 

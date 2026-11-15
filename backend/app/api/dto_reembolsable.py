@@ -23,6 +23,8 @@
 #                              comercio (restriccion de producto, §66.A.3; no
 #                              se reclasifica nada).
 # Version: 0.1.0 (F05-D052 paso 2; F05 §66.A.2, §66.A.3, §66.A.7)
+# Version: 0.2.0 (F06 T2-F06 CAT-VIV N1; L-04, §2.4.2): bloque OPCIONAL `propiedad`
+#   (dto_propiedad_registro.BloquePropiedadM3). Sin el bloque, nada cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ from typing import Annotated, Literal
 from pydantic import Field, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 
+from app.api.dto_propiedad_registro import BloquePropiedadM3
 from app.api.dto_registro import LONGITUD_NOTA, _Estricto, nota_canonica
 from app.api.dto_vs01 import (
     CategoriaSeleccionada,
@@ -70,6 +73,7 @@ class IntencionGastoReembolsable(_Estricto):
     tercero_id: uuid.UUID | None = None  # el comercio (VENDEDOR)
     contexto_id: uuid.UUID | None = None
     reembolso: BloqueReembolso
+    propiedad: BloquePropiedadM3 | None = None  # T2-F06 CAT-VIV (OBL-VIV-01)
 
     @property
     def categoria_id(self) -> uuid.UUID | None:
