@@ -9,6 +9,8 @@
 #   identico y ninguna auditoria. Propiedad del Lab de B3: YO 50 / T 50 desde 2026-01-01 y YO 100 desde
 #   2026-06-01; FECHA 2026-05-15 (50/50).
 # Version: 0.1.0 (F06 T2-F06 CAT-VIV N1)
+# Version: 0.1.1 (gate local, plan B): O-CV-06 leia el primer efecto del hecho sin orden (la posicion añade efectos);
+#   ahora exige un unico efecto GASTO con su categoria. Correccion del propio test, sin cambio de contrato.
 # ============================================================
 from __future__ import annotations
 
@@ -218,9 +220,9 @@ def test_o_cv_06_vs01_con_propiedad_50_50_cuenta_mia_deuda_confirmada(lab):
     j = _ok(lab, c)
     hid = uuid.UUID(j["hecho_id"])
     # GASTO con su categoria y presupuesto; clase no persistida (tipo GASTO, sin VALOR_ACTIVO).
-    assert m3.uno(lab.owner, "SELECT e.tipo_efecto, e.categoria_id, h.tipo_hecho_id IS NOT NULL FROM gapto.hecho_efectos e "
-                             "JOIN gapto.hechos_financieros h ON h.id = e.hecho_id WHERE e.hecho_id = %s",
-                  (hid,))[:2] == ("GASTO", lab.cat)
+    gastos = lab.sql("SELECT e.categoria_id FROM gapto.hecho_efectos e WHERE e.hecho_id = %s AND e.tipo_efecto = 'GASTO'",
+                     (hid,))
+    assert gastos == [(lab.cat,)]                                 # un unico efecto GASTO, con su categoria
     # AFECTA_A principal de nivel efecto con la marca de procedencia del registro de gasto.
     vinculos = _afecta_a(lab, hid)
     assert vinculos == [(uuid.uuid5(hid, PREFIJO_RG + "afecta_a"), uuid.UUID(str(lab.pid)), True, True)]
