@@ -11,6 +11,15 @@
 #                   0010..0330, o baseline + icon_key de 0340. Cualquier otra
 #                   columna o tipo sigue siendo drift. Las otras quince tablas
 #                   conservan la igualdad exacta.
+# Versión: 0.1.2  -- T2-F06 CAT-VIV / 0353 (decision de Moises del 2026-11-15,
+#                   F06-00_Decisiones_Moises_2026-11-15_CAT-VIV_test_002_v1.0.md,
+#                   SHA-256 08c5b4549baf7783de10f7dea7ef6b3fa72fe509e9ac74834da9c12c014bfbd1;
+#                   ampliacion del literal de CAT-VIV). Tercer estado nombrado
+#                   de categorias_financieras: baseline + icon_key +
+#                   asociada_vivienda (boolean, NOT NULL). Se conservan los dos
+#                   anteriores. Discriminante: con la columna presente se exige
+#                   EXACTAMENTE el tercer estado; sin ella (base en 0352 o
+#                   anterior) siguen exigidos los de 0010..0330 / 0340.
 # Versión: 0.1.0
 # ============================================================
 
@@ -256,6 +265,11 @@ def test_b01_tables_exist_and_are_owned_by_gapto_owner(db: psycopg.Connection) -
 COLUMNAS_POSTERIORES_AUTORIZADAS = {
     "categorias_financieras": {"icon_key": ("character varying(80)", False)},
 }
+#   categorias_financieras: + icon_key + asociada_vivienda (0353, T2-F06 CAT-VIV)
+COLUMNAS_0353 = {
+    "categorias_financieras": {"icon_key": ("character varying(80)", False),
+                               "asociada_vivienda": ("boolean", True)},
+}
 
 
 def test_b01_column_contract_is_exact(db: psycopg.Connection) -> None:
@@ -285,6 +299,8 @@ def test_b01_column_contract_is_exact(db: psycopg.Connection) -> None:
         extra = COLUMNAS_POSTERIORES_AUTORIZADAS.get(table)
         if extra is None:
             assert actual == expected
+        elif "asociada_vivienda" in actual:
+            assert actual == {**expected, **COLUMNAS_0353[table]}, table      # tercer estado (0353)
         else:
             assert actual in (expected, {**expected, **extra}), table
 

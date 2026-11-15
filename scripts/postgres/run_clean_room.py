@@ -277,7 +277,7 @@ from pathlib import Path
 
 # Version del runner que se materializa en el manifest. Debe coincidir con la
 # primera linea "Versión:" de la cabecera; test_040 lo comprueba.
-VERSION_RUNNER = "0.18.0"
+VERSION_RUNNER = "0.19.0"
 
 try:
     import psycopg
