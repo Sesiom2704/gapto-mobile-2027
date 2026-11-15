@@ -28,6 +28,8 @@
 #        python scripts/dev/mutantes_f05_d052_c03.py [--solo ID,ID] [--salida fichero]
 #   No ejecutar en paralelo con otro arnes ni con la suite sobre el mismo arbol.
 # Version: 0.1.0 (F05-D052 paso 2; F05 §66.A.11.8)
+# Version: 0.1.1 (F06 T2-F06 CAT-VIV N1, mandato §9.4): texto de C03-ORD1 actualizado (bloque `propiedad` entre
+#   INVERSIONES y la cuenta); misma mutacion (cuenta antes que INVERSIONES) y mismo discriminante.
 # ============================================================
 
 from __future__ import annotations
@@ -158,8 +160,8 @@ MUTANTES = [
        "        estable = None\n")],
      [T + "test_negativo_importe_recuperable_excede_el_total", T + "test_r6_tres_casos"], None),
     ("C03-ORD1", "orden de locks: cuenta antes que INVERSIONES",
-     [(EJR, "        tomar_inversiones(sesion)\n        # 3. Cuenta pagadora FNKU.\n        bloquear_cuentas(sesion, intencion.cuenta_id)\n",
-       "        bloquear_cuentas(sesion, intencion.cuenta_id)\n        tomar_inversiones(sesion)\n")],
+     [(EJR, "        tomar_inversiones(sesion)\n        bloque = intencion.propiedad\n",
+       "        bloquear_cuentas(sesion, intencion.cuenta_id)\n        tomar_inversiones(sesion)\n        bloque = intencion.propiedad\n")],
      [C + "test_c6_orden_de_locks_c03"], None),
     ("C03-ORD2", "orden de locks: terceros por UUID descendente",
      [(EJR, "            for tercero in sorted({intencion.tercero_id, contraparte} - {None}, key=str):\n",

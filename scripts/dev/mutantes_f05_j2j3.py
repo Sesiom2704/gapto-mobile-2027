@@ -46,6 +46,8 @@
 #   RG07/RG08 quitan la capacidad de origen/destino; RG09 quita la guarda de
 #   replay propia y conserva `replay_extra`. Mismos discriminantes; censo sin
 #   cambios.
+# Version: 0.7.2 (F06 T2-F06 CAT-VIV N1, mandato §9.4): texto de RG01 actualizado (INVERSIONES con contexto o con
+#   el bloque `propiedad`); misma mutacion (quitar INVERSIONES) y mismo discriminante.
 # ============================================================
 
 from __future__ import annotations
@@ -260,7 +262,7 @@ MUTANTES = [
      [f"{T179}::test_caso2_solo_categoria_con_cuenta_de_una_preferencia"]),
     # --- §3 bateria serial de concurrencia y locks (requiere GAPTO_J2J3_CONCURRENCIA=1)
     ("RG01", "registro con contexto sin INVERSIONES antes de la cuenta",
-     [(EJEC, "        if intencion.contexto_id is not None:\n            tomar_inversiones(sesion)\n", "")],
+     [(EJEC, "        if intencion.contexto_id is not None or con_propiedad:\n            tomar_inversiones(sesion)\n", "")],
      [f"{T190}::test_l1_registro_con_contexto_toma_inversiones_antes_que_la_cuenta"]),
     ("PL01", "alta de plantilla sin el advisory PLANTILLAS",
      [(PSRV, '    """Alta (tambien «Guardar como plantilla»: escritura independiente con su UUID)."""\n    repo.tomar_advisory(sesion)\n',

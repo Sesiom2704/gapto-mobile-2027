@@ -4,10 +4,11 @@
 // Ruta: mobile/src/components/BloquePropiedad.tsx
 // Descripción: CAT-VIV (T2-F06, bloque 3) · bloque «Propiedad» de «Registrar gasto» y de «Registrar desde la previsión» cuando la categoría está «Asociada a vivienda» (lámina SET-CAT/REG-CAT v1.0 R01–R03 y R06; OBL-VIV-01): selector OBLIGATORIO de propiedad (chips con tus propiedades activas) con «Falta: la propiedad.», reparto propuesto según la titularidad en la fecha del gasto (visible y marcado, con «No lo sé»; nunca 100 % mío por defecto), «¿Qué tipo de gasto es?» (Gasto corriente por defecto · Reparación; nunca Mejora) y «¿Quién pagó?» de PAG con la deuda del cotitular preseleccionada y desmarcable (DM-07, L-08) y su confirmación visible. La propuesta se relee al cambiar la fecha, la propiedad o la cuenta; lo que tocó el usuario se conserva.
 // Versión: 0.1.0 (F06 T2-F06 CAT-VIV N1 (L-04, lámina SET-CAT/REG-CAT v1.0))
+// Versión: 0.1.1 (F06 T2-F06 CAT-VIV N1, capturas del paso 11): el reparto propuesto («Según la titularidad…») va en columna para que el texto largo se ajuste al ancho (antes desbordaba el formulario en R02/R03).
 // ============================================================
 
 import React, { useEffect, useState } from 'react';
-import { Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import type { ClientePatrimonioB3, PropuestaGasto } from '../api/patrimonio_b3';
 import type { ClientePropiedades, FilaPropiedad } from '../api/propiedades';
@@ -119,7 +120,7 @@ export function BloquePropiedad(p: {
       {s && s.propuesta !== null && !esDeOtros(s) && !p.soloPropiedad ? (
         <>
           <Text style={[tipo.subheadline, { color: c.textPrimary, fontWeight: '600' }]}>¿De quién es el gasto?</Text>
-          <View style={ef.chips}>
+          <View style={lc.columna}>
             {hayPropuesta(s.propuesta) ? (
               <Chip testID={`${p.testID}-titularidad`} etiqueta={textoPropuesta(s.nombre, s.propuesta)} seleccionado={s.reparto?.modo === 'TITULARIDAD'}
                 onPress={() => set({ reparto: { modo: 'TITULARIDAD' }, repartoTocado: true })} />
@@ -191,3 +192,7 @@ export function BloquePropiedad(p: {
     </View>
   );
 }
+
+const lc = StyleSheet.create({
+  columna: { gap: espacio.s },
+});
