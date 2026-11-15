@@ -11,9 +11,12 @@
 // v0.7.0 (F05-D052 paso 2 · C-03, F05 §66.A): borrador con `reembolso` (aditivo); `validar` exige, con él, quién y cuánto (0,01 € .. total, nunca el comercio del gasto) y `sellarReembolsable` produce el payload de POST /v1/intenciones/gasto-reembolsable: el del gasto pagado sin `atribucion` y con `reembolso`.
 // v0.8.0 (F06 T1 UX-1 · M-07, D-M2-04): `esFechaIso` construye la fecha con `setFullYear` y ya no convierte los años 0–99 en 1900–1999: acepta 0001-01-01..0099-12-31 si el día existe (p. ej. 0050-06-15). El resto de la validación no cambia (sigue rechazando 2026-02-30).
 // Versión: 0.8.0
+// v0.9.0 (F06 T2-F06 CAT-VIV N1 (L-04, lámina SET-CAT/REG-CAT v1.0)): `Borrador.propiedad` (aditivo: el bloque `propiedad` de VS-01 ya compuesto). Con él, `sellar` envía `atribucion` SIN_INDICAR, financiación NO_DETERMINADA y `propiedad` (la atribución y las aportaciones las saca el bloque) y no exige la propuesta de financiación de la cuenta; sin él, el wire no cambia.
+// Versión: 0.9.0
 // ============================================================
 
 import type { MagnitudCategoria } from './categoria';
+import type { BloquePropiedadWire } from './propiedad_registro';
 import { parsearImporte } from './importe';
 import { normalizarValorMagnitud, textoMotivoValor } from './magnitud';
 import { faltaReembolso, importeReembolso, type IntencionReembolsableSellada, type PayloadGastoReembolsable, type ReembolsoBorrador, totalDe } from './reembolso';
@@ -93,6 +96,9 @@ export interface Borrador {
   // ---- F05-D052 C-03 (aditivo)
   /** «Mío, pero me lo reembolsan»: quién te lo debe y cuánto (null = no es un gasto reembolsable). */
   reembolso?: ReembolsoBorrador | null;
+  // ---- T2-F06 CAT-VIV (aditivo)
+  /** Bloque `propiedad` de VS-01 ya compuesto (categoría «Asociada a vivienda»); null/ausente = gasto sin propiedad. */
+  propiedad?: BloquePropiedadWire | null;
 }
 
 export interface MagnitudCapturada {
@@ -118,6 +124,8 @@ export interface PayloadGastoPagado {
   categoria: CategoriaWire;
   tercero_id?: string;
   contexto_id?: string;
+  /** T2-F06 CAT-VIV: gasto de una propiedad (categoría «Asociada a vivienda»). */
+  propiedad?: BloquePropiedadWire;
 }
 
 /** Tipo del formulario de registro con categoría (GASTO o INGRESO). */
@@ -276,7 +284,7 @@ export function categoriaWire(b: Borrador): CategoriaWire {
 
 export function sellar(b: Borrador, intencionId: string): IntencionSellada {
   const imp = parsearImporte(b.importeTexto);
-  if (!imp.ok || b.presupuestable === null || !b.cuentaId || b.propuesta === null || b.categoria.estado === 'PENDIENTE') {
+  if (!imp.ok || b.presupuestable === null || !b.cuentaId || (b.propuesta === null && !b.propiedad) || b.categoria.estado === 'PENDIENTE') {
     throw new Error('No se sella una intención inválida');
   }
   const nota = b.concepto.trim();
@@ -288,10 +296,11 @@ export function sellar(b: Borrador, intencionId: string): IntencionSellada {
     fecha_hecho: b.fechaHecho,
     cuenta_id: b.cuentaId,
     presupuestable: b.presupuestable,
-    atribucion: b.soloMio ? 'SOLO_MIO' : 'SIN_INDICAR',
-    financiacion: Object.freeze(financiacionDe(b, imp.valor)),
+    atribucion: b.soloMio && !b.propiedad ? 'SOLO_MIO' : 'SIN_INDICAR',
+    financiacion: Object.freeze(b.propiedad ? { estado: 'NO_DETERMINADA' as const } : financiacionDe(b, imp.valor)),
     categoria: categoriaWire(b),
     ...maestrosWire(b),
+    ...(b.propiedad ? { propiedad: b.propiedad } : {}),
   });
   return Object.freeze({ intencionId, payload });
 }

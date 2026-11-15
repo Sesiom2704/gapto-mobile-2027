@@ -29,6 +29,8 @@
 // Versión: 0.21.0
 // v0.22.0 (F06 T2-F06 PAG, §1.5 del mandato; lista cerrada de F05 autorizada por el párrafo 3 del literal de PAG (decisión 3 del lote 35, bfbba1e6…)): tipos aditivos de la fila de una reforma (`FilaActividad.propiedad`, `salida_cuentas`, `posiciones`) y de «Invertido en viviendas este mes» (`InvertidoMes`), con su lectura OPCIONAL `invertidoMes` (GET /v1/patrimonio/invertido-mes; opcional en `ClienteApi` para que los dobles de test no cambien). Ninguna llamada existente cambia.
 // Versión: 0.22.0
+// v0.23.0 (F06 T2-F06 CAT-VIV N1 (L-04, lámina SET-CAT/REG-CAT v1.0)): `viviendaCategoria` (POST /v1/categorias/{id}/vivienda, C-CAT-VIV-01; OPCIONAL en `ClienteApi` para que los dobles de test no cambien) y campo aditivo `DetalleActividad.aviso_vivienda_sin_propiedad` (R07). Ninguna llamada existente cambia.
+// Versión: 0.23.0
 // ============================================================
 
 import type { Ambito, CategoriaNodo } from '../domain/categoria';
@@ -464,6 +466,8 @@ export interface DetalleActividad extends FilaActividad {
   magnitudes: { magnitud_id: string; nombre: string; valor: string; unidad: string | null }[];
   /** F05-06 M2: devoluciones activas de una compra, lo devuelto, lo que queda y el neto derivado. */
   devoluciones?: { items: DevolucionDeOrigen[]; devuelto: string; queda: string; neto: string } | null;
+  /** T2-F06 CAT-VIV (R07, OBL-VIV-01.6): gasto con categoría «Asociada a vivienda» y sin propiedad (p. ej. tras corregir la categoría). */
+  aviso_vivienda_sin_propiedad?: boolean;
 }
 
 // ------------------------------------------------------------------ F05-06 M2 devolución contextual
@@ -838,6 +842,8 @@ export interface ClienteApi {
   usoCategoria(id: string): Promise<Respuesta<UsoCategoria>>;
   crearCategoria(alta: AltaCategoria): Promise<Respuesta<ResultadoComandoCategoria>>;
   iconoCategoria(id: string, c: { row_version: number; icon_key: string | null }): Promise<Respuesta<ResultadoComandoCategoria>>;
+  /** T2-F06 CAT-VIV (C-CAT-VIV-01): «Asociada a vivienda: sí/no». Opcional en los dobles de test. */
+  viviendaCategoria?(id: string, c: { row_version: number; asociada_vivienda: boolean }): Promise<Respuesta<ResultadoComandoCategoria>>;
   renombrarCategoria(id: string, c: { row_version: number; nombre: string }): Promise<Respuesta<ResultadoComandoCategoria>>;
   moverCategoria(id: string, c: { row_version: number; parent_id: string | null }): Promise<Respuesta<ResultadoComandoCategoria>>;
   desactivarCategoria(
@@ -1018,6 +1024,7 @@ export function crearCliente(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): C
     usoCategoria: (id) => llamar(`${CAT}/${encodeURIComponent(id)}/uso`, { method: 'GET' }, false),
     crearCategoria: (alta) => llamar(CAT, post(alta), 'CAMBIO'),
     iconoCategoria: (id, c) => llamar(`${CAT}/${encodeURIComponent(id)}/icono`, post(c), 'CAMBIO'),
+    viviendaCategoria: (id, c) => llamar(`${CAT}/${encodeURIComponent(id)}/vivienda`, post(c), 'CAMBIO'),
     renombrarCategoria: (id, c) => llamar(`${CAT}/${encodeURIComponent(id)}/renombrar`, post(c), 'CAMBIO'),
     moverCategoria: (id, c) => llamar(`${CAT}/${encodeURIComponent(id)}/mover`, post(c), 'CAMBIO'),
     desactivarCategoria: (id, c) => llamar(`${CAT}/${encodeURIComponent(id)}/desactivar`, post(c), 'CAMBIO'),

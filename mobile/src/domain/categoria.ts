@@ -8,6 +8,7 @@
 // Versión: 0.2.0 (F05-01 S6-WIRE+UI (este mandato), commit 2): Editar orden (D-UI-01) — `moverHermano` (subir/bajar un puesto sobre el conjunto COMPLETO de hermanos, sin salir de los extremos) y `mismoOrden` (el orden editado coincide con el cargado: no se envía nada); `subcategoriasActivas` (subárbol completo, atravesando desactivadas, como AJ-S4-02) para la N de «Desactivar también sus N subcategorías». El cliente sigue sin reordenar la lectura: solo propone el orden que el servidor aplica en una llamada.
 // Versión: 0.3.0 (F05-01 S6-WIRE+UI, correctivo AJ-S6WIREUI-09): `tieneDescendienteElegible` (algún nodo del subárbol, hoja o intermedio, es elegible con la naturaleza dada) para que el selector solo afirme que las subcategorías se pueden usar cuando es cierto.
 // Versión: 0.4.0 (F05-01 S7-MAG UI): `MagnitudCategoria` incluye `asociacion_id` (identidad estable de la asociación que devuelve GET /v1/categorias desde S7-MAG; la exigen los comandos de asociaciones, F05-D020 D-MAG-04).
+// Versión: 0.5.0 (F06 T2-F06 CAT-VIV N1 (L-04, lámina SET-CAT/REG-CAT v1.0)): `CategoriaNodo.asociada_vivienda` (0353; la devuelve GET /v1/categorias; ausente = no). Es la marca de ESA categoría: no se hereda de padres a hijos.
 // ============================================================
 
 export type Ambito = 'GASTO' | 'INGRESO' | 'AMBOS';
@@ -40,6 +41,8 @@ export interface CategoriaNodo {
   magnitudes: MagnitudCategoria[];
   capturable: boolean;
   motivo_no_capturable: 'MAGNITUD_OBLIGATORIA_NO_DISPONIBLE' | null;
+  /** T2-F06 CAT-VIV (0353): «Asociada a vivienda». Ausente = no (dobles de test anteriores). */
+  asociada_vivienda?: boolean;
 }
 
 export interface Arbol {

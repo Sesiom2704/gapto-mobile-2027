@@ -19,6 +19,8 @@
 // v0.14.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // v0.15.0 (F06 T1 UX-1 · M-07, DM-06: la fecha usa el componente único `CampoFecha` (chips, campo dd/mm/aaaa con máscara y calendario en JS); se conservan el estado, las reglas de cada campo, los testID y los textos de validación; regla ≤ hoy) y M-09: bajo el tercero, el resumen compacto «Pendiente con X» (lectura OP-20) que abre «Pendiente con X» encima del formulario (`onPendienteCon`); ✓ de éxito con el token `textPrimary` (contraste máximo en claro y oscuro; `positiveText` está acotado por PT-04).
 // Versión: 0.15.0
+// v0.16.0 (F06 T2-F06 CAT-VIV N1 (L-04, lámina SET-CAT/REG-CAT v1.0) R01–R05; OBL-VIV-01): con una categoría de GASTO «Asociada a vivienda» (la marca de ESA categoría) aparece el bloque obligatorio «Propiedad» (BloquePropiedad) y desaparece «¿De quién es este gasto?»: el reparto lo da la propiedad (titularidad en la fecha o «No lo sé»), con «¿Qué tipo de gasto es?» (Gasto corriente · Reparación; nunca Mejora) y «¿Quién pagó?» de PAG; no se ofrecen «Repartir», «Otra persona» ni «Me lo reembolsan» (si estaban, se quitan con aviso); «Pagado con» solo lista cuentas solo tuyas y no se pide si pagó todo un cotitular. Sin propiedad el registro se para con «Falta: la propiedad.». El envío lleva el bloque `propiedad` de VS-01. El éxito (R05) muestra la propiedad, el reparto, lo que cuenta en el mes y que no suma al coste de la vivienda. Sin marca, el formulario no cambia. Clientes de propiedades y de B3 por prop opcional (por defecto, los de `configApi`).
+// Versión: 0.16.0
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -27,6 +29,10 @@ import { InputAccessoryView, Keyboard, KeyboardAvoidingView, Platform, Pressable
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ClienteApi, CuentaPago } from '../api/cliente';
+import { configApi } from '../api/config';
+import { ClientePatrimonioB3, crearClientePatrimonioB3, PropuestaGasto } from '../api/patrimonio_b3';
+import { ClientePropiedades, crearClientePropiedades } from '../api/propiedades';
+import { BloquePropiedad } from '../components/BloquePropiedad';
 import { BotonPrimario, BotonTexto, Chip, ChipAccion, EstadoDato, Segmentado, Velo } from '../components/Basicos';
 import { FormularioContexto, SelectorContexto } from '../components/Contextos';
 import { AvisoFaltaCuenta, PanelCuentas, useSinConfigurar } from '../components/FaltaCuenta';
@@ -99,6 +105,22 @@ import {
 import { TEXTO_FORMULARIO_SE_CONSERVA } from '../domain/capacidades';
 import type { SugeridaCategoria } from '../domain/senales';
 import { textoChips, vistaSugeridas } from '../domain/senales';
+import {
+  bloqueWire,
+  conDeudas,
+  conPropuesta,
+  exigePropiedad,
+  faltasPropiedad,
+  miParte,
+  MOTIVO_RECHAZO_PROPIEDAD,
+  NOMBRE_CLASE_REGISTRO,
+  pagaYo,
+  SeleccionPropiedad,
+  TEXTO_NO_SUMA_COSTE,
+  TEXTO_RETIRADO_VIVIENDA,
+  TEXTO_SOLO_TUS_CUENTAS,
+  textoRepartoExito,
+} from '../domain/propiedad_registro';
 import { useEnvioGasto } from '../state/useEnvioGasto';
 import { useTema } from '../theme/tema';
 import { espacio, importe, radio, TACTIL_MIN, tipo } from '../theme/tokens';
@@ -152,8 +174,16 @@ export function RegistroGastoScreen(p: {
   onPendienteCon?: (t: { terceroId: string; nombre: string }) => void;
   /** F05-D051 9.1 (G1 v2): hitos del ensayo G1; solo en `__DEV__` (en producción, undefined). Nunca valores. */
   traza?: (evento: string, extra?: { via?: string; n?: number }) => void;
+  /** CAT-VIV: clientes de propiedades y de B3 para el bloque «Propiedad» (por defecto, los de `configApi`). */
+  propiedades?: ClientePropiedades;
+  patrimonio?: ClientePatrimonioB3;
 }) {
   const { c } = useTema();
+  const propiedadesApi = useMemo(() => p.propiedades ?? crearClientePropiedades(configApi), [p.propiedades]);
+  const patrimonioApi = useMemo(() => p.patrimonio ?? crearClientePatrimonioB3(configApi), [p.patrimonio]);
+  /** CAT-VIV: propiedad elegida, reparto, clase y «¿Quién pagó?» (solo con categoría marcada). */
+  const [selProp, setSelProp] = useState<SeleccionPropiedad | null>(null);
+  const [errorProp, setErrorProp] = useState<string | null>(null);
   const inset = useSafeAreaInsets();
   const hoy = useMemo(() => p.ahora(), [p.ahora]);
   const hoyIso = isoLocal(hoy);
@@ -426,12 +456,23 @@ export function RegistroGastoScreen(p: {
     b.terceroOrigen === 'USUARIO' || b.contextoOrigen === 'USUARIO' || !!b.reembolso;
   const cuentaSel = cuentas.fase === 'OK' ? cuentas.lista.find((x) => x.cuenta_id === b.cuentaId) : undefined;
   const nombreCategoria = b.categoria.estado === 'CATEGORIA' ? b.categoria.nombre : null;
+  // CAT-VIV: la categoría elegida exige propiedad (solo en gastos; la marca de ESA categoría).
+  const nodoElegido = b.categoria.estado === 'CATEGORIA' && arbol.fase === 'OK' ? arbol.arbol.porId.get(b.categoria.id) : undefined;
+  const conVivienda = exigePropiedad(tipoReg, nodoElegido);
+  /** Con una vivienda solo cuentas solo tuyas (Q-PAG-03); sin marca, la lista de siempre. */
+  const cuentasVisibles = cuentas.fase === 'OK' ? (conVivienda ? cuentas.lista.filter((x) => x.propuesta_financiacion === 'SELF_100') : cuentas.lista) : [];
+  const cuentaPropia = conVivienda && cuentaSel?.propuesta_financiacion === 'SELF_100' ? b.cuentaId : null;
+  /** «<cotitular>, todo»: no sale dinero de tus cuentas; VS-01 lleva igualmente una cuenta de referencia que no se mueve. */
+  const sinCuentaPropia = conVivienda && !!selProp && !pagaYo(selProp);
+  const cuentaReferencia = b.cuentaId ?? (cuentas.fase === 'OK' && cuentas.lista.length > 0 ? cuentas.lista[0].cuenta_id : null);
+  const bValidar: Borrador = sinCuentaPropia ? { ...b, cuentaId: cuentaReferencia, propuesta: b.propuesta ?? 'NO_DETERMINADA', reembolso: null } : conVivienda ? { ...b, reembolso: null } : b;
 
   // SPEC-08: decisiones bloqueantes de REG-01 que faltan, calculadas en cada render
   // con la MISMA validación que protege el sellado (sin duplicar reglas).
-  const pendientes = validar(b, hoyIso, tipoReg);
-  const listo = Object.keys(pendientes).length === 0;
-  const faltan = textoFaltan(pendientes, b, tipoReg);
+  const pendientes = validar(bValidar, hoyIso, tipoReg);
+  const faltasProp = conVivienda ? faltasPropiedad(selProp, b.importeTexto, cuentaPropia).filter((x) => !(pendientes.cuenta && x === 'la cuenta')) : [];
+  const listo = Object.keys(pendientes).length === 0 && faltasProp.length === 0;
+  const faltan = conFaltasPropiedad(textoFaltan(pendientes, b, tipoReg), faltasProp);
   // G1 v2: claves de lo que falta (nunca valores) cada vez que cambia el conjunto; y magnitudes visibles.
   const clavesFaltan = Object.keys(pendientes).join(',');
   useEffect(() => {
@@ -550,11 +591,33 @@ export function RegistroGastoScreen(p: {
 
   const onRegistrar = async () => {
     p.traza?.('registrar_pulsado');
+    // CAT-VIV: con categoría asociada a vivienda, la propiedad es obligatoria y viaja en el bloque `propiedad` de VS-01.
+    let aEnviar: Borrador = b.propiedad ? { ...b, propiedad: null } : b;
+    if (conVivienda) {
+      if (!selProp || faltasProp.length > 0) return setErrorProp(selProp ? `Falta: ${faltasProp.join(', ')}.` : 'Falta: la propiedad.');
+      setErrorProp(null);
+      aEnviar = { ...bValidar, soloMio: false, propiedad: bloqueWire(selProp, b.importeTexto, pagaYo(selProp) ? b.cuentaId : null, b.fechaHecho) };
+    }
     editable.current = false; // desde el sellado, ninguna propuesta en vuelo toca el borrador
-    if (Object.keys(validar(b, hoyIso, tipoReg)).length === 0) setEnviado(true); // primer envío: el tipo queda fijado
-    const e = await enviar(b, hoyIso);
+    if (Object.keys(validar(aEnviar, hoyIso, tipoReg)).length === 0) setEnviado(true); // primer envío: el tipo queda fijado
+    const e = await enviar(aEnviar, hoyIso);
     setErrores(e);
   };
+
+  // CAT-VIV: al pasar a una categoría de vivienda se quita lo que el reparto de la propiedad sustituye (R01).
+  useEffect(() => {
+    if (!conVivienda || bloqueado || enviado) return;
+    if (b.reembolso) {
+      setB((x) => ({ ...x, reembolso: null }));
+      setAvisos([TEXTO_RETIRADO_VIVIENDA]);
+    }
+  }, [conVivienda]); // eslint-disable-line react-hooks/exhaustive-deps
+  // CAT-VIV: las deudas propuestas siguen al importe (lo que el usuario tocó se conserva).
+  useEffect(() => {
+    setSelProp((x) => (x ? conDeudas(x, b.importeTexto) : x));
+  }, [b.importeTexto]);
+  const onPropuestaPropiedad = (id: string, prop: PropuestaGasto) =>
+    setSelProp((x) => (x && x.propiedadId === id ? conDeudas(conPropuesta(x, prop), bRef.current.importeTexto) : x));
 
   // ------------------------------------------------------------ tipo (T02), plantilla, tercero y contexto
   const cambiarTipo = (hacia: TipoRegistro) => {
@@ -670,12 +733,32 @@ export function RegistroGastoScreen(p: {
                 </View>
               ))}
             </View>
+          ) : (estado.sellada.payload as Readonly<PayloadGastoPagado>).propiedad && selProp ? (
+            // CAT-VIV R05 (VP-2b): gasto normal de vivienda que cuenta en el mes; no es inversión.
+            <View testID="exito-vivienda" style={{ alignSelf: 'stretch', gap: espacio.xs }}>
+              <View style={s.filaExito}>
+                <Text style={[tipo.body, { color: c.textSecondary }]}>Propiedad</Text>
+                <Text testID="exito-vivienda-propiedad" style={[tipo.bodyEmphasis, { color: c.textPrimary }]}>{selProp.nombre}</Text>
+              </View>
+              <View style={s.filaExito}>
+                <Text style={[tipo.body, { color: c.textSecondary }]}>Reparto</Text>
+                <Text testID="exito-vivienda-reparto" style={[tipo.body, { color: c.textPrimary, flexShrink: 1, textAlign: 'right' }]}>{textoRepartoExito(selProp)}</Text>
+              </View>
+              <View style={s.filaExito}>
+                <Text style={[tipo.body, { color: c.textSecondary }]}>Tipo</Text>
+                <Text testID="exito-vivienda-clase" style={[tipo.body, { color: c.textPrimary }]}>{NOMBRE_CLASE_REGISTRO[selProp.clase]}</Text>
+              </View>
+              <Text testID="exito-vivienda-mes" style={[tipo.footnote, { color: c.textSecondary, textAlign: 'center' }]}>
+                {miParte(selProp, r.importe) ? `Cuenta en el gasto de ${nombreMes(estado.sellada.payload.fecha_hecho)}: ${formatearEur(miParte(selProp, r.importe)!)}.` : 'Reparto sin indicar: no cuenta en tu gasto atribuible.'}
+              </Text>
+              <Text testID="exito-vivienda-no-coste" style={[tipo.footnote, { color: c.textSecondary, textAlign: 'center' }]}>{TEXTO_NO_SUMA_COSTE}</Text>
+            </View>
           ) : (
             <Text style={[tipo.footnote, { color: c.textSecondary, textAlign: 'center' }]}>
               {r.estado_atribucion === 'COMPLETA' ? 'Atribuido: solo tuyo.' : 'Reparto sin indicar: no cuenta en tu gasto atribuible.'}
             </Text>
           )}
-          {esIngreso ? null : (
+          {esIngreso || (estado.sellada.payload as Readonly<PayloadGastoPagado>).propiedad ? null : (
             <Text testID="exito-financiacion" style={[tipo.footnote, { color: c.textSecondary, textAlign: 'center' }]}>
               {r.financiacion === 'PROPUESTA_ACEPTADA' ? 'Financiado por ti.' : 'Financiación no determinada.'}
             </Text>
@@ -1013,7 +1096,16 @@ export function RegistroGastoScreen(p: {
         </Campo>
         </View>
 
-        <Campo etiqueta={esIngreso ? '¿De quién es este ingreso?' : '¿De quién es este gasto?'} opcional>
+        {conVivienda ? (
+          <Campo etiqueta="Propiedad">
+            <BloquePropiedad testID="vivienda" propiedades={propiedadesApi} patrimonio={patrimonioApi} fecha={b.fechaHecho}
+              cuentaId={cuentaPropia} importe={b.importeTexto} valor={selProp}
+              onCambiar={(x) => { if (!bloqueado && !enviado) { setSelProp(x ? conDeudas(x, b.importeTexto) : x); setErrorProp(null); } }}
+              onPropuesta={onPropuestaPropiedad}
+              error={errorProp ?? (selProp ? null : 'Falta: la propiedad.')} bloqueado={bloqueado || enviado} />
+          </Campo>
+        ) : null}
+        {conVivienda ? null : <Campo etiqueta={esIngreso ? '¿De quién es este ingreso?' : '¿De quién es este gasto?'} opcional>
           <View style={s.chips}>
             <Chip
               testID="solo-mio"
@@ -1046,9 +1138,9 @@ export function RegistroGastoScreen(p: {
               : b.reembolso && b.reembolso.nombre ? TEXTO_ATRIBUCION_REEMBOLSO(b.reembolso.nombre)
                 : b.soloMio ? 'Decisión tuya: el gasto es 100 % tuyo.' : 'Sin indicar: se guardará sin reparto y no contará en tu gasto atribuible.'}
           </Text>
-        </Campo>
+        </Campo>}
 
-        <Campo etiqueta={esIngreso ? 'Cobrado en' : 'Pagado con'} error={visibles.cuenta}>
+        {sinCuentaPropia ? null : <Campo etiqueta={esIngreso ? 'Cobrado en' : conVivienda && selProp?.pago.modo === 'CADA_UNO' ? 'Pagado con (tu parte)' : 'Pagado con'} error={visibles.cuenta}>
           {cuentas.fase === 'CARGANDO' ? <EstadoDato estado="CARGANDO" /> : null}
           {cuentas.fase === 'ERROR' ? (
             <Pressable testID="cuentas-error" accessibilityRole="button" onPress={() => cargarCuentas(b.fechaHecho)} style={{ minHeight: TACTIL_MIN }}>
@@ -1060,7 +1152,7 @@ export function RegistroGastoScreen(p: {
           ) : null}
           {cuentas.fase === 'OK' ? (
             <View style={s.chips}>
-              {cuentas.lista.map((x) => (
+              {cuentasVisibles.map((x) => (
                 <Chip
                   key={x.cuenta_id}
                   testID={`cuenta-${x.cuenta_id}`}
@@ -1072,7 +1164,7 @@ export function RegistroGastoScreen(p: {
                   }}
                 />
               ))}
-              {!esIngreso && p.onGastoCompartido && !enviado && !b.reembolso ? (
+              {!esIngreso && !conVivienda && p.onGastoCompartido && !enviado && !b.reembolso ? (
                 <Chip testID="otra-persona" etiqueta={TEXTO_OTRA_PERSONA} seleccionado={false} onPress={() => irACompartido({ repartir: false, otraPersona: true })} />
               ) : null}
             </View>
@@ -1083,7 +1175,8 @@ export function RegistroGastoScreen(p: {
               {b.cuentaOrigen === 'USUARIO' ? TEXTO_ELEGIDA : origen(b.cuentaPropuesta!)}
             </Text>
           ) : null}
-          {cuentaSel && b.propuesta && !esIngreso ? (
+          {conVivienda ? <Text testID="vivienda-solo-tus-cuentas" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_SOLO_TUS_CUENTAS}</Text> : null}
+          {cuentaSel && b.propuesta && !esIngreso && !conVivienda ? (
             <View testID="financiacion" style={s.filaFinanciacion}>
               <Text testID="financiacion-texto" style={[tipo.footnote, { color: c.textSecondary, flexShrink: 1 }]}>
                 {b.propuesta === 'SELF_100' && !b.propuestaRechazada
@@ -1099,7 +1192,7 @@ export function RegistroGastoScreen(p: {
               ) : null}
             </View>
           ) : null}
-        </Campo>
+        </Campo>}
 
         {/* Fecha común del gasto y del pago (REG-01): propuesta «Hoy», editable, nunca futura. */}
         <Campo etiqueta="Fecha" error={visibles.fecha}>
@@ -1179,6 +1272,8 @@ export function RegistroGastoScreen(p: {
                     ? `${estado.mensaje} ${TEXTO_FORMULARIO_SE_CONSERVA}`
                     : MOTIVO_RECHAZO_REEMBOLSO[estado.codigo] && b.reembolso
                       ? `No se ha registrado. ${MOTIVO_RECHAZO_REEMBOLSO[estado.codigo]}`
+                      : MOTIVO_RECHAZO_PROPIEDAD[estado.codigo]
+                        ? `No se ha registrado. ${MOTIVO_RECHAZO_PROPIEDAD[estado.codigo]}`
                       : `No se ha registrado. ${estado.mensaje}`}
             </Text>
           </View>
@@ -1342,6 +1437,19 @@ const NOMBRE_FALTA: Record<ClaveFalta, string> = {
   cuenta: 'cuenta de pago',
   fecha: 'fecha válida',
 };
+
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+/** «noviembre» de «2026-11-14». */
+const nombreMes = (iso: string) => MESES[Number(iso.slice(5, 7)) - 1] ?? '';
+
+/** CAT-VIV: añade lo que falta del bloque «Propiedad» al texto de `textoFaltan` (R01: «Para registrar falta: la propiedad.»). */
+export function conFaltasPropiedad(base: string, faltas: string[]): string {
+  if (faltas.length === 0) return base;
+  const previas = base ? base.replace(/^Para registrar falta: /, '').replace(/\.$/, '').split(/, | y /) : [];
+  const partes = [...previas, ...faltas];
+  const lista = partes.length === 1 ? partes[0] : `${partes.slice(0, -1).join(', ')} y ${partes[partes.length - 1]}`;
+  return `Para registrar falta: ${lista}.`;
+}
 
 /** «Para registrar falta: importe, categoría y consumo eléctrico (kWh).» (orden del formulario). */
 export function textoFaltan(e: Errores, b: Pick<Borrador, 'importeTexto' | 'categoria' | 'magnitudesTexto'>, tipoReg: 'GASTO' | 'INGRESO' = 'GASTO'): string {

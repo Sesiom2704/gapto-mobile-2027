@@ -5,12 +5,27 @@
 // Descripción: Registrar desde la previsión (F05-06 M5 §B1; lámina PREV v0.2 A3/A4, C1/C2, D1/D2; D-PREV-03/04/05/15). Tarea inmersiva CREATE con los datos de la previsión como propuesta VISIBLE («De la previsión»): importe real (manda lo real, «Distinto de lo previsto»), tercero y categoría de la previsión (la categoría se puede quitar: «Sin categoría»), presupuesto, cuenta («Pagado con» / «Cobrado en» o «Desde» / «Hacia»), fecha (Hoy u otra, ≤ hoy) y «¿Queda cubierta la previsión?» SIN respuesta marcada: «Revisar» no se activa hasta elegir (P-PREV-02). La revisión separa «Se registra» (realidad y su movimiento) de «La previsión» (cubierta o pendiente) y dice que la previsión no mueve dinero (MONTH-RULE-06); en la transferencia, que no es gasto ni ingreso. Un envío sin respuesta se reintenta con la MISMA identidad (no duplica). Rechazos con el texto del servidor; «Ha cambiado; revisa» vuelve al detalle releído.
 // Versión: 0.1.0 (F05-06 M5 §B1)
 // Versión: 0.2.0 (F06 T1 UX-1 · M-07, DM-06: la fecha usa el componente único `CampoFecha` (chips, campo dd/mm/aaaa con máscara y calendario en JS); se conservan el estado, las reglas de cada campo, los testID y los textos de validación; ≤ hoy; una fecha imposible (31/02) no se toma y sigue «Hoy», como cualquier texto que no es fecha; el servidor ya la rechaza, dt.date).
+// Versión: 0.3.0 (F06 T2-F06 CAT-VIV N1 (L-04, lámina SET-CAT/REG-CAT v1.0) R06; OBL-VIV-01.4): registrar el pago de una previsión de GASTO cuya categoría está «Asociada a vivienda» (según el árbol GET /v1/categorias) crea el gasto real y exige la propiedad igual que un registro directo, aunque la previsión fuera anterior a la marca: bloque «Propiedad» (BloquePropiedad: reparto por titularidad, clase y «¿Quién pagó?») con el texto de R06, «Pagado con» solo con cuentas solo tuyas y, sin propiedad, «Para revisar falta: la propiedad.». El envío lleva el bloque `propiedad` de VS-01 (atribución SIN_INDICAR, financiación NO_DETERMINADA). «Sin categoría» o una categoría sin marca: nada cambia.
 // ============================================================
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type { ClienteApi, DetallePrevision, Respuesta } from '../api/cliente';
+import { configApi } from '../api/config';
+import { ClientePatrimonioB3, crearClientePatrimonioB3, PropuestaGasto } from '../api/patrimonio_b3';
+import { ClientePropiedades, crearClientePropiedades } from '../api/propiedades';
+import { BloquePropiedad } from '../components/BloquePropiedad';
+import {
+  bloqueWire,
+  conDeudas,
+  conPropuesta,
+  faltasPropiedad,
+  pagaYo,
+  SeleccionPropiedad,
+  TEXTO_PREVISION_SIN_PROPIEDAD,
+  TEXTO_SOLO_TUS_CUENTAS,
+} from '../domain/propiedad_registro';
 import { BotonPrimario, BotonTexto, Chip, EstadoDato, Segmentado } from '../components/Basicos';
 import { CampoFecha } from '../components/CampoFecha';
 import { CabeceraTarea, Campo, estilosFormulario } from '../components/Formulario';
@@ -45,8 +60,13 @@ export function PrevisionRegistroScreen(p: {
   /** Desde el swipe «Abrir el formulario completo»: importe ya escrito. */
   importeInicial?: string | null;
   onCerrar: (registrado: boolean, releer?: boolean) => void;
+  /** CAT-VIV: clientes de propiedades y de B3 (por defecto, los de `configApi`). */
+  propiedades?: ClientePropiedades;
+  patrimonio?: ClientePatrimonioB3;
 }) {
   const { c } = useTema();
+  const propiedadesApi = useMemo(() => p.propiedades ?? crearClientePropiedades(configApi), [p.propiedades]);
+  const patrimonioApi = useMemo(() => p.patrimonio ?? crearClientePatrimonioB3(configApi), [p.patrimonio]);
   const d = p.detalle;
   const tipoReg = (d.tipo === 'INGRESO' || d.tipo === 'TRANSFERENCIA' ? d.tipo : 'GASTO') as keyof typeof TITULO;
   const hoyIso = isoLocal(p.ahora());
@@ -63,6 +83,18 @@ export function PrevisionRegistroScreen(p: {
   const [fase, setFase] = useState<Fase>('EDITANDO');
   const [mensaje, setMensaje] = useState<string | null>(null);
   const [codigo, setCodigo] = useState<string | null>(null);
+  /** CAT-VIV: marca «Asociada a vivienda» de la categoría de la previsión y propiedad elegida. */
+  const [marcaVivienda, setMarcaVivienda] = useState(false);
+  const [selProp, setSelProp] = useState<SeleccionPropiedad | null>(null);
+  useEffect(() => {
+    if (tipoReg !== 'GASTO' || !d.categoria || typeof p.cliente.arbolCategorias !== 'function') return;
+    let vivo = true;
+    void Promise.resolve(p.cliente.arbolCategorias()).then((r) => {
+      if (!r) return;
+      if (vivo && r.tipo === 'OK') setMarcaVivienda(r.datos.categorias.some((n) => n.id === d.categoria!.id && n.asociada_vivienda === true));
+    });
+    return () => { vivo = false; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fecha = fechaOtra ?? hoyIso;
   const prevista = tipoReg === 'INGRESO' ? d.cuenta_entrada : d.cuenta_salida;
@@ -98,24 +130,39 @@ export function PrevisionRegistroScreen(p: {
 
   const imp = parsearImporte(importeTexto);
   const fechaValida = fecha <= hoyIso;
-  const cuentaSel = cuentas.fase === 'OK' ? cuentas.origen.find((x) => x.cuenta_id === cuentaId) ?? null : null;
+  // CAT-VIV (R06): la confirmación crea el gasto real; con la categoría marcada exige la propiedad.
+  const conVivienda = tipoReg === 'GASTO' && conCategoria && marcaVivienda;
+  const sinCuentaPropia = conVivienda && !!selProp && !pagaYo(selProp);
+  const listaOrigen = cuentas.fase === 'OK' ? (conVivienda ? cuentas.origen.filter((x) => x.propuesta) : cuentas.origen) : [];
+  const cuentaElegida = listaOrigen.find((x) => x.cuenta_id === cuentaId) ?? null;
+  const cuentaRef = cuentas.fase === 'OK' ? cuentaElegida ?? cuentas.origen[0] ?? null : null;
+  const cuentaSel = sinCuentaPropia ? cuentaRef : conVivienda ? cuentaElegida : cuentas.fase === 'OK' ? cuentas.origen.find((x) => x.cuenta_id === cuentaId) ?? null : null;
   const destinoSel = cuentas.fase === 'OK' ? cuentas.destino.find((x) => x.cuenta_id === destinoId) ?? null : null;
   const form: FormularioDesdePrevision = {
     importe: imp.ok ? imp.valor : null,
     fecha,
-    cuentaId: cuentaSel ? cuentaId : null,
+    cuentaId: cuentaSel ? cuentaSel.cuenta_id : null,
     cuentaDestinoId: tipoReg === 'TRANSFERENCIA' ? (destinoSel ? destinoId : null) : null,
     presupuestable,
     conCategoria,
     propuestaSelf100: !!cuentaSel?.propuesta,
     marcar,
   };
-  const falta = faltaRegistro(d, form).concat(fechaValida ? [] : ['fecha (no puede ser futura)']);
+  const faltasProp = conVivienda ? faltasPropiedad(selProp, importeTexto, cuentaElegida ? cuentaElegida.cuenta_id : null).filter((x) => x !== 'la cuenta') : [];
+  const falta = faltaRegistro(d, form).concat(fechaValida ? [] : ['fecha (no puede ser futura)']).concat(faltasProp);
+  const onPropuestaPropiedad = (id: string, prop: PropuestaGasto) =>
+    setSelProp((x) => (x && x.propiedadId === id ? conDeudas(conPropuesta(x, prop), importeTexto) : x));
   const distinto = imp.ok && d.importe_esperado !== null && imp.valor !== d.importe_esperado;
 
   const enviar = useCallback(async () => {
-    const r = componerRegistro(d, form, intencion.actual());
-    if (!r) return;
+    const r0 = componerRegistro(d, form, intencion.actual());
+    if (!r0) return;
+    if (conVivienda && (!selProp || faltasProp.length > 0)) return;
+    // CAT-VIV: el bloque `propiedad` de VS-01; la atribución y las aportaciones las saca el bloque.
+    const r = conVivienda && selProp && r0.ruta === 'GASTO'
+      ? { ...r0, payload: { ...r0.payload, atribucion: 'SIN_INDICAR', financiacion: { estado: 'NO_DETERMINADA' },
+          propiedad: bloqueWire(selProp, importeTexto, pagaYo(selProp) ? form.cuentaId : null, form.fecha) } }
+      : r0;
     setFase('ENVIANDO');
     let res: Respuesta<unknown>;
     if (r.ruta === 'GASTO') res = await p.cliente.registrarGastoPagado(r.payload as never);
@@ -130,7 +177,7 @@ export function PrevisionRegistroScreen(p: {
     setCodigo(res.codigo);
     setMensaje(res.mensaje);
     setFase('RECHAZADO');
-  }, [d, form, intencion, p.cliente]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [d, form, intencion, p.cliente, conVivienda, selProp, faltasProp, importeTexto]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const cancelar = () => p.onCerrar(fase === 'CONFIRMADO');
 
@@ -186,16 +233,28 @@ export function PrevisionRegistroScreen(p: {
                 </View>
               </Campo>
             ) : null}
+            {conVivienda ? (
+              <Campo etiqueta="Propiedad">
+                <BloquePropiedad testID="prevision-vivienda" propiedades={propiedadesApi} patrimonio={patrimonioApi} fecha={fecha}
+                  cuentaId={cuentaElegida ? cuentaElegida.cuenta_id : null} importe={importeTexto} valor={selProp}
+                  onCambiar={(x) => setSelProp(x ? conDeudas(x, importeTexto) : x)} onPropuesta={onPropuestaPropiedad}
+                  error={selProp ? null : 'Falta: la propiedad.'} />
+                <Text testID="prevision-vivienda-aviso" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_PREVISION_SIN_PROPIEDAD}</Text>
+              </Campo>
+            ) : null}
             {tipoReg !== 'TRANSFERENCIA' ? (
               <Campo etiqueta="¿Cuenta para el presupuesto? · De la previsión">
                 <Segmentado testIDBase="prevision-presupuestable" etiquetaGrupo="¿Cuenta para el presupuesto?" valor={presupuestable}
                   opciones={[{ valor: true, etiqueta: 'Sí' }, { valor: false, etiqueta: 'No' }]} onCambiar={setPresupuestable} />
               </Campo>
             ) : null}
-            <Campo etiqueta={tipoReg === 'GASTO' ? 'Pagado con' : tipoReg === 'INGRESO' ? 'Cobrado en' : 'Desde'}>
-              <ListaCuentas cuentas={cuentas} lista={cuentas.fase === 'OK' ? cuentas.origen : []} sel={cuentaId} prevista={prevista?.id ?? null}
-                onElegir={setCuentaId} onReintentar={cargarCuentas} testIDBase="prevision-cuenta" />
-            </Campo>
+            {sinCuentaPropia ? null : (
+              <Campo etiqueta={tipoReg === 'GASTO' ? 'Pagado con' : tipoReg === 'INGRESO' ? 'Cobrado en' : 'Desde'}>
+                <ListaCuentas cuentas={cuentas} lista={listaOrigen} sel={cuentaId} prevista={prevista?.id ?? null}
+                  onElegir={setCuentaId} onReintentar={cargarCuentas} testIDBase="prevision-cuenta" />
+                {conVivienda ? <Text testID="prevision-vivienda-cuentas" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_SOLO_TUS_CUENTAS}</Text> : null}
+              </Campo>
+            )}
             {tipoReg === 'TRANSFERENCIA' ? (
               <Campo etiqueta="Hacia">
                 <ListaCuentas cuentas={cuentas} lista={cuentas.fase === 'OK' ? cuentas.destino.filter((x) => x.cuenta_id !== cuentaId) : []} sel={destinoId}
@@ -237,7 +296,11 @@ export function PrevisionRegistroScreen(p: {
         ) : null}
         {!revision ? (
           <>
-            {falta.length > 0 ? <Text testID="prevision-falta" style={[tipo.footnote, { color: c.textSecondary }]}>{`Falta: ${falta.join(', ')}`}</Text> : null}
+            {falta.length > 0 ? (
+              <Text testID="prevision-falta" style={[tipo.footnote, { color: c.textSecondary }]}>
+                {conVivienda ? `Para revisar falta: ${falta.join(', ')}.` : `Falta: ${falta.join(', ')}`}
+              </Text>
+            ) : null}
             <BotonPrimario testID="prevision-revisar" titulo="Revisar" deshabilitado={falta.length > 0} onPress={() => setFase('REVISION')} />
           </>
         ) : (

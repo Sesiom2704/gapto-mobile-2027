@@ -13,6 +13,7 @@
 // Versión: 0.8.0 (swipe (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados `principal` / `alternativa` del componente común (principal a la izquierda); la raíz y el scroll cierran la fila abierta a medias (`propsZonaSwipe`, `propsScrollSwipe`).)
 // Versión: 0.8.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // Versión: 0.9.0 (F06 T1 UX-1 · M-03, Q-UX-06: publica la señal «hay cambios sin guardar» de su formulario (`usarCambiosSinGuardar`; prop opcional `onCambiosSinGuardar`); sin cambios de escritura; la pasa al alta de categoría).
+// Versión: 0.10.0 (F06 T2-F06 CAT-VIV N1 (L-04, lámina SET-CAT/REG-CAT v1.0) S01–S05; C-CAT-VIV-01; VP-1): fila «Asociada a vivienda» (casa rellena «Sí» / contorno «No», se toca entera) entre «Icono» y las magnitudes/acciones, con su nota; en categorías de INGRESO no hay fila y la nota explica por qué (Q-CV-11); en «Ambos» la nota aclara que los ingresos no cambian. VP-1: al tocarla solo cambian la fila y su nota (valor mostrado al momento), guarda con el `row_version` vigente y relee el árbol EN SILENCIO (sin «Cargando», sin desmontar el detalle ni volver arriba); si el guardado falla, la fila vuelve a su valor con un aviso. La marca es de esta categoría: no pasa a sus subcategorías.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -99,6 +100,8 @@ export function CategoriasAjustesScreen(p: {
   const [uso, setUso] = useState<UsoCarga>({ fase: 'CARGANDO' });
   const [usoCambiado, setUsoCambiado] = useState(false);
   const [desdeCero, setDesdeCero] = useState(false);
+  /** CAT-VIV VP-1: valor de «Asociada a vivienda» mostrado mientras se guarda (solo cambia la fila). */
+  const [viviendaEnCurso, setViviendaEnCurso] = useState<{ id: string; valor: boolean } | null>(null);
 
   /** Devuelve si la lectura fue OK: en silencio, un fallo conserva el árbol mostrado y quien recarga lo comunica (AJ-S7MAGUI-02). */
   const cargar = useCallback(async (silencioso = false): Promise<boolean> => {
@@ -151,6 +154,23 @@ export function CategoriasAjustesScreen(p: {
     else if (r.codigo === 'ICONO_CATEGORIA_NO_VALIDO') setAviso('Ese icono no está disponible. Elige otro o «Sin icono».');
     else setAviso(r.mensaje || 'No se ha podido guardar el icono.');
     void cargar(); // siempre se muestra el estado persistido; nunca se reintenta solo
+  };
+
+  /** CAT-VIV (C-CAT-VIV-01, VP-1): solo cambia la fila; relectura SILENCIOSA del árbol (nunca «Cargando»); nunca reintenta solo. */
+  const guardarVivienda = async (valor: boolean) => {
+    if (!detalle || guardando || !p.cliente.viviendaCategoria) return;
+    const id = detalle.id;
+    setGuardando(true);
+    setViviendaEnCurso({ id, valor });
+    const r = await p.cliente.viviendaCategoria(id, { row_version: detalle.row_version, asociada_vivienda: valor });
+    if (r.tipo === 'OK') setAviso(null);
+    else if (r.tipo === 'INDETERMINADO') setAviso(MSG_INDETERMINADO);
+    else if (r.codigo === 'VERSION_DESFASADA') setAviso(MSG_VERSION);
+    else setAviso(r.mensaje || 'No se ha podido guardar «Asociada a vivienda».');
+    const leido = await cargar(true);
+    setViviendaEnCurso(null);
+    setGuardando(false);
+    if (!leido && r.tipo === 'OK') setAviso('No hemos podido comprobar el estado guardado. Vuelve a abrir la categoría para verlo.');
   };
 
   /** Cierra la tarea, deja el aviso y recarga SIEMPRE: se muestra el estado persistido; nunca se reintenta solo. */
@@ -367,6 +387,12 @@ export function CategoriasAjustesScreen(p: {
             <Text style={[tipo.body, { color: c.textPrimary }]}>{icono?.etiqueta ?? 'Sin asignar'}</Text>
             <Ionicons name="chevron-forward" size={18} color={c.textSecondary} />
           </Pressable>
+          <FilaVivienda
+            ambito={detalle.ambito}
+            valor={viviendaEnCurso && viviendaEnCurso.id === detalle.id ? viviendaEnCurso.valor : detalle.asociada_vivienda === true}
+            guardando={guardando}
+            onCambiar={(v) => void guardarVivienda(v)}
+          />
           {mag.seccion}
           <Text accessibilityRole="header" style={[tipo.footnote, s.seccion, { color: c.textSecondary }]}>Acciones</Text>
           <FilaAccion testID="accion-renombrar" titulo="Renombrar" onPress={() => { setErrorNombre(null); setTarea({ tipo: 'RENOMBRAR' }); }} />
@@ -606,6 +632,39 @@ function FilaAccion(p: { testID: string; titulo: string; critica?: boolean; onPr
       <Text style={[tipo.body, { color: p.critica ? c.criticalText : c.textPrimary, flex: 1 }]}>{p.titulo}</Text>
       {p.critica ? null : <Ionicons name="chevron-forward" size={18} color={c.textSecondary} />}
     </Pressable>
+  );
+}
+
+/** CAT-VIV (lámina SET-CAT S01–S05): textos literales de la fila «Asociada a vivienda». */
+export const NOTA_VIVIENDA_SI = 'Al registrar un gasto con esta categoría tendrás que elegir la propiedad. Lo ya registrado no cambia.';
+export const NOTA_VIVIENDA_SI_AMBOS =
+  'Al registrar un gasto con esta categoría tendrás que elegir la propiedad. Los ingresos con esta categoría no cambian. Lo ya registrado no cambia.';
+export const NOTA_VIVIENDA_NO = 'Márcala si sus gastos son siempre de una vivienda (comunidad, IBI…). Lo ya registrado no cambia.';
+export const NOTA_VIVIENDA_INGRESO =
+  'Las categorías de ingreso no se asocian a una vivienda. Los ingresos de una vivienda (el alquiler) llegarán con los contratos de alquiler.';
+
+function FilaVivienda(p: { ambito: CategoriaNodo['ambito']; valor: boolean; guardando: boolean; onCambiar: (v: boolean) => void }) {
+  const { c } = useTema();
+  const nota = p.ambito === 'INGRESO' ? NOTA_VIVIENDA_INGRESO : p.valor ? (p.ambito === 'AMBOS' ? NOTA_VIVIENDA_SI_AMBOS : NOTA_VIVIENDA_SI) : NOTA_VIVIENDA_NO;
+  return (
+    <>
+      {p.ambito !== 'INGRESO' ? (
+        <Pressable
+          testID="detalle-vivienda"
+          accessibilityRole="switch"
+          accessibilityState={{ checked: p.valor, disabled: p.guardando }}
+          accessibilityLabel={`Asociada a vivienda: ${p.valor ? 'Sí' : 'No'}`}
+          onPress={() => { if (!p.guardando) p.onCambiar(!p.valor); }}
+          style={[s.filaDato, { borderBottomColor: c.separator }]}
+        >
+          <Text style={[tipo.body, { color: c.textSecondary, flex: 1 }]}>Asociada a vivienda</Text>
+          <Ionicons testID={p.valor ? 'detalle-vivienda-casa-si' : 'detalle-vivienda-casa-no'} name={p.valor ? 'home' : 'home-outline'} size={18}
+            color={p.valor ? c.accentText : c.textSecondary} />
+          <Text testID="detalle-vivienda-valor" style={[tipo.body, { color: c.textPrimary }]}>{p.valor ? 'Sí' : 'No'}</Text>
+        </Pressable>
+      ) : null}
+      <Text testID="detalle-vivienda-nota" style={[tipo.caption, s.nota, { color: c.textSecondary }]}>{nota}</Text>
+    </>
   );
 }
 

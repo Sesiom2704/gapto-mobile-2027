@@ -23,6 +23,7 @@
 // Versión: 0.15.0 (F06 T1 UX-1 · M-07, DM-06: la fecha usa el componente único `CampoFecha` (chips, campo dd/mm/aaaa con máscara y calendario en JS); se conservan el estado, las reglas de cada campo, los testID y los textos de validación; «Entre fechas»: solo fechas que existen y d ≤ h; el servidor ya rechaza 31/02, dt.date).
 // Versión: 0.16.0 (F06 T1-F06 B3 · fila patrimonial de Actividad, R1 v0.8 §II.5 y lámina L-6; autorizada en lista cerrada por la decisión de Moisés afaac92d…, solo presentación): la fila de un hecho ADQUISICION_PATRIMONIAL o MEJORA_PATRIMONIAL lleva el icono de propiedad (`iconoPatrimonial`, por el tipo del HECHO, HF-14). Nada más cambia.
 // Versión: 0.17.0 (F06 T2-F06 PAG, §1.5 del mandato; lista cerrada de F05 autorizada por el párrafo 3 del literal de PAG (decisión 3 del lote 35, bfbba1e6…); Q-VP-03): la fila de una reforma pinta, bajo la secundaria, las líneas de `lineasReforma` («Salió de tu cuenta: −N €» si difiere de tu parte y la posición en su sentido). Nada más cambia.
+// Versión: 0.18.0 (F06 T2-F06 CAT-VIV N1 (L-04, lámina SET-CAT/REG-CAT v1.0) R07; OBL-VIV-01.6, D-CV-01): el detalle de un gasto con `aviso_vivienda_sin_propiedad` muestra el aviso «Categoría asociada a vivienda, sin propiedad» con su explicación, SIN acción (no ofrece asociar una propiedad). Nada más cambia.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -77,6 +78,7 @@ import { categoriaLista, componerAnulacion, componerCorreccionCategoria, TEXTO_A
 import { componerRepetir, repetibleHoy, type CapacidadesRepetir } from '../domain/repetir';
 import type { RepartoDeHecho } from '../domain/reparto';
 import { filtrar } from '../domain/maestros';
+import { TEXTO_AVISO_VIVIENDA, TEXTO_AVISO_VIVIENDA_DETALLE } from '../domain/propiedad_registro';
 import { useTema } from '../theme/tema';
 import { espacio, radio, TACTIL_MIN, tipo } from '../theme/tokens';
 
@@ -861,6 +863,12 @@ function DetalleVista({ d, onAbrir }: { d: DetalleActividad; onAbrir: (id: strin
         <IconoFila f={d} testID="detalle-icono" />
         <Text testID="detalle-subtitulo" style={[tipo.footnote, { color: c.textSecondary }]}>{`${nombreTipo} · ${diaMesAnioIso(d.fecha_hecho)}`}</Text>
       </View>
+      {d.aviso_vivienda_sin_propiedad ? (
+        <View testID="detalle-aviso-vivienda" style={[s.avisoVivienda, { backgroundColor: c.partialSurface }]}>
+          <Text style={[tipo.subheadline, { color: c.textPrimary, fontWeight: '600' }]}>{TEXTO_AVISO_VIVIENDA}</Text>
+          <Text style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_AVISO_VIVIENDA_DETALLE}</Text>
+        </View>
+      ) : null}
       {kv.map(([k, v]) => (
         <View key={k} testID={`kv-${k}`} style={s.kv}>
           <Text style={[tipo.subheadline, { color: c.textSecondary }]}>{k}</Text>
@@ -943,6 +951,7 @@ function HojaLista(p: { titulo: string; todas: string; opciones: Opcion[] | null
 }
 
 const s = StyleSheet.create({
+  avisoVivienda: { borderRadius: radio.m, padding: espacio.m, gap: espacio.xs },
   filaCabecera: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: espacio.s, minHeight: TACTIL_MIN },
   pestanas: { flexDirection: 'row', gap: espacio.l },
   pestana: { paddingVertical: espacio.xs, borderBottomWidth: 2, borderBottomColor: 'transparent' },
