@@ -5,6 +5,7 @@
 // Descripción: CAT-VIV (T2-F06, bloque 3) · bloque «Propiedad» de «Registrar gasto» y de «Registrar desde la previsión» cuando la categoría está «Asociada a vivienda» (lámina SET-CAT/REG-CAT v1.0 R01–R03 y R06; OBL-VIV-01): selector OBLIGATORIO de propiedad (chips con tus propiedades activas) con «Falta: la propiedad.», reparto propuesto según la titularidad en la fecha del gasto (visible y marcado, con «No lo sé»; nunca 100 % mío por defecto), «¿Qué tipo de gasto es?» (Gasto corriente por defecto · Reparación; nunca Mejora) y «¿Quién pagó?» de PAG con la deuda del cotitular preseleccionada y desmarcable (DM-07, L-08) y su confirmación visible. La propuesta se relee al cambiar la fecha, la propiedad o la cuenta; lo que tocó el usuario se conserva.
 // Versión: 0.1.0 (F06 T2-F06 CAT-VIV N1 (L-04, lámina SET-CAT/REG-CAT v1.0))
 // Versión: 0.1.1 (F06 T2-F06 CAT-VIV N1, capturas del paso 11): el reparto propuesto («Según la titularidad…») va en columna para que el texto largo se ajuste al ancho (antes desbordaba el formulario en R02/R03).
+// Versión: 0.1.2 (F06 T2-F06 CAT-VIV N1, repetición de capturas sobre 8146e24): «Sí / No, no me debe nada…» de la deuda también en columna (desbordaba con Dynamic Type en R03).
 // ============================================================
 
 import React, { useEffect, useState } from 'react';
@@ -163,7 +164,7 @@ export function BloquePropiedad(p: {
                     <Text style={[tipo.body, { color: c.textPrimary }]}>
                       {d.sentido === 'ME_DEBE' ? `${d.nombre} te debe su parte (${formatearEur(d.maximo)})` : `¿Le debes su parte (${formatearEur(d.maximo)}) a ${d.nombre}?`}
                     </Text>
-                    <View style={ef.chips}>
+                    <View style={lc.columna}>
                       <Chip testID={`${p.testID}-deuda-${d.actor_id}-si`} etiqueta="Sí" seleccionado={marcada} onPress={() => marcar(true)} />
                       <Chip testID={`${p.testID}-deuda-${d.actor_id}-no`}
                         etiqueta={d.sentido === 'ME_DEBE' ? 'No, no me debe nada (ya está saldado o le invito)' : 'No, no le debo nada (ya está saldado)'}
