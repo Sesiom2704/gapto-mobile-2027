@@ -28,6 +28,10 @@
 #   siguientes de la lectura (dependencias del H0 y tipo en «corregir») seguian negando las acciones: no era el defecto
 #   que describe el oraculo. Ahora la lectura OFRECE «anular por duplicado» sobre ADQUISICION_PATRIMONIAL (defecto
 #   literal de M-Q16-02, oraculos v0.7 §A.10.3); discriminantes O10.23 (c) en H0 y Hk.
+# Version: 0.2.0 (F06 T2-F06 A3-0352 (L-05)): M-O10-29 INVERTIDO (True -> False; discriminantes O10.29-H (a) y (b) de
+#   test_252); M-O10-28 sigue a la sentencia S1 de la lectura L2 de coste.py; M-V02-02 cambia de discriminante por el
+#   rename de O10.29 a O10.29-H (c). Los discriminantes corren sin forzar el interruptor (retirada de forzados). Los
+#   mutantes propios de A3-0352 van en scripts/mutantes/f06_t2_a3_0352.py.
 # ============================================================
 from __future__ import annotations
 
@@ -260,15 +264,15 @@ MUTANTES = (
             (n(T253, "test_o10_19_periodo_semiabierto"),)),
     # ------------------------------------------------------------------ inventario O10.28 y habilitacion O10.29
     Mutante("M-O10-28", "Solo C-PROP-05 y C-COMPRA-01/03 escriben las columnas de 0352", COSTE,
-            "    filas = repo.leer_coste(sesion, propiedad_id, a_fecha, habilitada)\n",
+            "    filas = repo.leer_coste(sesion, propiedad_id, a_fecha, habilitada)              # S1\n",
             "    if a_fecha is None:\n        repo.escribir_declaracion_completitud(sesion, propiedad_id, \"ADQUISICION\", (None, None, None))\n"
-            "    filas = repo.leer_coste(sesion, propiedad_id, a_fecha, habilitada)\n",
+            "    filas = repo.leer_coste(sesion, propiedad_id, a_fecha, habilitada)              # S1\n",
             (n(T252, "test_o10_28_writers_de_las_columnas_de_0352"),)),
-    Mutante("M-O10-29", "Los consumidores de 0352 no estan habilitados antes de su certificacion", HAB,
-            "CONSUMIDORES_0352_HABILITADOS = False\n", "CONSUMIDORES_0352_HABILITADOS = True\n",
-            (n(T252, "test_o10_29_constante_de_codigo_desactivada"),
-             n(T252, "test_o10_29_ruta_c_prop_05_inaccesible_y_servicio_rechaza"),
-             n(T252, "test_o10_29_declaracion_en_la_compra_y_en_el_gasto_posterior_es_422"))),
+    Mutante("M-O10-29", "Los consumidores de 0352 estan habilitados por codigo tras su certificacion (O10.29-H, A3-0352)", HAB,
+            "CONSUMIDORES_0352_HABILITADOS = True\n", "CONSUMIDORES_0352_HABILITADOS = False\n",
+            (n(T252, "test_o10_29_h_a_constante_de_codigo_habilitada"),
+             n(T252, "test_o10_29_h_b_encendido_c_prop_05_escribe_y_l_coste_completo"),
+             n(T252, "test_o10_29_h_b_encendido_compra_y_gasto_posterior_admiten_la_declaracion"))),
     # ------------------------------------------------------------------ v0.2 §M que corresponden a la compra
     Mutante("M-V02-01", "AJ-04: la marca del lote distingue el origen (C-COMPRA-03 no entra en el lote sellado)", COMPRA,
             "        compra03 = {(i, o) for i, o in _relaciones_hacia(sesion, h0) if i == uuid.uuid5(o, MARCA_LOTE03)}\n",
@@ -277,7 +281,7 @@ MUTANTES = (
     Mutante("M-V02-02", "AJ-02: L-COSTE nunca COMPLETO sin declaracion", COSTE,
             "        return (\"NO_DISPONIBLE\" if n == 0 else \"PARCIAL\"), \"SIN_DECLARACION\"\n",
             "        return (\"NO_DISPONIBLE\" if n == 0 else \"COMPLETO\"), \"SIN_DECLARACION\"\n",
-            (n(T252, "test_o10_29_o10_10_l_coste_sin_declaracion_nunca_completo"),
+            (n(T252, "test_o10_29_h_c_apagado_l_coste_sin_declaracion_nunca_completo"),
              n(T252, "test_o2_completo_y_no_completo"))),
     Mutante("M-V02-03", "AJ-03: el coste que permanece nunca es COMPLETO (bajas no representadas)", COSTE,
             "        \"estado\": \"NO_DISPONIBLE\" if adq[\"estado\"] == \"NO_DISPONIBLE\" else \"PARCIAL\",\n",

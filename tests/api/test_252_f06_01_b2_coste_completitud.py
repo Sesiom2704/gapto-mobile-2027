@@ -3,11 +3,13 @@
 # Fichero: test_252_f06_01_b2_coste_completitud.py
 # Ruta: tests/api/test_252_f06_01_b2_coste_completitud.py
 # Descripcion: F06 T1-F06 · B2 N1 · consumidores PROVISIONALES de 0352 y L-COSTE, por HTTP como gapto_runtime:
-#   - O10.29 (nuevo, mandato B2 §7.1): con habilitacion.CONSUMIDORES_0352_HABILITADOS = False (estado del
-#     repositorio) la ruta de C-PROP-05 es inaccesible (404 FUNCION_NO_HABILITADA), la declaracion en
-#     C-COMPRA-01/03 es 422 sin escribir y L-COSTE no lee la declaracion (nunca COMPLETO, sin corte ni huella);
-#     por llamada directa al servicio, igual. La constante es de codigo, no de entorno.
-#   - Con los consumidores activados SOLO dentro de cada test (monkeypatch): O2′ completo/no completo, O10.1-O10.6,
+#   - O10.29-H (A3-0352, sustituye a O10.29; mandato A3-0352 §7.1): (a) la constante es True y de codigo (sin
+#     environ/getenv/configuracion fuera de comentarios); (b) encendido, estado del repositorio SIN monkeypatch:
+#     C-PROP-05 escribe (200, terna, row_version + 1, auditoria), C-COMPRA-01/03 admiten la declaracion y L-COSTE da
+#     COMPLETO solo con declaracion y `declaracion_habilitada: true`; (c) apagado (UNICA variante con
+#     deshabilitar_0352): 404 FUNCION_NO_HABILITADA sin invocar el servicio, 422 ENTRADA_INVALIDA sin escribir y
+#     L-COSTE nunca COMPLETO, sin corte ni huella, por HTTP y por llamada directa; la fila 2 bis nunca aparece.
+#   - Con los consumidores habilitados por el repositorio (sin forzar): O2′ completo/no completo, O10.1-O10.6,
 #     O10.7′, O10.9, O10.12, O10.13-OP-02, O10.13-OP-03′, O10.15-O10.17, O10.20 (ABA en MEJORAS y adquisicion),
 #     O10.21, O10.22 (HF-07), O10.24 (HF-08), O10.25 (HF-11), O10.26 (HF-13), O11.1-O11.8, O11.11-O11.13, O11.16,
 #     O8.6 y AJ-0352-04 (ABA). Los componentes de MEJORAS se siembran por fixture (C-MEJ-02 es de B3).
@@ -18,6 +20,8 @@
 #   `d593a15d…`): O11.22 admite la SEXTA llamada productiva al 0P, la de C-PROP-03bis (servicio.py: 4 -> 5), cada
 #   una como primera llamada de su writer (lo comprueba test_233). El nombre de la funcion se conserva: lo citan
 #   los arneses de B1 y B2 como discriminante. Nada mas cambia.
+# Version: 0.2.0 (F06 T2-F06 A3-0352 (L-05)): O10.29 -> O10.29-H (a/b/c); el fixture `on` deja de forzar el
+#   interruptor (retirada de forzados). El resto de oraculos no cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -36,6 +40,8 @@ import f06_01_b1_helpers as b
 import f06_01_b2_helpers as c2
 import vs01_api_helpers as h
 from app.patrimonio import completitud as compl
+from app.patrimonio import compra as compra_mod
+from app.patrimonio import coste as coste_mod
 from app.patrimonio import habilitacion
 
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
@@ -64,8 +70,8 @@ def lab():
 
 
 @pytest.fixture()
-def on(monkeypatch):
-    c2.habilitar_0352(monkeypatch)
+def on():
+    """A3-0352: los consumidores de 0352 estan habilitados por el repositorio; el fixture ya no fuerza nada."""
 
 
 @pytest.fixture()
@@ -76,29 +82,81 @@ def comprado(lab, on):
     return lab, cuerpo
 
 
-# ================================================================== O10.29 · habilitacion bloqueada
-def test_o10_29_constante_de_codigo_desactivada():
-    assert habilitacion.CONSUMIDORES_0352_HABILITADOS is False
+# ================================================================== O10.29-H · habilitacion (A3-0352)
+def test_o10_29_h_a_constante_de_codigo_habilitada():
+    """O10.29-H (a): True, literal de codigo; el modulo no lee entorno ni configuracion fuera de comentarios."""
+    assert habilitacion.CONSUMIDORES_0352_HABILITADOS is True and habilitacion.consumidores_0352_habilitados() is True
     texto = (RAIZ / "backend" / "app" / "patrimonio" / "habilitacion.py").read_text(encoding="utf-8")
     codigo = "\n".join(linea.split("#", 1)[0] for linea in texto.splitlines())
     assert not re.search(r"environ|getenv|configuracion", codigo)          # no se activa por entorno
+    asignaciones = [n for n in ast.walk(ast.parse(texto)) if isinstance(n, ast.Assign)
+                    and any(getattr(x, "id", None) == "CONSUMIDORES_0352_HABILITADOS" for x in n.targets)]
+    assert len(asignaciones) == 1 and isinstance(asignaciones[0].value, ast.Constant)
+    assert asignaciones[0].value.value is True
 
 
-def test_o10_29_ruta_c_prop_05_inaccesible_y_servicio_rechaza(lab):
+def test_o10_29_h_b_encendido_c_prop_05_escribe_y_l_coste_completo(lab):
+    """O10.29-H (b): sin monkeypatch. C-PROP-05 escribe (200, terna, row_version + 1, auditoria) y L-COSTE da COMPLETO
+    solo con declaracion, con `declaracion_habilitada: true`, corte y huella."""
+    _ok(lab.compra(lab.peticion()))
+    coste = lab.coste()
+    assert coste["declaracion_habilitada"] is True
+    assert (coste["ADQUISICION"]["estado"], coste["ADQUISICION"]["motivo_estado"]) == ("PARCIAL", "SIN_DECLARACION")
+    v0 = lab.version()
+    intencion = uuid.uuid4()
+    j = _ok(lab.declarar("ADQUISICION", True, c2.CORTE, coste["ADQUISICION"]["huella_conjunto"], intencion_id=intencion))
+    assert j["idempotente"] is False and j["modificadas"] == [lab.pid]
+    assert lab.version() == v0 + 1 and _terna(lab)[0] is True and _terna(lab)[1] == c2.CORTE
+    assert [a for a, _ in c2.auditorias(lab.owner, intencion)] == ["entidades"]
+    adq = lab.coste()["ADQUISICION"]
+    assert (adq["estado"], adq["motivo_estado"], adq["fecha_corte"]) == ("COMPLETO", None, c2.CORTE)
+    assert adq["huella_conjunto"] == coste["ADQUISICION"]["huella_conjunto"]
+
+
+def test_o10_29_h_b_encendido_compra_y_gasto_posterior_admiten_la_declaracion(lab):
+    """O10.29-H (b): C-COMPRA-01 y C-COMPRA-03 admiten la declaracion sin forzar el interruptor."""
+    j = _ok(lab.compra(lab.peticion(completitud={"completo": True, "fecha_corte": c2.CORTE})))
+    assert j["compra"]["coste_adquisicion"]["estado"] == "COMPLETO" and _terna(lab)[0] is True
+    huella = lab.coste("2026-04-02")["ADQUISICION"]["huella_conjunto"]
+    linea = lab.gasto("OTRO", "400.00", "2026-04-02", "2026-04-02")
+    _ok(lab.gasto_posterior(lab.peticion03(linea, completitud={"completo": True, "fecha_corte": "2026-04-02"},
+                                           huella_vista=huella)))
+    assert _terna(lab)[1] == "2026-04-02" and lab.coste()["ADQUISICION"]["estado"] == "COMPLETO"
+
+
+def test_o10_29_h_c_apagado_ruta_inaccesible_sin_invocar_el_servicio(lab, monkeypatch):
+    """O10.29-H (c): con deshabilitar_0352, la ruta de C-PROP-05 responde 404 FUNCION_NO_HABILITADA SIN invocar el
+    servicio (guarda de la ruta, M-A3-G1) y el servicio, llamado directamente, rechaza igual (guarda propia, M-A3-G1b)."""
+    c2.deshabilitar_0352(monkeypatch)
     antes = c2.huella()
+    real = compl.declarar
+
+    def prohibido(*a, **k):
+        raise AssertionError("la ruta no debe invocar el servicio con el interruptor apagado")
+    monkeypatch.setattr(compl, "declarar", prohibido)
     _rechazo(lab.declarar("MEJORAS", True, b.HOY, "0" * 64), 404, habilitacion.FUNCION_NO_HABILITADA)
     _rechazo(lab.declarar("ADQUISICION", False), 404, habilitacion.FUNCION_NO_HABILITADA)
-    r = c2.unidad().ejecutar(c2.ctx(lab.owner), lambda s: compl.declarar(
-        s, propiedad_id=uuid.UUID(lab.pid), intencion_id=uuid.uuid4(), row_version=1, ambito="MEJORAS", completo=False,
-        fecha_corte=None, huella_vista=None))
-    assert isinstance(r, compl.Rechazo) and r.codigo == habilitacion.FUNCION_NO_HABILITADA
+    monkeypatch.setattr(compl, "declarar", real)
+    version = lab.version()
+    for ambito, completo, corte, huella in (("MEJORAS", False, None, None),
+                                            ("ADQUISICION", True, dt.date.fromisoformat(c2.CORTE), "0" * 64)):
+        r = c2.unidad().ejecutar(c2.ctx(lab.owner), lambda s: compl.declarar(
+            s, propiedad_id=uuid.UUID(lab.pid), intencion_id=uuid.uuid4(), row_version=version, ambito=ambito,
+            completo=completo, fecha_corte=corte, huella_vista=huella))
+        assert isinstance(r, compl.Rechazo) and r.codigo == habilitacion.FUNCION_NO_HABILITADA
     assert c2.huella() == antes
 
 
-def test_o10_29_declaracion_en_la_compra_y_en_el_gasto_posterior_es_422(lab):
+def test_o10_29_h_c_apagado_declaracion_en_la_compra_y_en_el_gasto_posterior_es_422(lab, monkeypatch):
+    """O10.29-H (c): con el interruptor apagado vuelve el 422 ENTRADA_INVALIDA sin escribir (guardas de compra.py,
+    M-A3-G2a/G2b), por HTTP y por llamada directa."""
+    c2.deshabilitar_0352(monkeypatch)
     antes = c2.huella()
     _rechazo(lab.compra(lab.peticion(completitud={"completo": True, "fecha_corte": c2.CORTE})), 422, "ENTRADA_INVALIDA")
     _rechazo(lab.compra(lab.peticion(completitud={"completo": False})), 422, "ENTRADA_INVALIDA")
+    r = c2.unidad().ejecutar(c2.ctx(lab.owner), lambda s: compra_mod.registrar_compra(
+        s, propiedad_id=uuid.UUID(lab.pid), peticion=_dto_compra(lab, {"completo": True, "fecha_corte": c2.CORTE})))
+    assert isinstance(r, compl.Rechazo) and r.codigo == "ENTRADA_INVALIDA"
     assert c2.huella() == antes
     _ok(lab.compra(lab.peticion()))
     antes = c2.huella()
@@ -109,18 +167,31 @@ def test_o10_29_declaracion_en_la_compra_y_en_el_gasto_posterior_es_422(lab):
     assert c2.huella() == antes
 
 
-def test_o10_29_o10_10_l_coste_sin_declaracion_nunca_completo(lab):
-    _ok(lab.compra(lab.peticion()))
-    # aunque las columnas tuvieran una declaracion (fixture), la lectura no la ve sin habilitacion
-    c2.como_owner(lab.owner, "UPDATE gapto.propiedades SET coste_adquisicion_declarado_completo = true, "
-                             "coste_adquisicion_declarado_en = %s, coste_adquisicion_conjunto_declarado = '[]'::jsonb "
-                             "WHERE entidad_id = %s", (c2.CORTE, lab.pid))
-    coste = lab.coste()
-    assert coste["declaracion_habilitada"] is False
-    adq = coste["ADQUISICION"]
-    assert (adq["estado"], adq["motivo_estado"], adq["fecha_corte"], adq["huella_conjunto"]) == (
-        "PARCIAL", "SIN_DECLARACION", None, None)
-    assert adq["total"] == "216830.00" and coste["MEJORAS"]["estado"] == "NO_DISPONIBLE"
+def test_o10_29_h_c_apagado_l_coste_sin_declaracion_nunca_completo(lab, monkeypatch):
+    """O10.29-H (c) y O-A3-R15-11: aunque las columnas tengan una declaracion completa (y aunque la fecha falte), con el
+    interruptor apagado la lectura no la ve (guarda de coste.py, M-A3-G3): PARCIAL SIN_DECLARACION, sin corte ni huella,
+    nunca la fila 2 bis; por HTTP y por llamada directa."""
+    _ok(lab.compra(lab.peticion(completitud={"completo": True, "fecha_corte": c2.CORTE})))
+    assert lab.coste()["ADQUISICION"]["estado"] == "COMPLETO"
+    c2.deshabilitar_0352(monkeypatch)
+    for fecha in (c2.ESCRITURA, None):
+        c2.como_owner(lab.owner, "UPDATE gapto.propiedades SET fecha_adquisicion = %s WHERE entidad_id = %s",
+                      (fecha, lab.pid))
+        coste = lab.coste()
+        assert coste["declaracion_habilitada"] is False
+        adq = coste["ADQUISICION"]
+        assert (adq["estado"], adq["motivo_estado"], adq["fecha_corte"], adq["huella_conjunto"]) == (
+            "PARCIAL", "SIN_DECLARACION", None, None)
+        assert adq["total"] == "216830.00" and coste["MEJORAS"]["estado"] == "NO_DISPONIBLE"
+        directo = c2.unidad().ejecutar(c2.ctx(lab.owner), lambda s: coste_mod.leer(
+            s, uuid.UUID(lab.pid), dt.date.fromisoformat(b.HOY)))
+        assert directo["ADQUISICION"]["estado"] == "PARCIAL" and directo["ADQUISICION"]["huella_conjunto"] is None
+
+
+def _dto_compra(lab, completitud) -> dict:
+    """Peticion de C-COMPRA-01 tal como la entrega el DTO de la ruta."""
+    from app.patrimonio.dto import RegistrarCompra
+    return RegistrarCompra.model_validate(lab.peticion(completitud=completitud)).model_dump()
 
 
 # ================================================================== O2′ con declaracion (consumidores activados)

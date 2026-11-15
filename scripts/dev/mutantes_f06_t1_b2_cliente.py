@@ -10,6 +10,10 @@
 #   disco en cuanto se conoce (GAPTO_B2C_VEREDICTOS). Un mutante solo es MUERTO si cae uno de SUS tests.
 # Uso: python scripts/dev/mutantes_f06_t1_b2_cliente.py [ID ...]
 # Version: 0.1.0 (F06 T1-F06 B2 N1)
+# Version: 0.2.0 (F06 T2-F06 A3-0352 (L-05)): MC-O10-29 INVERTIDO (true -> false; discriminante O10.29-H cliente) y
+#   mutantes de A3-0352 en el cliente (contrato A3-0352 v1.1 §9): MC-A3-01 (el estado del resumen ignora b.completo),
+#   MC-A3-02 (chip sin fecha de adquisicion), MC-A3-03 (textoEstadoCoste ignora motivo_estado) y MC-A3-04
+#   (TEXTOS_ERROR sin COMPLETITUD_SIN_FECHA_DE_ADQUISICION).
 # ============================================================
 from __future__ import annotations
 
@@ -44,9 +48,23 @@ MUTANTES = (
             "  tipoHecho === 'ADQUISICION_PATRIMONIAL' ? TEXTO_NO_GASTO_MES :",
             "  tipoHecho === 'ADQUISICION_PATRIMONIAL' || tipoHecho === 'VALOR_ACTIVO' ? TEXTO_NO_GASTO_MES :",
             ("HF-14",)),
-    Mutante("MC-O10-29", "La declaracion de completitud no se ofrece antes de la certificacion de 0352 (O10.29)", DOM,
-            "export const CONSUMIDORES_0352_HABILITADOS = false;", "export const CONSUMIDORES_0352_HABILITADOS = true;",
-            ("O10.29",)),
+    Mutante("MC-O10-29", "La declaracion de completitud se ofrece por codigo tras la certificacion de 0352 (O10.29-H)", DOM,
+            "export const CONSUMIDORES_0352_HABILITADOS = true;", "export const CONSUMIDORES_0352_HABILITADOS = false;",
+            ("O10.29-H",)),
+    Mutante("MC-A3-01", "El estado del resumen de B4 solo propone «Completo» si se marca «No faltan gastos» (UX-1)", PANT,
+            "valor={ofreceCompleto && b.completo ? 'Completo' : 'Parcial · puedes añadir gastos'} />",
+            "valor={ofreceCompleto ? 'Completo' : 'Parcial · puedes añadir gastos'} />",
+            ("UX-1", "B1 → B6")),
+    Mutante("MC-A3-02", "El chip «No faltan gastos» solo aparece con la fecha de adquisicion conocida (UX-1/UX-2)", DOM,
+            "CONSUMIDORES_0352_HABILITADOS && !!fechaAdquisicion;", "CONSUMIDORES_0352_HABILITADOS;",
+            ("UX-2", "UX-4 (cliente)", "O10.29-H (cliente): la declaración")),
+    Mutante("MC-A3-03", "textoEstadoCoste da el motivo propio de la adquisicion (UX-3)", DOM,
+            "  if (ambito === 'ADQUISICION') return (c.motivo_estado ? MOTIVOS_COSTE_ADQUISICION[c.motivo_estado] : null) ?? 'Parcial · puedes añadir gastos';\n",
+            "  if (ambito === 'ADQUISICION') return 'Parcial · puedes añadir gastos';\n",
+            ("UX-3",)),
+    Mutante("MC-A3-04", "El rechazo COMPLETITUD_SIN_FECHA_DE_ADQUISICION tiene el texto del servidor (UX-4, O-A3-TXT)", DOM,
+            "  COMPLETITUD_SIN_FECHA_DE_ADQUISICION: TEXTO_SIN_FECHA_ADQUISICION,\n", "",
+            ("UX-4",)),
     Mutante("MC-FE-01", "La propuesta de la compra es la de la fecha de ESCRITURA para todo el lote (AJ-TR1-10)", DOM,
             "atribucion: atribucionWire(b.atribucion, propuesta, 'TITULARIDAD_EN_FECHA_ESCRITURA', b.fechaEscritura),",
             "atribucion: atribucionWire(b.atribucion, propuesta, 'TITULARIDAD_EN_FECHA_ESCRITURA', b.gastos[0]?.fechaEconomica ?? b.fechaEscritura),",

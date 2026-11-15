@@ -26,6 +26,7 @@
 #     C-MEJ-01 || C-PROP-03 (titularidad en la fecha del hecho): C-PROP-03 primero -> ATRIBUCION_PROPUESTA_
 #            DESFASADA; C-MEJ-01 primero -> los dos 200.
 # Version: 0.1.0 (F06 T1-F06 B3 N1)
+# Version: 0.2.0 (F06 T2-F06 A3-0352 (L-05)): se retiran los forzados habilitar_0352 (O7.8, O7.9, S16/S17); corren con el interruptor del repositorio.
 # ============================================================
 
 from __future__ import annotations
@@ -333,7 +334,6 @@ def b2_coste(lab, a_fecha):
 
 @pytest.mark.parametrize("orden", ORDENES)
 def test_o7_8_literal_cmej03_frente_a_c_prop_05(monkeypatch, orden):
-    c2.habilitar_0352(monkeypatch)
     lab = b3.Lab()
     _mejora(lab)
     rep = _reparacion(lab)
@@ -365,7 +365,6 @@ def test_o7_8_literal_cmej03_frente_a_c_prop_05(monkeypatch, orden):
 
 # ================================================================== O7.9 (S15)
 def test_o7_9_op03_anula_componente_de_c_mej_02_frente_a_c_prop_05(monkeypatch):
-    c2.habilitar_0352(monkeypatch)
     lab = b3.Lab()
     mh = lab.cuerpo_mh(fecha="2026-02-10")
     assert lab.mejora_historica(mh).status_code == 200
@@ -400,7 +399,6 @@ def test_o7_9_op03_anula_componente_de_c_mej_02_frente_a_c_prop_05(monkeypatch):
 # ================================================================== S16/S17 (O11.9/O11.10) con componentes de B3
 @pytest.mark.parametrize("variante", ["identica", "otro_corte"])
 def test_s16_s17_dos_c_prop_05_de_mejoras_con_componentes_de_b3(monkeypatch, variante):
-    c2.habilitar_0352(monkeypatch)
     lab = b3.Lab()
     _mejora(lab)
     huella = _huella_mejoras(lab)

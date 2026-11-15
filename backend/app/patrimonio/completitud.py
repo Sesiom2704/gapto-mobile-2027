@@ -9,13 +9,17 @@
 #   Precedencia (§I.5.1, respuesta 7): DTO -> corte no futuro (capa, sin lock; O8.6) -> 0P (funcion UNICA de
 #   B1, `bloquear_intencion_propiedad`, importada, nunca copiada; §I.5.4) -> NK de la propiedad (404) ->
 #   IDENTIDAD (auditoria append-only de la raiz con request_id = intencion_id y `intencion = {operacion:
-#   "COMPLETITUD", contenido}` por igualdad exacta; E-6) -> version -> corte frente a fecha_adquisicion ->
+#   "COMPLETITUD", contenido}` por igualdad exacta; E-6) -> version -> R15-a (A3-0352: nueva declaracion completa
+#   de ADQUISICION con fecha_adquisicion NULL en la raiz bloqueada -> COMPLETITUD_SIN_FECHA_DE_ADQUISICION, sin
+#   escribir; retirar, MEJORAS y el replay exacto no la exigen) -> corte frente a fecha_adquisicion ->
 #   componentes (ADQUISICION) -> relectura del conjunto y huella (COMPLETITUD_VISTA_DESFASADA) -> sin cambios
 #   (200 sin escribir ni auditar) -> escritura de la terna, row_version + 1 y auditoria.
 #   Contenido sellado: {propiedad_id, ambito, completo, fecha_corte, huella_conjunto_vista, row_version_esperada}
 #   (operacion aparte, en la clave `intencion`). El conjunto releido no entra en el contenido.
 #   Las columnas de 0352 solo se tocan a traves de propiedades/repositorio.py (FA-01).
 # Version: 0.1.0 (F06 T1-F06 B2 N1)
+# Version: 0.2.0 (F06 T2-F06 A3-0352 (L-05)): R15-a (contrato A3-0352 v1.1 §2 y §2.2) tras la version; lee la fecha de
+#   la raiz ya bloqueada (repo.bloquear), sin locks ni lecturas nuevas.
 # ============================================================
 
 from __future__ import annotations
@@ -45,6 +49,7 @@ ENTRADA_INVALIDA = "ENTRADA_INVALIDA"
 SIN_FECHA_DE_CORTE = "COMPLETITUD_SIN_FECHA_DE_CORTE"
 SIN_COMPONENTES = "COMPLETITUD_SIN_COMPONENTES"
 VISTA_DESFASADA = "COMPLETITUD_VISTA_DESFASADA"
+SIN_FECHA_DE_ADQUISICION = "COMPLETITUD_SIN_FECHA_DE_ADQUISICION"
 
 
 @dataclass(frozen=True)
@@ -122,6 +127,8 @@ def declarar(sesion: SesionMotor, *, propiedad_id: uuid.UUID, intencion_id: uuid
         return replay
     if raiz["row_version"] != row_version:
         return Rechazo(VERSION_DESFASADA)
+    if completo and ambito == "ADQUISICION" and raiz["fecha_adquisicion"] is None:      # R15-a (A3-0352)
+        return Rechazo(SIN_FECHA_DE_ADQUISICION)
     actual = repo.declaracion_completitud(sesion, propiedad_id, ambito)
     if not completo:
         if actual == (None, None, None):

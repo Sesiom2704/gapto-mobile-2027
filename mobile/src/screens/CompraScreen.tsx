@@ -2,8 +2,9 @@
 // GAPTO MOBILE 2027
 // Fichero: CompraScreen.tsx
 // Ruta: mobile/src/screens/CompraScreen.tsx
-// Descripción: Registrar la compra de una propiedad (F06-01 B2 · C-COMPRA-01, sin hipoteca; lámina F06-01 v0.9 B1 Precio, B2 Cómo se pagó, B3 Gastos de la compra, B3b ¿De quién es el coste?, B4 Resumen y B6 Así se ve en Día a día) y añadir un gasto de la compra después (C-COMPRA-03, `GastoCompraScreen`, desde el detalle). Tarea inmersiva por pasos. Todas las fechas usan el `CampoFecha` de UX-1 (D-UX1-B2-01). B3b: ninguna opción viene marcada; «Según la titularidad» propone la titularidad de la propiedad EN LA ESCRITURA para todos los registros (AJ-TR1-10) y avisa de que los gastos anteriores no usan la titularidad de su fecha; «Otro reparto» y «No lo sé» siempre disponibles; nunca YO 100 por defecto. B4 separa el coste (precio + gastos), lo que sale de tus cuentas y el gasto del mes (0,00 €); «Se guarda todo junto o nada». Rechazos: ATRIBUCION_PROPUESTA_DESFASADA vuelve a B3b con la propuesta releída; VERSION_DESFASADA → Recargar. Sin hipoteca (B2b/B2c), sin desglose (D4) y sin «Repetir hoy». La declaración «no faltan gastos» (consumidor de 0352) solo aparece con CONSUMIDORES_0352_HABILITADOS (hoy false).
+// Descripción: Registrar la compra de una propiedad (F06-01 B2 · C-COMPRA-01, sin hipoteca; lámina F06-01 v0.9 B1 Precio, B2 Cómo se pagó, B3 Gastos de la compra, B3b ¿De quién es el coste?, B4 Resumen y B6 Así se ve en Día a día) y añadir un gasto de la compra después (C-COMPRA-03, `GastoCompraScreen`, desde el detalle). Tarea inmersiva por pasos. Todas las fechas usan el `CampoFecha` de UX-1 (D-UX1-B2-01). B3b: ninguna opción viene marcada; «Según la titularidad» propone la titularidad de la propiedad EN LA ESCRITURA para todos los registros (AJ-TR1-10) y avisa de que los gastos anteriores no usan la titularidad de su fecha; «Otro reparto» y «No lo sé» siempre disponibles; nunca YO 100 por defecto. B4 separa el coste (precio + gastos), lo que sale de tus cuentas y el gasto del mes (0,00 €); «Se guarda todo junto o nada». Rechazos: ATRIBUCION_PROPUESTA_DESFASADA vuelve a B3b con la propuesta releída; VERSION_DESFASADA → Recargar. Sin hipoteca (B2b/B2c), sin desglose (D4) y sin «Repetir hoy». La declaración «no faltan gastos» (consumidor de 0352) solo aparece con CONSUMIDORES_0352_HABILITADOS.
 // Versión: 0.1.0 (F06 T1-F06 B2 N1)
+// Versión: 0.2.0 (F06 T2-F06 A3-0352 (L-05); contrato A3-0352 v1.1 §6): UX-1 el chip «No faltan gastos» de B4 solo con la fecha de adquisición conocida (`puedeDeclararCompleto`), y «Completo» como PROPUESTA del resumen; UX-2 sin fecha, nota y la compra se guarda sin declaración; UX-4 COMPLETITUD_SIN_FECHA_DE_ADQUISICION muestra el texto del servidor, no guarda nada y recupera B4 sin el chip (intención nueva) para guardar sin declaración. GastoCompraScreen no cambia.
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -17,9 +18,9 @@ import { BotonPrimario, BotonTexto, Chip, EstadoDato } from '../components/Basic
 import { CampoFecha } from '../components/CampoFecha';
 import { AvisoCaja, CabeceraTarea, Caja, Campo, CampoTexto, estilosFormulario as ef, RotuloGrupo, Tarjeta } from '../components/Formulario';
 import {
-  avisoGastosAnteriores, BorradorCompra, textoPagado, borradorInicial, CONCEPTOS, CONSUMIDORES_0352_HABILITADOS, EleccionAtribucion, faltasAtribucion, faltasGasto,
+  avisoGastosAnteriores, BorradorCompra, textoPagado, borradorInicial, CONCEPTOS, EleccionAtribucion, faltasAtribucion, faltasGasto,
   faltasGastos, faltasPagos, faltasPrecio, filasDiaADia, GastoBorrador, NOMBRE_CONCEPTO, NOMBRE_ROL, PagoBorrador, payloadCompra,
-  payloadGastoCompra, resumen, ROLES, TEXTO_DESFASADA, TEXTO_GASTOS, TEXTO_INDETERMINADO_COMPRA, TEXTO_NADIE_MARCADO, TEXTO_SIN_HIPOTECA,
+  payloadGastoCompra, puedeDeclararCompleto, resumen, ROLES, TEXTO_DESFASADA, TEXTO_GASTOS, TEXTO_INDETERMINADO_COMPRA, TEXTO_NADIE_MARCADO, TEXTO_NOTA_SIN_FECHA, TEXTO_SIN_HIPOTECA,
   TEXTO_SIN_TITULARIDAD, TEXTO_VALOR_REFERENCIA, textoErrorCompra, textoPartes, textoPropuestaEscritura,
 } from '../domain/compra';
 import { ddmmaaaaAIso, diaMesAnioIso, isoADdmmaaaa, isoLocal } from '../domain/fechas';
@@ -126,6 +127,9 @@ export function CompraScreen(p: {
   const [conflicto, setConflicto] = useState(false);
   const [ocupado, setOcupado] = useState(false);
   const [resultado, setResultado] = useState<VistaPropiedad | null>(null);
+  // UX-4: el servidor dijo que falta la fecha de adquisición (R15-a): B4 deja de ofrecer el chip.
+  const [sinFechaServidor, setSinFechaServidor] = useState(false);
+  const ofreceCompleto = puedeDeclararCompleto(sinFechaServidor ? null : p.vista.fecha_adquisicion);
   const intencion = useRef(p.nuevoId());
 
   useEffect(() => {
@@ -153,7 +157,7 @@ export function CompraScreen(p: {
     if (ocupado) return;
     setOcupado(true);
     setAviso(null);
-    const res = await p.patrimonio.registrarCompra(p.vista.id, payloadCompra(intencion.current, p.vista.row_version, b, propuesta));
+    const res = await p.patrimonio.registrarCompra(p.vista.id, payloadCompra(intencion.current, p.vista.row_version, { ...b, completo: ofreceCompleto && b.completo }, propuesta));
     setOcupado(false);
     if (res.tipo === 'OK') {
       setResultado(res.datos.propiedad);
@@ -167,6 +171,12 @@ export function CompraScreen(p: {
       setB({ ...b, atribucion: null });
       setAvisoAtr(TEXTO_DESFASADA);
       return setPaso('ATRIBUCION');
+    }
+    if (res.codigo === 'COMPLETITUD_SIN_FECHA_DE_ADQUISICION') {
+      // UX-4: no se guardó nada; B4 sin el chip y con intención nueva para guardar sin declaración.
+      intencion.current = p.nuevoId();
+      setB({ ...b, completo: false });
+      setSinFechaServidor(true);
     }
     setAviso({ tipo: 'AVISO', texto: textoErrorCompra(res.codigo, res.mensaje) });
   };
@@ -268,13 +278,15 @@ export function CompraScreen(p: {
               <Linea testID="compra-res-precio" etiqueta="Precio" valor={formatearEur(parsearImporte(b.precio).ok ? (parsearImporte(b.precio) as { valor: string }).valor : '0')} />
               {b.gastos.map((g) => <Linea key={g.id} testID={`compra-res-${g.id}`} etiqueta={NOMBRE_CONCEPTO[g.concepto]} valor={formatearEur((parsearImporte(g.importe) as { valor: string }).valor)} />)}
               <Linea testID="compra-res-total" etiqueta="Total" valor={formatearEur(r.coste)} fuerte />
-              <Linea testID="compra-res-estado" etiqueta="Estado" valor={CONSUMIDORES_0352_HABILITADOS && b.completo ? 'Completo' : 'Parcial · puedes añadir gastos'} />
+              <Linea testID="compra-res-estado" etiqueta="Estado" valor={ofreceCompleto && b.completo ? 'Completo' : 'Parcial · puedes añadir gastos'} />
               <Linea testID="compra-res-sale" etiqueta="Sale de tus cuentas" valor={formatearEur(r.sale.replace('-', ''))} />
               <Linea testID="compra-res-gasto-mes" etiqueta="Cuenta como gasto del mes" valor={formatearEur(r.gastoMes)} />
             </Tarjeta>
-            {CONSUMIDORES_0352_HABILITADOS ? (
+            {ofreceCompleto ? (
               <Chip testID="compra-completo" etiqueta="No faltan gastos: el coste de la compra está completo" seleccionado={b.completo} onPress={() => setB({ ...b, completo: !b.completo })} />
-            ) : null}
+            ) : (
+              <Text testID="compra-nota-sin-fecha" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_NOTA_SIN_FECHA}</Text>
+            )}
             <Text testID="compra-registros" style={[tipo.footnote, { color: c.textSecondary }]}>
               {`Se crean ${r.registros} ${r.registros === 1 ? 'registro' : 'registros'} con ${r.pagos} ${r.pagos === 1 ? 'pago' : 'pagos'}. Se guarda todo junto o nada.`}
             </Text>

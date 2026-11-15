@@ -11,8 +11,9 @@
 #   - fecha de escritura (AJ-TR1-10): O6.22, O6.23, O6.25, O6.26 (+ Jest de la pantalla en el cliente);
 #   - HF-12 (criterio y ids de atribucion), HF-16 / O6.18 (valoracion COMPRA y C-PROP-05 con la intencion de la
 #     compra), elegibilidad de cuentas por la operacion de pago explicita (PB0-05).
-#   Los consumidores de 0352 (declaracion) solo se activan dentro del test que los prueba (habilitar_0352).
+#   Los consumidores de 0352 estan habilitados por el repositorio (A3-0352); ningun test fuerza el interruptor.
 # Version: 0.1.0 (F06 T1-F06 B2 N1)
+# Version: 0.2.0 (F06 T2-F06 A3-0352 (L-05)): se retiran los forzados habilitar_0352 (O8.7, O6.18): los oraculos corren con el interruptor del repositorio.
 # ============================================================
 
 from __future__ import annotations
@@ -286,7 +287,6 @@ def test_version_desfasada(lab):
 @pytest.mark.parametrize("valor", [{"completo": True}, {"completo": False, "fecha_corte": c2.CORTE}],
                          ids=["completo_sin_corte", "retirar_con_corte"])
 def test_o8_7_hf10_completitud_mal_formada(lab, monkeypatch, valor):
-    c2.habilitar_0352(monkeypatch)
     _rechazo(lab.compra(lab.peticion(completitud=valor)), 422, "ENTRADA_INVALIDA")
 
 
@@ -409,7 +409,6 @@ def test_titularidad_en_fecha_lectura_nueva(lab):
 
 # ================================================================== HF-16 / O6.18
 def test_o6_18_c_prop_05_con_la_intencion_de_la_compra(lab, monkeypatch):
-    c2.habilitar_0352(monkeypatch)
     cuerpo = lab.peticion()
     _ok(lab.compra(cuerpo))
     huella = lab.coste(c2.CORTE)["ADQUISICION"]["huella_conjunto"]

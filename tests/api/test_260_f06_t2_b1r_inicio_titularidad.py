@@ -10,6 +10,8 @@
 #   Casos TI-0..TI-6 del laboratorio (lote 30) dentro de los oraculos, con su nombre en el docstring.
 #   Exige GAPTO_TEST_DATABASE_URL (base desechable; estos tests confirman filas).
 # Version: 0.1.0 (F06 T2-F06 · B1-R N1)
+# Version: 0.1.1 (F06 T2-F06 A3-0352 · L-06 ampliada): O-B1R-24 comprobaba como linea base que los consumidores de 0352
+#   seguian sin habilitar; A3-0352 los habilita (L-05): la asercion pasa de False a True. Nada mas cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -431,8 +433,8 @@ def test_o_b1r_23_lectura_de_gastos_afectados_sin_escrituras():
 def test_o_b1r_24_c_compra_01_tras_corregir():
     """O-B1R-24 (Q-B1R-10): la compra con escritura en la adquisicion no encuentra titularidad antes de corregir
     (TITULARIDAD_NO_DISPONIBLE_EN_FECHA, sin escribir) y, tras corregir el inicio a la adquisicion, se atribuye por la
-    titularidad corregida. L-COSTE sigue sin consumidores de 0352 habilitados."""
-    assert habilitacion.CONSUMIDORES_0352_HABILITADOS is False
+    titularidad corregida. A3-0352: los consumidores de 0352 estan habilitados por el repositorio (L-06)."""
+    assert habilitacion.CONSUMIDORES_0352_HABILITADOS is True
     lab = Lab(adquisicion="2015-03-10")
     escritura = "2015-03-10"
     partes = [{"actor_id": lab.yo, "porcentaje": "50.0000"}, {"actor_id": lab.ta, "porcentaje": "50.0000"}]
@@ -459,7 +461,7 @@ def test_o_b1r_24_c_compra_01_tras_corregir():
                   "JOIN gapto.hecho_entidades x ON x.hecho_id = e.hecho_id AND x.entidad_id = %s "
                   "WHERE e.tipo_efecto = 'VALOR_ACTIVO' ORDER BY 1", (lab.pid,))
     assert atr and {a[1] for a in atr} == {"PARTICIPACION_ENTIDAD"} and {a[2] for a in atr} == {"50.0000"}
-    assert habilitacion.CONSUMIDORES_0352_HABILITADOS is False
+    assert habilitacion.CONSUMIDORES_0352_HABILITADOS is True
 
 
 def test_o_b1r_25_adquisicion_desconocida_e_inicio_corregible():

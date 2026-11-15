@@ -6,11 +6,16 @@
 //   - dominio: resumen de O2′ (coste, lo que sale de tus cuentas, gasto del mes 0), payload exacto de C-COMPRA-01 con UNA propuesta en la fecha
 //     de escritura (AJ-TR1-10, O6.22 parte cliente) y de C-COMPRA-03 en la fecha de su efecto (O6.24), aviso de los gastos anteriores, y la
 //     derivación de Día a día por el tipo del HECHO (HF-14, O10.19 parte cliente; discriminante de M-AC-02);
-//   - O10.29 parte cliente: la constante de habilitación de 0352 es false y ninguna pantalla ofrece declarar el coste completo;
+//   - O10.29-H parte cliente (A3-0352): la constante de habilitación de 0352 es true (de código); B4 ofrece el chip «No faltan gastos» solo
+//     con la fecha de adquisición conocida (UX-1), con «Completo» como propuesta y la declaración en el payload solo si se marca; sin fecha,
+//     nota y compra sin declaración (UX-2); motivo propio en la ficha por `textoEstadoCoste` (UX-3); rechazo COMPLETITUD_SIN_FECHA_DE_ADQUISICION
+//     con el texto del servidor y B4 recuperada sin el chip (UX-4);
 //   - pantallas: flujo B1 → B2 (sin hipoteca) → B3 → B3b (ninguna opción marcada; «Según la titularidad de <propiedad> en la escritura
 //     (<fecha>)») → B4 → B6; ATRIBUCION_PROPUESTA_DESFASADA vuelve a B3b sin selección; D1 con adquisición, mejoras y estado, y las entradas
 //     «Registrar la compra» y «Añadir un gasto de la compra»; sin «Desglose» (D4) ni «Repetir hoy».
 // Versión: 0.1.0 (F06 T1-F06 B2 N1)
+// Versión: 0.2.0 (F06 T2-F06 A3-0352 (L-05)): O10.29 cliente pasa a O10.29-H cliente (chip visible con fecha, payload con la declaración solo si
+//   se marca, estado «Completo» en el resumen) y se añaden O-A3-UX (UX-1..UX-4) y O-A3-TXT del cliente. Nada más cambia.
 // ============================================================
 
 import './tiempos_rn';
@@ -22,8 +27,9 @@ import type { ClienteApi, Respuesta } from '../src/api/cliente';
 import type { ClientePatrimonio, Coste, CosteAmbito, ParteEnFecha, ResultadoCompra } from '../src/api/patrimonio';
 import type { VistaPropiedad } from '../src/api/propiedades';
 import {
-  avisoGastosAnteriores, BorradorCompra, CONSUMIDORES_0352_HABILITADOS, esPatrimonial, etiquetaNoGastoMes, filasDiaADia, payloadCompra,
-  payloadGastoCompra, resumen, TEXTO_DESFASADA, TEXTO_NO_GASTO_MES, textoPropuestaEscritura,
+  avisoGastosAnteriores, BorradorCompra, CONSUMIDORES_0352_HABILITADOS, esPatrimonial, etiquetaNoGastoMes, filasDiaADia, MOTIVOS_COSTE_ADQUISICION, payloadCompra,
+  payloadGastoCompra, puedeDeclararCompleto, resumen, TEXTO_DESFASADA, TEXTO_NO_GASTO_MES, TEXTO_NOTA_SIN_FECHA, TEXTO_SIN_FECHA_ADQUISICION, textoErrorCompra,
+  textoEstadoCoste, textoPropuestaEscritura,
 } from '../src/domain/compra';
 import { CompraScreen, GastoCompraScreen } from '../src/screens/CompraScreen';
 import { PropiedadFichaScreen } from '../src/screens/PropiedadFichaScreen';
@@ -81,7 +87,7 @@ test('O6.22 (cliente): una sola propuesta en la fecha de ESCRITURA para todo el 
   expect(p.gastos.find((g) => g.concepto === 'AGENCIA')!.fecha_economica).toBe('2026-02-28');
   expect(p.precio).toBe('200000.00');
   expect(p.pagos_propios.map((x) => x.importe)).toEqual(['20000.00', '180000.00']);
-  expect(p).not.toHaveProperty('completitud_adquisicion');                       // O10.29: sin declaración
+  expect(p).not.toHaveProperty('completitud_adquisicion');                       // sin marcar: sin declaración
   expect(textoPropuestaEscritura('Piso Ejemplo', '2026-03-20')).toBe('Según la titularidad de Piso Ejemplo en la escritura (20 mar 2026)');
   expect(avisoGastosAnteriores(borradorO2())).toBe('Para el gasto del 28 feb se usa la titularidad de la escritura, no la vigente en la fecha de ese gasto.');
 });
@@ -104,8 +110,33 @@ test('HF-14 / O10.19 (cliente): «no es gasto del mes» sale del tipo del HECHO,
   expect(filas.map((f) => f.importe.startsWith('−'))).toEqual([true, true, true, true, true]);
 });
 
-test('O10.29 (cliente): la declaración del coste completo está bloqueada hasta la certificación de 0352', () => {
-  expect(CONSUMIDORES_0352_HABILITADOS).toBe(false);
+test('O10.29-H (cliente): la declaración del coste completo está habilitada por código y solo con la fecha de adquisición (UX-1)', () => {
+  expect(CONSUMIDORES_0352_HABILITADOS).toBe(true);
+  expect(puedeDeclararCompleto('2026-03-20')).toBe(true);
+  expect(puedeDeclararCompleto(null)).toBe(false);
+  expect(payloadCompra('i0', 1, { ...borradorO2(), completo: true }, PARTES).completitud_adquisicion).toEqual({ completo: true, fecha_corte: '2026-03-20' });
+});
+
+test('UX-3 (O-A3-UX): textoEstadoCoste da el motivo propio de la adquisición y deja igual el resto', () => {
+  const adq = (motivo_estado: string | null, estado: 'PARCIAL' | 'COMPLETO' = 'PARCIAL') => ambito({ estado, motivo_estado, componentes: 4 });
+  expect(textoEstadoCoste(adq('SIN_FECHA_DE_ADQUISICION'), 'ADQUISICION')).toBe('Parcial · falta la fecha de adquisición');
+  expect(textoEstadoCoste(adq('LECTURA_NO_ESTABLE'), 'ADQUISICION')).toBe('Parcial');
+  for (const m of ['SIN_DECLARACION', 'LECTURA_ANTERIOR_AL_CORTE', 'DECLARACION_DESACTUALIZADA', 'COMPONENTE_POSTERIOR_AL_CORTE', null]) {
+    expect(textoEstadoCoste(adq(m), 'ADQUISICION')).toBe('Parcial · puedes añadir gastos');
+  }
+  expect(textoEstadoCoste(adq(null, 'COMPLETO'), 'ADQUISICION')).toBe('Completo');
+  expect(textoEstadoCoste(adq('SIN_DECLARACION'), 'MEJORAS')).toBe('Parcial');
+  expect(textoEstadoCoste(ambito({}), 'ADQUISICION')).toBe('No disponible');
+  // O-A3-TXT (cliente): cada motivo de L-COSTE tiene entrada; los de la fila 2 bis y del agotamiento, texto propio
+  expect(Object.keys(MOTIVOS_COSTE_ADQUISICION).sort()).toEqual(['COMPONENTE_POSTERIOR_AL_CORTE', 'DECLARACION_DESACTUALIZADA', 'LECTURA_ANTERIOR_AL_CORTE',
+    'LECTURA_NO_ESTABLE', 'SIN_COMPONENTES', 'SIN_DECLARACION', 'SIN_FECHA_DE_ADQUISICION']);
+});
+
+test('UX-4 (O-A3-TXT): el rechazo COMPLETITUD_SIN_FECHA_DE_ADQUISICION tiene el mismo texto que el servidor', () => {
+  const servidor = 'Para marcar el coste como completo, indica antes la fecha de adquisición de la propiedad.';
+  expect(TEXTO_SIN_FECHA_ADQUISICION).toBe(servidor);
+  expect(textoErrorCompra('COMPLETITUD_SIN_FECHA_DE_ADQUISICION', '')).toBe(servidor);
+  expect(textoErrorCompra('COMPLETITUD_SIN_FECHA_DE_ADQUISICION', 'otro')).toBe(servidor);
 });
 
 // ------------------------------------------------------------------ pantallas
@@ -135,11 +166,11 @@ function patrimonio(partes: ParteEnFecha[] = PARTES) {
   return { api, enviados, forzar: (r: Respuesta<ResultadoCompra>) => (siguiente = r) };
 }
 
-function montarCompra(pat: ReturnType<typeof patrimonio>, onCerrar = jest.fn()) {
+function montarCompra(pat: ReturnType<typeof patrimonio>, onCerrar = jest.fn(), v: VistaPropiedad = vista()) {
   render(
     <SafeAreaProvider initialMetrics={METRICAS}>
       <ProveedorTema forzar="light">
-        <CompraScreen cliente={cliente()} patrimonio={pat.api} vista={vista()} nuevoId={nuevoId} ahora={AHORA} onCerrar={onCerrar} onRecargar={jest.fn()} />
+        <CompraScreen cliente={cliente()} patrimonio={pat.api} vista={v} nuevoId={nuevoId} ahora={AHORA} onCerrar={onCerrar} onRecargar={jest.fn()} />
       </ProveedorTema>
     </SafeAreaProvider>,
   );
@@ -167,7 +198,7 @@ async function rellenarHastaB3b() {
   await pulsar('compra-continuar');
 }
 
-test('B1 → B6: compra completa con la propuesta en la escritura (O6.22 Jest) y sin declaración (O10.29)', async () => {
+test('B1 → B6: compra completa con la propuesta en la escritura (O6.22 Jest) y sin marcar la declaración (O10.29-H)', async () => {
   const pat = patrimonio();
   const onCerrar = montarCompra(pat);
   await rellenarHastaB3b();
@@ -185,7 +216,8 @@ test('B1 → B6: compra completa con la propuesta en la escritura (O6.22 Jest) y
   expect(screen.getByTestId('compra-res-sale-valor').props.children).toBe('1.060,00 €');
   expect(screen.getByTestId('compra-res-gasto-mes-valor').props.children).toBe('0,00 €');
   expect(screen.getByTestId('compra-res-estado-valor').props.children).toBe('Parcial · puedes añadir gastos');
-  expect(screen.queryByTestId('compra-completo')).toBeNull();                           // O10.29: no se ofrece declarar
+  expect(screen.getByTestId('compra-completo').props.accessibilityState.checked).toBe(false);   // O10.29-H: se ofrece, nunca marcado
+  expect(screen.queryByTestId('compra-nota-sin-fecha')).toBeNull();
   expect(screen.getByTestId('compra-registros').props.children).toBe('Se crean 2 registros con 2 pagos. Se guarda todo junto o nada.');
   expect(screen.queryByText(/Desglose/)).toBeNull();
   expect(screen.queryByText(/Repetir hoy/)).toBeNull();
@@ -201,6 +233,59 @@ test('B1 → B6: compra completa con la propuesta en la escritura (O6.22 Jest) y
   expect(screen.getByText('Compra Piso Ejemplo · en la firma')).toBeTruthy();
   await pulsar('compra-listo');
   expect(onCerrar).toHaveBeenCalledWith(expect.objectContaining({ row_version: 2 }));
+});
+
+async function hastaB4() {
+  await rellenarHastaB3b();
+  await waitFor(() => screen.getByTestId('compra-atr-titularidad'));
+  await pulsar('compra-atr-titularidad');
+  await pulsar('compra-continuar');
+  expect(screen.getByTestId('compra-paso-resumen')).toBeTruthy();
+}
+
+test('O10.29-H / UX-1 (cliente): «No faltan gastos» marcado propone «Completo» y envía la declaración con la fecha de escritura', async () => {
+  const pat = patrimonio();
+  montarCompra(pat);
+  await hastaB4();
+  expect(screen.getByTestId('compra-res-estado-valor').props.children).toBe('Parcial · puedes añadir gastos');
+  await pulsar('compra-completo');
+  expect(screen.getByTestId('compra-completo').props.accessibilityState.checked).toBe(true);
+  expect(screen.getByTestId('compra-res-estado-valor').props.children).toBe('Completo');          // propuesta del resumen (MC-A3-01)
+  await pulsar('compra-guardar');
+  expect(pat.enviados[0].completitud_adquisicion).toEqual({ completo: true, fecha_corte: '2026-03-20' });
+});
+
+test('UX-2 (cliente): sin fecha de adquisición no hay chip, sale la nota y la compra se guarda sin declaración', async () => {
+  const pat = patrimonio();
+  montarCompra(pat, jest.fn(), vista({ fecha_adquisicion: null }));
+  await hastaB4();
+  expect(screen.queryByTestId('compra-completo')).toBeNull();                                   // MC-A3-02
+  expect(screen.getByTestId('compra-nota-sin-fecha').props.children).toBe(TEXTO_NOTA_SIN_FECHA);
+  expect(TEXTO_NOTA_SIN_FECHA).toBe('Para marcar que no faltan gastos, añade antes la fecha de adquisición en la ficha de la propiedad.');
+  expect(screen.getByTestId('compra-res-estado-valor').props.children).toBe('Parcial · puedes añadir gastos');
+  await pulsar('compra-guardar');
+  expect(pat.enviados[0]).not.toHaveProperty('completitud_adquisicion');
+});
+
+test('UX-4 (cliente): el 422 COMPLETITUD_SIN_FECHA_DE_ADQUISICION muestra el texto, no guarda y recupera B4 sin el chip', async () => {
+  const pat = patrimonio();
+  const onCerrar = montarCompra(pat);
+  await hastaB4();
+  await pulsar('compra-completo');
+  pat.forzar({ tipo: 'RECHAZADO', codigo: 'COMPLETITUD_SIN_FECHA_DE_ADQUISICION',
+    mensaje: 'Para marcar el coste como completo, indica antes la fecha de adquisición de la propiedad.' });
+  await pulsar('compra-guardar');
+  await waitFor(() => screen.getByTestId('compra-aviso'));
+  expect(screen.getByText(TEXTO_SIN_FECHA_ADQUISICION)).toBeTruthy();
+  expect(screen.getByTestId('compra-paso-resumen')).toBeTruthy();
+  expect(screen.queryByTestId('compra-completo')).toBeNull();
+  expect(screen.getByTestId('compra-nota-sin-fecha')).toBeTruthy();
+  expect(screen.getByTestId('compra-res-estado-valor').props.children).toBe('Parcial · puedes añadir gastos');
+  expect(onCerrar).not.toHaveBeenCalled();
+  await pulsar('compra-guardar');
+  expect(pat.enviados[1]).not.toHaveProperty('completitud_adquisicion');
+  expect(pat.enviados[1].intencion_id).not.toBe(pat.enviados[0].intencion_id);
+  expect(pat.enviados[0].completitud_adquisicion).toEqual({ completo: true, fecha_corte: '2026-03-20' });
 });
 
 test('ATRIBUCION_PROPUESTA_DESFASADA: vuelve a B3b sin opción marcada, relee la propuesta y usa una intención nueva', async () => {
@@ -281,4 +366,17 @@ test('D1: adquisición y mejoras con su estado; «Registrar la compra» sin comp
   expect(screen.queryByTestId('prop-accion-compra')).toBeNull();
   expect(screen.getByTestId('prop-accion-gasto-compra')).toBeTruthy();
   expect(screen.queryByText(/Desglose/)).toBeNull();
+});
+
+test('UX-3 (O-A3-UX): la ficha muestra «Parcial · falta la fecha de adquisición» a través de textoEstadoCoste, sin editar la pantalla', () => {
+  render(
+    <SafeAreaProvider initialMetrics={METRICAS}>
+      <ProveedorTema forzar="light">
+        <PropiedadFichaScreen vista={vista({ fecha_adquisicion: null })} onAtras={jest.fn()} onRevisarValor={jest.fn()} onHistorico={jest.fn()} onTitularidad={jest.fn()}
+          onEditar={jest.fn()} coste={coste({ total: '216830.00', estado: 'PARCIAL', motivo_estado: 'SIN_FECHA_DE_ADQUISICION', fecha_corte: '2026-03-20',
+            huella_conjunto: 'h', componentes: 4, tu_parte: { importe: '130098.00', estado: 'COMPLETO' } })} onRegistrarCompra={jest.fn()} onGastoCompra={jest.fn()} />
+      </ProveedorTema>
+    </SafeAreaProvider>,
+  );
+  expect(screen.getByTestId('prop-coste-detalle').props.children).toBe('Parcial · falta la fecha de adquisición');
 });

@@ -11,6 +11,7 @@
 #   declaracion se ejercita con los consumidores de 0352 activados SOLO dentro del test, como en B2).
 #   Fixtures declarados (SQL como gapto_owner con la GUC): O5.10, O5.11, O5.12, O5.13, O5.14b y O5.38.
 # Version: 0.1.0 (F06 T1-F06 B3 N1)
+# Version: 0.2.0 (F06 T2-F06 A3-0352 (L-05)): se retiran los forzados habilitar_0352 (O10.14, O10.20 bis); corren con el interruptor del repositorio.
 # ============================================================
 
 from __future__ import annotations
@@ -524,7 +525,6 @@ def _nombres_de_codigo(fuente: str) -> set[str]:
 
 # ------------------------------------------------------------------ L-COSTE de MEJORAS (O10.14, O10.20 bis)
 def test_o10_14_c_mej_03_desactualiza_la_declaracion_de_mejoras_sin_tocar_la_propiedad(lab, monkeypatch):
-    b2.habilitar_0352(monkeypatch)
     _mejora(lab, fecha="2026-02-10")
     rep = _reparacion(lab, fecha="2026-01-15")
     huella = lab.cli.get(f"/v1/propiedades/{lab.pid}/coste", params={"a_fecha": "2026-06-30"},
@@ -547,7 +547,6 @@ def test_o10_14_c_mej_03_desactualiza_la_declaracion_de_mejoras_sin_tocar_la_pro
 
 
 def test_o10_20_bis_ida_y_vuelta_con_ids_nuevos_no_recupera(lab, monkeypatch):
-    b2.habilitar_0352(monkeypatch)
     hid = _mejora(lab, fecha="2026-02-10")
     huella = lab.cli.get(f"/v1/propiedades/{lab.pid}/coste", params={"a_fecha": "2026-06-30"},
                          headers=h.AUTH).json()["coste"]["MEJORAS"]["huella_conjunto"]

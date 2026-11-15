@@ -63,6 +63,12 @@
 #   test_inventario_post_cerrado): la ruta POST nueva de C-CAT-VIV-01 (/v1/categorias/{categoria_id}/vivienda) se
 #   clasifica como ajena a F05-06 junto a las de F05-01 (una sola escritura de catalogo bajo advisory, como /icono;
 #   O-CV-02 en test_280). Ninguna ruta ni comando previo cambia.
+# Version: 0.6.0 (F06 T2-F06 A3-0352 · L-06 ampliada (b0d56b0d…), solo test_inventario_post_cerrado y su barrido):
+#   C-PROP-05 (/completitud) deja de ser «consumidor de 0352 no habilitado (404, O10.29)»: A3-0352 lo habilita (L-05).
+#   Escribe la terna (propiedades), row_version (entidades) y la auditoria en una transaccion: sale de AJENAS_A_F05_06
+#   y ENTRA en el barrido de fallo inyectado (B2_completitud: propiedad con fecha de adquisicion y compra, declaracion
+#   ADQUISICION con la huella vigente). El discriminante se SUSTITUYE por uno mas fuerte (rechazo tras su escritura
+#   auditada sin escrituras parciales). Ninguna otra ruta ni comando cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -318,6 +324,21 @@ def p_b2_compra(t):
     return f"/v1/propiedades/{prop['id']}/compra", _compra_b2(t, prop)
 
 
+def p_b2_completitud(t):
+    """A3-0352: C-PROP-05 habilitado. Propiedad con fecha de adquisicion (R15-a) y compra; declaracion de ADQUISICION
+    con la huella vigente al corte."""
+    owner, actor, cli, cta, ahorro = t
+    prop = b1.crear(cli, b1.alta(fecha_adquisicion="2026-01-01"))
+    r = cli.post(f"/v1/propiedades/{prop['id']}/compra", json=_compra_b2(t, prop), headers=h.AUTH)
+    assert r.status_code == 200, r.text
+    prop = r.json()["propiedad"]
+    coste = cli.get(f"/v1/propiedades/{prop['id']}/coste", params={"a_fecha": "2026-03-20"}, headers=h.AUTH)
+    assert coste.status_code == 200, coste.text
+    return f"/v1/propiedades/{prop['id']}/completitud", {
+        "intencion_id": _iid(), "row_version_esperada": prop["row_version"], "ambito": "ADQUISICION", "completo": True,
+        "fecha_corte": "2026-03-20", "huella_conjunto_vista": coste.json()["coste"]["ADQUISICION"]["huella_conjunto"]}
+
+
 def p_b2_gasto_posterior(t):
     owner, actor, cli, cta, ahorro = t
     prop = _propiedad(t)
@@ -528,6 +549,7 @@ COMANDOS = {
     "B1_valoracion": ("/v1/propiedades/{propiedad_id}/valoraciones", p_b1_valoracion),
     "B2_compra": ("/v1/propiedades/{propiedad_id}/compra", p_b2_compra),
     "B2_gasto_posterior": ("/v1/propiedades/{propiedad_id}/compra/gastos", p_b2_gasto_posterior),
+    "B2_completitud": ("/v1/propiedades/{propiedad_id}/completitud", p_b2_completitud),
     "B3_gasto_propiedad": ("/v1/intenciones/gasto-propiedad", p_b3_gasto_propiedad),
     "B3_mejora_historica": ("/v1/propiedades/{propiedad_id}/mejoras-historicas", p_b3_mejora_historica),
     "B3_corregir_clase": ("/v1/propiedades/{propiedad_id}/gastos/{hecho_id}/corregir-clase", p_b3_corregir_clase),
@@ -567,8 +589,6 @@ AJENAS_A_F05_06 = {
     "/v1/acciones-rapidas": "F05-03", "/v1/acciones-rapidas/reordenar": "F05-03",
     "/v1/acciones-rapidas/{accion_id}/editar": "F05-03", "/v1/acciones-rapidas/{accion_id}/desactivar": "F05-03",
     "/v1/afinidades": "F05-05", "/v1/afinidades/{afinidad_id}/retirar": "F05-05",
-    "/v1/propiedades/{propiedad_id}/completitud": "F06-01 B2 C-PROP-05: consumidor de 0352 no habilitado (404, O10.29; "
-                                                  "test_252)",
     "/v1/categorias/{categoria_id}/vivienda": "F06 T2-F06 CAT-VIV C-CAT-VIV-01: una escritura de catalogo (test_280 "
                                               "O-CV-02)",
     "/v1/propiedades/{propiedad_id}/titularidad/inicio": "F06 T2-F06 B1-R C-PROP-03bis: atomicidad propia (savepoint "

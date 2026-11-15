@@ -10,8 +10,10 @@
 #     fecha economica 2026-03-20.
 #   C1 cuenta corriente 100 % propia; C2 cuenta corriente compartida 50 % YO / 50 % A (liquidez atribuible).
 #   Huella de estado de las tablas de la compra y de la auditoria (O6.14 bis) leida como superusuario solo para
-#   comparar. Los consumidores de 0352 se activan en el propio test con `habilitar_0352(monkeypatch)`.
+#   comparar. Los consumidores de 0352 estan habilitados por el repositorio (A3-0352). El helper solo puede APAGARLOS
+#   (`deshabilitar_0352`), para la variante «apagado» de O10.29-H (test_252); ningun test fuerza True (O-A3-INV).
 # Version: 0.1.0 (F06 T1-F06 B2 N1)
+# Version: 0.2.0 (F06 T2-F06 A3-0352 (L-05)): habilitar_0352 se sustituye por deshabilitar_0352 (solo False).
 # ============================================================
 
 from __future__ import annotations
@@ -34,9 +36,10 @@ TABLAS_COMPRA = ("hechos_financieros", "hecho_efectos", "efecto_atribuciones", "
                  "propiedad_valoraciones", "auditoria", "entidad_participaciones", "efecto_cuentas")
 
 
-def habilitar_0352(monkeypatch, valor: bool = True) -> None:
+def deshabilitar_0352(monkeypatch) -> None:
+    """Solo apaga (variante «apagado» de O10.29-H). No admite valor: nunca fuerza True."""
     from app.patrimonio import habilitacion
-    monkeypatch.setattr(habilitacion, "CONSUMIDORES_0352_HABILITADOS", valor)
+    monkeypatch.setattr(habilitacion, "CONSUMIDORES_0352_HABILITADOS", False)
 
 
 def huella() -> str:

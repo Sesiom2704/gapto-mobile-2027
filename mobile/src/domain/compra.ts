@@ -2,8 +2,9 @@
 // GAPTO MOBILE 2027
 // Fichero: compra.ts
 // Ruta: mobile/src/domain/compra.ts
-// Descripción: Lógica pura de B2 · Compra (F06-01 B2; R1 v0.9.5 Parte II; lámina F06-01 v0.9 B1–B4, B6 y D1). Borrador de la compra (precio, fecha de escritura, valor de referencia, pagos propios sin hipoteca y gastos de la compra), validaciones de cada paso, resumen (coste = precio + gastos; lo que sale de tus cuentas aparte; gasto del mes 0), propuesta de atribución en la FECHA DE ESCRITURA para todas las raíces (AJ-TR1-10: «Según la titularidad de <propiedad> en la escritura (<fecha>)» y aviso para los gastos anteriores; nunca se marca sola ni se rellena con YO 100), payload de C-COMPRA-01 y C-COMPRA-03, textos de rechazo (ATRIBUCION_PROPUESTA_DESFASADA) y derivación de Día a día para los hechos patrimoniales (HF-14: la fuente es el `tipo` del hecho; «Coste de la compra · no es gasto del mes», importe con signo de cuenta). Consumidores de 0352 (declarar el coste completo): constante de código `CONSUMIDORES_0352_HABILITADOS = false` hasta la certificación de 0352 (O10.29); con false la interfaz no ofrece declarar nada.
+// Descripción: Lógica pura de B2 · Compra (F06-01 B2; R1 v0.9.5 Parte II; lámina F06-01 v0.9 B1–B4, B6 y D1). Borrador de la compra (precio, fecha de escritura, valor de referencia, pagos propios sin hipoteca y gastos de la compra), validaciones de cada paso, resumen (coste = precio + gastos; lo que sale de tus cuentas aparte; gasto del mes 0), propuesta de atribución en la FECHA DE ESCRITURA para todas las raíces (AJ-TR1-10: «Según la titularidad de <propiedad> en la escritura (<fecha>)» y aviso para los gastos anteriores; nunca se marca sola ni se rellena con YO 100), payload de C-COMPRA-01 y C-COMPRA-03, textos de rechazo (ATRIBUCION_PROPUESTA_DESFASADA) y derivación de Día a día para los hechos patrimoniales (HF-14: la fuente es el `tipo` del hecho; «Coste de la compra · no es gasto del mes», importe con signo de cuenta). Consumidores de 0352 (declarar el coste completo): constante de código `CONSUMIDORES_0352_HABILITADOS`, true desde A3-0352 (0352 certificada por D-210; L-05); con false la interfaz no ofrece declarar nada.
 // Versión: 0.1.0 (F06 T1-F06 B2 N1)
+// Versión: 0.2.0 (F06 T2-F06 A3-0352 (L-05)): `CONSUMIDORES_0352_HABILITADOS = true`; R15-a en el cliente (contrato A3-0352 v1.1 §6): `puedeDeclararCompleto` (UX-1, solo con la fecha de adquisición conocida), `TEXTO_NOTA_SIN_FECHA` (UX-2), `MOTIVOS_COSTE_ADQUISICION` y `textoEstadoCoste` con SIN_FECHA_DE_ADQUISICION y LECTURA_NO_ESTABLE (UX-3) y `TEXTOS_ERROR` con COMPLETITUD_SIN_FECHA_DE_ADQUISICION, mismo texto que el servidor (UX-4).
 // ============================================================
 
 import type {
@@ -13,8 +14,8 @@ import { diaMesAnioIso, diaMesIso } from './fechas';
 import { formatearEur, parsearImporte } from './importe';
 import { esFechaIso } from './intencion';
 
-/** O10.29: false hasta que 0352 esté certificada. Solo cambia con un commit revisado; nunca por configuración. */
-export const CONSUMIDORES_0352_HABILITADOS = false;
+/** O10.29-H: true desde A3-0352 (0352 certificada por D-210). Constante de código: solo cambia con un commit revisado; nunca por configuración. */
+export const CONSUMIDORES_0352_HABILITADOS = true;
 
 export const NOMBRE_CONCEPTO: Record<ConceptoGasto, string> = {
   ITP: 'ITP',
@@ -35,6 +36,13 @@ export const TEXTO_SIN_TITULARIDAD = 'No hay titularidad registrada en la fecha 
 export const TEXTO_DESFASADA = 'La titularidad ha cambiado: revisa el reparto.';
 export const TEXTO_NO_GASTO_MES = 'Coste de la compra · no es gasto del mes';
 export const TEXTO_INDETERMINADO_COMPRA = 'No se ha podido confirmar la compra. Revisa la propiedad antes de repetirla.';
+/** UX-2 (A3-0352): sin fecha de adquisición no se ofrece declarar el coste completo. */
+export const TEXTO_NOTA_SIN_FECHA = 'Para marcar que no faltan gastos, añade antes la fecha de adquisición en la ficha de la propiedad.';
+/** UX-4 (A3-0352): mismo texto que `RECHAZOS` del servidor (backend/app/patrimonio/rutas.py). */
+export const TEXTO_SIN_FECHA_ADQUISICION = 'Para marcar el coste como completo, indica antes la fecha de adquisición de la propiedad.';
+
+/** UX-1 (R15-a): la declaración «no faltan gastos» solo se ofrece con los consumidores habilitados y la fecha de adquisición conocida. */
+export const puedeDeclararCompleto = (fechaAdquisicion: string | null | undefined): boolean => CONSUMIDORES_0352_HABILITADOS && !!fechaAdquisicion;
 
 export interface PagoBorrador { id: string; rol: RolPago; cuentaId: string | null; fecha: string; importe: string }
 export interface GastoBorrador { id: string; concepto: ConceptoGasto; cuentaId: string | null; fechaEconomica: string; fechaPago: string; importe: string; nota: string }
@@ -180,10 +188,22 @@ export function payloadGastoCompra(intencionId: string, rowVersion: number, g: G
 }
 
 // ------------------------------------------------------------------ estado del coste (L-COSTE)
+/** Motivos de L-COSTE (backend/app/patrimonio/coste.py) y su texto propio en ADQUISICION; null = texto general del estado (UX-3, O-A3-TXT). */
+export const MOTIVOS_COSTE_ADQUISICION: Record<string, string | null> = {
+  SIN_COMPONENTES: null,
+  SIN_DECLARACION: null,
+  SIN_FECHA_DE_ADQUISICION: 'Parcial · falta la fecha de adquisición',
+  LECTURA_NO_ESTABLE: 'Parcial',
+  LECTURA_ANTERIOR_AL_CORTE: null,
+  DECLARACION_DESACTUALIZADA: null,
+  COMPONENTE_POSTERIOR_AL_CORTE: null,
+};
+
 export function textoEstadoCoste(c: CosteAmbito | null, ambito: 'ADQUISICION' | 'MEJORAS'): string {
   if (!c || c.estado === 'NO_DISPONIBLE') return 'No disponible';
   if (c.estado === 'COMPLETO') return ambito === 'MEJORAS' && c.componentes === 0 ? 'Completo · sin mejoras' : 'Completo';
-  return ambito === 'ADQUISICION' ? 'Parcial · puedes añadir gastos' : 'Parcial';
+  if (ambito === 'ADQUISICION') return (c.motivo_estado ? MOTIVOS_COSTE_ADQUISICION[c.motivo_estado] : null) ?? 'Parcial · puedes añadir gastos';
+  return 'Parcial';
 }
 
 export const etiquetaEstado = (e: EstadoCoste) => (e === 'COMPLETO' ? 'completo' : e === 'PARCIAL' ? 'parcial' : 'no disponible');
@@ -202,6 +222,7 @@ const TEXTOS_ERROR: Record<string, string> = {
   CUENTA_DESCONOCIDA: 'Una de las cuentas no se puede usar para pagar en esa fecha.',
   IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION: 'Esta compra ya se guardó con otros datos. No se ha guardado nada nuevo.',
   PROPIEDAD_NO_DISPONIBLE: 'Esta propiedad no está disponible.',
+  COMPLETITUD_SIN_FECHA_DE_ADQUISICION: TEXTO_SIN_FECHA_ADQUISICION,
 };
 export const textoErrorCompra = (codigo: string, mensaje: string) => TEXTOS_ERROR[codigo] ?? (mensaje || TEXTO_INDETERMINADO_COMPRA);
 

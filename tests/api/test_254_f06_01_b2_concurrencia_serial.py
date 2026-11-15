@@ -6,7 +6,7 @@
 #   §II.1; oraculos v0.7 §A.9.4, §A.9.5, §A.10.1, §A.10.4), FUERA de la suite general: solo con
 #   GAPTO_B2_CONCURRENCIA=1 (base desechable). Barreras externas que retienen la fila que el escenario necesita
 #   (HF-18); pg_locks y pg_stat_database.deadlocks; JSON por caso si GAPTO_B2_EVIDENCIA apunta a una carpeta.
-#   Los consumidores de 0352 se activan dentro de cada test (monkeypatch), nunca por entorno.
+#   Los consumidores de 0352 estan habilitados por el repositorio (A3-0352): ningun test fuerza el interruptor.
 #     O6.20  compra concurrente: (a) identica -> una compone y la otra idempotente; (b) otra linea -> la otra
 #            IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION; sin 40P01, una auditoria de la propiedad.
 #     O7.8 (S14, variante B2) C-COMPRA-03 (componente <= corte) || C-PROP-05 con la huella previa, en los dos
@@ -19,6 +19,7 @@
 #     O11.14 (S18) misma intencion en P1 y P2, los dos ordenes; O11.15 (S19) intencion ya confirmada por B1.
 #     O11.18 / S20 par 9 con C-PROP-05 REAL (G3); O11.21 con C-PROP-05 real; O11.17 / O11.23 de C-PROP-05.
 # Version: 0.1.0 (F06 T1-F06 B2 N1)
+# Version: 0.2.0 (F06 T2-F06 A3-0352 (L-05)): el fixture `on` deja de forzar el interruptor (retirada de forzados, L-05).
 # ============================================================
 
 from __future__ import annotations
@@ -83,8 +84,8 @@ def _correr(fa, fb, barrera, nombre_a="b1r_A", nombre_b="b1r_B"):
 
 
 @pytest.fixture()
-def on(monkeypatch):
-    c2.habilitar_0352(monkeypatch)
+def on():
+    """A3-0352: los consumidores de 0352 estan habilitados por el repositorio; el fixture ya no fuerza nada."""
 
 
 # ================================================================== O6.20

@@ -14,6 +14,8 @@
 # Version: 0.1.0 (F06 T1-F06 B3 N1)
 # Version: 0.1.1 (F06 T1-F06 B3 N1, tirada de mutantes del paso 10): O9.21 con «No lo sé» y un derecho confirmado o
 #   una aportacion manual sin deuda declarada (el caso que alcanza la guarda de la exclusion 4; M-DM02-13 quedaba VIVO).
+# Version: 0.2.0 (F06 T2-F06 A3-0352 (L-05)): test_consumidores_0352_siguen_bloqueados pasa a comprobar la habilitacion
+#   (test_consumidores_0352_habilitados_por_codigo: constante True, de codigo).
 # ============================================================
 
 from __future__ import annotations
@@ -345,6 +347,7 @@ def test_lectura_lista_y_404_de_hecho_de_otra_propiedad(lab):
     assert lab.gasto(uuid.uuid4()).status_code == 404
 
 
-def test_consumidores_0352_siguen_bloqueados():
+def test_consumidores_0352_habilitados_por_codigo():
+    """A3-0352 (L-05): la constante es True en el repositorio, como literal de codigo (O10.29-H (a) en test_252)."""
     from app.patrimonio import habilitacion
-    assert habilitacion.CONSUMIDORES_0352_HABILITADOS is False
+    assert habilitacion.CONSUMIDORES_0352_HABILITADOS is True

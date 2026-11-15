@@ -32,7 +32,11 @@
 #     422 ENTRADA_INVALIDA. Con declaracion, el conjunto calculado tras insertar tiene que ser exactamente el
 #     de las raices de la peticion (HF-07) o COMPLETITUD_VISTA_DESFASADA sin escribir.
 #   Rechazos despues de escribir: un savepoint los deshace (estado identico).
+#   R15-a (A3-0352; contrato A3-0352 v1.1 §2 y §3.3): una nueva declaracion completa de ADQUISICION exige la
+#     fecha_adquisicion de la raiz bloqueada; sin ella, COMPLETITUD_SIN_FECHA_DE_ADQUISICION en _validar_declaracion,
+#     despues de identidad, version y reglas propias de la operacion y antes de la primera escritura.
 # Version: 0.1.0 (F06 T1-F06 B2 N1)
+# Version: 0.2.0 (F06 T2-F06 A3-0352 (L-05)): R15-a en _validar_declaracion (C-COMPRA-01 y C-COMPRA-03).
 # ============================================================
 
 from __future__ import annotations
@@ -89,6 +93,7 @@ CUENTA_DESCONOCIDA = "CUENTA_DESCONOCIDA"
 SIN_FECHA_DE_CORTE = "COMPLETITUD_SIN_FECHA_DE_CORTE"
 SIN_COMPONENTES = "COMPLETITUD_SIN_COMPONENTES"
 VISTA_DESFASADA = "COMPLETITUD_VISTA_DESFASADA"
+SIN_FECHA_DE_ADQUISICION = "COMPLETITUD_SIN_FECHA_DE_ADQUISICION"
 
 
 class _Deshacer(Exception):
@@ -371,6 +376,8 @@ def _validar_declaracion(sesion: SesionMotor, propiedad_id: uuid.UUID, raiz: dic
     corte = completitud["fecha_corte"]
     if corte > hoy:
         return SIN_FECHA_DE_CORTE
+    if raiz["fecha_adquisicion"] is None:                                     # R15-a (A3-0352)
+        return SIN_FECHA_DE_ADQUISICION
     if raiz["fecha_adquisicion"] is not None and corte < raiz["fecha_adquisicion"]:
         return SIN_FECHA_DE_CORTE
     previo, _ = repo.conjunto_completitud(sesion, propiedad_id, "ADQUISICION", corte)

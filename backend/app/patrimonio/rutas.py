@@ -8,13 +8,15 @@
 #     POST /v1/propiedades/{id}/compra/gastos         C-COMPRA-03
 #     GET  /v1/propiedades/{id}/titularidad-en-fecha?fecha=  titularidad vigente en una fecha (P-H2-03,
 #                                                     adelantada a B2; sin fecha, hoy del owner)
-#     GET  /v1/propiedades/{id}/coste?a_fecha=        L-COSTE (sin la declaracion mientras 0352 no este
-#                                                     certificada)
-#     POST /v1/propiedades/{id}/completitud           C-PROP-05: 404 FUNCION_NO_HABILITADA mientras
-#                                                     habilitacion.CONSUMIDORES_0352_HABILITADOS sea False (O10.29)
+#     GET  /v1/propiedades/{id}/coste?a_fecha=        L-COSTE (con la declaracion: consumidores de 0352
+#                                                     habilitados por A3-0352; fila 2 bis y lectura L2)
+#     POST /v1/propiedades/{id}/completitud           C-PROP-05 (habilitado por A3-0352); la guarda de la ruta
+#                                                     se conserva: 404 FUNCION_NO_HABILITADA si
+#                                                     habilitacion.CONSUMIDORES_0352_HABILITADOS fuera False
 #   Una transaccion de UnidadDeTrabajo por comando, con request_id = intencion_id (identidad de la auditoria).
 #   Rechazos con su mapa propio (patron _RECHAZOS_PROPIEDAD de B1); los codigos existentes conservan su status.
 # Version: 0.1.0 (F06 T1-F06 B2 N1)
+# Version: 0.2.0 (F06 T2-F06 A3-0352 (L-05)): rechazo COMPLETITUD_SIN_FECHA_DE_ADQUISICION (R15-a, 422; UX-4).
 # ============================================================
 
 from __future__ import annotations
@@ -53,6 +55,7 @@ RECHAZOS: dict[str, tuple[int, str]] = {
     "COMPLETITUD_VISTA_DESFASADA": (409, "El coste ha cambiado desde que lo viste. Vuelve a cargarlo."),
     "COMPLETITUD_SIN_COMPONENTES": (422, "No hay ningún coste de compra hasta esa fecha."),
     "COMPLETITUD_SIN_FECHA_DE_CORTE": (422, "Revisa la fecha: no puede ser futura ni anterior a la compra."),
+    "COMPLETITUD_SIN_FECHA_DE_ADQUISICION": (422, "Para marcar el coste como completo, indica antes la fecha de adquisición de la propiedad."),
 }
 
 
