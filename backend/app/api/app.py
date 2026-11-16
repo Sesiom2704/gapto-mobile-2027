@@ -278,7 +278,8 @@
 # Version: 0.36.0 (F06 T2-F06 · CAT-VIV N1, L-04; C-CAT-VIV-01): POST /v1/categorias/{categoria_id}/vivienda
 #   (marcar_vivienda). Ninguna ruta existente cambia.
 # Version: 0.37.0 (F06 T3-F06 · F04-R-HIP, subhito F05 S7): «No hubo este mes» devuelve el RechazoRegistro de
-#   la frontera (PREVISION_DE_CUOTA) con rechazo_prevision. Ningun contrato existente cambia.
+#   la frontera (PREVISION_DE_CUOTA) con rechazo_prevision; candidatos admite CandidatosCuota (codigo de la cuota,
+#   firma del STOP n.º 2). Ningun contrato existente cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -451,6 +452,7 @@ from app.api.dto_edicion import (
 )
 from app.actividad import edicion as lect_edi
 from app.api.dto_prevision import (
+    CandidatosCuota,
     CandidatosPrevision,
     DetallePrevision,
     InicioPrevisiones,
@@ -1501,7 +1503,7 @@ def create_app(
                                  nombre="F05-06 M5 detalle_prevision")
         return _no_encontrada() if salida is None else {**salida, "aviso": _AVISO_F05}
 
-    @app.get("/v1/previsiones/{prevision_id}/candidatos", response_model=CandidatosPrevision,
+    @app.get("/v1/previsiones/{prevision_id}/candidatos", response_model=CandidatosPrevision | CandidatosCuota,
              dependencies=[Depends(autorizar)])
     def candidatos_prevision(prevision_id: uuid.UUID, ampliado: bool = Query(False)):
         salida = unidad.ejecutar(contexto(), lambda s: lect_prev.candidatos(s, prevision_id, ampliado=ampliado),

@@ -32,6 +32,8 @@
 # Version: 0.4.0 (F06 T3-F06 · F04-R-HIP, subhito F05; D-08): `AccionConCodigo`
 #   (Accion + `codigo`, PREVISION_DE_CUOTA) solo en la prevision de una cuota;
 #   las demas acciones se serializan como antes, sin `codigo` (byte a byte).
+#   `CandidatosCuota` (lote 42, firma del STOP n.º 2): candidatos de la prevision
+#   de una cuota con `codigo` PREVISION_DE_CUOTA; los demas, sin cambio.
 # ============================================================
 
 from __future__ import annotations
@@ -259,6 +261,12 @@ class CandidatosPrevision(_Estricto):
     mensaje: str | None
     candidatos: list[Candidato]
     aviso: str
+
+
+class CandidatosCuota(CandidatosPrevision):
+    """F04-R-HIP S7 (D-08; firma del STOP n.º 2): candidatos de la prevision de una cuota: lista vacia con
+    `codigo` PREVISION_DE_CUOTA. El resto de respuestas no cambia (sin `codigo: null`)."""
+    codigo: str
 
 
 # ------------------------------------------------------------------ resultados de escritura

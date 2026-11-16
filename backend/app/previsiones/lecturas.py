@@ -432,7 +432,7 @@ def candidatos(sesion: SesionMotor, prevision_id: uuid.UUID, *, ampliado: bool =
     salida = {"prevision_id": prevision_id, "ampliado": ampliado, "ventana_dias": dias, "mensaje": None,
               "candidatos": []}
     if es_prevision_de_cuota(sesion, prevision_id):  # F04-R-HIP S7
-        return {**salida, "mensaje": MOTIVO_PREVISION_DE_CUOTA}
+        return {**salida, "mensaje": MOTIVO_PREVISION_DE_CUOTA, "codigo": CODIGO_PREVISION_DE_CUOTA}
     if tercero is None and categoria is None:
         return {**salida, "mensaje": MENSAJE_SIN_CRITERIO}
     desde = desde or hasta

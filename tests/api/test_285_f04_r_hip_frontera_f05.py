@@ -18,6 +18,9 @@
 #   S6 (suplementos) y la frontera B3 se prueban por no alcanzabilidad en
 #   test_286. Reloj fijo 2026-10-10; fechas fijas; ORDER BY en los oraculos.
 # Version: 0.1.0 (F06 T3-F06 · F04-R-HIP, paso 4)
+# Version: 0.1.2 (F06 T3-F06 · F04-R-HIP, firma del STOP n.º 2, 1c76c3cb…): fixture de prevision de cuota
+#   CON tercero y categoria (sin la guarda, candidatos NO vacios) y oraculo candidatos == [] + codigo
+#   PREVISION_DE_CUOTA, con control sobre una prevision ordinaria.
 # Version: 0.1.1 (F06 T3-F06 · F04-R-HIP, STOP n.º 2): el oraculo de candidatos de la prevision de
 #   una cuota exige el mensaje de la cuota (MF05-L-candidatos-cuota sobrevivia por «sin criterio»).
 # ============================================================
@@ -255,6 +258,28 @@ def test_o_h22_s7_s10_l_lectura_de_la_prevision_de_una_cuota(esc, realizada) -> 
     # 0.1.1 (STOP n.º 2, MF05-L-candidatos-cuota VIVO en la repeticion 1): el mensaje es el de la cuota,
     # no el de «sin criterio» (que tambien deja la lista vacia y enmascaraba el mutante).
     assert cand["candidatos"] == [] and cand["mensaje"] == MOTIVO_PREVISION_DE_CUOTA
+
+
+def test_o_h22_s7_candidatos_de_una_prevision_de_cuota_con_criterio(esc) -> None:
+    """Firma del STOP n.º 2 (1c76c3cb…): previsión de cuota CON tercero y categoría y un gasto ordinario que
+    casa con ambos en la ventana. Sin la guarda, candidatos() devolvería ese gasto (lista NO vacía); con ella,
+    lista vacía y código PREVISION_DE_CUOTA (D-08)."""
+    tercero = x.tercero(esc.cli, f"Banco {uuid.uuid4().hex[:6]}")
+    categoria = x.categoria(esc.owner, f"Hipoteca {uuid.uuid4().hex[:6]}")
+    pid = m.prevision(esc.owner, "Cuota 1 hipoteca", importe="500.00", cuenta_salida=esc.cta, desde="2026-10-01",
+                      tercero=tercero, categoria=categoria)
+    fz.financiacion(esc.dsn, esc.owner, prevision_id=pid)
+    gasto = x.gasto(esc.cli, esc.cta, fecha="2026-10-02", importe="500.00", categoria_id=categoria, tercero_id=tercero)
+    for ampliado in (False, True):
+        cand = m.candidatos(esc.cli, pid, ampliado)
+        assert cand["candidatos"] == [], (ampliado, cand)
+        assert cand["codigo"] == PC, (ampliado, cand)
+    # Control: la misma forma en una prevision ordinaria SI propone el gasto (el fixture discrimina).
+    ordinaria = m.prevision(esc.owner, "Recibo banco", importe="500.00", desde="2026-10-01", tercero=tercero,
+                            categoria=categoria)
+    control = m.candidatos(esc.cli, ordinaria)
+    assert [c["hecho_id"] for c in control["candidatos"]] == [str(gasto)], control
+    assert "codigo" not in control
 
 
 def test_o_h22_s7_un_hecho_de_financiacion_no_es_candidato(esc) -> None:

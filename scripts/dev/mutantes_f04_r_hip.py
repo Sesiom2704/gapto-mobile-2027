@@ -31,6 +31,8 @@
 #        python scripts/dev/mutantes_f04_r_hip.py [--solo ID,ID] [--salida fichero]
 #   No ejecutar en paralelo con otro arnes ni con la suite sobre el mismo arbol.
 # Version: 0.1.0 (F06 T3-F06 · F04-R-HIP, paso 6)
+# Version: 0.1.1 (firma del STOP n.º 2): MF05-L-candidatos-cuota se discrimina tambien con el fixture de
+#   prevision de cuota con tercero y categoria (candidatos NO vacios sin la guarda).
 # ============================================================
 
 from __future__ import annotations
@@ -280,7 +282,8 @@ MUTANTES = [
      [T285 + "test_o_h22_s7_un_hecho_de_financiacion_no_es_candidato"], None),
     ("MF05-L-candidatos-cuota", "la prevision de una cuota vuelve a proponer candidatos",
      [(LEC, "    if es_prevision_de_cuota(sesion, prevision_id):  # F04-R-HIP S7\n", "    if False:\n")],
-     [T285 + "test_o_h22_s7_s10_l_lectura_de_la_prevision_de_una_cuota[ABIERTA]"], None),
+     [T285 + "test_o_h22_s7_candidatos_de_una_prevision_de_cuota_con_criterio",
+      T285 + "test_o_h22_s7_s10_l_lectura_de_la_prevision_de_una_cuota[ABIERTA]"], None),
     # ---------------------------------------------------------------- MF05-INV
     ("MF05-INV-S10", "inventario sin la superficie S10",
      [(INV, "    \"S10\": [(\"api/ejecucion_gasto_pagado.py\"", "    \"S10_FUERA\": [(\"api/ejecucion_gasto_pagado.py\""),
