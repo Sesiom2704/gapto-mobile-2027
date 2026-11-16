@@ -277,6 +277,8 @@
 #   L-MOV-CUENTA sin punteo). Ninguna ruta existente cambia.
 # Version: 0.36.0 (F06 T2-F06 · CAT-VIV N1, L-04; C-CAT-VIV-01): POST /v1/categorias/{categoria_id}/vivienda
 #   (marcar_vivienda). Ninguna ruta existente cambia.
+# Version: 0.37.0 (F06 T3-F06 · F04-R-HIP, subhito F05 S7): «No hubo este mes» devuelve el RechazoRegistro de
+#   la frontera (PREVISION_DE_CUOTA) con rechazo_prevision. Ningun contrato existente cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -1536,6 +1538,9 @@ def create_app(
             if respuesta is None:
                 raise
             return respuesta
+        if isinstance(salida, RechazoRegistro):  # F04-R-HIP S7 (PREVISION_DE_CUOTA)
+            status, cuerpo = eh.rechazo_prevision(salida.codigo, salida.detalle)
+            return JSONResponse(cuerpo, status_code=status)
         return {"intencion_id": intencion.intencion_id, "prevision_id": prevision_id, "estado": salida.estado,
                 "row_version": salida.row_version, "aviso": _AVISO_F05}
 

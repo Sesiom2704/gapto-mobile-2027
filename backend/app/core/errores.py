@@ -15,6 +15,14 @@
 #   operacion y reintentar no la hara posible". Fusionarlos haria que la UX
 #   reintentase indefinidamente algo imposible, o que abandonase algo que solo
 #   necesitaba otro intento.
+# Version: 0.25.0
+#   0.25.0 (F06 T3-F06 · F04-R-HIP, literal F04 v1.1 A9; adenda v1.3 del
+#   mandato, D-04/D-08): `ANULACION_FINANCIACION_SIN_REVERSION`. OP-03 y OP-03P
+#   rechazan, antes de cualquier escritura, la anulacion del pago de una cuota
+#   o del desembolso Hd mientras no exista una reversion coherente de cuota y
+#   prevision. Distinto de los codigos de frontera F05 (HECHO_DE_FINANCIACION,
+#   PREVISION_DE_CUOTA) para que S3 y A9 no se enmascaren. Ningun codigo
+#   existente cambia de significado.
 # Version: 0.24.0
 #   0.24.0 (F06-01 B0 v0.3, F06-D002; dictamen B0 implementacion PB0I-06,
 #   AJ-B0I-01): `CORRECCION_CONVERSION_VALOR_ACTIVO_NO_ADMITIDA`. OP-21 rechaza,
@@ -184,6 +192,10 @@ class CodigoError(str, enum.Enum):
 
     # --- OP-03 ------------------------------------------------------------
     HECHO_CON_REALIDAD_ASOCIADA = "HECHO_CON_REALIDAD_ASOCIADA"
+    # F04-R-HIP A9: anular el pago de una cuota o el desembolso Hd dejaria la
+    # cuota y su prevision incoherentes (G1). Se rechaza siempre mientras no
+    # exista la reversion coherente de cuota y prevision (sin flag).
+    ANULACION_FINANCIACION_SIN_REVERSION = "ANULACION_FINANCIACION_SIN_REVERSION"
 
     # --- OP-04 ------------------------------------------------------------
     DELTA_CERO = "DELTA_CERO"

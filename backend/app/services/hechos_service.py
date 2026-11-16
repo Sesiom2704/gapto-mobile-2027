@@ -20,6 +20,14 @@
 #       asi que se falla cerrado en vez de recalcular nada;
 #     - OP-03, ante realidad ya vinculada: entonces el hecho ocurrio y lo que
 #       corresponde es devolucion o reversion, que pertenecen a F04-06.
+# Version: 0.10.0
+#   0.10.0 (F06 T3-F06 · F04-R-HIP, literal F04 v1.1 A9; adenda v1.3 del
+#   mandato): `exigir_anulacion_sin_financiacion`, guarda de anulacion del pago
+#   de una cuota o del desembolso Hd (vinculo FINANCIACION de nivel efecto,
+#   predicado unico `hechos_repository.vinculos_de_financiacion`). OP-03 la
+#   evalua tras la rama de hecho ya ANULADO (idempotencia) y antes de
+#   `tiene_realidad_asociada`; OP-03P, en `_elegibilidad` (D-04). Sin locks
+#   nuevos ni flag que la levante.
 # Version: 0.9.0
 #   0.9.0 (F04-R1 G-R1-A; F04-D058): OP-03 rechaza anular el hecho X si existe
 #   una relacion de hecho_relaciones con destino X, de CUALQUIER tipo, cuyo
@@ -100,6 +108,30 @@ def _a_dict(snapshot_json: str) -> dict[str, Any]:
     siquiera para mostrarse.
     """
     return json.loads(snapshot_json, parse_float=decimal.Decimal)
+
+
+#: F04-R-HIP A9: motivo del rechazo (contexto_extra) y detalle por signo del efecto vinculado.
+MOTIVO_HECHO_DE_FINANCIACION = "HECHO_DE_FINANCIACION"
+
+
+def exigir_anulacion_sin_financiacion(sesion: SesionMotor, hecho_id: uuid.UUID) -> None:
+    """F04-R-HIP A9 (literal F04 v1.1). Rechaza anular el hecho de pago de una
+    cuota (DEUDA -capital) o el desembolso Hd (DEUDA +P): ambos tienen un
+    vinculo FINANCIACION de nivel efecto. Mientras no exista una reversion
+    coherente de cuota y prevision (G1), se rechaza siempre. Se evalua bajo
+    los locks que ya toma la operacion y antes de cualquier escritura. El
+    vinculo de nivel hecho no cuenta (no ampliacion)."""
+    for _vinculo_id, efecto_id, importe in repo.vinculos_de_financiacion(sesion, hecho_id):
+        if efecto_id is not None:
+            raise ErrorMotor(
+                CodigoError.ANULACION_FINANCIACION_SIN_REVERSION,
+                "El hecho es el pago de una cuota o el desembolso de una financiacion: "
+                "no se anula mientras no exista una reversion coherente de cuota y prevision.",
+                contexto_extra={
+                    "motivo": MOTIVO_HECHO_DE_FINANCIACION,
+                    "detalle": "CUOTA" if importe is not None and importe < 0 else "DESEMBOLSO_HD",
+                },
+            )
 
 
 def _motivo_obligatorio(motivo: str | None, operacion: str) -> str:
@@ -403,6 +435,9 @@ class HechosService:
                     CodigoError.OPERACION_NO_PERMITIDA_EN_ESTADO,
                     "El hecho ya esta anulado.",
                 )
+
+            # F04-R-HIP A9: antes de cualquier otra guarda y de toda escritura.
+            exigir_anulacion_sin_financiacion(sesion, hecho_id)
 
             if repo.tiene_realidad_asociada(sesion, hecho_id):
                 raise ErrorMotor(

@@ -28,6 +28,8 @@
 #   aditiva `posiciones_vinculadas` en RepartoDeHecho, separada de las partes.
 # Version: 0.5.0 (F06 T2-F06 CAT-VIV N1; L-04, §2.4.2): bloque OPCIONAL `propiedad`
 #   (dto_propiedad_registro.BloquePropiedadM3) en el gasto compartido. Sin el bloque, nada cambia.
+# Version: 0.6.0 (F06 T3-F06 · F04-R-HIP, subhito F05 S1/S3; D-08): motivo aditivo HECHO_DE_FINANCIACION en
+#   RepartoDeHecho.motivo y ElegibilidadAnulacion.motivos. Ningun valor existente cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -312,7 +314,8 @@ class RepartoDeHecho(_Estricto):
     importe: str
     estado_atribucion: Literal["COMPLETA", "PARCIAL", "NO_DISPONIBLE"]
     corregible: bool
-    motivo: Literal["TIPO_NO_ADMITIDO", "ORIGEN_IMPORTADO", "NO_ACTIVO", "SIN_REPARTO"] | None
+    motivo: Literal["TIPO_NO_ADMITIDO", "ORIGEN_IMPORTADO", "NO_ACTIVO", "SIN_REPARTO",
+                    "HECHO_DE_FINANCIACION"] | None
     partes: list[ParteDeHechoHttp]
     # F05 §66.A.8 (aditivo): posiciones del hecho no mostradas ya en `partes`.
     posiciones_vinculadas: list[PosicionVinculadaHttp] = []
@@ -325,4 +328,5 @@ class ElegibilidadAnulacion(_Estricto):
 
     hecho_id: uuid.UUID
     elegible: bool
-    motivos: list[Literal["TESORERIA", "DEPENDENCIAS_ACTIVAS", "POSICIONES", "NO_ACTIVO", "ORIGEN_IMPORTADO"]]
+    motivos: list[Literal["TESORERIA", "DEPENDENCIAS_ACTIVAS", "POSICIONES", "NO_ACTIVO", "ORIGEN_IMPORTADO",
+                          "HECHO_DE_FINANCIACION"]]

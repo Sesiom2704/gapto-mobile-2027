@@ -38,6 +38,9 @@
 #   CorreccionesService.corregir, con DatosCorreccion de hecho_id,
 #   row_version_esperada, motivo y efectos_a_actualizar de {categoria_id}.
 # Version: 0.1.0 (F05-06 M1 v1.1)
+# Version: 0.2.0 (F06 T3-F06 · F04-R-HIP, subhito F05; literal F05 v1.2; D-08 de la adenda v1.3):
+#   S5: «Corregir categoria» de V3 rechaza el hecho de financiacion con HECHO_DE_FINANCIACION antes
+#   de OP-21; la lectura (motivo_categoria_v3) dice el mismo motivo.
 # ============================================================
 
 from __future__ import annotations
@@ -49,6 +52,7 @@ from typing import Any
 from app.actividad import edicion as lect_edi
 from app.api.dto_edicion import IntencionCorregirCategoriaV3
 from app.api.ejecucion_registro import RechazoRegistro, validar_categoria_y_magnitudes
+from app.api import guarda_financiacion as gf
 from app.core.contexto import ContextoOperacion
 from app.core.errores import CodigoError, ErrorMotor
 from app.core.unidad_adscrita import UnidadDeTrabajoAdscrita
@@ -115,6 +119,8 @@ def _cambios(intencion: IntencionCorregirCategoriaV3) -> dict[str, Any]:
 def corregir_categoria_v3(unidad: UnidadDeTrabajo, contexto: ContextoOperacion, hecho_id: uuid.UUID,
                           intencion: IntencionCorregirCategoriaV3) -> CategoriaCorregida | RechazoRegistro:
     def operacion(sesion: SesionMotor) -> CategoriaCorregida | RechazoRegistro:
+        if gf.es_hecho_de_financiacion(sesion, hecho_id):  # F04-R-HIP S5: antes de OP-21
+            return RechazoRegistro(gf.HECHO_DE_FINANCIACION)
         motivo, efecto = lect_edi.motivo_categoria_v3(sesion, hecho_id)
         if motivo == "NO_ENCONTRADO":
             return RechazoRegistro(HECHO_NO_ENCONTRADO)

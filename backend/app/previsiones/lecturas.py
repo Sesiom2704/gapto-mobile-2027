@@ -63,6 +63,15 @@
 #        dice en `resuelta_por`.
 #   No calcula nada financiero nuevo ni suma a ningun total: «Por pagar», «Por
 #   cobrar» y `n` de pendientes no la incluyen. Orden: mas recientes primero.
+# Version: 0.4.0 (F06 T3-F06 · F04-R-HIP, subhito F05; literal F05 v1.2 S7/S10;
+#   D-08 de la adenda v1.3 del mandato): `es_prevision_de_cuota` (predicado
+#   unico de la guarda «prevision de cuota», SELECT sin lock sobre
+#   financiacion_cuotas.prevision_id). El detalle de la prevision de una cuota
+#   dice, en CUALQUIER estado y antes de las ramas de estado, moneda y tipo, que
+#   registrar, ya_lo_registre, swipe, omitir, dar_por_cubierta y reabrir no estan
+#   disponibles, con codigo PREVISION_DE_CUOTA y su texto. Candidatos: la de una
+#   cuota no propone ninguno, y un hecho de financiacion (vinculo FINANCIACION
+#   de nivel efecto) no es candidato de ninguna prevision.
 # ============================================================
 
 from __future__ import annotations
@@ -267,6 +276,13 @@ def _accion(disponible: bool, motivo: str | None = None) -> dict[str, Any]:
     return {"disponible": disponible, "motivo": None if disponible else motivo}
 
 
+#: F04-R-HIP S7/S10 (D-08): codigo y texto de la prevision de una cuota.
+CODIGO_PREVISION_DE_CUOTA = "PREVISION_DE_CUOTA"
+MOTIVO_PREVISION_DE_CUOTA = ("Esta previsión es una cuota de una financiación (hipoteca o préstamo): "
+                             "se paga desde la financiación, no desde aquí.")
+_ACCIONES = ("registrar", "ya_lo_registre", "omitir", "swipe", "dar_por_cubierta", "reabrir")
+
+
 MOTIVO_SIN_REALIDAD = ("Solo se puede dar por cubierta cuando ya hay algo registrado y enlazado. "
                        "Si este mes no hubo, existe «No hubo este mes».")
 
@@ -294,8 +310,12 @@ def _acciones_m5b(fila: dict[str, Any], estado_derivado: str | None) -> dict[str
     return {"dar_por_cubierta": dar, "reabrir": reabrir}
 
 
-def acciones(fila: dict[str, Any], estado_derivado: str | None) -> dict[str, dict[str, Any]]:
-    """Acciones de la prevision con su motivo en lenguaje llano."""
+def acciones(fila: dict[str, Any], estado_derivado: str | None, *, de_cuota: bool = False) -> dict[str, dict[str, Any]]:
+    """Acciones de la prevision con su motivo en lenguaje llano. La de una
+    cuota (F04-R-HIP S7/S10) no ofrece ninguna, en cualquier estado."""
+    if de_cuota:
+        return {k: {**_accion(False, MOTIVO_PREVISION_DE_CUOTA), "codigo": CODIGO_PREVISION_DE_CUOTA}
+                for k in _ACCIONES}
     return {**_acciones_m5(fila, estado_derivado), **_acciones_m5b(fila, estado_derivado)}
 
 
@@ -352,7 +372,8 @@ def detalle(sesion: SesionMotor, prevision_id: uuid.UUID, hoy: dt.date) -> dict[
         if s is not None:
             sucesor = {"id": s[0], "row_version": s[1]}
     return {**_publica(fila), "estado_derivado": derivado, "vinculos": vinculos,
-            "acciones": acciones(fila, derivado), "pendiente": _texto_con_signo(pendiente),
+            "acciones": acciones(fila, derivado, de_cuota=es_prevision_de_cuota(sesion, prevision_id)),
+            "pendiente": _texto_con_signo(pendiente),
             "recalculable": bool(recalculable), "sucesor": sucesor}
 
 
@@ -380,6 +401,9 @@ _CANDIDATOS = (
     "AND h.fecha_hecho BETWEEN %(desde)s AND %(hasta)s "
     "AND NOT EXISTS (SELECT 1 FROM gapto.prevision_hechos pv WHERE pv.hecho_id = h.id "
     "                AND pv.prevision_id = %(prevision)s) "
+    # F04-R-HIP S7: un hecho de financiacion (vinculo FINANCIACION de nivel efecto) no es candidato.
+    "AND NOT EXISTS (SELECT 1 FROM gapto.hecho_entidades fv JOIN gapto.entidades fn ON fn.id = fv.entidad_id "
+    "                WHERE fv.hecho_id = h.id AND fv.efecto_id IS NOT NULL AND fn.tipo_entidad = 'FINANCIACION') "
     "AND ({coincide})"
 )
 _POR_TERCERO = "EXISTS (SELECT 1 FROM gapto.hecho_terceros ht WHERE ht.hecho_id = h.id AND ht.tercero_id = %(tercero)s)"
@@ -407,6 +431,8 @@ def candidatos(sesion: SesionMotor, prevision_id: uuid.UUID, *, ampliado: bool =
     dias = VENTANA_CANDIDATOS_AMPLIADA_DIAS if ampliado else VENTANA_CANDIDATOS_DIAS
     salida = {"prevision_id": prevision_id, "ampliado": ampliado, "ventana_dias": dias, "mensaje": None,
               "candidatos": []}
+    if es_prevision_de_cuota(sesion, prevision_id):  # F04-R-HIP S7
+        return {**salida, "mensaje": MOTIVO_PREVISION_DE_CUOTA}
     if tercero is None and categoria is None:
         return {**salida, "mensaje": MENSAJE_SIN_CRITERIO}
     desde = desde or hasta
@@ -454,6 +480,14 @@ def tipo_de_prevision(sesion: SesionMotor, prevision_id: uuid.UUID) -> str | Non
     f = sesion.uno("SELECT th.codigo FROM gapto.previsiones p JOIN gapto.tipos_hecho th ON th.id = p.tipo_hecho_id "
                    "WHERE p.id = %s", (prevision_id,))
     return None if f is None else f[0]
+
+
+def es_prevision_de_cuota(sesion: SesionMotor, prevision_id: uuid.UUID) -> bool:
+    """F04-R-HIP S7/S10: la prevision es la de una cuota de financiacion. SELECT
+    sin lock: ningun codigo de runtime escribe financiacion_cuotas.prevision_id."""
+    f = sesion.uno("SELECT EXISTS (SELECT 1 FROM gapto.financiacion_cuotas WHERE prevision_id = %s)",
+                   (prevision_id,))
+    return bool(f and f[0])
 
 
 def tipo_de_hecho(sesion: SesionMotor, hecho_id: uuid.UUID) -> str | None:

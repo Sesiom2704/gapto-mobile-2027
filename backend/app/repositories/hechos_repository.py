@@ -24,6 +24,12 @@
 #   4) El snapshot EXCLUYE created_at, updated_at y row_version: son volatiles
 #      y romperian la comparabilidad entre el snapshot solicitado y el
 #      auditado. Exclusion deliberada.
+# Version: 0.4.0
+#   0.4.0 (F06 T3-F06 · F04-R-HIP, literal F04 v1.1 A1/A9 y literal F05 v1.2):
+#   `vinculos_de_financiacion`, el predicado UNICO compartido por la guarda
+#   FINANCIACION de OP-21 (A1), la de anulacion de OP-03/OP-03P (A9) y la
+#   guarda F05 «hecho vinculado a una financiacion». SELECT sin lock: cada
+#   operacion lo lee bajo los locks que ya toma; ninguno nuevo.
 # Version: 0.3.0
 #   0.3.0 (F04-R1 G-R1-A; F04-D058): `dependencias_activas`, relaciones de
 #   CUALQUIER tipo cuyo destino es el hecho y cuyo origen esta ACTIVO. Bajo
@@ -512,3 +518,32 @@ def tocar_raiz(
         (hecho_id, row_version_esperada),
     )
     return None if fila is None else fila[0]
+
+
+def vinculos_de_financiacion(
+    sesion: SesionMotor, hecho_id: uuid.UUID
+) -> list[tuple[uuid.UUID, uuid.UUID | None, Any]]:
+    """F04-R-HIP (literal F04 v1.1 A1 y A9; literal F05 v1.2). Vinculos de
+    `hecho_entidades` del hecho hacia una entidad FINANCIACION, de AMBOS
+    niveles: (vinculo_id, efecto_id, importe_delta del efecto). efecto_id NULL
+    = vinculo de nivel hecho (importe None).
+
+    Es el predicado unico de las guardas de financiacion: cada guarda decide
+    que nivel le concierne (hoy, solo el de nivel efecto: cuotas y Hd). El
+    signo del efecto distingue la cuota (DEUDA -capital) del desembolso Hd
+    (DEUDA +P). SELECT sin lock y con orden explicito.
+    """
+    with sesion.conexion.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT v.id, v.efecto_id, e.importe_delta
+              FROM gapto.hecho_entidades v
+              JOIN gapto.entidades n ON n.id = v.entidad_id
+              LEFT JOIN gapto.hecho_efectos e ON e.id = v.efecto_id
+             WHERE v.hecho_id = %s::uuid
+               AND n.tipo_entidad = 'FINANCIACION'
+             ORDER BY v.id
+            """,
+            (hecho_id,),
+        )
+        return [(f[0], f[1], f[2]) for f in cursor.fetchall()]

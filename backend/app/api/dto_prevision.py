@@ -29,6 +29,9 @@
 #   `resueltas_mes` (ResueltasMes: desde, hasta, n y FilaResuelta con su
 #   estado derivado, `resuelta_el` y `resuelta_por` AUDITORIA u OBJETIVO).
 #   Campo aparte: no suma a `n` ni a «Por pagar» / «Por cobrar».
+# Version: 0.4.0 (F06 T3-F06 · F04-R-HIP, subhito F05; D-08): `Accion.codigo`
+#   opcional y aditivo (PREVISION_DE_CUOTA en la prevision de una cuota; None
+#   en el resto). Ningun campo existente cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -194,6 +197,7 @@ class PendientesPrevisiones(_Estricto):
 class Accion(_Estricto):
     disponible: bool
     motivo: str | None
+    codigo: str | None = None  # F04-R-HIP S7/S10 (D-08): PREVISION_DE_CUOTA; None en el resto
 
 
 class Acciones(_Estricto):

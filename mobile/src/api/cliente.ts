@@ -31,6 +31,7 @@
 // Versión: 0.22.0
 // v0.23.0 (F06 T2-F06 CAT-VIV N1 (L-04, lámina SET-CAT/REG-CAT v1.0)): `viviendaCategoria` (POST /v1/categorias/{id}/vivienda, C-CAT-VIV-01; OPCIONAL en `ClienteApi` para que los dobles de test no cambien) y campo aditivo `DetalleActividad.aviso_vivienda_sin_propiedad` (R07). Ninguna llamada existente cambia.
 // Versión: 0.23.0
+// v0.24.0 (F06 T3-F06 · F04-R-HIP, subhito F05 S7/S10; D-08): campo aditivo OPCIONAL `AccionPrevision.codigo` (PREVISION_DE_CUOTA). Ninguna llamada existente cambia.
 // ============================================================
 
 import type { Ambito, CategoriaNodo } from '../domain/categoria';
@@ -673,6 +674,8 @@ export interface ResueltasMes {
 export interface AccionPrevision {
   disponible: boolean;
   motivo: string | null;
+  /** F04-R-HIP S7/S10 (D-08): PREVISION_DE_CUOTA en la previsión de una cuota; ausente o null en el resto. */
+  codigo?: string | null;
 }
 export interface DetallePrevision extends FilaPrevision {
   estado_derivado: 'REALIZADA_SIN_REALIDAD_ACTIVA' | 'REQUIERE_REVISION' | null;

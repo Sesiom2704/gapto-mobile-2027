@@ -8,6 +8,7 @@
 // Versión: 0.3.0 (F05-D051 paso 8; lámina B D-F0507L-03): `textoPosicion`, el texto de una posición según su estado. Pendiente con saldo desconocido → «Sin determinar»; CERRADA → «0,00 € · Saldado» y, si su importe inicial no se conoció, «Importe inicial desconocido». Ninguna CERRADA dice «Sin determinar»; sin valores por defecto (si una CERRADA llegara sin saldo, solo «Saldado»).
 // Versión: 0.4.0 (F05-D052 paso 3 · lámina B, F05 §66.2, AJ-F0507G3-06): `TEXTO_SALDO_INICIAL_DESCONOCIDO` = «Saldo inicial desconocido» (sustituye a «Importe inicial desconocido»): se refiere al saldo con el que empezó el seguimiento y sale solo de `apertura_indeterminada`, nunca de la ausencia del importe original.
 // Versión: 0.5.0 (F05-D052 paso 2 · R6, F05 §66.A.10): `sinMargenParaDesconocido` (alguna parte sin indicar y las indicadas suman el total), código estable `REPARTO_SIN_MARGEN_PARA_DESCONOCIDO` y texto propio; `faltaCompartido` lo nombra. El exceso conserva su error y la suma incompleta con partes sin indicar sigue admitida.
+// Versión: 0.6.0 (F06 T3-F06 · F04-R-HIP, subhito F05 S1; D-08): motivo `HECHO_DE_FINANCIACION` en `MotivoNoCorregible` y su texto en `MOTIVO_NO_CORREGIBLE` (también lo usa el rechazo REPARTO_NO_CORREGIBLE con ese motivo).
 // ============================================================
 
 import type { Borrador, CategoriaWire } from './intencion';
@@ -135,7 +136,7 @@ export interface ParteDeHecho {
   posicion: PosicionDeParte | null;
 }
 
-export type MotivoNoCorregible = 'TIPO_NO_ADMITIDO' | 'ORIGEN_IMPORTADO' | 'NO_ACTIVO' | 'SIN_REPARTO';
+export type MotivoNoCorregible = 'TIPO_NO_ADMITIDO' | 'ORIGEN_IMPORTADO' | 'NO_ACTIVO' | 'SIN_REPARTO' | 'HECHO_DE_FINANCIACION';
 
 export interface RepartoDeHecho {
   hecho_id: string;
@@ -220,6 +221,7 @@ export const MOTIVO_NO_CORREGIBLE: Record<string, string> = {
   ORIGEN_IMPORTADO: 'Viene de la versión anterior: su reparto no se puede corregir aquí.',
   NO_ACTIVO: 'Este gasto ya no está activo.',
   SIN_REPARTO: 'Este gasto no tiene reparto entre personas.',
+  HECHO_DE_FINANCIACION: 'Es el pago de una cuota de una financiación (hipoteca o préstamo): su reparto no se corrige aquí.',
   PARTE_AJENA: 'Una de las partes no es de este gasto. Vuelve a cargar el reparto.',
   SUMA_NO_CUADRA: 'Las partes no suman lo mismo que antes. El total del gasto no cambia.',
 };

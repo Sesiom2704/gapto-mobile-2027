@@ -102,6 +102,10 @@
 #   lock del origen y antes de las demas guardas de forma; el contexto del
 #   formulario lo devuelve como motivo. Una devolucion nunca reduce el derecho
 #   de forma implicita (DEU-C03-POSTERIORES, F06).
+# Version: 0.4.0 (F06 T3-F06 · F04-R-HIP, subhito F05; literal F05 v1.2; D-08 de la adenda v1.3):
+#   S2: devolucion y abono sobre un hecho de financiacion (o una devolucion de uno) ->
+#   HECHO_DE_FINANCIACION antes de cualquier lock; la lectura dice disponible = false y tuya_disponible = false
+#   con ese motivo.
 # ============================================================
 
 from __future__ import annotations
@@ -115,6 +119,7 @@ from typing import Any
 from app.api.dto_devolucion import AbonoCobrado, IntencionAbono, IntencionDevolucion
 from app.api.ejecucion_registro import RechazoRegistro, bloquear_cuentas
 from app.api.traductor_gasto_pagado import leer_actor_self
+from app.api import guarda_financiacion as gf
 from app.comun.elegibilidad_cuentas import MONEDA, SIN_CAPACIDAD, motivo_cuenta, motivo_cuenta_original_abono
 from app.comun.fecha_funcional import CODIGO_FECHA_FUTURA, Reloj, es_futura, reloj_sistema
 from app.core.contexto import ContextoOperacion
@@ -349,6 +354,9 @@ def registrar_devolucion(unidad: UnidadDeTrabajo, contexto: ContextoOperacion, o
     cobrado = isinstance(i.abono, AbonoCobrado)
 
     def operacion(sesion: SesionMotor) -> Devuelta | RechazoRegistro:
+        rechazo = gf.rechazo_hecho(sesion, origen_id)  # F04-R-HIP S2: antes de cualquier lock
+        if rechazo is not None:
+            return RechazoRegistro(rechazo)
         if cobrado:
             bloquear_cuentas(sesion, i.abono.cuenta_id)
         origen = sesion.uno(_ORIGEN, (origen_id,))
@@ -407,6 +415,11 @@ def registrar_devolucion(unidad: UnidadDeTrabajo, contexto: ContextoOperacion, o
 def registrar_abono(unidad: UnidadDeTrabajo, contexto: ContextoOperacion, devolucion_id: uuid.UUID,
                     i: IntencionAbono, reloj: Reloj = reloj_sistema) -> Abonada | RechazoRegistro:
     def operacion(sesion: SesionMotor) -> Abonada | RechazoRegistro:
+        # F04-R-HIP S2: abono de una devolucion cuyo origen es de financiacion (relacion inmutable, sin lock).
+        origen = sesion.uno("SELECT hecho_destino_id FROM gapto.hecho_relaciones WHERE hecho_origen_id = %s "
+                            "AND tipo_relacion = 'DEVOLUCION_DE'", (devolucion_id,))
+        if origen is not None and gf.es_hecho_de_financiacion(sesion, origen[0]):
+            return RechazoRegistro(gf.HECHO_DE_FINANCIACION)
         bloquear_cuentas(sesion, i.cuenta_id)
         # M2-D §1.5: el origen por DEVOLUCION_DE (relacion inmutable, sin lock) y bajo lock ANTES que la devolucion.
         relacion = sesion.uno("SELECT importe_relacionado, hecho_destino_id FROM gapto.hecho_relaciones "
@@ -461,7 +474,9 @@ def contexto_devolucion(sesion: SesionMotor, origen_id: uuid.UUID) -> dict[str, 
         return None
     estado, fecha, nota, total, es_v3, tercero = fila
     gastos = efectos_gasto(sesion, origen_id)
-    if estado != "ACTIVO":
+    if gf.es_hecho_de_financiacion(sesion, origen_id):  # F04-R-HIP S2
+        motivo = gf.HECHO_DE_FINANCIACION
+    elif estado != "ACTIVO":
         motivo = ORIGEN_NO_ACTIVO
     elif con_derecho_de_cobro(sesion, origen_id):
         motivo = GASTO_CON_DERECHO_DE_COBRO

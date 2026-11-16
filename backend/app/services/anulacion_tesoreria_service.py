@@ -44,6 +44,11 @@
 #   (row_version incluida); motivo y request_id comunes (REQUEST_ID_AUSENTE si
 #   falta). Idempotencia (§6.4): el mismo request_id sobre el hecho que ya anulo
 #   -> idempotente; con otra intencion -> IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION.
+# Version: 0.2.0 (F06 T3-F06 · F04-R-HIP, literal F04 v1.1 A9; D-04 de la adenda v1.3)
+#   `_elegibilidad` evalua `exigir_anulacion_sin_financiacion` justo despues de
+#   la comprobacion de estado ACTIVO y antes de la de tipo: cubre Hd sea cual
+#   sea su tipo y queda antes de W1. Para hechos que no son de financiacion el
+#   orden de errores no cambia.
 # Version: 0.1.0 (F04-R2 R2-C)
 # ============================================================
 
@@ -63,6 +68,7 @@ from app.repositories import hechos_repository as repo_hechos
 from app.repositories import posiciones_repository as repo_pos
 from app.repositories import previsiones_repository as repo_prev
 from app.services import integridad_posicion
+from app.services.hechos_service import exigir_anulacion_sin_financiacion
 from app.services.previsiones_service import ConjuntoCambiado
 
 TIPOS_ANULABLES = ("GASTO", "INGRESO", "TRANSFERENCIA")
@@ -265,6 +271,8 @@ class AnulacionTesoreriaService:
         # A-1
         if hecho["estado"] != ESTADO_ACTIVO:
             raise _estado("HECHO_ANULADO", "El hecho ya esta anulado.")
+        # F04-R-HIP A9 (D-04): tras ACTIVO y antes del tipo, para cubrir Hd sea cual sea su tipo.
+        exigir_anulacion_sin_financiacion(sesion, hecho_id)
         if hecho["tipo"] not in TIPOS_ANULABLES:
             raise _fuera("TIPO_NO_SOPORTADO")
         if repo_lect.tiene_entidad_de_inversion(sesion, hecho_id):

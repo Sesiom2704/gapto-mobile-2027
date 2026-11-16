@@ -65,6 +65,9 @@
 #   PRIMER recurso de su transaccion, antes de INVERSIONES, de la cuenta y de
 #   leer la identidad (OP-22 lo vuelve a pedir, reentrante). La transferencia
 #   no compone OP-22 y no cambia.
+# Version: 0.6.0 (F06 T3-F06 · F04-R-HIP, subhito F05; literal F05 v1.2; D-08 de la adenda v1.3):
+#   S10 (defensa): ingreso cobrado con bloque `prevision` de una cuota -> PREVISION_DE_CUOTA antes
+#   del advisory por raiz y de validar_tipo_prevision.
 # ============================================================
 
 from __future__ import annotations
@@ -79,6 +82,7 @@ from app.api.dto_registro import IntencionIngresoCobrado, IntencionTransferencia
 from app.api.elegibilidad_categoria import validar_seleccion_categoria
 from app.api.traductor_registro import componer_ingreso, componer_transferencia, vinculo_compuesto
 from app.api.traductor_gasto_pagado import leer_actor_self
+from app.api import guarda_financiacion as gf
 from app.comun.elegibilidad_cuentas import CAPACIDAD_POR_OPERACION, MONEDA, SIN_CAPACIDAD, motivo_cuenta
 from app.comun.fecha_funcional import CODIGO_FECHA_FUTURA, Reloj, es_futura, reloj_sistema
 from app.core.contexto import ContextoOperacion
@@ -216,6 +220,10 @@ def registrar_ingreso_cobrado(unidad: UnidadDeTrabajo, contexto: ContextoOperaci
                               intencion: IntencionIngresoCobrado,
                               reloj: Reloj = reloj_sistema) -> Registrado | RechazoRegistro:
     def operacion(sesion: SesionMotor) -> Registrado | RechazoRegistro:
+        # F04-R-HIP S10 (defensa): prevision de una cuota, antes de cualquier lock y del tipo.
+        rechazo = gf.rechazo_bloque_prevision(sesion, intencion.prevision)
+        if rechazo is not None:
+            return RechazoRegistro(rechazo)
         # F04-R3 il1b: advisory por raiz, primer recurso de la transaccion.
         repo_comp.tomar_advisory_raiz(sesion, intencion.intencion_id)
         if intencion.contexto_id is not None:

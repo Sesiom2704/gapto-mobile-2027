@@ -67,6 +67,11 @@
 #   un solo pagador y las reglas propias de M3): INVERSIONES y propiedad FOR SHARE antes de la cuenta; intencion
 #   nueva: propiedad disponible y no DE_OTROS y propuesta vista de la titularidad vigente; composicion de M3 +
 #   AFECTA_A principal de nivel efecto. Sin el bloque, nada cambia (O-CV-20).
+# Version: 0.7.0 (F06 T3-F06 · F04-R-HIP, subhito F05; literal F05 v1.2; D-08 de la adenda v1.3):
+#   S1: «Corregir reparto» rechaza el hecho de financiacion con REPARTO_NO_CORREGIBLE y motivo
+#   HECHO_DE_FINANCIACION antes de cualquier lock; su lectura dice corregible = false con ese motivo y la de
+#   anulacion lo lista. S10: gasto compartido con bloque `prevision` de una cuota -> PREVISION_DE_CUOTA antes
+#   del advisory por raiz (que sigue siendo el primer lock, il1b).
 # ============================================================
 
 from __future__ import annotations
@@ -102,6 +107,7 @@ from app.api.traductor_gasto_pagado import id_magnitud_hecho, leer_actor_self
 from app.api.traductor_registro import ESCALA, contexto_hecho, prevision_compuesta
 from app.api import propiedad_registro as pr
 from app.api.elegibilidad_categoria import exigir_propiedad
+from app.api import guarda_financiacion as gf
 from app.comun.fecha_funcional import CODIGO_FECHA_FUTURA, Reloj, es_futura, hoy_owner, reloj_sistema
 from app.core.contexto import ContextoOperacion
 from app.core.errores import CodigoError, ErrorMotor
@@ -305,6 +311,10 @@ def registrar_gasto_compartido(
     personas = _personas(intencion)
 
     def operacion(sesion: SesionMotor) -> GastoCompartidoRegistrado | RechazoRegistro:
+        # F04-R-HIP S10: prevision de una cuota, SELECT sin lock antes de cualquier lock.
+        rechazo = gf.rechazo_bloque_prevision(sesion, intencion.prevision)
+        if rechazo is not None:
+            return RechazoRegistro(rechazo)
         # F04-R3 il1b: advisory por raiz, primer recurso de la transaccion.
         repo_comp.tomar_advisory_raiz(sesion, intencion.intencion_id)
         # 0. Advisory INVERSIONES ANTES de la cuenta si habra posiciones
@@ -571,6 +581,8 @@ def elegibilidad_anulacion(sesion: SesionMotor, hecho_id: uuid.UUID) -> dict | N
     if estado is None:
         return None
     motivos = []
+    if gf.es_hecho_de_financiacion(sesion, hecho_id):  # F04-R-HIP S3 (lectura)
+        motivos.append(gf.HECHO_DE_FINANCIACION)
     if estado[0] != "ACTIVO":
         motivos.append("NO_ACTIVO")
     if sesion.uno("SELECT EXISTS (SELECT 1 FROM gapto.hecho_movimientos_tesoreria WHERE hecho_id = %s) "
@@ -631,6 +643,9 @@ def corregir_reparto(
 ) -> RepartoCorregido | RechazoRegistro:
     def operacion(sesion: SesionMotor) -> RepartoCorregido | RechazoRegistro:
         owner = repo_hechos.exigir_contexto(sesion)
+        # F04-R-HIP S1 (D-08): hecho de financiacion, antes de cualquier lock.
+        if gf.es_hecho_de_financiacion(sesion, hecho_id):
+            return RechazoRegistro(REPARTO_NO_CORREGIBLE, {"motivo": gf.HECHO_DE_FINANCIACION})
         # Orden global: advisory -> hecho -> posiciones (los mismos locks que
         # OP-21 tomara; reentrantes). La whitelist se evalua bajo ellos.
         integridad_posicion.adquirir_raiz(sesion, owner, hechos=[hecho_id], advisory=True)
@@ -702,7 +717,9 @@ def reparto_de_hecho(sesion: SesionMotor, contexto: ContextoOperacion, hecho_id:
     actor_self = leer_actor_self(sesion)
     gastos = [e for e in estado["efectos"] if e[1] == "GASTO"]
     motivo = None
-    if estado["estado"] != "ACTIVO":
+    if gf.es_hecho_de_financiacion(sesion, hecho_id):  # F04-R-HIP S1
+        motivo = gf.HECHO_DE_FINANCIACION
+    elif estado["estado"] != "ACTIVO":
         motivo = "NO_ACTIVO"
     elif (estado["tipo"] != "GASTO" or estado["es_devolucion"] or len(gastos) != 1
           or any(e[1] == "INGRESO" for e in estado["efectos"])):

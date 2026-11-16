@@ -33,6 +33,15 @@
 #   D-080 · ADVISORY PRIMERO. Si la correccion toca superficies de inversion,
 #   el advisory (INVERSIONES, owner) se toma ANTES de cualquier row lock. Los
 #   locks genericos no lo sustituyen.
+# Version: 0.18.0
+#   0.18.0 (F06 T3-F06 · F04-R-HIP, literal F04 v1.1 A1-A3; adenda v1.3 del
+#   mandato, D-07): guarda FINANCIACION. Bajo la raiz y ANTES de la primera
+#   escritura (el toque de raiz incluido), OP-21 rechaza con OWNERSHIP_F07 y
+#   estado identico, sobre un efecto vinculado a una FINANCIACION a nivel de
+#   efecto (cuotas y DEUDA +P de Hd): (a) baja conjunta efecto + vinculo, (b)
+#   baja aislada del vinculo, (c) cambio de importe_delta, (d) cambio de
+#   tipo_efecto. El vinculo de nivel hecho sigue como hoy (no ampliacion).
+#   Predicado unico: hechos_repository.vinculos_de_financiacion.
 # Version: 0.17.0
 #   0.17.0 (F04-D071, MANT de OP-21: R-L12-01 y R-L17-01 opcion A; dictamen
 #   de diseno MANT OP-21 del 2026-11-07, AJ-MOP21-01..10): las atribuciones
@@ -521,6 +530,9 @@ class CorreccionesService:
             # F06-D002 (PB0I-06): ni por retirada y alta en la misma
             # correccion. Tambien antes de la primera escritura.
             self._exigir_sin_conversion_logica_valor_activo(sesion, datos)
+            # F04-R-HIP A1: efectos vinculados a una FINANCIACION a nivel de
+            # efecto. Bajo la raiz y antes de la primera escritura (D-07).
+            self._exigir_sin_financiacion(sesion, datos)
             nueva_version = repo_hechos.tocar_raiz(
                 sesion, datos.hecho_id, datos.row_version_esperada
             )
@@ -797,6 +809,36 @@ class CorreccionesService:
             datos_antes_json=snapshot,
             motivo=datos.motivo,
         )
+
+    @staticmethod
+    def _exigir_sin_financiacion(sesion: SesionMotor, datos: DatosCorreccion) -> None:
+        """F04-R-HIP A1 (literal F04 v1.1). Cuatro modalidades independientes
+        sobre un efecto con vinculo FINANCIACION de nivel efecto; el de nivel
+        hecho no cuenta (A3)."""
+        vinculos = {}
+        for vinculo_id, efecto_id, _importe in repo_hechos.vinculos_de_financiacion(sesion, datos.hecho_id):
+            if efecto_id is not None:
+                vinculos[vinculo_id] = efecto_id
+        if not vinculos:
+            return
+        efectos = set(vinculos.values())
+        modalidades = []
+        if any(e in efectos for e in datos.efectos_a_eliminar):  # (a) baja conjunta
+            modalidades.append("BAJA_CONJUNTA")
+        if any(v in vinculos and vinculos[v] not in datos.efectos_a_eliminar
+               for v in datos.entidades_a_eliminar):  # (b) baja aislada del vinculo
+            modalidades.append("BAJA_VINCULO")
+        if any(e in efectos and "importe_delta" in c for e, c in datos.efectos_a_actualizar.items()):  # (c)
+            modalidades.append("IMPORTE_DELTA")
+        if any(e in efectos and "tipo_efecto" in c for e, c in datos.efectos_a_actualizar.items()):  # (d)
+            modalidades.append("TIPO_EFECTO")
+        if modalidades:
+            raise ErrorMotor(
+                CodigoError.OWNERSHIP_F07,
+                "Ese efecto pertenece a una financiacion (cuota o desembolso): "
+                "su correccion es de la operacion propia de la financiacion.",
+                contexto_extra={"motivo": "FINANCIACION", "modalidades": modalidades},
+            )
 
     def _retirar_vinculo_entidad(
         self, sesion: SesionMotor, datos: DatosCorreccion, registro_id: uuid.UUID

@@ -37,6 +37,9 @@
 #   vigente POSICIONES de M3). «Corregir» de un hecho con posiciones y sin
 #   reparto con otras personas (una sola atribucion, p. ej. el gasto C-03)
 #   explica POSICIONES en lugar de REPARTO; con reparto sigue REPARTO.
+# Version: 0.4.0 (F06 T3-F06 · F04-R-HIP, subhito F05; literal F05 v1.2; D-08 de la adenda v1.3):
+#   S3/S4/S5 (lecturas): «Corregir» y «Anular por duplicado» de un hecho de financiacion no estan
+#   disponibles con motivo HECHO_DE_FINANCIACION (tras HECHO_ANULADO); «Corregir categoria» de V3, tampoco.
 # ============================================================
 
 from __future__ import annotations
@@ -48,6 +51,7 @@ from typing import Any
 from app.core.unidad_trabajo import SesionMotor
 from app.repositories import correccion_tesoreria_repository as repo
 from app.repositories import hechos_repository as repo_hechos
+from app.api import guarda_financiacion as gf
 
 D = decimal.Decimal
 _CENT = D("0.01")
@@ -79,6 +83,8 @@ def _comun(sesion: SesionMotor, hecho_id: uuid.UUID, hecho: dict[str, Any],
     """Motivos que impiden tanto corregir como anular por esta via."""
     if hecho["estado"] != "ACTIVO":
         return "HECHO_ANULADO"
+    if gf.es_hecho_de_financiacion(sesion, hecho_id):  # F04-R-HIP S3/S4
+        return gf.HECHO_DE_FINANCIACION
     destinos = [("hechos_financieros", hecho_id)] + [("movimientos_tesoreria", m["id"]) for m in movimientos]
     if repo.importado(sesion, destinos):
         return "ORIGEN_IMPORTADO"
@@ -179,6 +185,8 @@ def motivo_categoria_v3(sesion: SesionMotor, hecho_id: uuid.UUID,
         return "NO_ENCONTRADO", None
     if not repo.importado(sesion, [("hechos_financieros", hecho_id)]):
         return "NO_IMPORTADO", None
+    if gf.es_hecho_de_financiacion(sesion, hecho_id):  # F04-R-HIP S5 (V3 con vinculo de nivel efecto)
+        return gf.HECHO_DE_FINANCIACION, None
     if hecho["estado"] != "ACTIVO":
         return "HECHO_ANULADO", None
     if hecho["tipo"] not in ("GASTO", "INGRESO"):

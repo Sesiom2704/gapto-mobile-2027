@@ -53,6 +53,10 @@
 #   REALIZADA y OMITIDA; una CANCELADA se rechaza AQUI con
 #   ESTADO_PREVISION_INCOMPATIBLE antes de llamar al motor (F05-D047: CANCELADA
 #   fuera de la UI). Motivo y version del sucesor RODANTE (la lectura la da).
+# Version: 0.3.0 (F06 T3-F06 · F04-R-HIP, subhito F05; literal F05 v1.2; D-08 de la adenda v1.3):
+#   S7: «Vincular realidad», «No hubo», «Dar por cubierta» y «Reabrir» rechazan la prevision de una
+#   cuota (PREVISION_DE_CUOTA) y «Vincular» un hecho de financiacion (HECHO_DE_FINANCIACION), antes del motor.
+#   S10 (defensa): transferencia con bloque `prevision` de una cuota, antes de transferir_bajo_locks.
 # ============================================================
 
 from __future__ import annotations
@@ -72,6 +76,7 @@ from app.api.ejecucion_registro import (
     validar_tipo_prevision,
 )
 from app.api.traductor_registro import ESCALA, uuid_sucesor, vinculo_compuesto
+from app.api import guarda_financiacion as gf
 from app.comun.fecha_funcional import Reloj, reloj_sistema
 from app.core.contexto import ContextoOperacion
 from app.core.errores import ErrorMotor
@@ -134,6 +139,10 @@ def vincular(unidad: UnidadDeTrabajo, contexto: ContextoOperacion, prevision_id:
     importe = intencion.importe_a_vincular.quantize(ESCALA)
 
     def operacion(sesion: SesionMotor) -> Vinculado | RechazoRegistro:
+        # F04-R-HIP S7: prevision de una cuota o hecho de financiacion, antes de OP-17.
+        rechazo = gf.rechazo_prevision(sesion, prevision_id) or gf.rechazo_hecho(sesion, intencion.hecho_id)
+        if rechazo is not None:
+            return RechazoRegistro(rechazo)
         tipo_hecho = lect_prev.tipo_de_hecho(sesion, intencion.hecho_id)
         tipo_prev = lect_prev.tipo_de_prevision(sesion, prevision_id)
         if tipo_hecho is not None and tipo_prev is not None and tipo_hecho != tipo_prev:
@@ -165,8 +174,12 @@ def vincular(unidad: UnidadDeTrabajo, contexto: ContextoOperacion, prevision_id:
 
 # ------------------------------------------------------------------ «No hubo este mes»
 def omitir(unidad: UnidadDeTrabajo, contexto: ContextoOperacion, prevision_id: uuid.UUID,
-           intencion: IntencionOmitir) -> Omitida:
+           intencion: IntencionOmitir) -> Omitida | RechazoRegistro:
     def operacion(sesion: SesionMotor) -> Omitida:
+        # F04-R-HIP S7: devuelve un RechazoRegistro (PREVISION_DE_CUOTA) antes del motor.
+        rechazo = gf.rechazo_prevision(sesion, prevision_id)
+        if rechazo is not None:
+            return RechazoRegistro(rechazo)
         r = _previsiones(sesion).omitir(
             contexto, prevision_id=prevision_id, row_version_esperada=intencion.row_version,
             motivo=intencion.motivo, uuid_sucesor=uuid_sucesor(intencion.intencion_id))
@@ -177,8 +190,11 @@ def omitir(unidad: UnidadDeTrabajo, contexto: ContextoOperacion, prevision_id: u
 
 # ------------------------------------------------------------------ «Dar por cubierta» (M5-B)
 def dar_por_cubierta(unidad: UnidadDeTrabajo, contexto: ContextoOperacion, prevision_id: uuid.UUID,
-                     intencion: IntencionDarPorCubierta) -> Transicion:
-    def operacion(sesion: SesionMotor) -> Transicion:
+                     intencion: IntencionDarPorCubierta) -> Transicion | RechazoRegistro:
+    def operacion(sesion: SesionMotor) -> Transicion | RechazoRegistro:
+        rechazo = gf.rechazo_prevision(sesion, prevision_id)  # F04-R-HIP S7
+        if rechazo is not None:
+            return RechazoRegistro(rechazo)
         r = _previsiones(sesion).dar_por_realizada(
             contexto, prevision_id=prevision_id, row_version_esperada=intencion.row_version,
             motivo=intencion.motivo,
@@ -195,6 +211,9 @@ CODIGO_ESTADO_INCOMPATIBLE = "ESTADO_PREVISION_INCOMPATIBLE"
 def reabrir(unidad: UnidadDeTrabajo, contexto: ContextoOperacion, prevision_id: uuid.UUID,
             intencion: IntencionReabrir) -> Transicion | RechazoRegistro:
     def operacion(sesion: SesionMotor) -> Transicion | RechazoRegistro:
+        rechazo = gf.rechazo_prevision(sesion, prevision_id)  # F04-R-HIP S7
+        if rechazo is not None:
+            return RechazoRegistro(rechazo)
         # F05-D047: una CANCELADA no se reabre desde la app (el motor si la admite, F04-D024.3).
         if lect_prev.estado_persistido(sesion, prevision_id) == "CANCELADA":
             return RechazoRegistro(CODIGO_ESTADO_INCOMPATIBLE)
@@ -221,6 +240,10 @@ def registrar_transferencia_prevista(unidad: UnidadDeTrabajo, contexto: Contexto
         return not bloque.marcar_realizada or lect_prev.estado_persistido(sesion, bloque.prevision_id) == "REALIZADA"
 
     def operacion(sesion: SesionMotor) -> Registrado | RechazoRegistro:
+        # F04-R-HIP S10 (defensa): prevision de una cuota, antes de bloquear_cuentas y del tipo.
+        rechazo = gf.rechazo_bloque_prevision(sesion, bloque)
+        if rechazo is not None:
+            return RechazoRegistro(rechazo)
         r = transferir_bajo_locks(sesion, contexto, intencion, reloj, replay_compuesto,
                                   lambda s: validar_tipo_prevision(s, bloque, "TRANSFERENCIA"))
         if isinstance(r, RechazoRegistro) or r.idempotente:

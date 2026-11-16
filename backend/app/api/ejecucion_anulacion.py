@@ -26,11 +26,16 @@
 #   y tras el total. Los vinculos GENERADO_POR solo nacen con el hecho (OP-22),
 #   asi que leerlos sin lock no tiene carrera. Un hecho ya ANULADO lo decide el
 #   motor (replay idempotente). anular_registro (frontera R2-C) no cambia.
+# Version: 0.4.0 (F06 T3-F06 · F04-R-HIP, subhito F05; literal F05 v1.2; D-08 de la adenda v1.3):
+#   S3: «Anular por duplicado» rechaza el hecho de financiacion con HECHO_DE_FINANCIACION antes del
+#   motor (la guarda de motor A9 de OP-03P se prueba aparte por servicio).
 # ============================================================
 
 from __future__ import annotations
 
 from app.api.dto_edicion import IntencionAnularDuplicado
+from app.api.ejecucion_registro import RechazoRegistro
+from app.api import guarda_financiacion as gf
 from app.actividad.edicion import con_posiciones
 from app.core.errores import CodigoError, ErrorMotor
 from app.core.contexto import ContextoOperacion
@@ -68,7 +73,10 @@ def anular_duplicado_http(unidad: UnidadDeTrabajo, contexto: ContextoOperacion, 
         movimientos_row_version_esperadas=dict(intencion.movimientos_row_version), motivo=intencion.motivo,
         movimiento_en_banco=False if intencion.duplicado_declarado is True else None)
 
-    def operacion(sesion: SesionMotor) -> ResultadoAnulacionRegistro:
+    def operacion(sesion: SesionMotor) -> ResultadoAnulacionRegistro | RechazoRegistro:
+        rechazo = gf.rechazo_hecho(sesion, hecho_id)  # F04-R-HIP S3: frontera, antes del motor (A9 aparte)
+        if rechazo is not None:
+            return RechazoRegistro(rechazo)
         activo = sesion.uno("SELECT estado = 'ACTIVO' FROM gapto.hechos_financieros WHERE id = %s", (hecho_id,))
         if activo is not None and activo[0] and con_posiciones(sesion, hecho_id):
             raise ErrorMotor(CodigoError.HECHO_CON_REALIDAD_ASOCIADA,

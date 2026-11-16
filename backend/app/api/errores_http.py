@@ -209,6 +209,12 @@
 #   PAGO_DESDE_CUENTA_COMPARTIDA y ENTRADA_INVALIDA (422). CATEGORIA_AMBITO_NO_ADMITE_VIVIENDA
 #   (422) en _RECHAZOS_CATEGORIA. Ningun codigo existente cambia de status.
 # Version: 0.32.0
+#   0.33.0 (F06 T3-F06 · F04-R-HIP; literales F04 v1.1 A9 y F05 v1.2; D-08 de la adenda v1.3 del mandato):
+#   _MAPA: ANULACION_FINANCIACION_SIN_REVERSION (409, motor A9). Codigos aditivos de la frontera F05 (409), en
+#   _RECHAZOS_INTEGRACION y _RECHAZOS_PREVISION: HECHO_DE_FINANCIACION (superficies sobre hechos, salvo el
+#   reparto, que usa REPARTO_NO_CORREGIBLE con motivo HECHO_DE_FINANCIACION) y PREVISION_DE_CUOTA (S7 y S10).
+#   MOTIVOS_EDICION anade HECHO_DE_FINANCIACION. Ningun codigo existente cambia de significado ni de status.
+# Version: 0.33.0
 # ============================================================
 
 from __future__ import annotations
@@ -241,6 +247,13 @@ _MAPA: dict[CodigoError, tuple[int, str, bool]] = {
     CodigoError.HECHO_CON_REALIDAD_ASOCIADA: (
         409,
         "No se puede anular: tiene una devolución u otra operación registrada. No se ha cambiado nada.",
+        False,
+    ),
+    # F04-R-HIP A9 (motor; la frontera F05 responde antes HECHO_DE_FINANCIACION).
+    CodigoError.ANULACION_FINANCIACION_SIN_REVERSION: (
+        409,
+        "Es el pago de una cuota o el dinero recibido de una financiación: no se puede anular. "
+        "No se ha cambiado nada.",
         False,
     ),
     CodigoError.YA_CONCILIADO: (409, "Esta devolución ya tiene su abono registrado. No se ha guardado nada.", False),
@@ -431,6 +444,9 @@ _RECHAZOS_INTEGRACION: dict[str, tuple[int, str]] = {
     "PAGO_DESDE_CUENTA_COMPARTIDA": (
         422, "Si pagaste desde una cuenta compartida, regístralo desde la ficha de la propiedad."),
     "ENTRADA_INVALIDA": (422, "Revisa la propiedad, quién pagó y el reparto. No se ha guardado nada."),
+    # T3-F06 F04-R-HIP, subhito F05 (D-08): frontera sobre hechos y previsiones de financiacion.
+    "HECHO_DE_FINANCIACION": (409, "Es el pago de una cuota o el dinero recibido de una financiación (hipoteca o préstamo): no se cambia desde aquí. No se ha guardado nada."),
+    "PREVISION_DE_CUOTA": (409, "Esta previsión es una cuota de una financiación (hipoteca o préstamo): se paga desde la financiación, no desde aquí. No se ha guardado nada."),
 }
 
 #: F05-D052: validaciones del DTO con codigo estable (422) y su texto propio.
@@ -473,6 +489,9 @@ _RECHAZOS_PREVISION: dict[str, tuple[int, str]] = {
              "desde aquí. No se ha cambiado nada."),
     "MOTIVO_AUSENTE": (422, "Escribe el motivo. No se ha guardado nada."),
     "ENTRADA_INVALIDA": (409, "La serie de esta previsión ha cambiado: vuelve a abrirla. No se ha cambiado nada."),
+    # T3-F06 F04-R-HIP, subhito F05 (D-08): S7 y S10.
+    "HECHO_DE_FINANCIACION": (409, "Es el pago de una cuota o el dinero recibido de una financiación (hipoteca o préstamo): no se cambia desde aquí. No se ha guardado nada."),
+    "PREVISION_DE_CUOTA": (409, "Esta previsión es una cuota de una financiación (hipoteca o préstamo): se paga desde la financiación, no desde aquí. No se ha guardado nada."),
 }
 _PORCION_NO_DETERMINABLE = ("El importe de ese registro no se puede comparar con lo ya enlazado: "
                             "no se puede enlazar así. No se ha guardado nada.")
@@ -777,6 +796,7 @@ MOTIVOS_EDICION: dict[str, str] = {
     "MOVIMIENTO_REAL_NO_ANULABLE": "Solo se anula si confirmas que está repetido y el cargo no ocurrió dos veces. No se ha cambiado nada.",
     "ACONTECIMIENTO_POSTERIOR": "Corregir es solo para datos que nunca fueron ciertos. Si algo cambió después, regístralo con su operación. No se ha cambiado nada.",
     "FECHA_ANTERIOR_INICIO": "Un movimiento es anterior al inicio de la cuenta en la app: su saldo inicial ya lo incluye. No se ha cambiado nada.",
+    "HECHO_DE_FINANCIACION": "Es el pago de una cuota o el dinero recibido de una financiación (hipoteca o préstamo): no se corrige ni se anula desde aquí.",
 }
 
 

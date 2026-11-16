@@ -128,6 +128,8 @@
 #     cuenta de VS-01 solo se revalida si pago yo.
 #   - SIN el bloque, el orden de locks, la composicion y las respuestas son los de 0.11.0 (O-CV-20).
 # Version: 0.12.0
+# Version: 0.13.0 (F06 T3-F06 · F04-R-HIP, subhito F05; literal F05 v1.2; D-08 de la adenda v1.3):
+#   S10: bloque `prevision` de una cuota -> PREVISION_DE_CUOTA antes del advisory por raiz.
 # ============================================================
 
 from __future__ import annotations
@@ -141,6 +143,7 @@ from app.api.dto_vs01 import IntencionGastoPagado
 from app.api.elegibilidad_categoria import exigir_propiedad, validar_seleccion_categoria
 from app.api.traductor_gasto_pagado import ESCALA, componer, leer_actor_self, participacion_self_100
 from app.api.traductor_registro import prevision_compuesta
+from app.api import guarda_financiacion as gf
 from app.api.ejecucion_registro import (
     CuentaSinCapacidad,
     con_rechazo_capacidad,
@@ -208,6 +211,10 @@ def registrar_gasto_pagado(
     reloj: Reloj = reloj_sistema,
 ) -> Registrado | RechazoIntegracion:
     def operacion(sesion: SesionMotor) -> Registrado | RechazoIntegracion:
+        # F04-R-HIP S10: prevision de una cuota, SELECT sin lock antes de cualquier lock.
+        rechazo = gf.rechazo_bloque_prevision(sesion, intencion.prevision)
+        if rechazo is not None:
+            return RechazoIntegracion(rechazo)
         # F04-R3 il1b: advisory por raiz, primer recurso de la transaccion.
         repo_comp.tomar_advisory_raiz(sesion, intencion.intencion_id)
         con_propiedad = intencion.propiedad is not None

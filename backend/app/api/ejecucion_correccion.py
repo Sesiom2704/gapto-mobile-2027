@@ -32,6 +32,9 @@
 #   datos de OP-21P / OP-21T sin anadir ni quitar nada y llaman a las mismas
 #   funciones (mismo orden de locks, misma revalidacion en el motor). Ni la
 #   excepcion I3 ni los metodos alcanzados cambian.
+# Version: 0.3.0 (F06 T3-F06 · F04-R-HIP, subhito F05; literal F05 v1.2; D-08 de la adenda v1.3):
+#   S4: «Corregir» (pago y transferencia) rechaza el hecho de financiacion con HECHO_DE_FINANCIACION
+#   antes de cualquier lock.
 # ============================================================
 
 from __future__ import annotations
@@ -39,6 +42,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.api.dto_edicion import IntencionCorregirPago, IntencionCorregirTransferencia
+from app.api import guarda_financiacion as gf
 from app.api.ejecucion_registro import (
     CuentaSinCapacidad,
     RechazoRegistro,
@@ -92,6 +96,9 @@ def _capacidad_bajo_lock(sesion: SesionMotor, plan: PlanCuentas) -> None:
 def corregir_pago(unidad: UnidadDeTrabajo, contexto: ContextoOperacion,
                   datos: DatosCorreccionPago) -> ResultadoCorreccionTesoreria | RechazoRegistro:
     def operacion(sesion: SesionMotor) -> Any:
+        rechazo = gf.rechazo_hecho(sesion, datos.hecho_id)  # F04-R-HIP S4: antes de cualquier lock
+        if rechazo is not None:
+            return RechazoRegistro(rechazo)
         _capacidad_bajo_lock(sesion, plan_cuentas_pago(sesion, datos))
         return _motor(sesion).corregir_pago(contexto, datos)
 
@@ -102,6 +109,9 @@ def corregir_pago(unidad: UnidadDeTrabajo, contexto: ContextoOperacion,
 def corregir_transferencia(unidad: UnidadDeTrabajo, contexto: ContextoOperacion,
                            datos: DatosCorreccionTransferencia) -> ResultadoCorreccionTesoreria | RechazoRegistro:
     def operacion(sesion: SesionMotor) -> Any:
+        rechazo = gf.rechazo_hecho(sesion, datos.hecho_id)  # F04-R-HIP S4: antes de cualquier lock
+        if rechazo is not None:
+            return RechazoRegistro(rechazo)
         _capacidad_bajo_lock(sesion, plan_cuentas_transferencia(sesion, datos))
         return _motor(sesion).corregir_transferencia(contexto, datos)
 
