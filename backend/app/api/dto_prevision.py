@@ -29,9 +29,9 @@
 #   `resueltas_mes` (ResueltasMes: desde, hasta, n y FilaResuelta con su
 #   estado derivado, `resuelta_el` y `resuelta_por` AUDITORIA u OBJETIVO).
 #   Campo aparte: no suma a `n` ni a «Por pagar» / «Por cobrar».
-# Version: 0.4.0 (F06 T3-F06 · F04-R-HIP, subhito F05; D-08): `Accion.codigo`
-#   opcional y aditivo (PREVISION_DE_CUOTA en la prevision de una cuota; None
-#   en el resto). Ningun campo existente cambia.
+# Version: 0.4.0 (F06 T3-F06 · F04-R-HIP, subhito F05; D-08): `AccionConCodigo`
+#   (Accion + `codigo`, PREVISION_DE_CUOTA) solo en la prevision de una cuota;
+#   las demas acciones se serializan como antes, sin `codigo` (byte a byte).
 # ============================================================
 
 from __future__ import annotations
@@ -197,16 +197,24 @@ class PendientesPrevisiones(_Estricto):
 class Accion(_Estricto):
     disponible: bool
     motivo: str | None
-    codigo: str | None = None  # F04-R-HIP S7/S10 (D-08): PREVISION_DE_CUOTA; None en el resto
+
+
+class AccionConCodigo(Accion):
+    """F04-R-HIP S7/S10 (D-08): accion no disponible con su codigo (PREVISION_DE_CUOTA). Solo aparece en la
+    prevision de una cuota: el resto de respuestas no cambia ni un byte (sin `codigo: null`)."""
+    codigo: str
+
+
+_AccionPrevision = Accion | AccionConCodigo
 
 
 class Acciones(_Estricto):
-    registrar: Accion
-    ya_lo_registre: Accion
-    omitir: Accion
-    swipe: Accion
-    dar_por_cubierta: Accion
-    reabrir: Accion
+    registrar: _AccionPrevision
+    ya_lo_registre: _AccionPrevision
+    omitir: _AccionPrevision
+    swipe: _AccionPrevision
+    dar_por_cubierta: _AccionPrevision
+    reabrir: _AccionPrevision
 
 
 class Sucesor(_Estricto):
