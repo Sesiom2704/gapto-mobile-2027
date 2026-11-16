@@ -18,6 +18,8 @@
 #   S6 (suplementos) y la frontera B3 se prueban por no alcanzabilidad en
 #   test_286. Reloj fijo 2026-10-10; fechas fijas; ORDER BY en los oraculos.
 # Version: 0.1.0 (F06 T3-F06 · F04-R-HIP, paso 4)
+# Version: 0.1.1 (F06 T3-F06 · F04-R-HIP, STOP n.º 2): el oraculo de candidatos de la prevision de
+#   una cuota exige el mensaje de la cuota (MF05-L-candidatos-cuota sobrevivia por «sin criterio»).
 # ============================================================
 
 from __future__ import annotations
@@ -248,8 +250,11 @@ def test_o_h22_s7_s10_l_lectura_de_la_prevision_de_una_cuota(esc, realizada) -> 
         assert d["acciones"][k]["disponible"] is False, k
         assert d["acciones"][k]["codigo"] == PC, k
         assert d["acciones"][k]["motivo"], k
+    from app.previsiones.lecturas import MOTIVO_PREVISION_DE_CUOTA
     cand = m.candidatos(esc.cli, pid)
-    assert cand["candidatos"] == [] and cand["mensaje"]
+    # 0.1.1 (STOP n.º 2, MF05-L-candidatos-cuota VIVO en la repeticion 1): el mensaje es el de la cuota,
+    # no el de «sin criterio» (que tambien deja la lista vacia y enmascaraba el mutante).
+    assert cand["candidatos"] == [] and cand["mensaje"] == MOTIVO_PREVISION_DE_CUOTA
 
 
 def test_o_h22_s7_un_hecho_de_financiacion_no_es_candidato(esc) -> None:
