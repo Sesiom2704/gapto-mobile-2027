@@ -3,7 +3,8 @@
 // Fichero: c03_reembolso.test.tsx
 // Ruta: mobile/__tests__/c03_reembolso.test.tsx
 // Descripción: C-03 «gasto propio reembolsable» en la UI (F05 §66.2 y anexo §66.A, §66.A.11.9; lámina F05-07 v0.3 C1–C4 y D1; D-F0507L-04..06; CONTRATO_API_C03). Dominio: importe recuperable de 0,01 € al total sin valor por defecto, lo que falta, sellado (payload del gasto pagado sin `atribucion` y con `reembolso`), texto tras el cobro (nunca «Saldado» con saldo indeterminado) y reconocimiento del derecho. C1: respuesta «Mío, pero me lo reembolsan» solo en gastos. C2: nada marcado, «Hecho» deshabilitado hasta elegir quién y cuánto, personas y empresas (nunca el comercio, ni ORGANISMO/OTRO/sin naturaleza, ni deshabilitadas), alta de empresa, «Otra cantidad» acotada, textos fijos y exclusión visible de la previsión; claro y oscuro. Formulario: resumen, «Quitar», sin «Repartir» ni «Otra persona», comercio igual a quien lo debe bloquea. Envío a POST /v1/intenciones/gasto-reembolsable y éxito C3 con el gasto y lo que te deben por separado; rechazos en lenguaje llano. C4: «Pendiente con…» abre el derecho elegido (dos derechos con la misma empresa), «Registrar cobro» deshabilitado hasta elegir cuenta, textos del derecho y del cobro parcial y total. Detalle: `posiciones_vinculadas` con su `entidad_id`. Devolución bloqueada con motivo.
-// Versión: 0.1.0 (F05-D052 paso 2 · C-03 UI)
+// Versión: 0.3.0 (MANT D18, lote 40): se elimina el jest.setTimeout(30000) propio; el límite (90 s) lo fija solo tiempos_rn (R-TEST-TIMEOUT); sin cambios de aserciones.
+//   previa: 0.1.0 (F05-D052 paso 2 · C-03 UI)
 // ============================================================
 
 import './tiempos_rn';
@@ -36,7 +37,6 @@ import { colores } from '../src/theme/tokens';
 import { clienteCategoriasStub, nodo } from './fixtures_categorias';
 
 jest.mock('expo-font', () => ({ ...jest.requireActual('expo-font'), isLoaded: () => true }));
-jest.setTimeout(30000);
 
 const AHORA = () => new Date(2026, 9, 26, 10, 0, 0);
 const HOY = '2026-10-26';

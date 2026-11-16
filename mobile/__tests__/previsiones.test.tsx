@@ -3,7 +3,8 @@
 // Fichero: previsiones.test.tsx
 // Ruta: mobile/__tests__/previsiones.test.tsx
 // Descripción: Confirmación de previsiones (F05-06 M5 §B2; láminas PREV v0.2 y HOME-01 v0.4; F05 §59). Dominio puro (importes por naturaleza, «Desconocido» nunca 0, cobertura y desviación, línea de la fila, «Por pagar» / «Por cobrar» separados, campana, «Se vinculará X €», bloque `prevision` solo con respuesta explícita, payloads por tipo y regla del swipe) y pantallas por estado, en claro y oscuro: Inicio (campana con 0, 2 y 3; bloque como mucho dos; sin importes sumados; estado de fallo con «Reintentar» y «!»; próximos de solo lectura), «Pendientes», detalle (acciones atenuadas con motivo, parcial, desconocido, terminal en solo lectura), registro desde la previsión («¿Queda cubierta?» sin respuesta, revisión que separa realidad y previsión, reintento con la MISMA identidad), swipe (consecuencia antes de «Confirmar pago y cubrir»), «Ya lo registré» (sin preselección, «Buscar en más fechas», toda la porción libre, PORCION_CAMBIADA relee) y omitir (409 con el estado actual; tras un fallo, «No sabemos si se guardó»).
-// Versión: 0.1.0 (F05-06 M5 §B2)
+// Versión: 0.10.0 (MANT D18, lote 40): se elimina el jest.setTimeout(30000) propio; el límite (90 s) lo fija solo tiempos_rn (R-TEST-TIMEOUT); sin cambios de aserciones.
+//   previa: 0.1.0 (F05-06 M5 §B2)
 // Versión: 0.2.0 (F05-06 M5 SWIPE; regla del 2026-10-22): el swipe de B1 abre la hoja solo cuando la acción rápida no es inequívoca (aquí, sin poder leer la capacidad de hoy); la acción rápida con «Deshacer» se prueba en accion_rapida.test.tsx.
 // Versión: 0.3.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2): acciones accesibles «derecha» (Pagado / Cobrado) e «izquierda» (No hubo); el importe desconocido y el pago parcial ya tienen gesto: la derecha abre el formulario rellenado y «No hubo» solo existe sin pagos enlazados (accion_rapida.test.tsx).
 // Versión: 0.4.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados invertidos — la acción principal se desliza a la IZQUIERDA y la alternativa a la DERECHA; acciones accesibles con el nombre de la dirección nueva.
@@ -46,7 +47,6 @@ import { ProveedorTema } from '../src/theme/tema';
 import { clienteCategoriasStub } from './fixtures_categorias';
 
 jest.mock('expo-font', () => ({ ...jest.requireActual('expo-font'), isLoaded: () => true }));
-jest.setTimeout(30000);
 
 const AHORA = () => new Date(2026, 9, 10, 10, 0, 0);
 const ACCIONES_OK = {

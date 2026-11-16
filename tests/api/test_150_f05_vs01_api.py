@@ -20,7 +20,10 @@
 #   campo `estado_categorial` de ResultadoGastoPagado (Literal del DTO, enum
 #   del esquema OpenAPI expuesto y literales de la respuesta real); discrimina
 #   el mutante W03 de mutantes_f05_01.py.
-# Version: 0.4.0
+#   v0.4.1 (MANT D18, lote 40; R-L19-C-02): la base "no permitida" del test
+#   fail-closed se deriva del nombre real de la base conectada, ya no es el
+#   literal gapto2027_test (que coincidia con la base de Neon y no fallaba).
+# Version: 0.4.1
 # ============================================================
 
 from __future__ import annotations
@@ -284,7 +287,7 @@ def test_fail_closed_fuera_de_development_y_base_no_permitida(tenant):
         with pytest.raises(ConfiguracionInvalida):
             h.configuracion(owner, **env)
     with pytest.raises(ConfiguracionInvalida):
-        create_app(h.configuracion(owner, GAPTO_DEV_DB_ALLOWLIST="gapto2027_test"))
+        create_app(h.configuracion(owner, GAPTO_DEV_DB_ALLOWLIST=h.nombre_base() + "_ajena"))
 
 
 def test_bd_caida_es_indeterminado_reintentable(tenant):

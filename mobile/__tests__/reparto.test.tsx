@@ -3,7 +3,8 @@
 // Fichero: reparto.test.tsx
 // Ruta: mobile/__tests__/reparto.test.tsx
 // Descripción: Reparto, pagador real y posiciones (F05-06 M3 §B2; lámina REP v0.2; F05 §57). Dominio puro (partes iguales con el céntimo en la última fila, falta por repartir sin completar solo, lo que falta, payload sellado, deudas previstas, neto «Sin determinar», corrección solo de importes). Pantallas por estado: gasto pagado por otra persona (A1/A2: selector solo de personas E7, «Sí, le debo» / «No» / «No lo sé», revisión en cuatro bloques), cena repartida (B1–B4: «A partes iguales», «¿Te deben su parte?», revisión), reparto incompleto en oscuro (D1), envío (doble toque, INDETERMINADO con la MISMA identidad, rechazo), éxito con «Pendiente con»; «Pendiente con» (C1, C4, D2), cobro (C3), pago sin tercero (E8) y perdón; «Corregir reparto» (E6) con lo excluido atenuado y su motivo, revisión de impacto, motivo obligatorio, rechazos en lenguaje llano e INDETERMINADO sin reintento; detalle de la Actividad y registro («Repartir» / «Otra persona»).
-// Versión: 0.1.0 (F05-06 M3 §B2)
+// Versión: 0.8.0 (MANT D18, lote 40): se elimina el jest.setTimeout(30000) propio; el límite (90 s) lo fija solo tiempos_rn (R-TEST-TIMEOUT); sin cambios de aserciones.
+//   previa: 0.1.0 (F05-06 M3 §B2)
 // v0.1.1 (F05-06 M3 CORR-01, R-M3-05): dos personas con la misma parte; cada «Pendiente con» señala a su persona por el `tercero_id` del servidor, también con las posiciones en otro orden.
 // Versión: 0.2.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // Versión: 0.3.0 (F05-D051 paso 2; F05 §65.4 contrato HTTP Q4/Q4-H2): fixtures wire con `apertura_indeterminada` (y `estado` en PosicionDeParte); sin cambios de aserciones.
@@ -56,8 +57,6 @@ import { colores } from '../src/theme/tokens';
 import { clienteCategoriasStub } from './fixtures_categorias';
 
 jest.mock('expo-font', () => ({ ...jest.requireActual('expo-font'), isLoaded: () => true }));
-// Arranque en frío del primer test de pantalla (misma convención que capacidades.test.tsx).
-jest.setTimeout(30000);
 
 const AHORA = () => new Date(2026, 9, 10, 10, 0, 0);
 const HOY = '2026-10-10';

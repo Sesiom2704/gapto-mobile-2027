@@ -7,6 +7,7 @@
 // Versión: 0.3.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): lados invertidos — la acción principal se desliza a la IZQUIERDA y la alternativa a la DERECHA; acciones accesibles con el nombre de la dirección nueva.
 // Versión: 0.4.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // Versión: 0.5.0 (F05-D056 paso 2, COLA-AR v1.0, F05 §70.A): las acciones financieras de estas pantallas pasan por la cola de la app. Mensajes veraces (A.5): «Pagando…» / «Cobrando…» / «Confirmando…» / «Registrando el abono…» antes de la confirmación y el resultado con ✓ SOLO tras el 2xx; un rechazo deja el motivo en el aviso (con «Cerrar») y la fila vuelve; un resultado desconocido es «Comprobando el pago…» y se reconcilia con la MISMA identidad (la fila no admite otro swipe mientras tanto); desmontar la pantalla NO cancela (se envía al vencer el plazo, nunca antes); en segundo plano no se envía nada y al volver con el plazo vencido se pregunta «Enviar / Descartar». La persistencia (AsyncStorage) se vacía antes de cada prueba.
+// Versión: 0.6.0 (MANT D18, lote 40): se elimina el jest.setTimeout(30000) propio; el límite (90 s) lo fija solo tiempos_rn (R-TEST-TIMEOUT); en la pasada en frío con 15 workers cortaban 2 pruebas de Inicio a 30 s; sin cambios de aserciones.
 // ============================================================
 
 import './tiempos_rn';
@@ -28,7 +29,6 @@ import { colores } from '../src/theme/tokens';
 import { clienteCategoriasStub } from './fixtures_categorias';
 
 jest.mock('expo-font', () => ({ ...jest.requireActual('expo-font'), isLoaded: () => true }));
-jest.setTimeout(30000);
 
 const AHORA = () => new Date(2026, 9, 10, 10, 0, 0);
 const HOY = '2026-10-10';

@@ -3,7 +3,8 @@
 // Fichero: cat_viv.test.tsx
 // Ruta: mobile/__tests__/cat_viv.test.tsx
 // Descripción: CAT-VIV (T2-F06, bloque 3) contra dobles en memoria, con los nombres de oráculo del mandato (§9.2) y de la lámina SET-CAT/REG-CAT v1.0: dominio (`exigePropiedad` solo GASTO y por la marca de ESA categoría; faltas; wire `propiedad` con `posiciones_confirmadas`; sellado), O-CV-12 (sin marca el formulario no cambia; con marca «Propiedad» obligatoria), «<cotitular>, todo» (sin «Pagado con»), O-CV-18 (VP-2b: mueble 250 € que cuenta en el mes y no suma al coste), O-CV-16 (una plantilla que deja una categoría marcada en el registro hace obligatoria la propiedad), R06/M5 (registrar desde una previsión con categoría marcada pide la propiedad y la envía), R07 (aviso de lectura en Actividad, sin acción) y O-CV-17 (VP-1: al tocar «Asociada a vivienda» solo cambia la fila; la relectura es silenciosa y el detalle no se desmonta).
-// Versión: 0.1.0 (F06 T2-F06 CAT-VIV N1 (L-04, lámina SET-CAT/REG-CAT v1.0))
+// Versión: 0.3.0 (MANT D18, lote 40): se elimina el jest.setTimeout(30000) propio; el límite (90 s) lo fija solo tiempos_rn (R-TEST-TIMEOUT); sin cambios de aserciones.
+//   previa: 0.1.0 (F06 T2-F06 CAT-VIV N1 (L-04, lámina SET-CAT/REG-CAT v1.0))
 // ============================================================
 
 import './tiempos_rn';
@@ -37,7 +38,6 @@ import { ProveedorTema } from '../src/theme/tema';
 import { clienteCategoriasStub, nodo } from './fixtures_categorias';
 
 jest.mock('expo-font', () => ({ ...jest.requireActual('expo-font'), isLoaded: () => true }));
-jest.setTimeout(30000);
 
 const AHORA = () => new Date(2026, 9, 26, 10, 0, 0);
 const HOY = '2026-10-26';
