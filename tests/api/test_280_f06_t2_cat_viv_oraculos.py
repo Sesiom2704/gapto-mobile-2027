@@ -11,6 +11,10 @@
 # Version: 0.1.0 (F06 T2-F06 CAT-VIV N1)
 # Version: 0.1.1 (gate local, plan B): O-CV-06 leia el primer efecto del hecho sin orden (la posicion añade efectos);
 #   ahora exige un unico efecto GASTO con su categoria. Correccion del propio test, sin cambio de contrato.
+# Version: 0.1.2 (lote 38, STOP C04; decision de Moises 2026-11-16, F06-00_Decisiones_Moises_2026-11-16_M-CV-04_
+#   oraculo_v1.0): O-CV-06 y O-CV-18 exigen ademas, de forma determinista, que el hecho de VS-01 con propiedad
+#   conserve el tipo GASTO (nunca MEJORA_PATRIMONIAL) y no tenga efecto VALOR_ACTIVO (no entra en L-COSTE);
+#   mata M-CV-04. Solo test, sin cambio de contrato.
 # ============================================================
 from __future__ import annotations
 
@@ -117,6 +121,14 @@ def _atribuciones(lab, hid):
 
 def _posiciones(lab, hid):
     return sorted((t, str(a), str(D(i).quantize(D("0.01")))) for t, a, i in m3.posiciones(lab.owner, hid))
+
+
+def _no_es_mejora(lab, hid) -> None:
+    """M-CV-04: el gasto de vivienda conserva el tipo GASTO (nunca MEJORA_PATRIMONIAL) y no tiene VALOR_ACTIVO."""
+    assert lab.sql("SELECT th.codigo FROM gapto.hechos_financieros h JOIN gapto.tipos_hecho th "
+                   "ON th.id = h.tipo_hecho_id WHERE h.id = %s", (hid,)) == [("GASTO",)]
+    assert lab.sql("SELECT count(*) FROM gapto.hecho_efectos WHERE hecho_id = %s AND tipo_efecto = 'VALOR_ACTIVO'",
+                   (hid,)) == [(0,)]
 
 
 def _detalle_actividad(lab, hid) -> dict:
@@ -234,6 +246,7 @@ def test_o_cv_06_vs01_con_propiedad_50_50_cuenta_mia_deuda_confirmada(lab):
     # Sale de mi cuenta 120; L-COSTE sin cambios (M-CV-04).
     assert m5.movimientos(lab.owner, hid) == [(lab.c1, D("-120.0000"))]
     assert b2.leer_coste(lab.cli, lab.pid) == coste
+    _no_es_mejora(lab, hid)                                       # tipo GASTO, sin VALOR_ACTIVO (M-CV-04)
 
 
 def test_o_cv_06b_m3_compartido_y_reembolsable_con_propiedad(lab):
@@ -454,6 +467,7 @@ def test_o_cv_18_mueble_de_250_cuenta_en_el_mes_y_no_en_el_coste(lab):
     assert b2.leer_coste(lab.cli, lab.pid) == coste
     assert lab.cli.get("/v1/patrimonio/invertido-mes", params={"fecha": fecha}, headers=h.AUTH).json() == invertido
     assert len(_afecta_a(lab, uuid.UUID(j["hecho_id"]))) == 1
+    _no_es_mejora(lab, uuid.UUID(j["hecho_id"]))                  # tipo GASTO, sin VALOR_ACTIVO (M-CV-04)
 
 
 # ================================================================== O-CV-19 · replay
