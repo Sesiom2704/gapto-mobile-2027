@@ -5,13 +5,15 @@
 // Descripción: Registrar la compra de una propiedad (F06-01 B2 · C-COMPRA-01, sin hipoteca; lámina F06-01 v0.9 B1 Precio, B2 Cómo se pagó, B3 Gastos de la compra, B3b ¿De quién es el coste?, B4 Resumen y B6 Así se ve en Día a día) y añadir un gasto de la compra después (C-COMPRA-03, `GastoCompraScreen`, desde el detalle). Tarea inmersiva por pasos. Todas las fechas usan el `CampoFecha` de UX-1 (D-UX1-B2-01). B3b: ninguna opción viene marcada; «Según la titularidad» propone la titularidad de la propiedad EN LA ESCRITURA para todos los registros (AJ-TR1-10) y avisa de que los gastos anteriores no usan la titularidad de su fecha; «Otro reparto» y «No lo sé» siempre disponibles; nunca YO 100 por defecto. B4 separa el coste (precio + gastos), lo que sale de tus cuentas y el gasto del mes (0,00 €); «Se guarda todo junto o nada». Rechazos: ATRIBUCION_PROPUESTA_DESFASADA vuelve a B3b con la propuesta releída; VERSION_DESFASADA → Recargar. Sin hipoteca (B2b/B2c), sin desglose (D4) y sin «Repetir hoy». La declaración «no faltan gastos» (consumidor de 0352) solo aparece con CONSUMIDORES_0352_HABILITADOS.
 // Versión: 0.1.0 (F06 T1-F06 B2 N1)
 // Versión: 0.2.0 (F06 T2-F06 A3-0352 (L-05); contrato A3-0352 v1.1 §6): UX-1 el chip «No faltan gastos» de B4 solo con la fecha de adquisición conocida (`puedeDeclararCompleto`), y «Completo» como PROPUESTA del resumen; UX-2 sin fecha, nota y la compra se guarda sin declaración; UX-4 COMPLETITUD_SIN_FECHA_DE_ADQUISICION muestra el texto del servidor, no guarda nada y recupera B4 sin el chip (intención nueva) para guardar sin declaración. GastoCompraScreen no cambia.
+// Versión: 0.3.0 (F06 T3-F06 bloque 2 F06-01H, paso 10; contrato v0.4 §3.2 y §8; mandato v1.1 §15): bloque «Hipoteca» dentro de la compra, en B2 «¿Cómo se pagó el precio?», opcional («+ Añadir la hipoteca de esta compra»; sin ella la compra y su petición no cambian): banco, importe del préstamo, cuenta en la que el banco lo deja (texto sin «ingreso»; cuentas que pueden recibir dinero en la escritura), fijo o variable (sin valor por defecto), tipo anual, plazo en años o meses → n.º de cuotas, primera cuota (posterior a la escritura), cuenta de cargo, titularidad del préstamo propuesta (la de la propiedad en la escritura) y modificable, aviso «Cálculo mensual: tipo anual entre 12» y «Ver el cuadro» (W-HIP-00, sin escritura; CuadroPrevioScreen). B4 añade la hipoteca al resumen; B6 muestra el aviso `aviso_reparto_distinto` (O-H30) si el servidor lo devuelve. Rechazos de la hipoteca con texto propio, sin «ingreso» ni «cobro». La regla «los pagos suman el precio» no cambia.
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import type { ClienteApi, CuentaElegible } from '../api/cliente';
+import type { ClienteApi, CuentaElegible, Tercero } from '../api/cliente';
+import type { CuadroPrevio } from '../api/hipoteca';
 import type { ClientePatrimonio, ParteEnFecha } from '../api/patrimonio';
 import type { VistaPropiedad } from '../api/propiedades';
 import { BotonPrimario, BotonTexto, Chip, EstadoDato } from '../components/Basicos';
@@ -25,9 +27,15 @@ import {
 } from '../domain/compra';
 import { ddmmaaaaAIso, diaMesAnioIso, isoADdmmaaaa, isoLocal } from '../domain/fechas';
 import { formatearEur, parsearImporte } from '../domain/importe';
+import {
+  BorradorHipoteca, borradorHipoteca, conHipoteca, eleccionPropuesta, faltasHipoteca, NOMBRE_TIPO, numeroCuotas, payloadCuadroPrevio, puedeVerCuadro,
+  ROTULO_CUENTA_DESEMBOLSO, TEXTO_AVISO_REPARTO, TEXTO_CONVENCION, TEXTO_CUENTA_DESEMBOLSO, TEXTO_PRESTAMO, TEXTO_SIN_CUENTAS_CARGO, TEXTO_SIN_CUENTAS_DESEMBOLSO,
+  TEXTO_SIN_TITULARIDAD_PRESTAMO, TEXTO_TITULARIDAD_PRESTAMO, textoErrorHipoteca, textoSeguro, TIPOS_INTERES,
+} from '../domain/hipoteca';
 import { esFechaIso } from '../domain/intencion';
 import { useTema } from '../theme/tema';
 import { espacio, tipo } from '../theme/tokens';
+import { CuadroPrevioScreen, EleccionRepartoVista } from './HipotecaCuadroScreen';
 import { ConflictoPropiedad } from './PropiedadEditarScreen';
 
 type Paso = 'PRECIO' | 'PAGOS' | 'GASTOS' | 'ATRIBUCION' | 'RESUMEN' | 'HECHO';
@@ -131,10 +139,26 @@ export function CompraScreen(p: {
   const [sinFechaServidor, setSinFechaServidor] = useState(false);
   const ofreceCompleto = puedeDeclararCompleto(sinFechaServidor ? null : p.vista.fecha_adquisicion);
   const intencion = useRef(p.nuevoId());
+  // F06-01H: hipoteca de la compra (null = sin hipoteca: la compra no cambia).
+  const [hip, setHip] = useState<BorradorHipoteca | null>(null);
+  const [propuestaHip, setPropuestaHip] = useState<ParteEnFecha[] | null>(null);
+  const [previo, setPrevio] = useState<CuadroPrevio | null>(null);
+  const [avisoReparto, setAvisoReparto] = useState(false);
 
   useEffect(() => {
     void p.cliente.cuentasElegibles('GASTO', hoyIso).then((r) => { if (r.tipo === 'OK') setCuentas(r.datos.cuentas); });
   }, []);
+  // Titularidad del préstamo propuesta: la de la propiedad en la escritura (D13), solo con hipoteca.
+  const conHip = hip !== null;
+  useEffect(() => {
+    if (!conHip || !esFechaIso(b.fechaEscritura)) return;
+    setPropuestaHip(null);
+    void p.patrimonio.titularidadEnFecha(p.vista.id, b.fechaEscritura).then((r) => {
+      const partes = r.tipo === 'OK' ? r.datos.partes : [];
+      setPropuestaHip(partes);
+      setHip((h) => (h && h.titularidad?.modo !== 'MANUAL' ? { ...h, titularidad: eleccionPropuesta(partes) } : h));
+    });
+  }, [conHip, b.fechaEscritura]);
   const cargarPropuesta = async () => {
     setPropuesta(null);
     const r = await p.patrimonio.titularidadEnFecha(p.vista.id, b.fechaEscritura);
@@ -144,7 +168,7 @@ export function CompraScreen(p: {
     if (paso === 'ATRIBUCION') void cargarPropuesta();
   }, [paso]);
 
-  const faltas = paso === 'PRECIO' ? faltasPrecio(b) : paso === 'PAGOS' ? faltasPagos(b) : paso === 'GASTOS' ? faltasGastos(b)
+  const faltas = paso === 'PRECIO' ? faltasPrecio(b) : paso === 'PAGOS' ? [...faltasPagos(b), ...(hip ? faltasHipoteca(hip, b.fechaEscritura, propuestaHip) : [])] : paso === 'GASTOS' ? faltasGastos(b)
     : paso === 'ATRIBUCION' ? faltasAtribucion(b.atribucion, propuesta) : [];
   const nombreCuenta = (id: string | null) => cuentas.find((x) => x.cuenta_id === id)?.nombre ?? 'Cuenta';
   const r = resumen(b);
@@ -157,10 +181,11 @@ export function CompraScreen(p: {
     if (ocupado) return;
     setOcupado(true);
     setAviso(null);
-    const res = await p.patrimonio.registrarCompra(p.vista.id, payloadCompra(intencion.current, p.vista.row_version, { ...b, completo: ofreceCompleto && b.completo }, propuesta));
+    const res = await p.patrimonio.registrarCompra(p.vista.id, conHipoteca(payloadCompra(intencion.current, p.vista.row_version, { ...b, completo: ofreceCompleto && b.completo }, propuesta), hip, propuestaHip));
     setOcupado(false);
     if (res.tipo === 'OK') {
       setResultado(res.datos.propiedad);
+      setAvisoReparto(res.datos.aviso_reparto_distinto === true);
       return setPaso('HECHO');
     }
     if (res.tipo === 'INDETERMINADO') return setAviso({ tipo: 'AVISO', texto: TEXTO_INDETERMINADO_COMPRA });
@@ -178,6 +203,7 @@ export function CompraScreen(p: {
       setB({ ...b, completo: false });
       setSinFechaServidor(true);
     }
+    if (hip) return setAviso({ tipo: 'AVISO', texto: textoErrorHipoteca(res.codigo, res.detalle) ?? textoSeguro(textoErrorCompra(res.codigo, res.mensaje)) });
     setAviso({ tipo: 'AVISO', texto: textoErrorCompra(res.codigo, res.mensaje) });
   };
 
@@ -201,11 +227,14 @@ export function CompraScreen(p: {
             ))}
           </Tarjeta>
           <Text style={[tipo.footnote, { color: c.textSecondary }]}>Cada pago aparece como lo que es, con su importe de cuenta. No suma al gasto del mes.</Text>
+          {avisoReparto ? <Text testID="compra-hip-aviso-reparto" style={[tipo.footnote, { color: c.warningText }]}>{TEXTO_AVISO_REPARTO}</Text> : null}
           <BotonPrimario testID="compra-listo" titulo="Listo" onPress={() => p.onCerrar(resultado)} />
         </ScrollView>
       </View>
     );
   }
+
+  if (previo) return <CuadroPrevioScreen cuadro={previo} onCerrar={() => setPrevio(null)} />;
 
   const titulo = paso === 'ATRIBUCION' ? '¿De quién es este coste?' : paso === 'RESUMEN' ? 'Revisar la compra' : 'La compra';
   return (
@@ -248,7 +277,15 @@ export function CompraScreen(p: {
             ))}
             <BotonTexto testID="compra-pago-anadir" titulo="+ Añadir pago" onPress={() => setB({ ...b, pagos: [...b.pagos, { id: p.nuevoId(), rol: 'ARRAS', cuentaId: null, fecha: b.fechaEscritura, importe: '' }] })} />
             <Linea testID="compra-pagado" etiqueta="Pagado entre todo" valor={formatearEur(textoPagado(b))} fuerte />
-            <Text testID="compra-sin-hipoteca" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_SIN_HIPOTECA}</Text>
+            {hip ? (
+              <BloqueHipoteca cliente={p.cliente} hip={hip} escrituraIso={b.fechaEscritura} hoyIso={hoyIso} propuesta={propuestaHip}
+                onCambiar={(x) => setHip({ ...hip, ...x })} onQuitar={() => setHip(null)} onAviso={setAviso} onCuadro={setPrevio} />
+            ) : (
+              <>
+                <Text testID="compra-sin-hipoteca" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_SIN_HIPOTECA}</Text>
+                <BotonTexto testID="compra-hip-anadir" titulo="+ Añadir la hipoteca de esta compra" onPress={() => setHip(borradorHipoteca())} />
+              </>
+            )}
           </>
         ) : null}
         {paso === 'GASTOS' ? (
@@ -282,6 +319,17 @@ export function CompraScreen(p: {
               <Linea testID="compra-res-sale" etiqueta="Sale de tus cuentas" valor={formatearEur(r.sale.replace('-', ''))} />
               <Linea testID="compra-res-gasto-mes" etiqueta="Cuenta como gasto del mes" valor={formatearEur(r.gastoMes)} />
             </Tarjeta>
+            {hip ? (
+              <>
+                <RotuloGrupo texto="Hipoteca" />
+                <Tarjeta testID="compra-res-hipoteca">
+                  <Linea testID="compra-res-hip-prestamo" etiqueta="Préstamo del banco" valor={formatearEur(parsearImporte(hip.importe).ok ? (parsearImporte(hip.importe) as { valor: string }).valor : '0')} />
+                  <Linea testID="compra-res-hip-cuenta" etiqueta="Lo deja en" valor={nombreCuenta(hip.cuentaDesembolsoId)} />
+                  <Linea testID="compra-res-hip-cuotas" etiqueta="Cuotas" valor={`${numeroCuotas(hip.plazo, hip.unidadPlazo) ?? '—'} mensuales desde el ${esFechaIso(hip.primeraCuota) ? diaMesAnioIso(hip.primeraCuota) : '—'}`} />
+                </Tarjeta>
+                <Text testID="compra-res-hip-nota" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_PRESTAMO}</Text>
+              </>
+            ) : null}
             {ofreceCompleto ? (
               <Chip testID="compra-completo" etiqueta="No faltan gastos: el coste de la compra está completo" seleccionado={b.completo} onPress={() => setB({ ...b, completo: !b.completo })} />
             ) : (
@@ -320,6 +368,119 @@ function EditorGasto(p: { prefijo: string; g: GastoBorrador; cuentas: CuentaEleg
       </Campo>
       <CampoTexto testID={`${p.prefijo}-nota`} etiqueta="Nota" marcador="Opcional" valor={p.g.nota} onCambiar={(t) => p.onCambiar({ nota: t })} />
       {p.onQuitar ? <BotonTexto testID={`${p.prefijo}-quitar`} titulo="Quitar este gasto" critico onPress={p.onQuitar} /> : null}
+    </View>
+  );
+}
+
+/** Chips de cuentas del bloque «Hipoteca» con su propio texto de lista vacía. */
+function CuentasHip(p: { testID: string; cuentas: CuentaElegible[] | null; valor: string | null; vacio: string; onCambiar: (id: string) => void }) {
+  if (p.cuentas === null) return <EstadoDato testID={`${p.testID}-cargando`} estado="CARGANDO" />;
+  if (p.cuentas.length === 0) return <EstadoDato testID={`${p.testID}-sin`} estado="NO_DISPONIBLE" detalle={p.vacio} />;
+  return (
+    <View style={ef.chips}>
+      {p.cuentas.map((c) => (
+        <Chip key={c.cuenta_id} testID={`${p.testID}-${c.cuenta_id}`} etiqueta={c.nombre} seleccionado={p.valor === c.cuenta_id} onPress={() => p.onCambiar(c.cuenta_id)} />
+      ))}
+    </View>
+  );
+}
+
+/** F06-01H · bloque «Hipoteca» de la compra (contrato v0.4 §3.2.1 y §8). El cliente no calcula importes: «Ver el cuadro» lo pide al servidor (W-HIP-00). */
+function BloqueHipoteca(p: {
+  cliente: ClienteApi;
+  hip: BorradorHipoteca;
+  escrituraIso: string;
+  hoyIso: string;
+  propuesta: ParteEnFecha[] | null;
+  onCambiar: (x: Partial<BorradorHipoteca>) => void;
+  onQuitar: () => void;
+  onAviso: (a: AvisoCaja) => void;
+  onCuadro: (c: CuadroPrevio) => void;
+}) {
+  const { c } = useTema();
+  const h = p.hip;
+  const [bancos, setBancos] = useState<Tercero[] | null>(null);
+  const [cuentasDesembolso, setCuentasDesembolso] = useState<CuentaElegible[] | null>(null);
+  const [cuentasCargo, setCuentasCargo] = useState<CuentaElegible[] | null>(null);
+  const [pidiendo, setPidiendo] = useState(false);
+  const fechaCargo = esFechaIso(h.primeraCuota) ? h.primeraCuota : p.escrituraIso;
+  useEffect(() => {
+    void p.cliente.listarTerceros().then((r) => setBancos(r.tipo === 'OK' ? r.datos.terceros.filter((t) => t.enabled) : []));
+  }, []);
+  useEffect(() => {
+    // La cuenta en la que el banco deja el préstamo tiene que poder recibir dinero en la fecha de la escritura.
+    setCuentasDesembolso(null);
+    void p.cliente.cuentasElegibles('INGRESO', p.escrituraIso).then((r) => setCuentasDesembolso(r.tipo === 'OK' ? r.datos.cuentas : []));
+  }, [p.escrituraIso]);
+  useEffect(() => {
+    setCuentasCargo(null);
+    void p.cliente.cuentasElegibles('GASTO', fechaCargo).then((r) => setCuentasCargo(r.tipo === 'OK' ? r.datos.cuentas : []));
+  }, [fechaCargo]);
+  const n = numeroCuotas(h.plazo, h.unidadPlazo);
+
+  const verCuadro = async () => {
+    if (pidiendo || !p.cliente.cuadroHipoteca) return;
+    if (!puedeVerCuadro(h)) return p.onAviso({ tipo: 'AVISO', texto: 'Para ver el cuadro indica el importe del préstamo, el tipo anual y el plazo.' });
+    setPidiendo(true);
+    p.onAviso(null);
+    const r = await p.cliente.cuadroHipoteca(payloadCuadroPrevio(h));
+    setPidiendo(false);
+    if (r.tipo === 'OK') return p.onCuadro(r.datos);
+    p.onAviso({ tipo: 'AVISO', texto: r.tipo === 'RECHAZADO' ? textoErrorHipoteca(r.codigo, r.detalle) ?? textoSeguro(r.mensaje) : 'No se ha podido calcular el cuadro. Vuelve a intentarlo.' });
+  };
+
+  return (
+    <View testID="compra-hip" style={{ gap: espacio.m }}>
+      <RotuloGrupo texto="Hipoteca" />
+      <Campo etiqueta="Banco">
+        {bancos === null ? <EstadoDato testID="compra-hip-banco-cargando" estado="CARGANDO" /> : bancos.length === 0 ? (
+          <EstadoDato testID="compra-hip-banco-sin" estado="NO_DISPONIBLE" detalle="Da de alta el banco en Ajustes › Terceros" />
+        ) : (
+          <View style={ef.chips}>
+            {bancos.map((t) => <Chip key={t.id} testID={`compra-hip-banco-${t.id}`} etiqueta={t.nombre} seleccionado={h.financiadorId === t.id} onPress={() => p.onCambiar({ financiadorId: t.id })} />)}
+          </View>
+        )}
+      </Campo>
+      <Campo etiqueta="Importe del préstamo">
+        <CampoTexto testID="compra-hip-importe" etiqueta="Importe del préstamo" marcador="Ej.: 160.000,00" valor={h.importe} onCambiar={(t) => p.onCambiar({ importe: t })} />
+      </Campo>
+      <Campo etiqueta={ROTULO_CUENTA_DESEMBOLSO}>
+        <CuentasHip testID="compra-hip-desembolso" cuentas={cuentasDesembolso} valor={h.cuentaDesembolsoId} vacio={TEXTO_SIN_CUENTAS_DESEMBOLSO}
+          onCambiar={(id) => p.onCambiar({ cuentaDesembolsoId: id })} />
+      </Campo>
+      <Text testID="compra-hip-desembolso-texto" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_CUENTA_DESEMBOLSO}</Text>
+      <Campo etiqueta="Tipo de interés">
+        <View style={ef.chips}>
+          {TIPOS_INTERES.map((t) => <Chip key={t} testID={`compra-hip-tipo-${t}`} etiqueta={NOMBRE_TIPO[t]} seleccionado={h.tipoInteres === t} onPress={() => p.onCambiar({ tipoInteres: t })} />)}
+        </View>
+      </Campo>
+      <Campo etiqueta="Tipo anual (%)">
+        <CampoTexto testID="compra-hip-tasa" etiqueta="Tipo anual (%)" marcador="Ej.: 2,5" valor={h.tasa} onCambiar={(t) => p.onCambiar({ tasa: t })} />
+      </Campo>
+      <Campo etiqueta="Plazo">
+        <CampoTexto testID="compra-hip-plazo" etiqueta="Plazo" marcador={h.unidadPlazo === 'ANIOS' ? 'Años' : 'Meses'} valor={h.plazo} onCambiar={(t) => p.onCambiar({ plazo: t })} />
+        <View style={ef.chips}>
+          <Chip testID="compra-hip-plazo-anios" etiqueta="En años" seleccionado={h.unidadPlazo === 'ANIOS'} onPress={() => p.onCambiar({ unidadPlazo: 'ANIOS' })} />
+          <Chip testID="compra-hip-plazo-meses" etiqueta="En meses" seleccionado={h.unidadPlazo === 'MESES'} onPress={() => p.onCambiar({ unidadPlazo: 'MESES' })} />
+        </View>
+      </Campo>
+      {n !== null ? <Text testID="compra-hip-n-cuotas" style={[tipo.footnote, { color: c.textSecondary }]}>{`${n} ${n === 1 ? 'cuota mensual' : 'cuotas mensuales'}`}</Text> : null}
+      <Campo etiqueta="Primera cuota">
+        <Fecha testID="compra-hip-primera" etiqueta="Primera cuota, día barra mes barra año" iso={h.primeraCuota} hoyIso={p.hoyIso} onCambiar={(iso) => p.onCambiar({ primeraCuota: iso })} />
+      </Campo>
+      <Campo etiqueta="Cuenta de cargo de las cuotas">
+        <CuentasHip testID="compra-hip-cargo" cuentas={cuentasCargo} valor={h.cuentaCargoId} vacio={TEXTO_SIN_CUENTAS_CARGO} onCambiar={(id) => p.onCambiar({ cuentaCargoId: id })} />
+      </Campo>
+      <Campo etiqueta="¿De quién es el préstamo?">
+        <EleccionRepartoVista testID="compra-hip-titularidad" propuesta={p.propuesta} eleccion={h.titularidad} onCambiar={(e) => p.onCambiar({ titularidad: e })}
+          textoPropuesta="Según la titularidad en la escritura" textoSinPropuesta={TEXTO_SIN_TITULARIDAD_PRESTAMO} />
+      </Campo>
+      <Text style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_TITULARIDAD_PRESTAMO}</Text>
+      <Text testID="compra-hip-convencion" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_CONVENCION}</Text>
+      {p.cliente.cuadroHipoteca ? (
+        <BotonTexto testID="compra-hip-ver-cuadro" titulo={pidiendo ? 'Calculando el cuadro…' : 'Ver el cuadro'} onPress={() => void verCuadro()} />
+      ) : null}
+      <BotonTexto testID="compra-hip-quitar" titulo="Quitar la hipoteca" critico onPress={p.onQuitar} />
     </View>
   );
 }

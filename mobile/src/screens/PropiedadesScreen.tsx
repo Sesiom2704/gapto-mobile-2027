@@ -8,6 +8,7 @@
 // Versión: 0.3.0 (F06 T1-F06 B3 N1): SOLO aditivo: tarea inmersiva «Obras y gastos» (GastosPropiedadScreen de B3, con su cliente `patrimonioB3` por prop opcional; por defecto el de `configApi`). Al cerrar con cambios se relee el coste. Nada más cambia en B1 ni B2.
 // Versión: 0.5.0 (F06 T2-F06 · B1-R (L-01/L-01b)): SOLO aditivo: tarea inmersiva «Corregir desde cuándo» (PropiedadInicioScreen, C-PROP-03bis) desde la ficha; al cerrar con cambios, la ficha muestra la vista del servidor. El alta recibe `ahora` para la cota «Desde» ≤ hoy (L-01b).
 // Versión: 0.4.0 (F06 LOTE30 punto 1, observaciones de Moisés en ENV-DEV e1d2386; N3 de cliente): a) tras el alta la ficha no leía L-COSTE (el coste quedaba sin cargar, o era el de la propiedad abierta antes) y «Registrar la compra» no aparecía; ahora el alta relee el coste de la propiedad creada y A3 abre la compra de B2 directamente. b) Día a día (Actividad) e Inicio solo releían tras un registro de la hoja: la compra, el gasto de la compra y las obras y gastos guardados aquí no se veían hasta cambiar de periodo; ahora se avisa con `onCambios` (la raíz sube `refresco`). Nada más cambia.
+// Versión: 0.6.0 (F06 T3-F06 bloque 2 F06-01H, paso 10): SOLO aditivo: la ficha lee también L-HIP (`cliente.hipotecaDePropiedad`, opcional; sin ella o sin hipoteca no hay fila) junto con el coste, y la fila «Hipoteca» abre el cuadro (HipotecaCuadroScreen) como tarea inmersiva. La propuesta del reparto de los intereses de una cuota se lee con `titularidadEnFecha` de la propiedad en el vencimiento (provisional: L-HIP no expone la titularidad del préstamo; el servidor rechaza una propuesta distinta con ATRIBUCION_PROPUESTA_DESFASADA). Al cerrar con cambios se releen la ficha, el coste y Día a día. Nada más cambia.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -16,6 +17,7 @@ import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ClienteApi } from '../api/cliente';
+import type { Hipoteca } from '../api/hipoteca';
 import { configApi } from '../api/config';
 import { ClientePatrimonio, Coste, crearClientePatrimonio } from '../api/patrimonio';
 import { ClientePatrimonioB3, crearClientePatrimonioB3 } from '../api/patrimonio_b3';
@@ -28,6 +30,7 @@ import { useTema } from '../theme/tema';
 import { espacio, TACTIL_MIN, tipo } from '../theme/tokens';
 import { CompraScreen, GastoCompraScreen } from './CompraScreen';
 import { GastosPropiedadScreen } from './GastoPropiedadScreen';
+import { HipotecaCuadroScreen } from './HipotecaCuadroScreen';
 import { PropiedadAltaScreen } from './PropiedadAltaScreen';
 import { PropiedadEditarScreen } from './PropiedadEditarScreen';
 import { PropiedadFichaScreen } from './PropiedadFichaScreen';
@@ -38,7 +41,7 @@ import { HistoricoValoracionesScreen, ValoracionFormScreen } from './PropiedadVa
 type Lista = { fase: 'CARGANDO' } | { fase: 'ERROR' } | { fase: 'OK'; filas: FilaPropiedad[] };
 type Ficha = { fase: 'CARGANDO'; id: string } | { fase: 'ERROR'; id: string } | { fase: 'OK'; vista: VistaPropiedad };
 type Nivel = 'LISTA' | 'FICHA' | 'TITULARIDAD' | 'HISTORICO';
-type Tarea = { t: 'ALTA' } | { t: 'EDITAR' } | { t: 'REPARTO' } | { t: 'VALOR' } | { t: 'COMPRA' } | { t: 'GASTO_COMPRA' } | { t: 'GASTOS' } | { t: 'INICIO' };
+type Tarea = { t: 'ALTA' } | { t: 'EDITAR' } | { t: 'REPARTO' } | { t: 'VALOR' } | { t: 'COMPRA' } | { t: 'GASTO_COMPRA' } | { t: 'GASTOS' } | { t: 'INICIO' } | { t: 'HIPOTECA' };
 
 /** Detalle de la fila de la lista: «Vivienda · Compartida · 245.000,00 €». */
 export function detalleFila(f: FilaPropiedad): string {
@@ -68,13 +71,25 @@ export function PropiedadesScreen(p: {
   const patrimonio = useMemo(() => p.patrimonio ?? crearClientePatrimonio(configApi), [p.patrimonio]);
   const patrimonioB3 = useMemo(() => p.patrimonioB3 ?? crearClientePatrimonioB3(configApi), [p.patrimonioB3]);
   const [coste, setCoste] = useState<Coste | null | undefined>(undefined);
+  /** F06-01H: L-HIP de la propiedad abierta (null: sin hipoteca, sin lectura o sin la llamada opcional). */
+  const [hipoteca, setHipoteca] = useState<Hipoteca | null>(null);
+  const cargarHipoteca = useCallback(
+    async (id: string) => {
+      setHipoteca(null);
+      if (!p.cliente.hipotecaDePropiedad) return;
+      const r = await p.cliente.hipotecaDePropiedad(id);
+      setHipoteca(r.tipo === 'OK' ? r.datos.hipoteca : null);
+    },
+    [p.cliente],
+  );
   const cargarCoste = useCallback(
     async (id: string) => {
       setCoste(undefined);
+      void cargarHipoteca(id);
       const r = await patrimonio.leerCoste(id);
       setCoste(r.tipo === 'OK' ? r.datos.coste : null);
     },
-    [patrimonio],
+    [patrimonio, cargarHipoteca],
   );
 
   const cargarLista = useCallback(
@@ -169,6 +184,12 @@ export function PropiedadesScreen(p: {
         <GastosPropiedadScreen cliente={p.cliente} patrimonio={patrimonioB3} vista={vista} nuevoId={p.nuevoId} ahora={p.ahora}
           onCerrar={(cambio) => { setTarea(null); if (cambio) { void cargarCoste(vista.id); p.onCambios?.(); } }} />
       );
+    if (tarea.t === 'HIPOTECA')
+      tareaVista = (
+        <HipotecaCuadroScreen cliente={p.cliente} propiedadId={vista.id} ahora={p.ahora} nuevoId={p.nuevoId}
+          leerPropuesta={async (fecha) => { const r = await patrimonio.titularidadEnFecha(vista.id, fecha); return r.tipo === 'OK' ? r.datos.partes : null; }}
+          onCerrar={(cambio) => { setTarea(null); if (cambio) { void cargarFicha(vista.id); p.onCambios?.(); } }} />
+      );
   }
   if (tareaVista) return <View style={{ flex: 1 }}>{tareaVista}</View>;
 
@@ -201,6 +222,8 @@ export function PropiedadesScreen(p: {
         onGastoCompra={() => setTarea({ t: 'GASTO_COMPRA' })}
         onGastos={() => setTarea({ t: 'GASTOS' })}
         onCorregirInicio={() => setTarea({ t: 'INICIO' })}
+        hipoteca={hipoteca}
+        onHipoteca={() => setTarea({ t: 'HIPOTECA' })}
       />
     );
   if (vista && nivel === 'TITULARIDAD') return <PropiedadTitularidadScreen vista={vista} onAtras={() => setNivel('FICHA')} onCambiar={() => setTarea({ t: 'REPARTO' })} />;

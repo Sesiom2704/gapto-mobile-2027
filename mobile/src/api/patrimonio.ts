@@ -4,8 +4,10 @@
 // Ruta: mobile/src/api/patrimonio.ts
 // Descripción: Cliente HTTP de B2 · Compra (F06-01 B2; R1 v0.9.5 Parte II; v0.8 DTO RegistrarCompra sin hipoteca). POST /v1/propiedades/{id}/compra (C-COMPRA-01), POST …/{id}/compra/gastos (C-COMPRA-03), GET …/{id}/coste?a_fecha= (L-COSTE) y GET …/{id}/titularidad-en-fecha?fecha= (titularidad vigente en una fecha, P-H2-03, adelantada a B2). Las escrituras usan la clasificación 'CAMBIO' (indeterminado = revisar antes de repetir; el reintento idéntico con la misma intención es un replay). Importes y porcentajes viajan como texto exacto. Va aparte de `ClientePropiedades` (B1) para no ampliar su interfaz. C-PROP-05 no tiene cliente: es un consumidor de 0352 con la habilitación bloqueada (O10.29).
 // Versión: 0.1.0 (F06 T1-F06 B2 N1)
+// Versión: 0.2.0 (F06 T3-F06 bloque 2 F06-01H, paso 10): SOLO aditivo: bloque opcional `hipoteca` en `PayloadCompra` (contrato v0.4 §3.2.1; fin de E4) y, en `ResultadoCompra`, `hipoteca` (L-HIP) y `aviso_reparto_distinto` (O-H30) cuando la compra lleva hipoteca. Sin hipoteca, la petición y la respuesta no cambian.
 // ============================================================
 
+import type { BloqueHipotecaWire, Hipoteca } from './hipoteca';
 import type { VistaPropiedad } from './propiedades';
 import { ConfigApi, crearLlamada, Respuesta } from './cliente';
 
@@ -51,6 +53,8 @@ export interface PayloadCompra {
   gastos: LineaGastoWire[];
   atribucion: AtribucionWire;
   completitud_adquisicion?: { completo: boolean; fecha_corte?: string };
+  /** F06-01H: hipoteca de la compra (solo si la hay; sin ella la clave no viaja). */
+  hipoteca?: BloqueHipotecaWire;
 }
 
 export interface PayloadGastoCompra {
@@ -91,6 +95,9 @@ export interface ResultadoCompra {
     gasto_del_mes: string;
     atribucion: unknown;
   };
+  /** F06-01H: solo con hipoteca. */
+  hipoteca?: Hipoteca | null;
+  aviso_reparto_distinto?: boolean;
 }
 
 export interface ParteEnFecha {

@@ -5,6 +5,7 @@
 // Descripción: Lógica pura de B2 · Compra (F06-01 B2; R1 v0.9.5 Parte II; lámina F06-01 v0.9 B1–B4, B6 y D1). Borrador de la compra (precio, fecha de escritura, valor de referencia, pagos propios sin hipoteca y gastos de la compra), validaciones de cada paso, resumen (coste = precio + gastos; lo que sale de tus cuentas aparte; gasto del mes 0), propuesta de atribución en la FECHA DE ESCRITURA para todas las raíces (AJ-TR1-10: «Según la titularidad de <propiedad> en la escritura (<fecha>)» y aviso para los gastos anteriores; nunca se marca sola ni se rellena con YO 100), payload de C-COMPRA-01 y C-COMPRA-03, textos de rechazo (ATRIBUCION_PROPUESTA_DESFASADA) y derivación de Día a día para los hechos patrimoniales (HF-14: la fuente es el `tipo` del hecho; «Coste de la compra · no es gasto del mes», importe con signo de cuenta). Consumidores de 0352 (declarar el coste completo): constante de código `CONSUMIDORES_0352_HABILITADOS`, true desde A3-0352 (0352 certificada por D-210; L-05); con false la interfaz no ofrece declarar nada.
 // Versión: 0.1.0 (F06 T1-F06 B2 N1)
 // Versión: 0.2.0 (F06 T2-F06 A3-0352 (L-05)): `CONSUMIDORES_0352_HABILITADOS = true`; R15-a en el cliente (contrato A3-0352 v1.1 §6): `puedeDeclararCompleto` (UX-1, solo con la fecha de adquisición conocida), `TEXTO_NOTA_SIN_FECHA` (UX-2), `MOTIVOS_COSTE_ADQUISICION` y `textoEstadoCoste` con SIN_FECHA_DE_ADQUISICION y LECTURA_NO_ESTABLE (UX-3) y `TEXTOS_ERROR` con COMPLETITUD_SIN_FECHA_DE_ADQUISICION, mismo texto que el servidor (UX-4).
+// Versión: 0.3.0 (F06 T3-F06 bloque 2 F06-01H, paso 10): `TEXTO_SIN_HIPOTECA` deja de decir que la hipoteca no se registra (ya se registra dentro de la compra, bloque «Hipoteca» de CompraScreen). Nada más cambia: la lógica de la hipoteca vive en domain/hipoteca.ts.
 // ============================================================
 
 import type {
@@ -30,7 +31,7 @@ export const ROLES: RolPago[] = ['ARRAS', 'FIRMA', 'OTRO'];
 
 export const TEXTO_VALOR_REFERENCIA = 'El valor de referencia se guarda como dato fiscal. No cambia el precio ni se usa para calcular nada aquí.';
 export const TEXTO_GASTOS = 'Pon lo que pagaste de verdad (modelo 600, factura de notaría…). Cada pago se guarda como un registro propio y suma al coste de la vivienda.';
-export const TEXTO_SIN_HIPOTECA = 'La hipoteca todavía no se registra aquí: la compra se guarda con lo que pagaste de tus cuentas.';
+export const TEXTO_SIN_HIPOTECA = 'Sin hipoteca, la compra se guarda con lo que pagaste de tus cuentas. Si hay hipoteca, añádela aquí.';
 export const TEXTO_NADIE_MARCADO = 'Ninguna opción viene marcada. La titularidad solo propone; decides tú. Si la titularidad cambia más adelante, este reparto no cambia.';
 export const TEXTO_SIN_TITULARIDAD = 'No hay titularidad registrada en la fecha de la escritura: elige otro reparto o «No lo sé».';
 export const TEXTO_DESFASADA = 'La titularidad ha cambiado: revisa el reparto.';

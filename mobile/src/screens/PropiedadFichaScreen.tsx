@@ -8,18 +8,21 @@
 // Versión: 0.3.0 (F06 T1-F06 B3 N1): SOLO aditivo: prop opcional `onGastos` y la fila «Obras y gastos» (C1–C3 y corrección de clase de B3). Sin `onGastos` la ficha es la de B2.
 // Versión: 0.3.1 (F06 T1-F06 B3 ajuste N3 · decisión de Moisés 2026-11-13 «B3 alcance y CAT-VIV» v1.0): la fila pasa a «Reforma o mejora» (obras que suben el valor); los gastos corrientes y las reparaciones se registran desde «Registrar gasto».
 // Versión: 0.4.0 (F06 T2-F06 · B1-R (L-01/L-01b), mandato §4.6): SOLO aditivo: prop opcional `onCorregirInicio` y la fila «Corregir desde cuándo» (C-PROP-03bis) con el inicio vigente, visible solo si el servidor la ofrece (`inicio_titularidad.inicio_corregible`); el cliente no la deduce.
+// Versión: 0.5.0 (F06 T3-F06 bloque 2 F06-01H, paso 10; contrato v0.4 §8): SOLO aditivo: props opcionales `hipoteca` (L-HIP) y `onHipoteca`, y la fila «Hipoteca» SOLO con hipoteca (lo que queda por pagar —«no disponible» si el saldo es desconocido, nunca 0— y la cuota). Es una fila normal, sin swipe. Sin esas props la ficha no cambia.
 // ============================================================
 
 import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import type { Hipoteca } from '../api/hipoteca';
 import type { Coste } from '../api/patrimonio';
 import type { VistaPropiedad } from '../api/propiedades';
 import { CabeceraNavegacion, EstadoDato } from '../components/Basicos';
 import { estilosFormulario as ef, FilaLista, RotuloGrupo, Tarjeta } from '../components/Formulario';
 import { hayCompra, textoEstadoCoste } from '../domain/compra';
 import { diaMesAnioIso } from '../domain/fechas';
+import { detalleFichaHipoteca } from '../domain/hipoteca';
 import { formatearEur } from '../domain/importe';
 import { etiquetaMetodo, etiquetaTipo, formatearPorcentaje, mesCortoAnioIso, MetodoValoracion, textoTitularidad, tuParticipacion } from '../domain/propiedad';
 import { useTema } from '../theme/tema';
@@ -46,6 +49,9 @@ export function PropiedadFichaScreen(p: {
   onGastos?: () => void;
   /** B1-R: corregir el inicio de la titularidad (C-PROP-03bis). */
   onCorregirInicio?: () => void;
+  /** F06-01H: L-HIP de la propiedad (null o ausente = sin hipoteca: no hay fila). */
+  hipoteca?: Hipoteca | null;
+  onHipoteca?: () => void;
 }) {
   const { c } = useTema();
   const inset = useSafeAreaInsets();
@@ -97,6 +103,9 @@ export function PropiedadFichaScreen(p: {
           ) : null}
           {p.onGastoCompra && hayCompra(p.coste?.ADQUISICION) ? (
             <FilaLista testID="prop-accion-gasto-compra" titulo="Añadir un gasto de la compra" detalle="Impuestos, notaría o agencia que faltaban" onPress={p.onGastoCompra} />
+          ) : null}
+          {p.onHipoteca && p.hipoteca ? (
+            <FilaLista testID="prop-accion-hipoteca" titulo="Hipoteca" detalle={detalleFichaHipoteca(p.hipoteca)} onPress={p.onHipoteca} />
           ) : null}
           {p.onGastos ? <FilaLista testID="prop-accion-gastos" titulo="Reforma o mejora" detalle="Obras que suben el valor: cocina, ventanas, pintura…" onPress={p.onGastos} /> : null}
           <FilaLista testID="prop-accion-valor" titulo="Revisar valor" detalle={sinDatos ? 'Para saber lo que vale' : undefined} onPress={p.onRevisarValor} />
