@@ -15,6 +15,8 @@
 #   L-HIP: propiedad no visible para el owner (inexistente o de otro owner) -> 404 AGREGADO_NO_ENCONTRADO,
 #   indistinguibles (G9); propiedad visible sin hipoteca -> 200 {"hipoteca": null} (forma del contrato §3.3).
 # Version: 0.1.0 (F06 T3-F06 bloque 2 F06-01H, paso 4)
+# Version: 0.2.0 (F06 T3-F06 bloque 2 F06-01H, paso 6): POST /v1/hipotecas/{financiacion_id}/cuotas/{numero}/pago
+#   (W-HIP-02, servicio propio pago.py) con sus rechazos (contrato v0.4 §7.3).
 # ============================================================
 
 from __future__ import annotations
@@ -34,7 +36,9 @@ from app.core.contexto import ContextoOperacion
 from app.core.errores import CodigoError
 from app.hipotecas import calculadora as calc
 from app.hipotecas import lecturas
-from app.hipotecas.dto import CuadroPrevio
+from app.hipotecas import pago as serv_pago
+from app.hipotecas.dto import CuadroPrevio, PagoCuota
+from app.patrimonio.completitud import Rechazo
 from app.propiedades import repositorio as repo_prop
 
 _LOG = logging.getLogger(__name__)
@@ -43,6 +47,18 @@ _LOG = logging.getLogger(__name__)
 RECHAZOS: dict[str, tuple[int, str]] = {
     "AGREGADO_NO_ENCONTRADO": (404, "No encontrado."),
     calc.CONDICIONES_INCOMPLETAS: (422, "Revisa las condiciones de la hipoteca."),
+    "IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION": (409, "Este registro ya existe con otros datos. No se ha guardado nada nuevo."),
+    "OPERACION_NO_PERMITIDA_EN_ESTADO": (409, "La hipoteca no está activa."),
+    "SALDO_PRINCIPAL_INDETERMINADO": (409, "No se conoce lo que quedaba por pagar de esta hipoteca: no se puede pagar ni revisar."),
+    "CUOTA_NO_PENDIENTE": (409, "Esta cuota ya no está pendiente."),
+    "VERSION_DESFASADA": (409, "La hipoteca ha cambiado desde que la abriste. Vuelve a cargarla."),
+    "CUOTA_ANTERIOR_PENDIENTE": (409, "Hay una cuota anterior sin pagar."),
+    "FECHA_PAGO_INCOHERENTE": (422, "La fecha del cargo no puede ser futura."),
+    "EXCEDE_SALDO_POSICION": (409, "El capital supera lo que queda por pagar."),
+    "CUENTA_DESCONOCIDA": (422, "Esa cuenta no se puede usar para pagar en esa fecha."),
+    "ATRIBUCION_PROPUESTA_DESFASADA": (409, "La titularidad del préstamo ha cambiado. Revisa el reparto de los intereses."),
+    "ENTRADA_INVALIDA": (422, "Revisa los datos."),
+    "SUMA_NO_CUADRA": (422, "El reparto no suma el 100 %."),
 }
 
 
@@ -106,4 +122,16 @@ def registrar(app: FastAPI, *, unidad, contexto: Callable[[], ContextoOperacion]
         salida = unidad.ejecutar(contexto(), leer_hipoteca, nombre="F06-01H L-HIP")
         if salida is None:
             return rechazo("AGREGADO_NO_ENCONTRADO")
+        return _texto(salida)
+
+    @app.post("/v1/hipotecas/{financiacion_id}/cuotas/{numero}/pago", dependencies=dep)
+    def pagar_cuota(financiacion_id: uuid.UUID, numero: int, c: PagoCuota):
+        peticion = c.model_dump()
+        ctx = contexto()
+        ctx = ContextoOperacion.de_usuario(ctx.owner_user_id, request_id=c.intencion_id)
+        salida = unidad.ejecutar(ctx, lambda s: serv_pago.pagar(s, financiacion_id=financiacion_id, numero=numero,
+                                                                  peticion=peticion, reloj=reloj),
+                                 nombre="F06-01H W-HIP-02")
+        if isinstance(salida, Rechazo):
+            return rechazo(salida.codigo)
         return _texto(salida)

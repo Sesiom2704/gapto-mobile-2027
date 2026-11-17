@@ -12,6 +12,7 @@
 #   (textos de error sin «ingreso» ni «cobro»). Datos sinteticos; fechas fijas (escritura 2026-03-20, hoy
 #   2026-10-10); orden explicito en todas las lecturas.
 # Version: 0.1.0 (F06 T3-F06 bloque 2 F06-01H, paso 5)
+# Version: 0.1.1 (F06 T3-F06 bloque 2 F06-01H, paso 6): O-H30 por cuenta_participaciones + aviso (enmienda del STOP n.º 2).
 # ============================================================
 from __future__ import annotations
 
@@ -276,7 +277,10 @@ def test_o_h30_distribuciones_distintas_aviso_y_atribuciones_conservadas(lab):
     atrib = lab.sql("SELECT a.actor_id::text, a.importe_atribuido::text FROM gapto.efecto_atribuciones a "
                     "JOIN gapto.hecho_efectos e ON e.id = a.efecto_id WHERE e.hecho_id = %s ORDER BY 1", (hd,))
     assert sorted(atrib) == sorted([(lab.yo, "96000.0000"), (lab.a, "64000.0000")])
-    # STOP_F06-T3-2_2 (opcion A provisional): la entrada +P no lleva aportaciones (OP-06/OP-07 solo sobre salidas)
+    # O-H30 enmendado (firma STOP n.º 2, 5f3f5f8e…): la entrada sigue la titularidad de la cuenta
+    # (cuenta_participaciones 100 % mia) sin aportaciones; la deuda, la del prestamo (60/40)
+    assert lab.sql("SELECT actor_id, porcentaje::text FROM gapto.cuenta_participaciones WHERE cuenta_id = %s",
+                   (lab.cd,)) == [(lab.actor, "100.0000")]
     assert lab.sql("SELECT count(*) FROM gapto.hecho_aportaciones_pago WHERE hecho_id = %s", (hd,)) == [(0,)]
 
 

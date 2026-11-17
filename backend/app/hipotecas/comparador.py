@@ -14,6 +14,10 @@
 #        campos de la tabla MB2 (contrato §1.2) con lo que la peticion sellada produce.
 #   Igualdad -> idempotente (0 escrituras); cualquier diferencia -> IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION.
 # Version: 0.1.0 (F06 T3-F06 bloque 2 F06-01H, paso 5)
+# Version: 0.2.0 (F06 T3-F06 bloque 2 F06-01H, paso 6; firma de Moises STOP n.º 2 / Q3, 5f3f5f8e…, y enmienda
+#   e28be7c6… del contrato v0.4 y del literal B2 v1.1): la pieza 13 (MB2-13) pasa a «pertenencia: Hd sin
+#   aportaciones» y se comprueba SOLO en `_p13_aportacion` (fuera de `_pertenencia`), para que su mutante propio
+#   la elimine sin que otra comprobacion la cubra.
 # ============================================================
 
 from __future__ import annotations
@@ -66,10 +70,12 @@ def _pertenencia(sesion: SesionMotor, e: Esperado) -> bool:
     declaradas["hecho_efectos"] = {x.efecto_id for x in d.efectos}
     declaradas["efecto_atribuciones"] = {a.atribucion_id for x in d.efectos for a in x.atribuciones}
     declaradas["hecho_movimientos_tesoreria"] = {p.conciliacion.conciliacion_id for p in d.pagos}
-    declaradas["hecho_aportaciones_pago"] = {a.aportacion_id for a in d.aportaciones}
     declaradas["hecho_entidades"] = {pl.vinculo_id}
     declaradas["hecho_relaciones"] = {pl.parte_de}
-    if repo_comp.identidades_del_agregado(sesion, pl.hd) != declaradas:
+    persistidas = repo_comp.identidades_del_agregado(sesion, pl.hd)
+    persistidas.pop("hecho_aportaciones_pago", None)          # pieza 13: la comprueba _p13_aportacion
+    declaradas.pop("hecho_aportaciones_pago", None)
+    if persistidas != declaradas:
         return False
     if _ids(sesion, "SELECT id FROM gapto.entidad_participaciones WHERE entidad_id = %s", pl.financiacion_id) != {
             pl.participacion_id(a) for a, _ in e.prestamo or []}:
@@ -186,6 +192,11 @@ def _p12_conciliacion(sesion: SesionMotor, e: Esperado) -> bool:
 
 
 def _p13_aportacion(sesion: SesionMotor, e: Esperado) -> bool:
+    """Firma STOP n.º 2 (opcion A): para una entrada la regla vigente es «ninguna aportacion»; la pieza 13 es la
+    pertenencia exacta: el conjunto de aportaciones de Hd es el declarado (vacio)."""
+    if _ids(sesion, "SELECT id FROM gapto.hecho_aportaciones_pago WHERE hecho_id = %s", e.plan.hd) != {
+            a.aportacion_id for a in e.hd.aportaciones}:
+        return False
     return all(_fila(sesion, "SELECT * FROM gapto.hecho_aportaciones_pago WHERE id = %s", a.aportacion_id, {
         "hecho_id": e.plan.hd, "actor_id": a.actor_id, "importe": a.importe, "porcentaje_aplicado": a.porcentaje_aplicado,
         "criterio_aportacion": a.criterio_aportacion, "hecho_movimiento_tesoreria_id": a.hecho_movimiento_tesoreria_id})

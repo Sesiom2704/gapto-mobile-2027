@@ -73,6 +73,10 @@
 #   la ruta POST nueva de W-HIP-00 (/v1/hipotecas/cuadro, contrato v0.4 §3.1 y §7.1) se clasifica como ajena a F05-06:
 #   POST SIN ESCRITURA (no abre transaccion; huella de toda la base identica en test_288). Ninguna otra ruta ni
 #   comando cambia; el barrido no cambia.
+# Version: 0.6.2 (F06 T3-F06 bloque 2 F06-01H, paso 6; L-06-T3 del mandato v1.1 §5.1, solo test_inventario_post_cerrado):
+#   la ruta POST de W-HIP-02 (/v1/hipotecas/{financiacion_id}/cuotas/{numero}/pago, contrato v0.4 §3.4 y §7.1) se
+#   clasifica como ajena a F05-06: atomicidad propia (una transaccion de UnidadDeTrabajo, OP-22 adscrito; rechazo =
+#   estado identico, test_293). Ninguna otra ruta ni comando cambia; el barrido no cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -599,6 +603,8 @@ AJENAS_A_F05_06 = {
                                                           "de comando; test_260 O-B1R-19 y O-B1R-05..08)",
     "/v1/hipotecas/cuadro": "F06 T3-F06 F06-01H W-HIP-00: POST SIN ESCRITURA (vista previa del cuadro; test_288, "
                             "huella de toda la base identica antes y despues)",
+    "/v1/hipotecas/{financiacion_id}/cuotas/{numero}/pago": "F06 T3-F06 F06-01H W-HIP-02: atomicidad propia (una "
+                                                            "transaccion, OP-22 adscrito; test_293 estado identico)",
 }
 
 

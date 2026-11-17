@@ -10,9 +10,10 @@
 #   hipoteca (falta Hd) -> rechazo sin completar con OP-22.
 #   Alteraciones que un guard fisico de 0354 impide (declaradas, regla de §11.3): MB2-05 (G3 congela la version
 #   ALTA de F en M) se altera la MISMA fila y columna con los triggers de usuario desactivados en la transaccion
-#   del fixture (session_replication_role = replica, superusuario de la base desechable). MB2-13 queda sin oraculo
-#   por STOP_F06-T3-2_2 (Hd sin aportaciones: OP-06/OP-07); su lugar lo ocupa la pertenencia (aportacion anadida).
+#   del fixture (session_replication_role = replica, superusuario de la base desechable). MB2-13 (enmendado por la
+#   firma del STOP n.º 2, 5f3f5f8e…): pertenencia «Hd sin aportaciones» (aportacion anadida -> 409).
 # Version: 0.1.0 (F06 T3-F06 bloque 2 F06-01H, paso 5)
+# Version: 0.2.0 (F06 T3-F06 bloque 2 F06-01H, paso 6): test_mb2_13_aportacion por la enmienda de MB2-13.
 # ============================================================
 from __future__ import annotations
 
@@ -195,8 +196,9 @@ def test_mb2_14_atribucion(lab):
     _replay_rechazado_y_reversible(lab, cuerpo, lambda: poner(x2, x1), lambda: poner(x1, x2))
 
 
-def test_mb2_pertenencia_aportacion_anadida_a_hd(lab):
-    """En lugar de MB2-13 (STOP_F06-T3-2_2): una aportacion que aparece en Hd rompe el replay por pertenencia."""
+def test_mb2_13_aportacion(lab):
+    """MB2-13 enmendado (firma STOP n.º 2, 5f3f5f8e…; enmienda e28be7c6…): pertenencia «Hd sin aportaciones»;
+    una aportacion que aparece en Hd rompe el replay (409, huella identica)."""
     cuerpo, i = _alta(lab)
     nueva = uuid.uuid4()
     _replay_rechazado_y_reversible(

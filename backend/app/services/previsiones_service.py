@@ -31,6 +31,11 @@
 #   sigue siendo ABIERTA: no hay estado PARCIAL persistido. Y el primer hecho
 #   ACTIVO congela la expectativa poniendo `recalculo_automatico=false`, de
 #   modo que una version posterior de la regla ya no reescribe ese importe.
+# Version: 0.11.0
+#   0.11.0 (F06 T3-F06 bloque 2 F06-01H, paso 6; contrato v0.4 §3.4 «Prevision de la cuota fuera de M5»,
+#   AJ-T3D-06; M-H-36): `corregir_estado_terminal` rechaza ANTES de escribir la prevision vinculada a una cuota de
+#   financiacion (ESTADO_PREVISION_INCOMPATIBLE, motivo PREVISION_DE_CUOTA_HIPOTECA). La base lo impide ademas con
+#   G1-R (0354). Ningun otro comportamiento cambia.
 # Version: 0.10.1
 #   0.10.1 (F05-D051 paso 1, §65.4 C2-H1; AJ-F0507G2-07): `_sucesor_reabrible`
 #   busca SIEMPRE el terminal posterior de la cadena, tambien el INTERMEDIO
@@ -1623,6 +1628,14 @@ class PrevisionesService:
             if regla_id is not None:
                 repo_reglas.bloquear_regla(sesion, regla_id)
 
+            if sesion.uno(
+                "SELECT 1 FROM gapto.financiacion_cuotas WHERE prevision_id = %s", (prevision_id,)
+            ) is not None:                                     # F06-01H (M-H-36): nunca reabrir una cuota
+                raise ErrorMotor(
+                    CodigoError.ESTADO_PREVISION_INCOMPATIBLE,
+                    "La previsión de una cuota de hipoteca no se reabre: solo cambia con su pago.",
+                    contexto_extra={"motivo": "PREVISION_DE_CUOTA_HIPOTECA"},
+                )
             estado = prevision["estado"]
             if estado == ABIERTA:
                 raise ErrorMotor(

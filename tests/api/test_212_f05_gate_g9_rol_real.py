@@ -34,6 +34,10 @@
 #   /v1/propiedades/{propiedad_id}/gastos/..., y CONSULTA gana los parametros obligatorios de dos lecturas
 #   (propuesta-gasto: fecha; impacto-correccion: clase_nueva). El oraculo, las rutas recorridas (todas, desde la
 #   propia app) y las demas sustituciones no cambian.
+# Version: 0.4.0 (F06 T3-F06 bloque 2 F06-01H, paso 6; L-06-T3 del mandato v1.1 §5.1, test_212 en la lista inicial):
+#   para admitir la ruta nueva POST /v1/hipotecas/{financiacion_id}/cuotas/{numero}/pago, el owner B tiene una
+#   financiacion HIPOTECA real (fixture sintetico bajo gapto_owner, sin cuadro: fuera del ambito de 0354) que
+#   sustituye a {financiacion_id}, y {numero} = 1. El oraculo y las rutas recorridas no cambian.
 # ============================================================
 
 from __future__ import annotations
@@ -161,11 +165,19 @@ def b():
             "criterio": "TITULARIDAD_EN_FECHA_HECHO", "fecha_referencia": "2026-05-15",
             "partes": [{"actor_id": yo, "porcentaje": "100.0000"}]}}}, headers=h.AUTH)
     assert r.status_code == 200, r.text
+    financiacion = uuid.uuid4()                                 # F06-01H: hipoteca real de B (sin cuadro)
+    with psycopg.connect(h.dsn()) as conexion, conexion.transaction():  # subtipo unico: una transaccion
+        conexion.execute("SET LOCAL ROLE gapto_owner")
+        conexion.execute("SELECT set_config('gapto.owner_user_id', %s, true)", (str(owner),))
+        conexion.execute("INSERT INTO gapto.entidades (id, owner_user_id, tipo_entidad, nombre) VALUES "
+                         "(%s, %s, 'FINANCIACION', 'Hipoteca de B')", (financiacion, owner))
+        conexion.execute("INSERT INTO gapto.financiaciones (entidad_id, tipo_financiacion, moneda) VALUES "
+                         "(%s, 'HIPOTECA', 'EUR')", (financiacion,))
     ids = {"categoria_id": categoria, "asociacion_id": aid, "magnitud_id": mid, "preferencia_id": pref, "cuenta_id": cta,
            "capacidad": "PAGAR_GASTO", "tercero_id": tercero, "contexto_id": contexto, "plantilla_id": plt,
            "accion_id": acc, "origen_id": gasto, "devolucion_id": devolucion, "entidad_id": posicion, "hecho_id": gasto,
            "prevision_id": prevision, "afinidad_id": afi, "propiedad_id": propiedad,
-           "gasto_propiedad": gasto_propiedad}
+           "gasto_propiedad": gasto_propiedad, "financiacion_id": financiacion, "numero": 1}
     return {"owner": owner, "cli": cli, "ids": ids, "cena": cena, "transferencia": transf, "tania": tania}
 
 

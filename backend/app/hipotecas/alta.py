@@ -17,7 +17,7 @@
 #   - Hd (§3.2.3-5; firma 8aa948f9 tipo de Hd; C-01): hecho GENERACION_DERECHO_OBLIGACION, no presupuestable,
 #     fecha = escritura, importe = P; UN efecto DEUDA +P atribuido por la titularidad DEL PRESTAMO (D13);
 #     movimiento +P en la cuenta de desembolso conciliado ENTERO; SIN aportaciones (OP-06/OP-07 solo las admiten
-#     sobre salidas; STOP_F06-T3-2_2, opcion A provisional); por OP-22 adscrito. Vinculo AFECTA_A de NIVEL EFECTO a la
+#     sobre salidas; firma STOP n.º 2 / Q3, 5f3f5f8e…, opcion A definitiva); por OP-22 adscrito. Vinculo AFECTA_A de NIVEL EFECTO a la
 #     financiacion por el writer propio (vinculo.py). Enlace con la compra: PARTE_DE Hd -> H0 con la marca
 #     `gapto.f06.compra.desembolso` (H-HIP-02, paso 1).
 #   - Financiacion (§1.1): entidad FINANCIACION «Hipoteca · <propiedad>»; HIPOTECA, EUR, P, apertura 0 con
@@ -30,6 +30,8 @@
 #   Locks: los toma la compra (R1, §6): advisory de raices (H0, Hk, Hd) -> INVERSIONES -> propiedad -> cuentas
 #   por UUID una vez cada una (pagos, desembolso y cargo) -> resto del agregado.
 # Version: 0.1.0 (F06 T3-F06 bloque 2 F06-01H, paso 5)
+# Version: 0.1.1 (F06 T3-F06 bloque 2 F06-01H, paso 6): APORTACIONES_EN_ENTRADA = False definitiva por la firma
+#   del STOP n.º 2 (5f3f5f8e…); solo comentarios.
 # ============================================================
 
 from __future__ import annotations
@@ -76,9 +78,9 @@ OBLIGATORIOS = ("financiador", "importe_prestamo", "cuenta_desembolso_id", "titu
                 "tasa_anual_pct", "numero_cuotas", "fecha_primera_cuota", "cuenta_cargo_id")
 #: Campos de modalidad no representable en v1 (§3.2.7-8): se aceptan en el DTO solo para rechazarlos con motivo.
 MODALIDAD = ("fecha_desembolso", "pago_directo_vendedor", "tramos")
-#: STOP_F06-T3-2_2: el contrato v0.4 (§3.2.3-5, O-H30, MB2-13) pide una aportacion de la cuenta sobre la entrada
-#: +P, pero OP-06/OP-07 la prohiben (USO_EN_COBRO_NO_PERMITIDO: una aportacion financia una SALIDA). Opcion A
-#: (provisional, recomendada): sin aportaciones en Hd. Constante de codigo; nunca entorno.
+#: DEFINITIVA (firma de Moises STOP n.º 2 / Q3, 5f3f5f8e…; enmienda e28be7c6… del contrato v0.4 §3.2.3-5 y O-H30
+#: y del literal B2 v1.1 MB2-13): para una entrada la regla vigente de OP-06/OP-07 es «ninguna aportacion»
+#: (USO_EN_COBRO_NO_PERMITIDO); Hd va sin aportaciones (Q-T3D-04). No se toca OP-06/OP-07. Constante de codigo.
 APORTACIONES_EN_ENTRADA = False
 
 
@@ -264,8 +266,8 @@ def composicion_hd(pl: Plan, prestamo: list[tuple[uuid.UUID, Decimal]] | None, m
                                        descripcion="PRESTAMO RECIBIDO"),
             conciliacion=DatosConciliacion(conciliacion_id=pl.conciliacion, hecho_id=pl.hd,
                                            movimiento_tesoreria_id=pl.movimiento, importe_asignado=pl.p))],
-        # STOP_F06-T3-2_2 (opcion A provisional): la regla vigente de aportaciones (OP-06/OP-07) solo admite
-        # aportaciones sobre SALIDAS (USO_EN_COBRO_NO_PERMITIDO); para la entrada +P no hay aportacion.
+        # Firma STOP n.º 2 (opcion A, definitiva): OP-06/OP-07 solo admiten aportaciones sobre SALIDAS; la entrada
+        # +P no lleva aportacion.
         aportaciones=[] if not APORTACIONES_EN_ENTRADA else [
             DatosAportacion(aportacion_id=pl.aportacion_id(a), importe=importes[a],
                             criterio_aportacion="PARTICIPACION_CUENTA", actor_id=a, porcentaje_aplicado=pc,
