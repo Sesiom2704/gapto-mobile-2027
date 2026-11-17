@@ -215,6 +215,8 @@
 #   reparto, que usa REPARTO_NO_CORREGIBLE con motivo HECHO_DE_FINANCIACION) y PREVISION_DE_CUOTA (S7 y S10).
 #   MOTIVOS_EDICION anade HECHO_DE_FINANCIACION. Ningun codigo existente cambia de significado ni de status.
 # Version: 0.33.0
+# Version: 0.34.0 (F06 T3-F06 bloque 2 F06-01H, paso 5; firma 53972c8c): CUENTA_SIN_CAPACIDAD conoce la operacion
+#   DESEMBOLSO_FINANCIACION («recibir dinero»; nunca «ingreso»). Ningun codigo existente cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -517,6 +519,7 @@ _SIN_CAPACIDAD: dict[str, tuple[str, str]] = {
     "TRANSFERENCIA_ORIGEN": ("enviar a otras cuentas tuyas", "La transferencia"),
     "TRANSFERENCIA_DESTINO": ("recibir de otras cuentas tuyas", "La transferencia"),
     "ABONO_DEVOLUCION": ("recibir dinero", "El abono"),
+    "DESEMBOLSO_FINANCIACION": ("recibir dinero", "La compra"),
 }
 #: ABONO_DEVOLUCION: lo que la cuenta ya no puede hacer, segun la capacidad del detalle (M2-D; nunca «ingreso»).
 _SIN_CAPACIDAD_ABONO: dict[str, str] = {"RECIBIR_INGRESO": "recibir dinero"}

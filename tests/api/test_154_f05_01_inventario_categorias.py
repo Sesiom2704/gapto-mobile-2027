@@ -418,6 +418,10 @@
 #     I13a registra SOLO las altas de imports de RegistroGastoScreen del bloque «Propiedad» (api/config,
 #     api/patrimonio_b3, api/propiedades, components/BloquePropiedad, domain/propiedad_registro). El discriminante
 #     (igualdad exacta del conjunto de imports) se conserva. Ninguna regla ni entrada previa cambia.
+# Version: 0.42.0 (F06 T3-F06 bloque 2 F06-01H, paso 5; L-06-T3 del mandato v1.1 §5.1, test_154 en la lista
+#     inicial): alta aditiva en I1 del comparador ampliado de la compra con hipoteca
+#     (backend/app/hipotecas/comparador.py::_p09_efecto_deuda, clase R: lee categoria_id para comparar la pieza 9,
+#     MB2-09; no escribe). El discriminante (toda aparicion registrada) se conserva. Ninguna entrada previa cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -560,6 +564,9 @@ REGISTRO: dict[tuple[str, str], tuple[str, str, str]] = {
     ("backend/app/patrimonio/compra.py", "agregado_coincide"): (
         "R", "C-COMPRA-01/03 identidad (F06 B2)", "comparador propio del replay de la compra: igualdad exacta del "
         "agregado (F04-D050, AJ-TR1-09); B2 nunca escribe categoria (VALOR_ACTIVO de adquisicion sin categoria)"),
+    ("backend/app/hipotecas/comparador.py", "_p09_efecto_deuda"): (
+        "R", "C-COMPRA-01 con hipoteca identidad (F06-01H, B2 v1.1)", "pieza 9 (efecto DEUDA de Hd) del comparador "
+        "ampliado: igualdad exacta; Hd nunca lleva categoria (categoria_id NULL esperado)"),
     ("backend/app/services/suplementos_service.py", "SuplementosService.registrar.operacion"): (
         "A_MOTOR", "OP-18", "realidad suplementaria nueva con categoria declarada (no se presupone B)"),
     ("backend/app/services/devoluciones_service.py", "DevolucionesService.devolver.operacion"): (

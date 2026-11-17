@@ -17,6 +17,9 @@
 #   Rechazos con su mapa propio (patron _RECHAZOS_PROPIEDAD de B1); los codigos existentes conservan su status.
 # Version: 0.1.0 (F06 T1-F06 B2 N1)
 # Version: 0.2.0 (F06 T2-F06 A3-0352 (L-05)): rechazo COMPLETITUD_SIN_FECHA_DE_ADQUISICION (R15-a, 422; UX-4).
+# Version: 0.3.0 (F06 T3-F06 bloque 2 F06-01H, paso 5): rechazos del bloque `hipoteca` de la compra
+#   (CONDICIONES_INCOMPLETAS con `motivo` arriba, HIPOTECA_YA_REGISTRADA, CUENTA_SIN_CAPACIDAD del desembolso,
+#   TERCERO_NO_DISPONIBLE); textos sin «ingreso» ni «cobro».
 # ============================================================
 
 from __future__ import annotations
@@ -56,6 +59,11 @@ RECHAZOS: dict[str, tuple[int, str]] = {
     "COMPLETITUD_SIN_COMPONENTES": (422, "No hay ningún coste de compra hasta esa fecha."),
     "COMPLETITUD_SIN_FECHA_DE_CORTE": (422, "Revisa la fecha: no puede ser futura ni anterior a la compra."),
     "COMPLETITUD_SIN_FECHA_DE_ADQUISICION": (422, "Para marcar el coste como completo, indica antes la fecha de adquisición de la propiedad."),
+    # F06-01H (contrato v0.4 §3.2.4, §7.3): ni el formulario ni los errores del desembolso dicen «ingreso».
+    "CONDICIONES_INCOMPLETAS": (422, "Revisa los datos de la hipoteca."),
+    "HIPOTECA_YA_REGISTRADA": (409, "Esta propiedad ya tiene una hipoteca activa."),
+    "CUENTA_SIN_CAPACIDAD": (409, "Esta cuenta no puede recibir dinero en la fecha de la escritura."),
+    "TERCERO_NO_DISPONIBLE": (422, "El banco elegido no está disponible."),
 }
 
 
@@ -64,6 +72,8 @@ def rechazo(codigo: str, detalle: dict | None = None) -> JSONResponse:
     cuerpo: dict[str, Any] = {"codigo": codigo, "mensaje": mensaje, "reintentable": False}
     if detalle:
         cuerpo["detalle"] = detalle
+        if "motivo" in detalle and codigo == "CONDICIONES_INCOMPLETAS":
+            cuerpo["motivo"] = detalle["motivo"]                    # contrato v0.4 §7.2
     return JSONResponse(cuerpo, status_code=status)
 
 

@@ -48,6 +48,8 @@
 #   SIN exigir capacidad (recibir la devolucion no es pagar). No cambia
 #   ninguna operacion existente: CAPACIDAD_POR_OPERACION, OPERACIONES,
 #   `elegibilidad_cuentas`, `cuentas_elegibles` y `motivo_cuenta` quedan igual.
+# Version: 0.4.0 (F06 T3-F06 bloque 2 F06-01H, paso 5; firma 53972c8c): operacion DESEMBOLSO_FINANCIACION ->
+#   RECIBIR_INGRESO (permiso de recibir fondos; no clasifica el hecho). Las operaciones existentes no cambian.
 # ============================================================
 
 from __future__ import annotations
@@ -67,6 +69,9 @@ CAPACIDAD_POR_OPERACION: dict[str, str] = {
     "INGRESO": "RECIBIR_INGRESO",
     "TRANSFERENCIA_ORIGEN": "TRANSFERIR_SALIDA",
     "TRANSFERENCIA_DESTINO": "TRANSFERIR_ENTRADA",
+    # F06-01H (firma 53972c8c): recibir el prestamo en la cuenta de desembolso exige el PERMISO de recibir
+    # fondos (RECIBIR_INGRESO, precedente D-DEV-04); no clasifica el hecho como ingreso.
+    "DESEMBOLSO_FINANCIACION": "RECIBIR_INGRESO",
 }
 OPERACIONES = frozenset(CAPACIDAD_POR_OPERACION)
 

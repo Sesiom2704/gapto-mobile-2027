@@ -37,6 +37,17 @@
 #     despues de identidad, version y reglas propias de la operacion y antes de la primera escritura.
 # Version: 0.1.0 (F06 T1-F06 B2 N1)
 # Version: 0.2.0 (F06 T2-F06 A3-0352 (L-05)): R15-a en _validar_declaracion (C-COMPRA-01 y C-COMPRA-03).
+# Version: 0.3.0 (F06 T3-F06 bloque 2 F06-01H, paso 5; reapertura de B2 v1.1 B1-B6; contrato v0.4 §3.2; D6, D7):
+#   bloque `hipoteca` habilitado (fin de E4). Forma del bloque (alta.forma) antes de cualquier lock; el sello incluye
+#   la forma canonica del bloque SOLO si viene (una compra sin hipoteca conserva su sello). Raices = H0, Hk y Hd
+#   (desembolso, uuid5(H0, 'gapto.f06.compra.desembolso')). Identidad: (ii) admite ademas la PARTE_DE de Hd y, tras
+#   (i)..(vi), el comparador ampliado de 14 piezas (hipotecas/comparador.py). Guardas: las de la compra sin cambios
+#   (Σ pagos propios = precio intacta, B4; sin PRESTAMO_SUPERA_PRECIO, B3) -> HIPOTECA_YA_REGISTRADA -> cuentas
+#   FOR NO KEY UPDATE por UUID UNA vez cada una (pagos, desembolso y cargo; R1 propiedad -> cuentas, B6) -> pagos
+#   PAGAR_GASTO -> cargo PAGAR_GASTO en la primera cuota -> desembolso RECIBIR_INGRESO en la escritura
+#   (operacion DESEMBOLSO_FINANCIACION; firma 53972c8c) -> financiador -> titularidad del prestamo. Composicion:
+#   OP-22 por raiz (Hd incluido) y despues el agregado de la financiacion (alta.escribir). La declaracion de
+#   completitud no cuenta Hd. Respuesta con `hipoteca` (L-HIP) y `aviso_reparto_distinto`.
 # ============================================================
 
 from __future__ import annotations
@@ -58,6 +69,9 @@ from app.core.modelos_efectos import DatosEfecto
 from app.core.modelos_tesoreria import DatosConciliacion, DatosMovimiento
 from app.core.unidad_adscrita import UnidadDeTrabajoAdscrita
 from app.core.unidad_trabajo import SesionMotor
+from app.hipotecas import alta as hip
+from app.hipotecas import comparador as comp_hip
+from app.hipotecas import lecturas as lect_hip
 from app.patrimonio import atribucion as m2
 from app.patrimonio import coste
 from app.patrimonio import habilitacion
@@ -154,6 +168,7 @@ def canonica_compra(propiedad_id: uuid.UUID, p: dict) -> dict:
         "gastos": sorted((canonica_gasto(g) for g in p["gastos"]), key=lambda x: x["linea_id"]),
         "atribucion": canonica_atribucion(p["atribucion"]),
         "completitud_adquisicion": canonica_completitud(p.get("completitud_adquisicion")),
+        **({} if p.get("hipoteca") is None else {"hipoteca": hip.canonica(p["hipoteca"])}),
     }
 
 
@@ -316,15 +331,25 @@ def h0_candidatos(sesion: SesionMotor, propiedad_id: uuid.UUID) -> list[uuid.UUI
         return [f[0] for f in cur.fetchall()]
 
 
-def _bloquear_y_validar_cuentas(sesion: SesionMotor, usos: list[tuple[uuid.UUID, dt.date]]) -> str | None:
-    """Nivel 3: cuentas FOR NO KEY UPDATE por id; regla R1 con la operacion de pago EXPLICITA (GASTO ->
-    PAGAR_GASTO; §II.5): no se apoya en «todo lo que no es INGRESO es GASTO»."""
-    for cuenta in sorted({c for c, _ in usos}, key=str):
+def _bloquear_cuentas(sesion: SesionMotor, cuentas: set[uuid.UUID]) -> None:
+    """Nivel 3 (R1, B6): cuentas FOR NO KEY UPDATE en orden de UUID, UNA vez cada una (pagos, desembolso y cargo)."""
+    for cuenta in sorted(cuentas, key=str):
         sesion.uno("SELECT id FROM gapto.cuentas WHERE id = %s FOR NO KEY UPDATE", (cuenta,))
+
+
+def _validar_cuentas(sesion: SesionMotor, usos: list[tuple[uuid.UUID, dt.date]]) -> str | None:
+    """Regla R1 con la operacion de pago EXPLICITA (GASTO -> PAGAR_GASTO; §II.5): no se apoya en «todo lo que no
+    es INGRESO es GASTO». Las cuentas ya estan bloqueadas por `_bloquear_cuentas`."""
     for cuenta, fecha in usos:
         if motivo_cuenta(sesion, cuenta, "GASTO", fecha, bloquear=True) is not None:
             return CUENTA_DESCONOCIDA
     return None
+
+
+def _bloquear_y_validar_cuentas(sesion: SesionMotor, usos: list[tuple[uuid.UUID, dt.date]]) -> str | None:
+    """Nivel 3 de C-COMPRA-01 sin hipoteca y de C-COMPRA-03: bloqueo por UUID y regla R1 (GASTO)."""
+    _bloquear_cuentas(sesion, {c for c, _ in usos})
+    return _validar_cuentas(sesion, usos)
 
 
 def _de_otros(sesion: SesionMotor, propiedad_id: uuid.UUID, hoy: dt.date) -> bool:
@@ -347,14 +372,53 @@ def _liquidez_atribuible(sesion: SesionMotor, movimientos: list[tuple[uuid.UUID,
 
 
 def _respuesta(sesion: SesionMotor, propiedad_id: uuid.UUID, hechos: list[dict], movimientos: list,
-               atribucion: dict, hoy: dt.date, idempotente: bool) -> dict:
+               atribucion: dict, hoy: dt.date, idempotente: bool, plan_hip: hip.Plan | None = None) -> dict:
     vista = lecturas.detalle(sesion, propiedad_id, hoy)
     salida = sum((imp.quantize(CENT) for _, _, imp in movimientos), Decimal(0))
     leido = coste.leer(sesion, propiedad_id, hoy)
-    return {"propiedad": vista, "idempotente": idempotente,
-            "compra": {"hechos": hechos, "coste_adquisicion": None if leido is None else leido["ADQUISICION"],
-                       "sale_de_tus_cuentas": str(salida), "liquidez_atribuible": _liquidez_atribuible(sesion, movimientos),
-                       "gasto_del_mes": "0.00", "atribucion": atribucion}}
+    respuesta = {"propiedad": vista, "idempotente": idempotente,
+                 "compra": {"hechos": hechos, "coste_adquisicion": None if leido is None else leido["ADQUISICION"],
+                            "sale_de_tus_cuentas": str(salida),
+                            "liquidez_atribuible": _liquidez_atribuible(sesion, movimientos),
+                            "gasto_del_mes": "0.00", "atribucion": atribucion}}
+    if plan_hip is not None:                                                            # F06-01H
+        vista_hip = lect_hip.leer(sesion, plan_hip.financiacion_id, hoy)
+        respuesta["hipoteca"] = vista_hip
+        respuesta["aviso_reparto_distinto"] = bool(vista_hip and vista_hip["aviso_reparto_distinto"])
+    return respuesta
+
+
+def _guardas_hipoteca(sesion: SesionMotor, pl: hip.Plan, propiedad_id: uuid.UUID, bloque: dict) -> dict | Rechazo:
+    """§3.2.4 tras los locks de cuentas: cargo PAGAR_GASTO en la primera cuota -> desembolso RECIBIR_INGRESO en la
+    escritura (DESEMBOLSO_FINANCIACION, FOR SHARE de la capacidad) -> financiador -> titularidad del prestamo."""
+    if motivo_cuenta(sesion, pl.cuenta_cargo, "GASTO", pl.primera_cuota, bloquear=True) is not None:
+        return Rechazo(CUENTA_DESCONOCIDA)
+    motivo = motivo_cuenta(sesion, pl.cuenta_desembolso, hip.OPERACION_DESEMBOLSO, pl.escritura, bloquear=True)
+    if motivo is not None:
+        nombre = sesion.uno("SELECT nombre FROM gapto.cuentas WHERE id = %s", (pl.cuenta_desembolso,))
+        return Rechazo(hip.CUENTA_SIN_CAPACIDAD, {
+            "operacion": hip.OPERACION_DESEMBOLSO, "capacidad": "RECIBIR_INGRESO", "motivo": motivo,
+            "cuenta_id": str(pl.cuenta_desembolso), "cuenta": None if nombre is None else nombre[0]})
+    actor = hip.financiador(sesion, uuid.UUID(pl.canon["financiador"]["tercero_id"]))
+    if isinstance(actor, str):
+        return Rechazo(actor)
+    prestamo = m2.resolver(sesion, propiedad_id, bloque["titularidad"])
+    if isinstance(prestamo, str):
+        return Rechazo(prestamo)
+    return {"financiador": actor, "prestamo": prestamo,
+            "cuenta": hip.participacion_cuenta(sesion, pl.cuenta_desembolso, pl.escritura)}
+
+
+def _esperado_hip(sesion: SesionMotor, pl: hip.Plan) -> comp_hip.Esperado:
+    """Replay: la composicion esperada con las partes SELLADAS del prestamo (nunca la titularidad actual)."""
+    from app.actores import repositorio as repo_actores
+    titularidad = pl.canon["titularidad"]
+    prestamo = _partes_del_sello({"atribucion": titularidad})
+    cuenta = hip.participacion_cuenta(sesion, pl.cuenta_desembolso, pl.escritura)
+    return comp_hip.Esperado(
+        plan=pl, hd=hip.composicion_hd(pl, prestamo, titularidad["modo"], cuenta),
+        financiador_actor=repo_actores.leer_actor_de_tercero(sesion, uuid.UUID(pl.canon["financiador"]["tercero_id"])),
+        prestamo=prestamo, nombre_propiedad=repo.leer(sesion, pl.propiedad_id)["nombre"])
 
 
 def _partes_del_sello(canon: dict) -> list[tuple[uuid.UUID, Decimal]] | None:
@@ -421,13 +485,23 @@ def registrar_compra(sesion: SesionMotor, *, propiedad_id: uuid.UUID, peticion: 
                              fecha_referencia=peticion["fecha_escritura"])
     if forma is not None:
         return Rechazo(forma)
+    bloque = peticion.get("hipoteca")
+    if bloque is not None:                                          # F06-01H: forma antes de cualquier lock
+        motivo = hip.forma(bloque, peticion["fecha_escritura"])
+        if motivo is not None:
+            return Rechazo(hip.CONDICIONES_INCOMPLETAS, {"motivo": motivo})
+        forma = m2.validar_forma(bloque["titularidad"], criterio=m2.CRITERIO_ESCRITURA,
+                                 fecha_referencia=peticion["fecha_escritura"])
+        if forma is not None:
+            return Rechazo(forma)
     canon = canonica_compra(propiedad_id, peticion)
     s = sello(canon)
     h0 = uuid.UUID(canon["intencion_id"])
     lineas = {uuid.UUID(g["linea_id"]): g for g in canon["gastos"]}
     hks = {lid: uuid.uuid5(h0, f"gapto.f06.compra.gasto:{lid}") for lid in lineas}
-    raices = sorted({h0, *hks.values()}, key=str)
     escritura = dt.date.fromisoformat(canon["fecha_escritura"])
+    plan_hip = None if bloque is None else hip.plan(h0, propiedad_id, escritura, canon["hipoteca"])
+    raices = sorted({h0, *hks.values(), *([] if plan_hip is None else [plan_hip.hd])}, key=str)
     # 0 -> 1 -> 2
     for r in raices:
         repo_comp.tomar_advisory_raiz(sesion, r)
@@ -477,7 +551,8 @@ def registrar_compra(sesion: SesionMotor, *, propiedad_id: uuid.UUID, peticion: 
         if len(existentes) != len(raices):                                              # (v) lote parcial
             return Rechazo(IDENTIDAD_REUTILIZADA)
         compra03 = {(i, o) for i, o in _relaciones_hacia(sesion, h0) if i == uuid.uuid5(o, MARCA_LOTE03)}
-        if _relaciones_hacia(sesion, h0) - compra03 != {(i, hk) for hk, (i, _) in parte_de.items()}:
+        desembolso = set() if plan_hip is None else {(plan_hip.parte_de, plan_hip.hd)}
+        if _relaciones_hacia(sesion, h0) - compra03 != {(i, hk) for hk, (i, _) in parte_de.items()} | desembolso:
             return Rechazo(IDENTIDAD_REUTILIZADA)                                       # (ii) y (vi)
         if repo_comp.leer(sesion, "hecho_entidades", vinculo_h0) is None:               # (iv) sello
             return Rechazo(IDENTIDAD_REUTILIZADA)
@@ -485,7 +560,9 @@ def registrar_compra(sesion: SesionMotor, *, propiedad_id: uuid.UUID, peticion: 
         for r, d in declaradas.items():                                                 # (i) y (iii)
             if not agregado_coincide(sesion, d, parte_de.get(r)):
                 return Rechazo(IDENTIDAD_REUTILIZADA)
-        return _respuesta(sesion, propiedad_id, hechos, movimientos, canon["atribucion"], hoy, True)
+        if plan_hip is not None and not comp_hip.coincide(sesion, _esperado_hip(sesion, plan_hip)):
+            return Rechazo(IDENTIDAD_REUTILIZADA)                                       # 14 piezas (B2)
+        return _respuesta(sesion, propiedad_id, hechos, movimientos, canon["atribucion"], hoy, True, plan_hip)
 
     # INTENCION NUEVA
     if raiz["row_version"] != canon["row_version_esperada"]:
@@ -502,13 +579,25 @@ def registrar_compra(sesion: SesionMotor, *, propiedad_id: uuid.UUID, peticion: 
         fp = dt.date.fromisoformat(p["fecha_pago"])
         if (p["rol"] == "FIRMA" and fp != escritura) or (p["rol"] == "ARRAS" and fp > escritura):
             return Rechazo(FECHA_PAGO_INCOHERENTE)
-    rechazo = _bloquear_y_validar_cuentas(sesion, [(c, f) for c, f, _ in movimientos])
+    if plan_hip is not None and hip.hipoteca_activa(sesion, propiedad_id):
+        return Rechazo(hip.HIPOTECA_YA_REGISTRADA)
+    _bloquear_cuentas(sesion, {c for c, _, _ in movimientos} | (
+        set() if plan_hip is None else {plan_hip.cuenta_desembolso, plan_hip.cuenta_cargo}))
+    rechazo = _validar_cuentas(sesion, [(c, f) for c, f, _ in movimientos])
     if rechazo:
         return Rechazo(rechazo)
+    extra_hip = None
+    if plan_hip is not None:
+        extra_hip = _guardas_hipoteca(sesion, plan_hip, propiedad_id, bloque)
+        if isinstance(extra_hip, Rechazo):
+            return extra_hip
     partes = m2.resolver(sesion, propiedad_id, peticion["atribucion"])
     if isinstance(partes, str):
         return Rechazo(partes)
     datos = composiciones(partes)
+    if plan_hip is not None:
+        datos[plan_hip.hd] = hip.composicion_hd(plan_hip, extra_hip["prestamo"], bloque["titularidad"]["modo"],
+                                                extra_hip["cuenta"])
     fechas = [escritura] + [dt.date.fromisoformat(g["fecha_economica"]) for g in canon["gastos"]]
     rechazo = _validar_declaracion(sesion, propiedad_id, raiz, completitud, fechas, hoy)
     if rechazo:
@@ -521,6 +610,9 @@ def registrar_compra(sesion: SesionMotor, *, propiedad_id: uuid.UUID, peticion: 
                 op22.registrar_hecho_compuesto(sesion.contexto, datos[r])
             for hk in hks.values():
                 _insertar_parte_de(sesion, hk, h0, MARCA_LOTE)
+            if plan_hip is not None:                                                    # F06-01H (§3.2.3)
+                hip.escribir(sesion, plan_hip, nombre_propiedad=repo.leer(sesion, propiedad_id)["nombre"],
+                             financiador_actor=extra_hip["financiador"], prestamo=extra_hip["prestamo"])
             repo.insertar_valoracion(sesion, valoracion_id=uuid.uuid5(h0, "gapto.f06.compra.valoracion"),
                                      propiedad_id=propiedad_id, valor_total=Decimal(canon["precio"]), fecha=escritura,
                                      metodo="COMPRA", fuente=None, notas=None)
@@ -529,14 +621,15 @@ def registrar_compra(sesion: SesionMotor, *, propiedad_id: uuid.UUID, peticion: 
                                          propiedad_id=propiedad_id, valor_total=Decimal(canon["valor_referencia"]),
                                          fecha=escritura, metodo="FISCAL_REFERENCIA", fuente=None, notas=None)
             corte = completitud["fecha_corte"] if completitud is not None and completitud["completo"] else None
-            esperados = None if corte is None else {str(d.efectos[0].efecto_id) for d in datos.values()
-                                                    if d.hecho.fecha_hecho <= corte}
+            esperados = None if corte is None else {str(d.efectos[0].efecto_id) for r, d in datos.items()
+                                                    if d.hecho.fecha_hecho <= corte
+                                                    and (plan_hip is None or r != plan_hip.hd)}
             _declarar(sesion, propiedad_id, completitud, esperados)                       # 8
     except _Deshacer as exc:
         return Rechazo(exc.codigo)
     repo.subir_version(sesion, propiedad_id)
     auditar(sesion, propiedad_id, antes, {"operacion": OP_COMPRA, "contenido": {"sello": s}}, MOTIVO_COMPRA)
-    return _respuesta(sesion, propiedad_id, hechos, movimientos, canon["atribucion"], hoy, False)
+    return _respuesta(sesion, propiedad_id, hechos, movimientos, canon["atribucion"], hoy, False, plan_hip)
 
 
 # ------------------------------------------------------------------ C-COMPRA-03

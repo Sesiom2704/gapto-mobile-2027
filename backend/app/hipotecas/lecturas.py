@@ -24,6 +24,8 @@
 #   La lectura no dice si una revision fue por bonificacion ni su desglose (Q-H-11).
 #   Importes como texto exacto a centimos; tasas como texto decimal sin ceros sobrantes.
 # Version: 0.1.0 (F06 T3-F06 bloque 2 F06-01H, paso 4)
+# Version: 0.2.0 (F06 T3-F06 bloque 2 F06-01H, paso 5; contrato v0.4 §3.2.7-5): `aviso_reparto_distinto` = la
+#   distribucion de la cuenta del desembolso y la del prestamo en la fecha de Hd difieren (sin Hd: False).
 # ============================================================
 
 from __future__ import annotations
@@ -142,6 +144,18 @@ def _financiador(sesion: SesionMotor, actor_id: uuid.UUID | None) -> dict[str, A
             "nombre": None if fila is None else fila[1]}
 
 
+def _aviso(sesion: SesionMotor, fid: uuid.UUID, desembolso: dict[str, Any] | None) -> bool:
+    from app.hipotecas import alta
+    if desembolso is None or desembolso["cuenta_id"] is None:
+        return False
+    fecha = desembolso["fecha"]
+    prestamo = [(a, Decimal(p)) for a, p in _filas(
+        sesion, "SELECT actor_id, porcentaje FROM gapto.entidad_participaciones WHERE entidad_id = %s "
+        "AND vigente_desde <= %s AND (vigente_hasta IS NULL OR vigente_hasta >= %s) ORDER BY actor_id::text",
+        (fid, fecha, fecha))]
+    return alta.aviso_reparto_distinto(alta.participacion_cuenta(sesion, desembolso["cuenta_id"], fecha), prestamo)
+
+
 def leer(sesion: SesionMotor, fid: uuid.UUID, hoy: dt.date) -> dict[str, Any] | None:
     """Vista L-HIP de una financiacion HIPOTECA (None si no es visible)."""
     fila = sesion.uno(
@@ -159,6 +173,7 @@ def leer(sesion: SesionMotor, fid: uuid.UUID, hoy: dt.date) -> dict[str, Any] | 
                     and (v["vigente_hasta"] is None or hoy <= v["vigente_hasta"])), None) \
         or next((v for v in versiones if v["vigente_hasta"] is None), None)
     alta = next((v for v in versiones if v["motivo"] == "ALTA"), None)
+    desembolso = _desembolso(sesion, fid, None if alta is None else alta["hecho_causa_id"])
     capital_p = None if capital is None else Decimal(capital)
     acumulado, filas = Decimal(0), []
     for numero, venc, total, interes, cap, version_id, prevision_id, estado_prev, cuenta, hecho_pago in _cuotas(
@@ -179,7 +194,7 @@ def leer(sesion: SesionMotor, fid: uuid.UUID, hoy: dt.date) -> dict[str, Any] | 
     return {
         "financiacion_id": fid, "nombre": nombre, "row_version": row_version, "estado": estado,
         "propiedad_id": propiedad, "compra_hecho_id": _compra_hecho_id(sesion, propiedad),
-        "desembolso": _desembolso(sesion, fid, None if alta is None else alta["hecho_causa_id"]),
+        "desembolso": desembolso, "aviso_reparto_distinto": _aviso(sesion, fid, desembolso),
         "financiador": _financiador(sesion, financiador), "capital": _importe(capital),
         "fecha_inicio": inicio, "fecha_fin_prevista": fin, "convencion": calc.CONVENCION,
         "cuenta_cargo_id": cargo,
