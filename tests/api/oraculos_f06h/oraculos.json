@@ -1,0 +1,86 @@
+{
+ "caso1_frances_160000_2.5_360": {
+  "sigma_capital": "160000.00",
+  "sigma_intereses": "67590.10",
+  "capital_igual_principal": true,
+  "componentes_no_negativos": true,
+  "cuota_positiva": true,
+  "pendiente_final": "0.00",
+  "cuota_1": "632.19",
+  "capital_1": "298.86",
+  "interes_1": "333.33",
+  "ref_cuota": "632.19",
+  "ref_capital_1": "298.86",
+  "ref_interes_1": "333.33",
+  "cuota_exacta": "632.19343810837135650398962131350139910651107964192"
+ },
+ "caso2_lineal_160000_2.5_360": {
+  "sigma_capital": "160000.00",
+  "sigma_intereses": "60167.26",
+  "capital_igual_principal": true,
+  "componentes_no_negativos": true,
+  "cuota_positiva": true,
+  "pendiente_final": "0.00",
+  "cuota_1": "777.77",
+  "cuota_ultima": "446.97"
+ },
+ "caso3a_tasa0_1200_12": {
+  "sigma_capital": "1200.00",
+  "sigma_intereses": "0.00",
+  "capital_igual_principal": true,
+  "componentes_no_negativos": true,
+  "cuota_positiva": true,
+  "pendiente_final": "0.00"
+ },
+ "caso3b_una_cuota_1000_5": {
+  "sigma_capital": "1000",
+  "sigma_intereses": "4.17",
+  "capital_igual_principal": true,
+  "componentes_no_negativos": true,
+  "cuota_positiva": true,
+  "pendiente_final": "0"
+ },
+ "caso3c_dos_cuotas_residuo_100_7": {
+  "sigma_capital": "100.00",
+  "sigma_intereses": "0.87",
+  "capital_igual_principal": true,
+  "componentes_no_negativos": true,
+  "cuota_positiva": true,
+  "pendiente_final": "0.00",
+  "cuotas": [
+   "50.44",
+   "50.43"
+  ],
+  "capitales": [
+   "49.86",
+   "50.14"
+  ]
+ },
+ "caso4_revision_2.95_348": {
+  "sigma_capital": "156372.35",
+  "sigma_intereses": "76492.02",
+  "capital_igual_principal": true,
+  "componentes_no_negativos": true,
+  "cuota_positiva": true,
+  "pendiente_final": "0.00",
+  "pendiente_tras_12": "156372.35",
+  "ref_pendiente": "156372.35",
+  "cuota_nueva": "669.15",
+  "ref_cuota": "669.15",
+  "cuota_exacta": "669.15021052921187971335088921888052683521910794842"
+ },
+ "caso5_pago_distinto_c3": {
+  "sigma_capital": "160000.00",
+  "sigma_intereses": "67171.24",
+  "capital_igual_principal": true,
+  "componentes_no_negativos": true,
+  "cuota_positiva": true,
+  "pendiente_final": "0.00",
+  "capital_previsto_c3": "300.10",
+  "capital_real_c3": "1300.10",
+  "cuota_4_recalculada": "628.22",
+  "cuota_4_original": "632.19",
+  "n_cuotas": 360
+ },
+ "discrepancias": []
+}

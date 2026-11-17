@@ -280,6 +280,9 @@
 # Version: 0.37.0 (F06 T3-F06 · F04-R-HIP, subhito F05 S7): «No hubo este mes» devuelve el RechazoRegistro de
 #   la frontera (PREVISION_DE_CUOTA) con rechazo_prevision; candidatos admite CandidatosCuota (codigo de la cuota,
 #   firma del STOP n.º 2). Ningun contrato existente cambia.
+# Version: 0.38.0 (F06 T3-F06 bloque 2 F06-01H, paso 4; contrato v0.4 §3.1, §3.3, §7.1): dos rutas de la hipoteca
+#   registradas con UNA llamada a app.hipotecas.rutas.registrar: POST /v1/hipotecas/cuadro (W-HIP-00, sin
+#   escritura) y GET /v1/propiedades/{propiedad_id}/hipoteca (L-HIP). Ninguna ruta existente cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -484,6 +487,7 @@ from app.propiedades import servicio as serv_prop
 from app.patrimonio import rutas as rutas_patrimonio
 from app.patrimonio import rutas_b3 as rutas_patrimonio_b3
 from app.patrimonio import rutas_pag as rutas_patrimonio_pag
+from app.hipotecas import rutas as rutas_hipotecas
 from app.terceros import lecturas as lect_ter
 from app.terceros import servicio as serv_ter
 from app.comun import elegibilidad_cuentas as eleg
@@ -1089,6 +1093,8 @@ def create_app(
                                   autorizar=autorizar, reloj=reloj)
     # ------------------------------------------------------------ T2-F06 PAG lecturas (modulo patrimonio)
     rutas_patrimonio_pag.registrar(app, unidad=unidad, contexto=contexto, autorizar=autorizar)
+    # ------------------------------------------------------------ T3-F06 F06-01H hipoteca (modulo hipotecas)
+    rutas_hipotecas.registrar(app, unidad=unidad, contexto=contexto, autorizar=autorizar, reloj=reloj)
 
     # ------------------------------------------------------------ F05-03 J2 §1.6 plantillas y acciones
     def _comando_plantilla(nombre_op: str, operacion, clave: str) -> dict | JSONResponse:
