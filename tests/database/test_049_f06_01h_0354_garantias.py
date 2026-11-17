@@ -25,6 +25,10 @@
 #              HUELLAS_D111_POR_HEAD['0354'] del runner; inventario cerrado de
 #              seis funciones y siete triggers con su forma.
 # Versión: 0.1.0  -- F06 T3-F06 bloque 2 F06-01H (mandato v1.1 §8.5).
+# Versión: 0.2.0  -- F06 T3-F06 bloque 2 F06-01H, firma Q2 de Moises (ae67cf8c…)
+#                    condicion (b): discriminante de la PO-04 de 0354 v0.1.1
+#                    (aclexplode): con un privilegio indebido de gapto_runtime
+#                    el postcheck falla; sin el, pasa (control).
 # ============================================================
 from __future__ import annotations
 
@@ -421,3 +425,28 @@ def test_0354_fichero_forma():
     assert "SET search_path" not in cuerpo and "SECURITY DEFINER" not in cuerpo and "ALTER TABLE" not in cuerpo
     assert texto.count("CREATE FUNCTION") == 6 and texto.count("CREATE TRIGGER") + texto.count(
         "CREATE CONSTRAINT TRIGGER") == 7
+
+
+def _postcheck_0354() -> str:
+    texto = (RAIZ / "migrations" / "0354_f06_01h_garantias_hipoteca.sql").read_text(encoding="utf-8")
+    inicio = texto.index("DO $postcheck_0354$")
+    fin = texto.index("$postcheck_0354$;", inicio + len("DO $postcheck_0354$")) + len("$postcheck_0354$;")
+    return texto[inicio:fin]
+
+
+def test_0354_po04_discrimina_privilegio_indebido(db):
+    """Firma Q2 (b): el bloque de postchecks de 0354, ejecutado sobre el head, pasa (control); con UN privilegio
+    de tabla de mas para gapto_runtime falla en PO-04 (cuenta con aclexplode, no con information_schema, que
+    dependia de los roles habilitados del usuario conectado: STOP_F06-T3-2_1). Todo en transacciones revertidas."""
+    bloque = _postcheck_0354()
+    assert "aclexplode" in bloque and "information_schema" not in bloque
+    with db.transaction(force_rollback=True):
+        db.execute(bloque)                                                        # control: head 0354 intacto
+    with db.transaction(force_rollback=True):
+        db.execute("SET LOCAL ROLE gapto_owner")
+        db.execute("GRANT TRUNCATE ON gapto.financiacion_cuotas TO gapto_runtime")  # privilegio indebido
+        db.execute("RESET ROLE")
+        with pytest.raises(psycopg.errors.RaiseException,
+                           match=r"PO-04: privilegios de tabla de gapto_runtime = 267 \(esperados 266\)"):
+            with db.transaction():
+                db.execute(bloque)
