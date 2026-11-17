@@ -4,6 +4,7 @@
 // Ruta: mobile/src/screens/PagarCuotaScreen.tsx
 // Descripción: Pagar una cuota de la hipoteca con un BOTÓN, nunca swipe (F06-01H W-HIP-02; contrato v0.4 §3.4 y §8; n.º 133). Desglose tal como lo da el servidor: «Capital · reduce lo que debes», «Intereses · gasto del mes» y «Sale de tu cuenta»; el cliente solo comprueba capital + intereses = cuota (si no cuadra, no deja pagar). Fecha del cargo (≤ hoy), cuenta (la de cargo propuesta) y reparto de los intereses: la propuesta (titularidad del préstamo en el vencimiento) visible y modificable («Otro reparto»); `propuesta_vista` viaja siempre. Rechazos: VERSION_DESFASADA vuelve a cargar la hipoteca; ATRIBUCION_PROPUESTA_DESFASADA relee la propuesta con intención nueva; el resto con su texto, sin «ingreso» ni «cobro». Solo se abre si la exposición de código lo permite (HipotecaCuadroScreen).
 // Versión: 0.1.0 (F06 T3-F06 bloque 2 F06-01H, paso 10)
+// Versión: 0.2.0 (F06 T3-F06 bloque 2 F06-01H; N-30, firma 0f3e5633…): la propuesta del reparto de los intereses es la titularidad DEL PRÉSTAMO de L-HIP en el vencimiento (`titularidadPrestamoEnFecha`, Q-T3D-08); `leerPropuesta` (titularidad de la propiedad) solo si el servidor no da el campo. Con el campo, ATRIBUCION_PROPUESTA_DESFASADA vuelve a cargar la hipoteca.
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -19,7 +20,7 @@ import { AvisoCaja, CabeceraTarea, Caja, Campo, estilosFormulario as ef, RotuloG
 import { ddmmaaaaAIso, diaMesAnioIso, isoADdmmaaaa } from '../domain/fechas';
 import {
   desglosePago, EleccionReparto, eleccionPropuesta, ETIQUETA_CAPITAL, ETIQUETA_INTERESES, ETIQUETA_SALIDA, faltasPago, payloadPago, TEXTO_INDETERMINADO, TEXTO_NO_CUADRA,
-  TEXTO_REPARTO_INTERESES, TEXTO_SIN_TITULARIDAD_CUOTA, textoErrorHipoteca, textoSeguro,
+  TEXTO_REPARTO_INTERESES, TEXTO_SIN_TITULARIDAD_CUOTA, textoErrorHipoteca, textoSeguro, titularidadPrestamoEnFecha,
 } from '../domain/hipoteca';
 import { formatearEur } from '../domain/importe';
 import { useTema } from '../theme/tema';
@@ -53,7 +54,9 @@ export function PagarCuotaScreen(p: {
 
   const cargarPropuesta = async () => {
     setPropuesta(null);
-    const x = p.leerPropuesta ? await p.leerPropuesta(q.vencimiento) : [];
+    // N-30: titularidad DEL PRÉSTAMO de L-HIP en el vencimiento; la de la propiedad solo si el servidor no la da.
+    const delPrestamo = titularidadPrestamoEnFecha(p.hipoteca, q.vencimiento);
+    const x = delPrestamo ?? (p.leerPropuesta ? await p.leerPropuesta(q.vencimiento) : []);
     const partes = x ?? [];
     setPropuesta(partes);
     setEleccion(eleccionPropuesta(partes));
@@ -80,6 +83,8 @@ export function PagarCuotaScreen(p: {
     if (r.tipo === 'OK') return p.onPagada(r.datos.hipoteca);
     if (r.tipo === 'INDETERMINADO') return setAviso({ tipo: 'AVISO', texto: TEXTO_INDETERMINADO });
     if (r.codigo === 'VERSION_DESFASADA') return p.onRecargar();
+    // N-30: con la titularidad del préstamo en L-HIP, la propuesta nueva llega releyendo la hipoteca.
+    if (r.codigo === 'ATRIBUCION_PROPUESTA_DESFASADA' && p.hipoteca.titularidad_prestamo) return p.onRecargar();
     if (r.codigo === 'ATRIBUCION_PROPUESTA_DESFASADA') {
       // La petición rechazada no escribió nada; el contenido cambia con la propuesta releída: intención nueva.
       intencion.current = p.nuevoId();

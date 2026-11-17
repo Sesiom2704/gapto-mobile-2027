@@ -4,6 +4,8 @@
 // Ruta: mobile/src/domain/hipoteca.ts
 // Descripción: Lógica pura de la hipoteca de la compra en el cliente (F06-01H; contrato v0.4 §3.2.1, §3.2.7-5, §3.3, §3.4, §3.5 y §8; mandato T3-F06 bloque 2 v1.1 §15). Bloque «Hipoteca» de la compra: borrador, validaciones (tipo anual 0–30 % con hasta 4 decimales, plazo en años o meses → 1–600 cuotas, primera cuota posterior a la escritura, cuentas, banco y titularidad del préstamo propuesta y modificable) y bloque `hipoteca` de la petición (nunca con campos de modalidad no representable). Cuadro: filas visibles. Pago de una cuota: desglose que presenta lo que da el servidor y SOLO comprueba capital + intereses = cuota, reparto de los intereses (propuesta visible y modificable) y payload de W-HIP-02. Revisión del tipo: cuotas afectadas, texto «Se recalculan N cuotas desde …; las M pagadas no cambian» (nunca «bonificación») y payload de W-HIP-03/04. Textos de error propios, sin «ingreso» ni «cobro» (R-1). El cliente NO calcula importes. Exposición del pago de una cuota: constante de código `PAGO_CUOTA_EXPUESTO` (firma de Moisés del 2026-11-17, e446b4c3…), nunca entorno ni configuración.
 // Versión: 0.1.0 (F06 T3-F06 bloque 2 F06-01H, paso 10)
+// Versión: 0.2.0 (F06 T3-F06 bloque 2 F06-01H; N-31, firma 0f3e5633…): constante de código propia `REVISION_TIPO_EXPUESTA = true` y `ofreceRevisionTipo` (revisión solo expuesta, ACTIVA y con deuda conocida).
+// Versión: 0.3.0 (F06 T3-F06 bloque 2 F06-01H; N-30, firma 0f3e5633…, enmienda 52ef5511…): `titularidadPrestamoEnFecha`: la propuesta del reparto de los intereses sale de la titularidad DEL PRÉSTAMO de L-HIP vigente en el vencimiento (Q-T3D-08), no de la de la propiedad.
 // ============================================================
 
 import type {
@@ -21,6 +23,17 @@ import { esFechaIso } from './intencion';
  * queda NO EXPUESTO. Constante de código: solo cambia con un commit revisado; nunca por entorno ni configuración.
  */
 export const PAGO_CUOTA_EXPUESTO = false;
+
+/**
+ * Exposición de la revisión del tipo en la app (N-31; firma de Moisés del 2026-11-17, 0f3e5633…): constante propia, mismo mecanismo que el pago.
+ * Vale true; si al final del bloque falla cualquiera de sus tests, mutantes o la concurrencia, vuelve a false sin nueva firma.
+ * Constante de código: solo cambia con un commit revisado; nunca por entorno ni configuración.
+ */
+export const REVISION_TIPO_EXPUESTA = true;
+
+/** La revisión del tipo se ofrece solo expuesta, en una hipoteca ACTIVA con deuda conocida. */
+export const ofreceRevisionTipo = (h: Hipoteca, expuesta: boolean): boolean =>
+  expuesta && h.estado === 'ACTIVA' && !h.deuda_indeterminada;
 
 export const MAX_CUOTAS = 600;
 export const TASA_MAXIMA = 30;
@@ -81,6 +94,17 @@ export const borradorHipoteca = (): BorradorHipoteca => ({
 /** La propuesta se ofrece marcada si existe; sin titularidad no se marca nada (nunca «100 % tuyo» inventado). */
 export const eleccionPropuesta = (propuesta: ParteEnFecha[] | null): EleccionReparto =>
   propuesta && propuesta.length > 0 ? { modo: 'TITULARIDAD' } : null;
+
+/**
+ * N-30 (Q-T3D-08): propuesta del reparto de los intereses = titularidad DEL PRÉSTAMO vigente en el vencimiento (`fechaIso`), leída de L-HIP
+ * (`titularidad_prestamo`), con el mismo criterio que W-HIP-02 relee (vigente_desde ≤ fecha ≤ vigente_hasta). null si el servidor no la da.
+ */
+export function titularidadPrestamoEnFecha(h: Hipoteca, fechaIso: string): ParteEnFecha[] | null {
+  if (!h.titularidad_prestamo) return null;
+  return h.titularidad_prestamo
+    .filter((t) => t.vigente_desde <= fechaIso && (t.vigente_hasta === null || fechaIso <= t.vigente_hasta))
+    .map((t) => ({ actor_id: t.actor_id, porcentaje: t.porcentaje, yo: t.yo, tercero_id: t.tercero_id, nombre: t.nombre }));
+}
 
 /** «2,5» → «2.5»; null si no es un tipo anual válido (0 a 30 %, hasta 4 decimales). */
 export function normalizarTasa(t: string): string | null {

@@ -4,6 +4,8 @@
 // Ruta: mobile/__tests__/hipoteca_dominio.test.ts
 // Descripción: Lógica pura de la hipoteca en el cliente (F06-01H; contrato v0.4 §3.2.1, §3.2.7-5, §3.3, §3.4, §3.5 y §8; mandato T3-F06 bloque 2 v1.1 §15) y llamadas opcionales del cliente HTTP. Cada guarda con un caso que falla si se quita: exposición del pago como constante de código en false y sin entorno; tipo anual 0–30 con 4 decimales; plazo → cuotas (1–600); primera cuota posterior a la escritura; tipo fijo/variable sin valor por defecto; bloque `hipoteca` exacto (sin campos de modalidad) y petición sin hipoteca intacta; capital + intereses = cuota; botón de pago solo con exposición, próxima cuota, hipoteca activa y deuda conocida; `propuesta_vista` del pago; alcance de la revisión sin «bonificación»; textos sin «ingreso» ni «cobro»; rutas y clasificación de las llamadas.
 // Versión: 0.1.0 (F06 T3-F06 bloque 2 F06-01H, paso 10)
+// Versión: 0.2.0 (F06 T3-F06 bloque 2 F06-01H; N-31, firma 0f3e5633…): `REVISION_TIPO_EXPUESTA` constante propia (true) y `ofreceRevisionTipo`.
+// Versión: 0.3.0 (F06 T3-F06 bloque 2 F06-01H; N-30, firma 0f3e5633…): `titularidadPrestamoEnFecha` (tramos y límites; sin campo, null).
 // ============================================================
 
 import { crearCliente } from '../src/api/cliente';
@@ -33,6 +35,31 @@ test('exposición: PAGO_CUOTA_EXPUESTO es una constante de código y vale false 
   const src = fuente('src/domain/hipoteca.ts');
   expect(src).toMatch(/^export const PAGO_CUOTA_EXPUESTO = (true|false);$/m);
   expect(src).not.toMatch(/process\.env|EXPO_PUBLIC|expo-constants|Constants\./);
+});
+
+test('N-30: titularidadPrestamoEnFecha proyecta la titularidad DEL PRÉSTAMO vigente en la fecha (límites incluidos); sin el campo, null', () => {
+  const tp = [
+    { actor_id: YO, porcentaje: '100.0000', yo: true, tercero_id: null, nombre: null, vigente_desde: '2026-03-20', vigente_hasta: '2026-05-31' },
+    { actor_id: ANA, porcentaje: '50.0000', yo: false, tercero_id: 't-ana', nombre: 'Ana', vigente_desde: '2026-06-01', vigente_hasta: null },
+    { actor_id: YO, porcentaje: '50.0000', yo: true, tercero_id: null, nombre: null, vigente_desde: '2026-06-01', vigente_hasta: null },
+  ];
+  const h = hipoteca({ titularidad_prestamo: tp });
+  const yo100 = [{ actor_id: YO, porcentaje: '100.0000', yo: true, tercero_id: null, nombre: null }];
+  const mitad = [{ actor_id: ANA, porcentaje: '50.0000', yo: false, tercero_id: 't-ana', nombre: 'Ana' }, { actor_id: YO, porcentaje: '50.0000', yo: true, tercero_id: null, nombre: null }];
+  expect(dominio.titularidadPrestamoEnFecha(h, '2026-05-31')).toEqual(yo100);
+  expect(dominio.titularidadPrestamoEnFecha(h, '2026-06-01')).toEqual(mitad);
+  expect(dominio.titularidadPrestamoEnFecha(h, '2027-01-20')).toEqual(mitad);
+  expect(dominio.titularidadPrestamoEnFecha(h, '2026-03-19')).toEqual([]);
+  expect(dominio.titularidadPrestamoEnFecha(hipoteca(), '2026-06-01')).toBeNull();
+});
+
+test('N-31: REVISION_TIPO_EXPUESTA es una constante de código propia (true); ofreceRevisionTipo exige exposición, ACTIVA y deuda conocida', () => {
+  expect(dominio.REVISION_TIPO_EXPUESTA).toBe(true);
+  expect(fuente('src/domain/hipoteca.ts')).toMatch(/^export const REVISION_TIPO_EXPUESTA = (true|false);$/m);
+  expect(dominio.ofreceRevisionTipo(hipoteca(), true)).toBe(true);
+  expect(dominio.ofreceRevisionTipo(hipoteca(), false)).toBe(false);
+  expect(dominio.ofreceRevisionTipo(hipoteca({ estado: 'CANCELADA' }), true)).toBe(false);
+  expect(dominio.ofreceRevisionTipo(hipoteca({ deuda_indeterminada: true, deuda_pendiente: null }), true)).toBe(false);
 });
 
 test('exposición: el botón de pago solo con exposición, próxima cuota, hipoteca ACTIVA y deuda conocida', () => {

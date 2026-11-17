@@ -26,6 +26,10 @@
 # Version: 0.1.0 (F06 T3-F06 bloque 2 F06-01H, paso 4)
 # Version: 0.2.0 (F06 T3-F06 bloque 2 F06-01H, paso 5; contrato v0.4 §3.2.7-5): `aviso_reparto_distinto` = la
 #   distribucion de la cuenta del desembolso y la del prestamo en la fecha de Hd difieren (sin Hd: False).
+# Version: 0.3.0 (F06 T3-F06 bloque 2 F06-01H; N-30, firma 0f3e5633…, enmienda 52ef5511… del contrato v0.4 en
+#   L-HIP): campo ADITIVO `titularidad_prestamo` = participaciones del prestamo con su vigencia (actor, porcentaje
+#   a 4 decimales, yo, tercero, nombre, vigente_desde, vigente_hasta); el cliente propone la atribucion de los
+#   intereses con las vigentes en el vencimiento, igual que W-HIP-02 (Q-T3D-08). Sin participaciones: [].
 # ============================================================
 
 from __future__ import annotations
@@ -144,6 +148,18 @@ def _financiador(sesion: SesionMotor, actor_id: uuid.UUID | None) -> dict[str, A
             "nombre": None if fila is None else fila[1]}
 
 
+def _titularidad_prestamo(sesion: SesionMotor, fid: uuid.UUID) -> list[dict[str, Any]]:
+    """N-30: participaciones DEL PRESTAMO (no de la propiedad) con su vigencia, por vigente_desde y actor (texto).
+    La propuesta de W-HIP-02 es la de las filas vigentes en el vencimiento (pago.propuesta, Q-T3D-08)."""
+    return [{"actor_id": a, "porcentaje": format(Decimal(p).quantize(Decimal("0.0001")), "f"), "yo": tid is None,
+             "tercero_id": tid, "nombre": nombre, "vigente_desde": desde, "vigente_hasta": hasta}
+            for a, p, tid, nombre, desde, hasta in _filas(
+                sesion, "SELECT x.actor_id, x.porcentaje, a.tercero_id, t.nombre, x.vigente_desde, x.vigente_hasta "
+                "FROM gapto.entidad_participaciones x JOIN gapto.actores_financieros a ON a.id = x.actor_id "
+                "LEFT JOIN gapto.terceros t ON t.id = a.tercero_id WHERE x.entidad_id = %s "
+                "ORDER BY x.vigente_desde, x.actor_id::text", (fid,))]
+
+
 def _aviso(sesion: SesionMotor, fid: uuid.UUID, desembolso: dict[str, Any] | None) -> bool:
     from app.hipotecas import alta
     if desembolso is None or desembolso["cuenta_id"] is None:
@@ -195,7 +211,8 @@ def leer(sesion: SesionMotor, fid: uuid.UUID, hoy: dt.date) -> dict[str, Any] | 
         "financiacion_id": fid, "nombre": nombre, "row_version": row_version, "estado": estado,
         "propiedad_id": propiedad, "compra_hecho_id": _compra_hecho_id(sesion, propiedad),
         "desembolso": desembolso, "aviso_reparto_distinto": _aviso(sesion, fid, desembolso),
-        "financiador": _financiador(sesion, financiador), "capital": _importe(capital),
+        "financiador": _financiador(sesion, financiador), "titularidad_prestamo": _titularidad_prestamo(sesion, fid),
+        "capital": _importe(capital),
         "fecha_inicio": inicio, "fecha_fin_prevista": fin, "convencion": calc.CONVENCION,
         "cuenta_cargo_id": cargo,
         "tipo_vigente": None if vigente is None else vigente["tasa_anual"],

@@ -14,6 +14,8 @@
 //   - revisar el tipo: «Se recalculan N cuotas desde …; las M pagadas no cambian», nunca «bonificación», VERSION_DESFASADA recarga;
 //   - ficha de la propiedad: fila «Hipoteca» solo con hipoteca, sin swipe.
 // Versión: 0.1.0 (F06 T3-F06 bloque 2 F06-01H, paso 10)
+// Versión: 0.2.0 (F06 T3-F06 bloque 2 F06-01H; N-31, firma 0f3e5633…): `REVISION_TIPO_EXPUESTA` simulable como el pago; test de exposición de la revisión (true ofrece «Revisar el tipo», false no).
+// Versión: 0.3.0 (F06 T3-F06 bloque 2 F06-01H; N-30, firma 0f3e5633…): el pago propone con `titularidad_prestamo` de L-HIP en el vencimiento (no con la de la propiedad) y, con ella, ATRIBUCION_PROPUESTA_DESFASADA recarga la hipoteca.
 // ============================================================
 
 import './tiempos_rn';
@@ -36,11 +38,14 @@ jest.mock('expo-font', () => ({ ...jest.requireActual('expo-font'), isLoaded: ()
 
 // Exposición del pago: el módulo real vale false (constante de código); aquí se prueban los dos valores sin tocar entorno ni configuración.
 let mockExpuesto = false;
+// N-31: la revisión del tipo con su propia constante (el módulo real vale true); se prueban los dos valores.
+let mockRevisionExpuesta = true;
 jest.mock('../src/domain/hipoteca', () => {
   // Sin spread: el helper de babel evaluaría el getter al construir el objeto y congelaría el valor.
   const m = Object.assign({}, jest.requireActual('../src/domain/hipoteca'));
   Object.defineProperty(m, '__esModule', { value: true });
   Object.defineProperty(m, 'PAGO_CUOTA_EXPUESTO', { get: () => mockExpuesto, enumerable: true });
+  Object.defineProperty(m, 'REVISION_TIPO_EXPUESTA', { get: () => mockRevisionExpuesta, enumerable: true });
   return m;
 });
 const dominioReal = jest.requireActual('../src/domain/hipoteca');
@@ -311,6 +316,25 @@ test('exposición: con la constante a true el pago es un BOTÓN; ninguna fila de
   sinPalabrasProhibidas();
 });
 
+test('N-31 exposición de la revisión: la constante real es true y ofrece «Revisar el tipo»; a false no lo ofrece (con el pago igual)', async () => {
+  expect(dominioReal.REVISION_TIPO_EXPUESTA).toBe(true);
+  mockRevisionExpuesta = dominioReal.REVISION_TIPO_EXPUESTA;
+  mockExpuesto = false;
+  montarCuadro(clienteCuadro());
+  await waitFor(() => screen.getByTestId('hip-cuadro'));
+  expect(screen.getByTestId('hip-revisar')).toBeTruthy();
+  screen.unmount();
+  mockRevisionExpuesta = false;
+  try {
+    montarCuadro(clienteCuadro());
+    await waitFor(() => screen.getByTestId('hip-cuadro'));
+    expect(screen.queryByTestId('hip-revisar')).toBeNull();
+    expect(screen.queryByTestId('hip-pagar')).toBeNull();
+  } finally {
+    mockRevisionExpuesta = true;
+  }
+});
+
 test('ninguna superficie nueva de la hipoteca importa swipe ni gestos (fuente)', () => {
   for (const f of ['src/screens/HipotecaCuadroScreen.tsx', 'src/screens/PagarCuotaScreen.tsx', 'src/screens/RevisarTipoScreen.tsx']) {
     expect(fuente(f)).not.toMatch(/SwipePrevision|FilaDeslizable|PanResponder|Swipeable|enTarjeta|react-native-gesture-handler/);
@@ -364,6 +388,42 @@ test('pagar cuota: desglose del servidor, reparto de los intereses propuesto y m
   expect(textos()).toContain('Cuota 3 pagada.');
   await pulsar('hip-cerrar');
   expect(onCerrar).toHaveBeenCalledWith(true);
+});
+
+// N-30: titularidad DEL PRÉSTAMO en L-HIP con dos tramos; la cuota 3 vence el 2026-06-20 (tramo nuevo 50/50).
+const TITULARIDAD_PRESTAMO = [
+  { actor_id: YO, porcentaje: '100.0000', yo: true, tercero_id: null, nombre: null, vigente_desde: '2026-03-20', vigente_hasta: '2026-05-31' },
+  { actor_id: ANA, porcentaje: '50.0000', yo: false, tercero_id: 't-ana', nombre: 'Ana', vigente_desde: '2026-06-01', vigente_hasta: null },
+  { actor_id: YO, porcentaje: '50.0000', yo: true, tercero_id: null, nombre: null, vigente_desde: '2026-06-01', vigente_hasta: null },
+];
+
+test('N-30 pagar cuota: la propuesta es la titularidad DEL PRÉSTAMO de L-HIP en el vencimiento, no la de la propiedad', async () => {
+  mockExpuesto = true;
+  const cli = clienteCuadro(hipoteca({ titularidad_prestamo: TITULARIDAD_PRESTAMO }));
+  const leer = jest.fn(async () => PARTES); // titularidad de la propiedad (60/40): no debe usarse
+  montarCuadro(cli, leer);
+  await waitFor(() => screen.getByTestId('hip-pagar'));
+  await pulsar('hip-pagar');
+  await waitFor(() => expect(screen.getByTestId('hip-pago-reparto-propuesta').props.accessibilityState).toMatchObject({ checked: true }));
+  expect(leer).not.toHaveBeenCalled();
+  expect(textos()).toContain('✓ Según la titularidad del préstamo el 20 jun 2026: Tú 50 % · Ana 50 %');
+  await pulsar('hip-pago-confirmar');
+  const cuerpo = (cli.pagarCuotaHipoteca.mock.calls[0] as unknown as [string, number, any])[2];
+  expect(cuerpo.atribucion).toStrictEqual({ propuesta_vista: { partes: [{ actor_id: ANA, porcentaje: '50.0000' }, { actor_id: YO, porcentaje: '50.0000' }] },
+    partes: [{ actor_id: ANA, porcentaje: '50.0000' }, { actor_id: YO, porcentaje: '50.0000' }] });
+});
+
+test('N-30 pagar cuota: con la titularidad del préstamo en L-HIP, ATRIBUCION_PROPUESTA_DESFASADA vuelve a cargar la hipoteca', async () => {
+  mockExpuesto = true;
+  const cli = clienteCuadro(hipoteca({ titularidad_prestamo: TITULARIDAD_PRESTAMO }));
+  montarCuadro(cli);
+  await waitFor(() => screen.getByTestId('hip-pagar'));
+  await pulsar('hip-pagar');
+  await waitFor(() => expect(screen.getByTestId('hip-pago-reparto-propuesta').props.accessibilityState).toMatchObject({ checked: true }));
+  cli.pagarCuotaHipoteca.mockResolvedValueOnce(rechazo('ATRIBUCION_PROPUESTA_DESFASADA', 'x'));
+  await pulsar('hip-pago-confirmar');
+  await waitFor(() => screen.getByTestId('hip-cuadro'));
+  expect(cli.hipotecaDePropiedad).toHaveBeenCalledTimes(2);
 });
 
 test('pagar cuota: si capital + intereses no da la cuota, no se puede pagar', async () => {

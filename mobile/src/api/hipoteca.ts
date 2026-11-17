@@ -4,6 +4,7 @@
 // Ruta: mobile/src/api/hipoteca.ts
 // Descripción: Tipos del wire de la hipoteca de la compra (F06-01H; contrato v0.4 §3.1, §3.2.1, §3.3, §3.4, §3.5 y §7; servidor backend/app/hipotecas/rutas.py y dto.py). Solo tipos: W-HIP-00 vista previa del cuadro (POST /v1/hipotecas/cuadro, sin escritura), bloque `hipoteca` de la petición de la compra (C-COMPRA-01), L-HIP (GET /v1/propiedades/{id}/hipoteca), pago de una cuota (W-HIP-02) y revisión del tipo (W-HIP-03/04). Las llamadas son métodos OPCIONALES de `ClienteApi` (cliente.ts). Importes y tipos como texto exacto: el cliente no calcula importes.
 // Versión: 0.1.0 (F06 T3-F06 bloque 2 F06-01H, paso 10)
+// Versión: 0.2.0 (F06 T3-F06 bloque 2 F06-01H; N-30, firma 0f3e5633…, enmienda 52ef5511…): SOLO aditivo: `Hipoteca.titularidad_prestamo?` (participaciones del préstamo con su vigencia).
 // ============================================================
 
 import type { AtribucionWire, ParteAtribucion } from './patrimonio';
@@ -85,6 +86,17 @@ export interface CondicionesHipoteca {
   hecho_causa_id: string | null;
 }
 
+/** N-30: una participación del préstamo en L-HIP (lecturas.py `_titularidad_prestamo`). */
+export interface ParteTitularidadPrestamo {
+  actor_id: string;
+  porcentaje: string;
+  yo: boolean;
+  tercero_id: string | null;
+  nombre: string | null;
+  vigente_desde: string;
+  vigente_hasta: string | null;
+}
+
 /** L-HIP (contrato §3.3; lecturas.py). */
 export interface Hipoteca {
   financiacion_id: string;
@@ -96,6 +108,8 @@ export interface Hipoteca {
   desembolso: { hecho_id: string; cuenta_id: string | null; fecha: string; importe: string | null } | null;
   aviso_reparto_distinto: boolean;
   financiador: { actor_id: string; tercero_id: string | null; nombre: string | null } | null;
+  /** N-30 (aditivo): participaciones DEL PRÉSTAMO con su vigencia; ausente en un servidor anterior. */
+  titularidad_prestamo?: ParteTitularidadPrestamo[];
   capital: string | null;
   fecha_inicio: string | null;
   fecha_fin_prevista: string | null;

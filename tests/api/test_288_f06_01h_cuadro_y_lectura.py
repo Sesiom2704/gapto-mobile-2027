@@ -24,6 +24,9 @@
 #       inexistente, sin fuga de IDs; la lectura no escribe.
 #   Fechas fijas; ORDER BY en los fixtures y en la lectura.
 # Version: 0.1.0 (F06 T3-F06 bloque 2 F06-01H, paso 4)
+# Version: 0.2.0 (F06 T3-F06 bloque 2 F06-01H; N-30, firma 0f3e5633…, enmienda 52ef5511…): oraculo de servidor de
+#   `titularidad_prestamo` (aditivo en L-HIP): participaciones del prestamo con su vigencia, distintas de las de la
+#   propiedad, y proyeccion en cada vencimiento == pago.propuesta (lo que relee W-HIP-02).
 # ============================================================
 
 from __future__ import annotations
@@ -296,6 +299,60 @@ def test_l_hip_hipoteca_coherente(esc) -> None:
         (str(x["cambio"]), "2026-10-01", None, "CAMBIO_CONDICIONES", "VARIABLE", "6.5", "101.17", 2, None)]
     assert all(c["capital"] is not None for c in hip["cuotas"])
     assert "bonificacion" not in json.dumps(hip).lower()
+
+
+def test_l_hip_n30_titularidad_vigente_del_prestamo(esc) -> None:
+    """N-30 (firma 0f3e5633…; enmienda 52ef5511… del contrato v0.4 en L-HIP): L-HIP devuelve, como campo aditivo,
+    la titularidad DEL PRESTAMO con su vigencia, distinta de la de la propiedad; la proyeccion en el vencimiento de
+    cada cuota coincide con la propuesta que W-HIP-02 relee (pago.propuesta, Q-T3D-08)."""
+    from app.hipotecas import pago as serv_pago
+
+    pid = esc.propiedad()                                   # propiedad: 100 % mia
+    x = esc.hipoteca(pid)
+    sin = esc.cli.get(_url(pid), headers=h.AUTH).json()["hipoteca"]
+    assert sin["titularidad_prestamo"] == []                # sin participaciones del prestamo: lista vacia
+    ana = b.tercero(esc.cli, "Ana Préstamo")
+    otra = uuid.UUID(b.crear(esc.cli, b.alta(b.compartida([b.yo("60"), b.de(ana, "40")]), nombre="Garaje"))["id"])
+    actores = {str(t): a for a, t in fz_actores(esc, otra)}
+    yo, a_ana = actores["None"], actores[str(ana)]
+    corte = dt.date(2026, 9, 30)
+    fz.como_owner(esc.dsn, esc.owner, [
+        ("INSERT INTO gapto.entidad_participaciones (id, entidad_id, actor_id, porcentaje, vigente_desde, "
+         "vigente_hasta) VALUES (%s, %s, %s, 100, %s, %s)", (uuid.uuid4(), x["fid"], yo, F_ALTA, corte)),
+        ("INSERT INTO gapto.entidad_participaciones (id, entidad_id, actor_id, porcentaje, vigente_desde) "
+         "VALUES (%s, %s, %s, 70, %s)", (uuid.uuid4(), x["fid"], yo, corte + dt.timedelta(days=1))),
+        ("INSERT INTO gapto.entidad_participaciones (id, entidad_id, actor_id, porcentaje, vigente_desde) "
+         "VALUES (%s, %s, %s, 30, %s)", (uuid.uuid4(), x["fid"], a_ana, corte + dt.timedelta(days=1))),
+    ])
+    antes = b.huella()
+    r = esc.cli.get(_url(pid), headers=h.AUTH)
+    assert r.status_code == 200, r.text
+    assert b.huella() == antes
+    hip = r.json()["hipoteca"]
+    tramo2 = sorted([(str(yo), "70.0000", True, None, None), (str(a_ana), "30.0000", False, str(ana), "Ana Préstamo")])
+    assert [(t["actor_id"], t["porcentaje"], t["yo"], t["tercero_id"], t["nombre"], t["vigente_desde"],
+             t["vigente_hasta"]) for t in hip["titularidad_prestamo"]] == [
+        (str(yo), "100.0000", True, None, None, "2026-08-20", "2026-09-30"),
+        *[(*t, "2026-10-01", None) for t in tramo2]]
+    # la de la propiedad (100 % mia) no es la del prestamo: el campo no la copia
+    assert {t["porcentaje"] for t in hip["titularidad_prestamo"]} != {"100.0000"}
+    # proyeccion en el vencimiento de cada cuota == propuesta que relee W-HIP-02
+    for c in hip["cuotas"]:
+        venc = c["vencimiento"]
+        vista = sorted((t["actor_id"], decimal.Decimal(t["porcentaje"])) for t in hip["titularidad_prestamo"]
+                       if t["vigente_desde"] <= venc and (t["vigente_hasta"] is None or venc <= t["vigente_hasta"]))
+        fecha = dt.date.fromisoformat(venc)
+        servidor = sorted((str(a), p) for a, p in esc.u().ejecutar(
+            esc.ctx(), lambda s, f=fecha: serv_pago.propuesta(s, x["fid"], f), nombre="N-30 propuesta W-HIP-02"))
+        assert vista == servidor, (venc, vista, servidor)
+
+
+def fz_actores(esc, entidad) -> list[tuple]:
+    """(actor_id, tercero_id) de las participaciones de `entidad` (lectura sin RLS de la base desechable)."""
+    import psycopg
+    with psycopg.connect(esc.dsn, autocommit=True) as c:
+        return c.execute("SELECT x.actor_id, a.tercero_id FROM gapto.entidad_participaciones x JOIN "
+                         "gapto.actores_financieros a ON a.id = x.actor_id WHERE x.entidad_id = %s", (entidad,)).fetchall()
 
 
 def test_l_hip_o_h10_legacy_indeterminada_nunca_cero(esc) -> None:
