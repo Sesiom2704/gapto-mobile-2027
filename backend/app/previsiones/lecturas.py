@@ -72,6 +72,7 @@
 #   disponibles, con codigo PREVISION_DE_CUOTA y su texto. Candidatos: la de una
 #   cuota no propone ninguno, y un hecho de financiacion (vinculo FINANCIACION
 #   de nivel efecto) no es candidato de ninguna prevision.
+# Version: 0.5.0 (F06 T3-F06 bloque 2 F06-01H; literal F05 Q3-Hd v1.1): Q3-S2: marca aditiva codigo PREVISION_DE_CUOTA en las filas de lista (_marcar_cuotas, una consulta por lista, sin lock).
 # ============================================================
 
 from __future__ import annotations
@@ -174,7 +175,23 @@ def _abiertas(sesion: SesionMotor, hoy: dt.date) -> list[dict[str, Any]]:
     nodos = catalogo(sesion)
     with sesion.conexion.cursor() as cur:
         cur.execute(_COLUMNAS + "WHERE p.estado = 'ABIERTA' AND th.codigo = ANY(%s)", (list(TIPOS_CONFIRMABLES),))
-        return [_fila(f, nodos, hoy) for f in cur.fetchall()]
+        return _marcar_cuotas(sesion, [_fila(f, nodos, hoy) for f in cur.fetchall()])
+
+
+def _marcar_cuotas(sesion: SesionMotor, filas: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """F06-01H (literal F05 Q3-Hd, Q3-S2): marca aditiva `codigo` = PREVISION_DE_CUOTA en las filas que son la
+    prevision de una cuota (mismo predicado que es_prevision_de_cuota). Una consulta por lista, sin lock; no
+    cambia orden, filtros ni recuentos, y las demas filas no llevan la clave."""
+    if not filas:
+        return filas
+    with sesion.conexion.cursor() as cur:
+        cur.execute("SELECT DISTINCT prevision_id FROM gapto.financiacion_cuotas WHERE prevision_id = ANY(%s)",
+                    ([f["id"] for f in filas],))
+        cuotas = {r[0] for r in cur.fetchall()}
+    for f in filas:
+        if f["id"] in cuotas:
+            f["codigo"] = CODIGO_PREVISION_DE_CUOTA
+    return filas
 
 
 def _clave(fila: dict[str, Any]) -> tuple:
@@ -254,8 +271,9 @@ def resueltas_mes(sesion: SesionMotor, hoy: dt.date) -> dict[str, Any]:
                               "FROM gapto.previsiones p ", 1)
             + "WHERE p.estado = ANY(%s) AND th.codigo = ANY(%s)", (list(ESTADOS_RESUELTAS), list(TIPOS_CONFIRMABLES)))
         filas = []
-        for f in cur.fetchall():
-            fila = _fila(f[:-1], nodos, hoy)
+        crudas = cur.fetchall()
+        compuestas = _marcar_cuotas(sesion, [_fila(f[:-1], nodos, hoy) for f in crudas])
+        for f, fila in zip(crudas, compuestas):
             instante = f[-1]
             if instante is not None:
                 fecha, origen = instante.astimezone(zona).date(), FECHAS_RESOLUCION[0]

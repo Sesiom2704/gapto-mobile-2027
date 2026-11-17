@@ -20,6 +20,7 @@
 #   `salida_cuentas` (lo que salio de mis cuentas) y `posiciones` (deuda real en su sentido).
 # Version: 0.7.0 (F06 T2-F06 CAT-VIV N1; L-04, OBL-VIV-01.6, lamina R07): campo ADITIVO del detalle
 #   `aviso_vivienda_sin_propiedad` (gasto con categoria marcada sin propiedad, p. ej. tras corregir la categoria).
+# Version: 0.8.0 (F06 T3-F06 bloque 2 F06-01H; literal F05 Q3-Hd v1.1): HD-S2: valor aditivo PRESTAMO_RECIBIDO en CuentaFila.rol.
 # ============================================================
 
 from __future__ import annotations
@@ -138,7 +139,7 @@ class CategoriaFila(Referencia):
 class CuentaFila(_Estricto):
     cuenta_id: uuid.UUID
     nombre: str
-    rol: Literal["PAGO", "COBRO", "ORIGEN", "DESTINO"]
+    rol: Literal["PAGO", "COBRO", "ORIGEN", "DESTINO", "PRESTAMO_RECIBIDO"]  # F06-01H HD-S2: aditivo
     enabled: bool
 
 

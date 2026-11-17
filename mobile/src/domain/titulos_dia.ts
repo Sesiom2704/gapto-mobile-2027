@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-D056 decisión 2 de Moisés del 2026-10-29: la corrección de 91cc41f sale de actividad.ts y registro.ts a este módulo)
 // Versión: 0.2.0 (F06 T1-F06 B3 · fila patrimonial de Actividad, R1 v0.8 §II.5 y lámina L-6; autorizada en lista cerrada por la decisión de Moisés afaac92d…, solo presentación): los hechos ADQUISICION_PATRIMONIAL y MEJORA_PATRIMONIAL tienen nombre propio («Compra de la propiedad», «Gasto de la compra · <concepto>», «Mejora · <nota>»; en el detalle, «Compra» y «Mejora»). La fuente es el tipo del HECHO (HF-14). Los demás tipos, sus títulos y la precedencia de `tituloFila` no cambian.
 // Versión: 0.3.0 (F06 T2-F06 PAG, §1.5 del mandato; lista cerrada de F05 autorizada por el párrafo 3 del literal de PAG (decisión 3 del lote 35, bfbba1e6…); Q-VP-03): una MEJORA_PATRIMONIAL con vivienda en la fila (`propiedad`) se titula «<nota> · <vivienda>» («Reforma · <vivienda>» sin nota). Sin `propiedad`, como antes.
+// Versión: 0.4.0 (F06 T3-F06 bloque 2 F06-01H; literal F05 Q3-Hd v1.1): HD-C2: el rol `PRESTAMO_RECIBIDO` se nombra «Préstamo recibido».
 // ============================================================
 
 import type { FilaActividad } from '../api/cliente';
@@ -47,6 +48,7 @@ const esDeRegistro = (t: string): t is keyof typeof NOMBRE_TIPO => t === 'GASTO'
 export function nombreTipoFila(r: Pick<FilaActividad, 'tipo' | 'cuentas'>): string {
   const t: string = r.tipo;
   if (esDeRegistro(t)) return NOMBRE_TIPO[t];
+  if (r.cuentas[0]?.rol === 'PRESTAMO_RECIBIDO') return 'Préstamo recibido'; // HD-C2: desembolso Hd, por rol
   if (t === 'REEMBOLSO') {
     const rol = r.cuentas[0]?.rol;
     return rol === 'COBRO' ? 'Cobro' : rol === 'PAGO' ? 'Pago' : 'Liquidación';

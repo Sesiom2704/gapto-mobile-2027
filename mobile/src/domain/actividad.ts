@@ -7,6 +7,7 @@
 // Versión: 0.2.0 (F05-06 M2-B §B1; lámina DEV B1, D-DEV-07, P-DEV-03): una devolución se titula «Devolución · <compra>», su línea secundaria dice el tercero de la compra y la categoría, el importe va sin «+» ni «−» y bajo él «Devolución» o «Abono pendiente» (nunca la marca de reparto). Nada más cambia.
 // Versión: 0.3.0 (F06 T1-F06 B3 · fila patrimonial de Actividad, R1 v0.8 §II.5 y lámina L-6; autorizada en lista cerrada por la decisión de Moisés afaac92d…, solo presentación): para los hechos ADQUISICION_PATRIMONIAL y MEJORA_PATRIMONIAL (por el tipo del HECHO, HF-14) el importe va con signo «−» (sale de la cuenta) y la línea secundaria dice «Coste de la compra · no es gasto del mes» o «Mejora · no es gasto del mes» y la cuenta. Ni el periodo, ni los filtros, ni la búsqueda, ni el reparto, ni ningún otro tipo cambian.
 // Versión: 0.4.0 (F06 T2-F06 PAG, §1.5 del mandato; lista cerrada de F05 autorizada por el párrafo 3 del literal de PAG (decisión 3 del lote 35, bfbba1e6…); Q-VP-03): en una reforma (MEJORA_PATRIMONIAL) el importe principal es «tu parte» cuando el servidor la trae (sin ella, el total como antes) y `lineasReforma` da las líneas adicionales: «Salió de tu cuenta: −N €» solo si difiere de tu parte, y cada posición real en su sentido («<X> te debe N €» / «Le debes N € a <X>»), nunca inferida. Ningún otro tipo cambia.
+// Versión: 0.5.0 (F06 T3-F06 bloque 2 F06-01H; literal F05 Q3-Hd v1.1): HD-C3: línea secundaria «Préstamo recibido · <cuenta>» para el rol `PRESTAMO_RECIBIDO`, sin «Sin categoría».
 // ============================================================
 
 import type { ConsultaActividad, FilaActividad, TipoActividad } from '../api/cliente';
@@ -145,6 +146,11 @@ export function secundariaFila(r: FilaActividad): string {
     partes.push(r.categoria?.nombre ?? 'Sin categoría');
   } else if (r.tipo === 'TRANSFERENCIA') {
     partes.push('Entre cuentas');
+  } else if (r.cuentas[0]?.rol === 'PRESTAMO_RECIBIDO') {
+    // HD-C3: desembolso Hd: «Préstamo recibido · <cuenta>», sin «Sin categoría»
+    partes.push('Préstamo recibido');
+    const cuenta = r.cuentas[0]?.nombre;
+    if (cuenta) partes.push(cuenta);
   } else if (esPatrimonial(r.tipo)) {
     partes.push(etiquetaNoGastoMes(r.tipo) as string);
     const cuenta = r.cuentas[0]?.nombre;

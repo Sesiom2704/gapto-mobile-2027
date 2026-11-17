@@ -24,6 +24,7 @@
 // Versión: 0.16.0 (F06 T1-F06 B3 · fila patrimonial de Actividad, R1 v0.8 §II.5 y lámina L-6; autorizada en lista cerrada por la decisión de Moisés afaac92d…, solo presentación): la fila de un hecho ADQUISICION_PATRIMONIAL o MEJORA_PATRIMONIAL lleva el icono de propiedad (`iconoPatrimonial`, por el tipo del HECHO, HF-14). Nada más cambia.
 // Versión: 0.17.0 (F06 T2-F06 PAG, §1.5 del mandato; lista cerrada de F05 autorizada por el párrafo 3 del literal de PAG (decisión 3 del lote 35, bfbba1e6…); Q-VP-03): la fila de una reforma pinta, bajo la secundaria, las líneas de `lineasReforma` («Salió de tu cuenta: −N €» si difiere de tu parte y la posición en su sentido). Nada más cambia.
 // Versión: 0.18.0 (F06 T2-F06 CAT-VIV N1 (L-04, lámina SET-CAT/REG-CAT v1.0) R07; OBL-VIV-01.6, D-CV-01): el detalle de un gasto con `aviso_vivienda_sin_propiedad` muestra el aviso «Categoría asociada a vivienda, sin propiedad» con su explicación, SIN acción (no ofrece asociar una propiedad). Nada más cambia.
+// Versión: 0.19.0 (F06 T3-F06 bloque 2 F06-01H; literal F05 Q3-Hd v1.1): HD-C4: el detalle rápido dice «Recibido en» para el rol `PRESTAMO_RECIBIDO`.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -847,7 +848,7 @@ function DetalleVista({ d, onAbrir }: { d: DetalleActividad; onAbrir: (id: strin
   } else {
     kv.push(['Total del hecho', `${d.tipo === 'INGRESO' ? '+' : ''}${formatearEur(d.importe_total ?? '0')}`]);
     kv.push(['Tu parte', textoTuParte(d)]);
-    kv.push([d.tipo === 'INGRESO' || (d.tipo !== 'GASTO' && d.cuentas[0]?.rol === 'COBRO') ? 'Cobrado en' : 'Pagado con', d.cuentas[0]?.nombre ?? '—']);
+    kv.push([d.cuentas[0]?.rol === 'PRESTAMO_RECIBIDO' ? 'Recibido en' : d.tipo === 'INGRESO' || (d.tipo !== 'GASTO' && d.cuentas[0]?.rol === 'COBRO') ? 'Cobrado en' : 'Pagado con', d.cuentas[0]?.nombre ?? '—']);
     kv.push(['Categoría', d.varias ? 'Varias' : d.categoria ? `${d.categoria.ruta}${d.categoria.enabled ? '' : ' (desactivada)'}` : 'Sin categoría']);
     if (d.tercero) kv.push([d.tipo === 'INGRESO' ? 'De' : 'Tercero', `${d.tercero.nombre}${d.tercero.enabled ? '' : ' (desactivado)'}`]);
     if (d.contexto) kv.push(['Contexto', `${d.contexto.nombre}${d.contexto.enabled ? '' : ' (desactivado)'}`]);

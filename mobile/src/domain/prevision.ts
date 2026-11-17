@@ -9,6 +9,7 @@
 // Versión: 0.4.0 (F05-06 M5-B; F04-D065, F05-D047): «Dar por cubierta» solo en una PARCIAL (`ofreceDarPorCubierta`), «Queda sin cubrir ±X €» con el pendiente derivado (`quedaSinCubrirTexto`; nunca se guarda), «Más» en las terminales (`ofreceMas`, para «Reabrir») y las sugerencias de motivo de las dos hojas.
 // Versión: 0.5.0 (F05-06 M5-B v1.1): «Resueltas este mes». `etiquetaResuelta` («No hubo» en una OMITIDA; «Pagada» / «Cobrada» en una REALIZADA cubierta del todo; «Cubierta» en el resto: dada por cubierta, transferencia o sin registro activo) y `lineaResuelta` («Pagada · 22 oct»).
 // Versión: 0.6.0 (F05-06 M5-B cierre, AJ-M5BM1-CIERRE-02): procedencia de la fecha. Con `resuelta_por = OBJETIVO` (sin auditoría de la transición) la línea dice «prevista el …»: la fecha objetivo nunca se rotula como fecha de resolución.
+// Versión: 0.7.0 (F06 T3-F06 bloque 2 F06-01H; literal F05 Q3-Hd v1.1): Q3-C2/Q3-C3: `admiteSwipe` y `planRapidoPrevision` excluyen la fila marcada `codigo = PREVISION_DE_CUOTA` (sin gesto ni acción rápida).
 // ============================================================
 
 import type { BloquePrevisionWire, CuentaElegible, CuentaPago, DetallePrevision, FilaPrevision, FilaResuelta, ImportePorNaturaleza } from '../api/cliente';
@@ -202,6 +203,7 @@ export function textoEditable(decimal: string | null): string {
 /** Swipe «Pagado» / «Cobrado» (D-PREV-08): gasto o ingreso, esperado conocido, EUR, cuenta prevista y sin pagos previos.
  *  Espejo de las acciones del detalle; la autoridad sigue siendo el servidor al registrar. */
 export function admiteSwipe(f: FilaPrevision): boolean {
+  if (f.codigo === 'PREVISION_DE_CUOTA') return false; // Q3-C2: la cuota no tiene gesto (se paga con botón)
   if (f.estado !== 'ABIERTA' || f.moneda !== 'EUR' || f.con_realidad || f.importe_esperado === null) return false;
   if (f.tipo === 'GASTO') return f.cuenta_salida !== null;
   if (f.tipo === 'INGRESO') return f.cuenta_entrada !== null;
@@ -217,6 +219,7 @@ export interface CapacidadesHoy {
 /** Swipe como acción rápida (regla del 2026-10-22): solo si la acción es inequívoca; si falta algo, null (abre la hoja).
  *  Comprueba cada condición por sí misma, sin apoyarse en `admiteSwipe`. */
 export function planRapidoPrevision(f: FilaPrevision, cap: CapacidadesHoy | null, hoy: string): FormularioDesdePrevision | null {
+  if (f.codigo === 'PREVISION_DE_CUOTA') return null; // Q3-C3: comprobación propia, sin apoyarse en admiteSwipe
   if (!cap || f.estado !== 'ABIERTA' || f.moneda !== 'EUR' || f.con_realidad || f.pagos > 0) return null;
   if (f.importe_esperado === null) return null;
   if (f.tipo !== 'GASTO' && f.tipo !== 'INGRESO') return null;

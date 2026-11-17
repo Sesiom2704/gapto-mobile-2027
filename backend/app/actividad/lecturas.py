@@ -60,6 +60,7 @@
 #   en la lectura»; OBL-VIV-01.6, lamina REG-CAT R07): campo ADITIVO del detalle `aviso_vivienda_sin_propiedad`
 #   (true si el hecho tiene un efecto GASTO con categoria «Asociada a vivienda» y ningun vinculo AFECTA_A a una
 #   PROPIEDAD). Solo lectura: no crea ni propone vinculos.
+# Version: 0.6.0 (F06 T3-F06 bloque 2 F06-01H; literal F05 Q3-Hd v1.1): HD-S1: rol PRESTAMO_RECIBIDO del movimiento + de un desembolso Hd (predicado fisico del literal, lectura en lote).
 # ============================================================
 
 from __future__ import annotations
@@ -289,8 +290,26 @@ def devoluciones_de_origen(sesion: SesionMotor, origen_id: uuid.UUID) -> dict[st
     }
 
 
+#: F06-01H (literal F05 Q3-Hd, HD-S1): rol propio del movimiento + del desembolso Hd.
+ROL_PRESTAMO_RECIBIDO = "PRESTAMO_RECIBIDO"
+
+
 def _dinero(valor) -> str | None:
     return None if valor is None else str(decimal.Decimal(valor).quantize(_CENT))
+
+
+def _desembolsos_hd(cur, ids: list[uuid.UUID]) -> set[uuid.UUID]:
+    """F06-01H (literal F05 Q3-Hd, HD-S1): desembolsos Hd de la pagina, por el predicado fisico del literal (hecho
+    ACTIVO GENERACION_DERECHO_OBLIGACION con un efecto DEUDA > 0 vinculado a nivel efecto a una FINANCIACION).
+    Su movimiento + sale con el rol PRESTAMO_RECIBIDO. Lectura en lote, sin lock."""
+    cur.execute(
+        "SELECT DISTINCT v.hecho_id FROM gapto.hecho_entidades v "
+        "JOIN gapto.entidades n ON n.id = v.entidad_id JOIN gapto.hecho_efectos e ON e.id = v.efecto_id "
+        "JOIN gapto.hechos_financieros h ON h.id = v.hecho_id JOIN gapto.tipos_hecho th ON th.id = h.tipo_hecho_id "
+        "WHERE v.hecho_id = ANY(%s) AND v.efecto_id IS NOT NULL AND n.tipo_entidad = 'FINANCIACION' "
+        "AND e.tipo_efecto = 'DEUDA' AND e.importe_delta > 0 AND h.estado = 'ACTIVO' "
+        "AND th.codigo = 'GENERACION_DERECHO_OBLIGACION'", (ids,))
+    return {r[0] for r in cur.fetchall()}
 
 
 def _componer(sesion: SesionMotor, ids: list[uuid.UUID]) -> dict[uuid.UUID, dict[str, Any]]:
@@ -376,6 +395,7 @@ def _componer(sesion: SesionMotor, ids: list[uuid.UUID]) -> dict[uuid.UUID, dict
             "WHERE r.hecho_origen_id = ANY(%s) AND r.tipo_relacion = 'DEVOLUCION_DE'", (ids,))
         origenes = {r[0]: {"hecho_id": r[1], "nota": r[2], "fecha_hecho": r[3], "tercero": r[4]}
                     for r in cur.fetchall()}
+        desembolsos = _desembolsos_hd(cur, ids)
     salida = {}
     for hid in ids:
         _, fecha, tipo, concepto, importe_total, moneda = base[hid]
@@ -399,6 +419,8 @@ def _componer(sesion: SesionMotor, ids: list[uuid.UUID]) -> dict[uuid.UUID, dict
         for c in cuentas.get(hid, []):
             if tipo == "TRANSFERENCIA":
                 rol = "ORIGEN" if c["importe"] < 0 else "DESTINO"
+            elif c["importe"] > 0 and hid in desembolsos:
+                rol = ROL_PRESTAMO_RECIBIDO
             else:
                 rol = "PAGO" if c["importe"] < 0 else "COBRO"
             roles.append({"cuenta_id": c["cuenta_id"], "nombre": c["nombre"], "rol": rol, "enabled": c["enabled"]})

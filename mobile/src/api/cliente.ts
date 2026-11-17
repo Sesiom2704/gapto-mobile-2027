@@ -32,6 +32,7 @@
 // v0.23.0 (F06 T2-F06 CAT-VIV N1 (L-04, lámina SET-CAT/REG-CAT v1.0)): `viviendaCategoria` (POST /v1/categorias/{id}/vivienda, C-CAT-VIV-01; OPCIONAL en `ClienteApi` para que los dobles de test no cambien) y campo aditivo `DetalleActividad.aviso_vivienda_sin_propiedad` (R07). Ninguna llamada existente cambia.
 // Versión: 0.23.0
 // v0.24.0 (F06 T3-F06 · F04-R-HIP, subhito F05 S7/S10; D-08): campo aditivo OPCIONAL `AccionPrevision.codigo` (PREVISION_DE_CUOTA). Ninguna llamada existente cambia.
+// v0.25.0 (F06 T3-F06 bloque 2 F06-01H; literal F05 Q3-Hd v1.1): Q3-C1 `FilaPrevision.codigo?` (PREVISION_DE_CUOTA) y HD-C1 rol aditivo `PRESTAMO_RECIBIDO` de `CuentaFila`. Ninguna llamada existente cambia.
 // ============================================================
 
 import type { Ambito, CategoriaNodo } from '../domain/categoria';
@@ -441,7 +442,7 @@ export interface FilaActividad {
   categoria: (ReferenciaActividad & { ruta: string; icon_key?: string | null }) | null;
   varias: boolean;
   contexto: ReferenciaActividad | null;
-  cuentas: { cuenta_id: string; nombre: string; rol: 'PAGO' | 'COBRO' | 'ORIGEN' | 'DESTINO'; enabled: boolean }[];
+  cuentas: { cuenta_id: string; nombre: string; rol: 'PAGO' | 'COBRO' | 'ORIGEN' | 'DESTINO' | 'PRESTAMO_RECIBIDO'; enabled: boolean }[];
   estado_reparto: 'COMPLETA' | 'PARCIAL' | 'NO_DISPONIBLE' | null;
   tu_parte: string | null;
   pendiente: string | null;
@@ -616,6 +617,8 @@ export interface RefNombre {
   nombre: string;
 }
 export interface FilaPrevision {
+  /** Q3-C1: marca aditiva del servidor, solo en la fila de la previsión de una cuota (sin swipe ni acción rápida). */
+  codigo?: 'PREVISION_DE_CUOTA';
   id: string;
   row_version: number;
   estado: string;

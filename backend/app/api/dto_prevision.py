@@ -34,6 +34,7 @@
 #   las demas acciones se serializan como antes, sin `codigo` (byte a byte).
 #   `CandidatosCuota` (lote 42, firma del STOP n.º 2): candidatos de la prevision
 #   de una cuota con `codigo` PREVISION_DE_CUOTA; los demas, sin cambio.
+# Version: 0.5.0 (F06 T3-F06 bloque 2 F06-01H; literal F05 Q3-Hd v1.1): Q3-S1: FilaPrevisionCuota/FilaResueltaCuota con codigo aditivo; las demas filas sin la clave.
 # ============================================================
 
 from __future__ import annotations
@@ -149,15 +150,25 @@ class FilaPrevision(_Estricto):
     presupuestable: bool  # propuesta «De la prevision» del registro
 
 
+class FilaPrevisionCuota(FilaPrevision):
+    """F06-01H (literal F05 Q3-Hd, Q3-S1): fila de la prevision de una cuota, con la marca aditiva `codigo`.
+    Las demas filas validan como FilaPrevision (extra="forbid") y no llevan la clave (sin `codigo: null`)."""
+    codigo: Literal["PREVISION_DE_CUOTA"]
+
+
+#: Fila de lista: la de cuota o la ordinaria (solo una de las dos valida con extra="forbid").
+FilaLista = FilaPrevisionCuota | FilaPrevision
+
+
 class RequiereAtencion(_Estricto):
     n: int
-    primeras: list[FilaPrevision]
+    primeras: list[FilaLista]
 
 
 class InicioPrevisiones(_Estricto):
     hoy: dt.date
     requiere_atencion: RequiereAtencion
-    proximos: list[FilaPrevision]
+    proximos: list[FilaLista]
     aviso: str
 
 
@@ -168,9 +179,9 @@ class ImportePorNaturaleza(_Estricto):
 
 
 class Secciones(_Estricto):
-    vencidas: list[FilaPrevision]
-    con_pago_parcial: list[FilaPrevision]
-    sin_fecha: list[FilaPrevision]
+    vencidas: list[FilaLista]
+    con_pago_parcial: list[FilaLista]
+    sin_fecha: list[FilaLista]
 
 
 class FilaResuelta(FilaPrevision):
@@ -179,11 +190,16 @@ class FilaResuelta(FilaPrevision):
     resuelta_por: Literal["AUDITORIA", "OBJETIVO"]  # fecha de la transicion o, sin auditoria, la objetivo
 
 
+class FilaResueltaCuota(FilaResuelta):
+    """F06-01H (Q3-S1): fila resuelta de la prevision de una cuota, con la marca aditiva."""
+    codigo: Literal["PREVISION_DE_CUOTA"]
+
+
 class ResueltasMes(_Estricto):
     desde: dt.date
     hasta: dt.date
     n: int
-    filas: list[FilaResuelta]
+    filas: list[FilaResueltaCuota | FilaResuelta]
 
 
 class PendientesPrevisiones(_Estricto):
