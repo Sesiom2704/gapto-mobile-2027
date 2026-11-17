@@ -8,6 +8,7 @@
 // Versión: 0.4.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): `lados` devuelve `principal` y `alternativa` (la dirección la pone el componente común: principal a la izquierda).
 // Versión: 0.3.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2): `lados(fila)` da los dos lados de la fila. Derecha «Pagado» / «Cobrado» (transferencia: «Hecha»): acción rápida si no hay dudas; si las hay, la hoja (esperado y cuenta conocidos) o el formulario completo ya rellenado (importe desconocido, pago parcial, transferencia). Izquierda «No hubo» solo sin pagos enlazados (`admiteNoHubo`): omite con motivo vacío y la misma identidad que la hoja de omitir, tras el aviso de 5 s.
 // Versión: 0.5.0 (F05-D056 paso 2, COLA-AR v1.0, F05 §70.A): «Pagado» / «Cobrado» (F4) y «No hubo» (F5) son acciones de la cola de la app (`useAccionFinanciera`): la petición se compone al soltar con la identidad del swipe, sobrevive a la navegación y a cerrar la app, y el aviso dice «Pagando…» / «Confirmando…» hasta la confirmación del servidor. «No hubo» se reconcilia leyendo la previsión (decisión 1 de Moisés del 2026-10-29). La hoja y el formulario no cambian.
+// Versión: 0.6.0 (F06 T3-F06 bloque 2 F06-01H; literal F05 Q3-Hd v1.1 enmendado, pieza Q3-C5, firma 0f3e5633…): `lados()` no ofrece gestos (ni «Pagado» ni «No hubo») sobre una fila marcada `codigo = PREVISION_DE_CUOTA`; comprobación propia, sin apoyarse en `admiteSwipe`.
 // ============================================================
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -110,6 +111,7 @@ export function useSwipePrevision(p: {
   /** Los dos lados de una fila (null fuera de gasto, ingreso o transferencia abiertos). */
   const lados = (f: FilaPrevision): { principal?: LadoSwipe; alternativa?: LadoSwipe } => {
     if (f.estado !== 'ABIERTA' || !['GASTO', 'INGRESO', 'TRANSFERENCIA'].includes(f.tipo)) return {};
+    if (f.codigo === 'PREVISION_DE_CUOTA') return {}; // Q3-C5: la cuota no ofrece gestos (se paga con botón)
     return {
       principal: { etiqueta: f.tipo === 'TRANSFERENCIA' ? 'Hecha' : verboSwipe(f.tipo), icono: 'checkmark', tono: 'confirmar', onEjecutar: () => deslizar(f) },
       alternativa: admiteNoHubo(f) ? { etiqueta: 'No hubo', icono: 'remove-circle-outline', tono: 'neutro', onEjecutar: () => noHubo(f) } : undefined,

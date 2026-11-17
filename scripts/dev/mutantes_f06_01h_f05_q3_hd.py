@@ -14,6 +14,9 @@
 #        python -u scripts/dev/mutantes_f06_01h_f05_q3_hd.py [--solo ID,ID] [--salida fichero]
 #   No ejecutar en paralelo con otro arnes ni con la suite sobre el mismo arbol.
 # Version: 0.1.0 (F06 T3-F06 bloque 2 F06-01H; literal F05 Q3-Hd v1.1, paso 9)
+# Version: 0.2.0 (F06 T3-F06 bloque 2 F06-01H; enmienda 52ef5511…, firma 0f3e5633…, STOP_F06-T3-2_3 opcion A):
+#   MQ3-C5 (lados() de SwipePrevision.tsx ofrece gestos sobre la fila de la cuota); discriminante Jest
+#   prevision_cuota_lados (Q3-C5).
 # ============================================================
 
 from __future__ import annotations
@@ -39,6 +42,8 @@ T297 = "tests/api/test_297_f06_01h_f05_q3_listas.py::"
 T298 = "tests/api/test_298_f06_01h_f05_actividad_hd.py::"
 JQ3 = "jest:__tests__/prevision_cuota_swipe.test.ts::"
 JHD = "jest:__tests__/actividad_prestamo_recibido.test.tsx::"
+SWP = "mobile/src/components/SwipePrevision.tsx"
+JC5 = "jest:__tests__/prevision_cuota_lados.test.tsx::"
 LISTAS = [T297 + "test_o_q3_1_inicio_marca_solo_la_cuota", T297 + "test_o_q3_1_pendientes_marca_solo_la_cuota"]
 
 MUTANTES = [
@@ -57,6 +62,9 @@ MUTANTES = [
     ("MQ3-C2", "planRapidoPrevision ignora la marca",
      [(DOMP, "  if (f.codigo === 'PREVISION_DE_CUOTA') return null; // Q3-C3: comprobación propia, sin apoyarse en admiteSwipe\n",
        "")], [JQ3 + "Q3-C3"], None),
+    ("MQ3-C5", "lados() ofrece gestos sobre la fila de la cuota",
+     [(SWP, "    if (f.codigo === 'PREVISION_DE_CUOTA') return {}; // Q3-C5: la cuota no ofrece gestos (se paga con botón)\n",
+       "")], [JC5 + "Q3-C5"], None),
     ("MHD-S1", "el rol del Hd vuelve a COBRO",
      [(LACT, '            elif c["importe"] > 0 and hid in desembolsos:\n', '            elif False:\n')],
      [T298 + "test_o_hd_1_lista_y_detalle_del_hd"], None),
