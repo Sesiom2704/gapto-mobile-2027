@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F06 T3-F06 bloque 2 F06-01H, paso 10)
 // Versión: 0.2.0 (F06 T3-F06 bloque 2 F06-01H; N-31, firma 0f3e5633…): `REVISION_TIPO_EXPUESTA` constante propia (true) y `ofreceRevisionTipo`.
 // Versión: 0.3.0 (F06 T3-F06 bloque 2 F06-01H; N-30, firma 0f3e5633…): `titularidadPrestamoEnFecha` (tramos y límites; sin campo, null).
+// Versión: 0.4.0 (F06 T3-F06 bloque 2 F06-01H; firma e446b4c3…, N-40): la constante real de exposición del pago vale true.
 // ============================================================
 
 import { crearCliente } from '../src/api/cliente';
@@ -30,8 +31,8 @@ const completo = (x: Partial<BorradorHipoteca> = {}): BorradorHipoteca => ({
 });
 
 // ------------------------------------------------------------------ exposición del pago (firma 2026-11-17)
-test('exposición: PAGO_CUOTA_EXPUESTO es una constante de código y vale false (Q3 con STOP abierto)', () => {
-  expect(PAGO_CUOTA_EXPUESTO).toBe(false);
+test('exposición: PAGO_CUOTA_EXPUESTO es una constante de código y vale true (N-40, firma e446b4c3…; vuelve a false si falla una condición)', () => {
+  expect(PAGO_CUOTA_EXPUESTO).toBe(true);
   const src = fuente('src/domain/hipoteca.ts');
   expect(src).toMatch(/^export const PAGO_CUOTA_EXPUESTO = (true|false);$/m);
   expect(src).not.toMatch(/process\.env|EXPO_PUBLIC|expo-constants|Constants\./);

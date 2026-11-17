@@ -16,6 +16,7 @@
 // Versión: 0.1.0 (F06 T3-F06 bloque 2 F06-01H, paso 10)
 // Versión: 0.2.0 (F06 T3-F06 bloque 2 F06-01H; N-31, firma 0f3e5633…): `REVISION_TIPO_EXPUESTA` simulable como el pago; test de exposición de la revisión (true ofrece «Revisar el tipo», false no).
 // Versión: 0.3.0 (F06 T3-F06 bloque 2 F06-01H; N-30, firma 0f3e5633…): el pago propone con `titularidad_prestamo` de L-HIP en el vencimiento (no con la de la propiedad) y, con ella, ATRIBUCION_PROPUESTA_DESFASADA recarga la hipoteca.
+// Versión: 0.4.0 (F06 T3-F06 bloque 2 F06-01H; firma e446b4c3…, N-40): la constante real de exposición del pago vale true; el caso «no expuesto» se prueba con el valor simulado false.
 // ============================================================
 
 import './tiempos_rn';
@@ -286,9 +287,9 @@ function montarCuadro(cli: ClienteApi, leerPropuesta: (f: string) => Promise<Par
   return onCerrar;
 }
 
-test('exposición: la constante real es false y, con ella, el cuadro NO ofrece «Pagar la cuota»', async () => {
-  expect(dominioReal.PAGO_CUOTA_EXPUESTO).toBe(false);
-  mockExpuesto = dominioReal.PAGO_CUOTA_EXPUESTO;
+test('exposición: la constante real es true (N-40); con false el cuadro NO ofrece «Pagar la cuota»', async () => {
+  expect(dominioReal.PAGO_CUOTA_EXPUESTO).toBe(true);
+  mockExpuesto = false;
   const cli = clienteCuadro();
   const onCerrar = montarCuadro(cli);
   await waitFor(() => screen.getByTestId('hip-cuadro'));

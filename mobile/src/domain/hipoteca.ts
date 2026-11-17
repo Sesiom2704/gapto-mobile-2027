@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F06 T3-F06 bloque 2 F06-01H, paso 10)
 // Versión: 0.2.0 (F06 T3-F06 bloque 2 F06-01H; N-31, firma 0f3e5633…): constante de código propia `REVISION_TIPO_EXPUESTA = true` y `ofreceRevisionTipo` (revisión solo expuesta, ACTIVA y con deuda conocida).
 // Versión: 0.3.0 (F06 T3-F06 bloque 2 F06-01H; N-30, firma 0f3e5633…, enmienda 52ef5511…): `titularidadPrestamoEnFecha`: la propuesta del reparto de los intereses sale de la titularidad DEL PRÉSTAMO de L-HIP vigente en el vencimiento (Q-T3D-08), no de la de la propiedad.
+// Versión: 0.4.0 (F06 T3-F06 bloque 2 F06-01H; firma e446b4c3…, N-40): `PAGO_CUOTA_EXPUESTO = true` antes del gate (Q3-C5 implementada, STOP 3 resuelto); vuelve a false sin nueva firma si al final falla #96 (D17), el bloque 1, Q3, el botón o el no swipe.
 // ============================================================
 
 import type {
@@ -19,10 +20,11 @@ import { esFechaIso } from './intencion';
 
 /**
  * Exposición del pago de una cuota en la app (firma de Moisés del 2026-11-17, `F06-00_Decisiones_Moises_2026-11-17_exposicion_pago_cuota_v1.0.md`,
- * e446b4c3…): «expuesto» solo si al terminar el bloque se cumplen #96 (D17), bloque 1 verde, Q3 verde, botón y no swipe. Con el STOP de Q3 abierto
- * queda NO EXPUESTO. Constante de código: solo cambia con un commit revisado; nunca por entorno ni configuración.
+ * e446b4c3…): «expuesto» solo si al terminar el bloque se cumplen #96 (D17), bloque 1 verde, Q3 verde, botón y no swipe. Decisión anotada antes
+ * del gate (N-40): true, para que el gate, los mutantes y la concurrencia cubran el estado expuesto; si al final falla cualquiera de esas
+ * condiciones vuelve a false sin nueva firma. Constante de código: solo cambia con un commit revisado; nunca por entorno ni configuración.
  */
-export const PAGO_CUOTA_EXPUESTO = false;
+export const PAGO_CUOTA_EXPUESTO = true;
 
 /**
  * Exposición de la revisión del tipo en la app (N-31; firma de Moisés del 2026-11-17, 0f3e5633…): constante propia, mismo mecanismo que el pago.
