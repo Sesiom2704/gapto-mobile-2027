@@ -17,6 +17,9 @@
 # Version: 0.1.0 (F06 T3-F06 bloque 2 F06-01H, paso 4)
 # Version: 0.2.0 (F06 T3-F06 bloque 2 F06-01H, paso 6): POST /v1/hipotecas/{financiacion_id}/cuotas/{numero}/pago
 #   (W-HIP-02, servicio propio pago.py) con sus rechazos (contrato v0.4 §7.3).
+# Version: 0.3.0 (F06 T3-F06 bloque 2 F06-01H, paso 7): POST /v1/hipotecas/{financiacion_id}/revision (W-HIP-03/04,
+#   servicio propio revision.py): REVISION_SOBRE_CUOTA_PAGADA y SIN_CUOTAS_FUTURAS 409, FECHA_REVISION_INCOHERENTE
+#   422; CUADRO_NO_CUADRA -> log, ErrorMotor VIOLACION_INVARIANTE_FISICA (500) y ROLLBACK (revision.py).
 # ============================================================
 
 from __future__ import annotations
@@ -37,7 +40,8 @@ from app.core.errores import CodigoError
 from app.hipotecas import calculadora as calc
 from app.hipotecas import lecturas
 from app.hipotecas import pago as serv_pago
-from app.hipotecas.dto import CuadroPrevio, PagoCuota
+from app.hipotecas import revision as serv_revision
+from app.hipotecas.dto import CuadroPrevio, PagoCuota, RevisionTipo
 from app.patrimonio.completitud import Rechazo
 from app.propiedades import repositorio as repo_prop
 
@@ -59,6 +63,9 @@ RECHAZOS: dict[str, tuple[int, str]] = {
     "ATRIBUCION_PROPUESTA_DESFASADA": (409, "La titularidad del préstamo ha cambiado. Revisa el reparto de los intereses."),
     "ENTRADA_INVALIDA": (422, "Revisa los datos."),
     "SUMA_NO_CUADRA": (422, "El reparto no suma el 100 %."),
+    "REVISION_SOBRE_CUOTA_PAGADA": (409, "La revisión afecta a una cuota que ya no está pendiente."),
+    "SIN_CUOTAS_FUTURAS": (409, "No quedan cuotas desde esa fecha."),
+    "FECHA_REVISION_INCOHERENTE": (422, "La fecha de la revisión debe ser posterior a la de las condiciones vigentes."),
 }
 
 
@@ -134,4 +141,16 @@ def registrar(app: FastAPI, *, unidad, contexto: Callable[[], ContextoOperacion]
                                  nombre="F06-01H W-HIP-02")
         if isinstance(salida, Rechazo):
             return rechazo(salida.codigo)
+        return _texto(salida)
+
+    @app.post("/v1/hipotecas/{financiacion_id}/revision", dependencies=dep)
+    def revisar_tipo(financiacion_id: uuid.UUID, c: RevisionTipo):
+        peticion = c.model_dump()
+        ctx = contexto()
+        ctx = ContextoOperacion.de_usuario(ctx.owner_user_id, request_id=c.intencion_id)
+        salida = unidad.ejecutar(ctx, lambda s: serv_revision.revisar(s, financiacion_id=financiacion_id,
+                                                                      peticion=peticion, reloj=reloj),
+                                 nombre="F06-01H W-HIP-03/04")
+        if isinstance(salida, Rechazo):
+            return rechazo(salida.codigo, (salida.detalle or {}).get("motivo"))
         return _texto(salida)

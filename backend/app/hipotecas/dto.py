@@ -11,6 +11,7 @@
 #   vigente de la API). Nunca float: los importes viajan como texto o numero decimal exacto.
 # Version: 0.1.0 (F06 T3-F06 bloque 2 F06-01H, paso 4)
 # Version: 0.2.0 (F06 T3-F06 bloque 2 F06-01H, paso 6): PagoCuota (W-HIP-02, contrato v0.4 §3.4).
+# Version: 0.3.0 (F06 T3-F06 bloque 2 F06-01H, paso 7): RevisionTipo (W-HIP-03/04, contrato v0.4 §3.5).
 # ============================================================
 
 from __future__ import annotations
@@ -57,3 +58,14 @@ class PagoCuota(_Estricto):
     cuenta_id: uuid.UUID
     fecha_pago: dt.date
     atribucion: AtribucionPago
+
+
+class RevisionTipo(_Estricto):
+    intencion_id: uuid.UUID
+    row_version_esperada: int = Field(ge=1)
+    vigente_desde: dt.date
+    tasa_anual: decimal.Decimal
+    tipo_interes: str | None = Field(default=None, max_length=20)
+    indice_referencia: str | None = Field(default=None, max_length=40)
+    diferencial: decimal.Decimal | None = None
+    periodicidad: str = Field(default=calc.PERIODICIDAD, max_length=20)

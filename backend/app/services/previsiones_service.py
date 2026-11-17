@@ -31,6 +31,12 @@
 #   sigue siendo ABIERTA: no hay estado PARCIAL persistido. Y el primer hecho
 #   ACTIVO congela la expectativa poniendo `recalculo_automatico=false`, de
 #   modo que una version posterior de la regla ya no reescribe ese importe.
+# Version: 0.12.0
+#   0.12.0 (F06 T3-F06 bloque 2 F06-01H, paso 7; contrato v0.4 §3.5.2-6; I3 por el D-200 de F05 0.74; Q-T3D-09):
+#   metodo nuevo `ajustar_importe_cuota_hipoteca`: solo prevision MANUAL, ABIERTA y vinculada a una cuota de la
+#   financiacion indicada (si no, ESTADO_PREVISION_INCOMPATIBLE con motivo PREVISION_CON_REGLA,
+#   PREVISION_NO_ABIERTA o PREVISION_NO_ES_DE_CUOTA, antes de escribir); FOR UPDATE; row_version comprobada y
+#   subida; importe_esperado y motivo_ajuste; auditoria ACTUALIZAR. Nunca recalcular_futuras. Nada mas cambia.
 # Version: 0.11.0
 #   0.11.0 (F06 T3-F06 bloque 2 F06-01H, paso 6; contrato v0.4 §3.4 «Prevision de la cuota fuera de M5»,
 #   AJ-T3D-06; M-H-36): `corregir_estado_terminal` rechaza ANTES de escribir la prevision vinculada a una cuota de
@@ -298,6 +304,70 @@ class PrevisionesService:
             )
 
         return self._ejecutar(contexto, operacion, "crear_prevision_manual")
+
+    # ==================================================================
+    # F06-01H W-HIP-04 · ajuste del importe de la prevision de una cuota (I3)
+    # ==================================================================
+    def ajustar_importe_cuota_hipoteca(
+        self,
+        contexto: ContextoOperacion,
+        *,
+        prevision_id: uuid.UUID,
+        financiacion_id: uuid.UUID,
+        importe_esperado: decimal.Decimal,
+        row_version_esperada: int,
+        motivo_ajuste: str,
+    ) -> ResultadoPrevision:
+        """Ajusta `importe_esperado` de la prevision de UNA cuota (contrato v0.4 §3.5.2-6; I3 por D-200 de F05).
+
+        Solo una prevision MANUAL (sin regla), ABIERTA y vinculada a una cuota de ESTA financiacion; FOR UPDATE;
+        `row_version` comprobada y subida; `motivo_ajuste`; auditoria ACTUALIZAR con antes/despues. Nunca
+        regobierna la prevision ni recalcula otras (test_230). Rechazo -> ESTADO_PREVISION_INCOMPATIBLE con
+        motivo, antes de escribir.
+        """
+        importe = decimal.Decimal(importe_esperado)
+        if not importe.is_finite() or importe <= 0:
+            raise ErrorMotor(CodigoError.IMPORTE_NO_POSITIVO, "El importe de la cuota debe ser positivo.")
+        motivo = (motivo_ajuste or "").strip()
+        if not motivo:
+            raise ErrorMotor(CodigoError.MOTIVO_AUSENTE, "El ajuste de una cuota exige motivo.")
+
+        def operacion(sesion: SesionMotor) -> ResultadoPrevision:
+            repo_hechos.exigir_contexto(sesion)
+            if repo_prev.bloquear_prevision(sesion, prevision_id) is None:
+                raise ErrorMotor(CodigoError.AGREGADO_NO_ENCONTRADO,
+                                 "La previsión indicada no existe o no es accesible.")
+            prevision = self._exigir_prevision(sesion, prevision_id)
+
+            def incompatible(clave: str) -> ErrorMotor:
+                return ErrorMotor(CodigoError.ESTADO_PREVISION_INCOMPATIBLE,
+                                  "Solo se ajusta la previsión abierta de una cuota de esta hipoteca.",
+                                  contexto_extra={"motivo": clave})
+
+            if prevision["regla_version_id"] is not None:
+                raise incompatible("PREVISION_CON_REGLA")
+            if prevision["estado"] != ABIERTA:
+                raise incompatible("PREVISION_NO_ABIERTA")
+            if sesion.uno(
+                "SELECT 1 FROM gapto.financiacion_cuotas WHERE prevision_id = %s AND financiacion_entidad_id = %s",
+                (prevision_id, financiacion_id),
+            ) is None:
+                raise incompatible("PREVISION_NO_ES_DE_CUOTA")
+            nueva = self._tocar(sesion, prevision_id, row_version_esperada)
+            antes, despues = repo_prev.actualizar_prevision(
+                sesion, prevision_id, {"importe_esperado": importe, "motivo_ajuste": motivo})
+            auditoria.registrar(
+                sesion,
+                tabla=repo_prev.TABLA_PREVISIONES,
+                registro_id=prevision_id,
+                accion=auditoria.ACCION_ACTUALIZAR,
+                datos_antes_json=antes,
+                datos_despues_json=despues,
+                motivo=motivo,
+            )
+            return self._resultado_actual(sesion, prevision_id, row_version=nueva)
+
+        return self._ejecutar(contexto, operacion, "ajustar_importe_cuota_hipoteca")
 
     # ==================================================================
     # Generacion CALENDARIO
