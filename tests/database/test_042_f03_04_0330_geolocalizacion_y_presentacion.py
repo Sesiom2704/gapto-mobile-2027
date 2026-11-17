@@ -30,6 +30,7 @@
 #              garantías SRV/API (D-186 §3). No hay trigger y no debe haberlo:
 #              probarlas contra el catálogo daría una falsa sensación de
 #              garantía física. Se prueban en el servicio.
+# Versión: 0.1.2  -- F06 T3-F06 bloque 2 F06-01H (L-06-T3, mandato v1.1 §5.1; añadido en el handoff): con 0354 aplicada (marca fn_validar_cuadro_hipoteca) triggers no internos 65.
 # Versión: 0.1.1  -- P3 en replica local: el fixture insertaba tambien el usuario
 #                   de OTRO_OWNER bajo el contexto de OWNER, y la RLS de usuarios
 #                   lo rechazaba. OTRO_OWNER solo se usa como contexto de tenant y
@@ -86,6 +87,12 @@ def _uno(db: psycopg.Connection, sql: str, params: tuple | None = None):
         cur.execute(sql, params)
         fila = cur.fetchone()
     return fila[0] if fila else None
+
+
+def _head_0354(db: psycopg.Connection) -> bool:
+    """0354 aplicada (marca: funcion gapto.fn_validar_cuadro_hipoteca, T3-F06 F06-01H)."""
+    return _uno(db, "SELECT count(*) FROM pg_catalog.pg_proc WHERE pronamespace = 'gapto'::regnamespace "
+                    "AND proname = 'fn_validar_cuadro_hipoteca'") == 1
 
 
 class Escenario:
@@ -221,7 +228,7 @@ def test_0330_no_crea_postgis_ni_triggers_ni_tablas(db: psycopg.Connection) -> N
         SELECT count(*) FROM pg_catalog.pg_trigger t
           JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid
          WHERE c.relnamespace='gapto'::regnamespace AND NOT t.tgisinternal
-    """) == 58
+    """) == (65 if _head_0354(db) else 58)
 
 
 def test_0330_force_rls_restaurado(db: psycopg.Connection) -> None:

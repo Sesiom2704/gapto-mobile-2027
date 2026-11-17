@@ -19,6 +19,7 @@
 #
 # PRECONDICIÓN: requiere 0190 (B16). Debe ejecutarse desde la raiz del
 #              repositorio, porque G6 inspecciona migrations/ y tests/.
+# Versión: 0.10.2  -- F06 T3-F06 bloque 2 F06-01H (L-06-T3, mandato v1.1 §5.1; añadido en el handoff): SUCESORA_0354 (funciones 34, triggers 65, constraint triggers 44).
 # Versión: 0.10.1  -- F06-01 B0 (F06-D002): sucesora 0351 de la matriz de runtime (DELETE 41).
 # Versión: 0.10.0 -- SUCESORA 0320 / D-183. La matriz de runtime pasa a DELETE 48.
 #                   Los dicts SUCESORA_* no cuentan indices ni columnas, de modo
@@ -128,6 +129,10 @@ SUCESORA_0300 = {**SUCESORA_0290, "foreign_keys": 175}
 # runtime. Contrato MEDIDO en Neon gapto2027_test, no previsto.
 SUCESORA_0310 = {**SUCESORA_0300, "funciones": 28,
                  "triggers_no_internos": 58, "constraint_triggers": 41}
+# SUCESORA 0354 (T3-F06 F06-01H, MIG-HIP-GAR): seis funciones y siete triggers
+# (tres constraint triggers diferidos); ningun otro campo cambia.
+SUCESORA_0354 = {**SUCESORA_0310, "funciones": 34,
+                 "triggers_no_internos": 65, "constraint_triggers": 44}
 
 # La matriz de runtime la fija B14/B18/B21; 0286 suma efecto_cuentas en
 # SELECT, INSERT y UPDATE, y NO en DELETE (bucket A de D-093).
@@ -207,7 +212,8 @@ def test_gate_g2_contrato_fisico(db: psycopg.Connection) -> None:
                AND t.tgname LIKE '%%guard%%'"""),
     }
     if obtenido in (SUCESORA_0270, SUCESORA_0280, SUCESORA_0285, SUCESORA_0286,
-                    SUCESORA_0288, SUCESORA_0290, SUCESORA_0300, SUCESORA_0310):
+                    SUCESORA_0288, SUCESORA_0290, SUCESORA_0300, SUCESORA_0310,
+                    SUCESORA_0354):
         return
     diferencias = {
         k: (CONTRATO_ESPERADO[k], obtenido[k])

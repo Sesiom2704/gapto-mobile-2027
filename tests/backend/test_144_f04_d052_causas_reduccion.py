@@ -19,6 +19,9 @@
 #   financiacion_cuotas (guarda estructural, D4). Los casos mixtos (pago +
 #   condonacion del resto y al reves) prueban la guarda motivo_cierre <->
 #   causa, anadida por iniciativa propia y mantenida por la orquestacion.
+# Version: 0.4.0 (F06 T3-F06 bloque 2 F06-01H; AJ-T3C-04, mandato v1.1 §5.2): el fixture `financiacion`
+#   lleva capital contratado 100 y capital_previsto 100 en su unica cuota (cuadro coherente con
+#   INV-0354-G2); tipo HIPOTECA, cuota REAL y oraculos de la seccion 8 sin cambio.
 # Version: 0.3.0
 #   0.3.0 (F04-D055 B1 · A4): `test_4_..._indeterminada_...` afirma la
 #   lectura de una CERRADA (conocido 0) y `apertura_indeterminada` en lugar
@@ -136,12 +139,12 @@ def financiacion(admin: psycopg.Connection, owner: uuid.UUID):
     _como_owner(admin, owner, [
         ("INSERT INTO gapto.entidades (id, owner_user_id, tipo_entidad, nombre) "
          "VALUES (%s, %s, 'FINANCIACION', 'Hipoteca formal')", (entidad_id, owner)),
-        ("INSERT INTO gapto.financiaciones (entidad_id, tipo_financiacion, moneda, "
+        ("INSERT INTO gapto.financiaciones (entidad_id, tipo_financiacion, moneda, capital_original_contratado, "
          "saldo_principal_apertura, fecha_inicio_seguimiento) "
-         "VALUES (%s, 'HIPOTECA', 'EUR', 1000, %s)", (entidad_id, dt.date(2026, 1, 1))),
+         "VALUES (%s, 'HIPOTECA', 'EUR', 100, 1000, %s)", (entidad_id, dt.date(2026, 1, 1))),
         ("INSERT INTO gapto.financiacion_cuotas (id, financiacion_entidad_id, "
-         "numero_cuota, fecha_vencimiento, importe_total_previsto) "
-         "VALUES (%s, %s, 1, %s, 100)", (cuota_id, entidad_id, dt.date(2026, 7, 1))),
+         "numero_cuota, fecha_vencimiento, capital_previsto, importe_total_previsto) "
+         "VALUES (%s, %s, 1, %s, 100, 100)", (cuota_id, entidad_id, dt.date(2026, 7, 1))),
     ])
     return entidad_id, cuota_id
 

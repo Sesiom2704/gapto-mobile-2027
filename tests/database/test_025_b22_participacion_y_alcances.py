@@ -22,6 +22,7 @@
 #              cualquier otra huella sigue siendo drift.
 #
 # PRECONDICIÓN: requiere 0190 (B16).
+# Versión: 0.1.8  -- F06 T3-F06 bloque 2 F06-01H (L-06-T3, mandato v1.1 §5.1; añadido en el handoff): estado autorizado (65, 44, 7) de 0354 (siete triggers, tres constraint; sus nombres no llevan 'guard').
 # Versión: 0.1.7  -- D-173. Sucesora 0310 (D-169/D-170/D-171): la invariante
 #              agregada de aportaciones anade cuatro constraint triggers
 #              diferidos, (58, 41, 7). Ninguno lleva 'guard' en el nombre, asi
@@ -159,7 +160,8 @@ def test_b22_recuento_de_triggers(db: psycopg.Connection) -> None:
         """)
         total, constraint, guards = cursor.fetchone()
     assert (total, constraint, guards) in ((34, 19, 7), (39, 23, 7), (40, 30, 7),
-                                          (48, 31, 7), (54, 37, 7), (58, 41, 7)), (
+                                          (48, 31, 7), (54, 37, 7), (58, 41, 7),
+                                          (65, 44, 7)), (
         f"({total}, {constraint}, {guards}) no es un estado autorizado. "
         "Sucesora 0310: cuatro constraint triggers diferidos de D-169/D-170/D-171.")
 

@@ -20,6 +20,9 @@
 #   la cuota y el mapeo V3 se escriben bajo gapto_owner (el writer propio de
 #   la hipoteca es de F06-01H; la ruta generica lo rechaza con OWNERSHIP_F07).
 #   Datos sinteticos; base desechable. Fechas fijas.
+# Version: 0.2.0 (F06 T3-F06 bloque 2 F06-01H; AJ-T3C-04, mandato v1.1 §5.2): cuadro coherente con
+#   INV-0354-G2: la cuota 1 (CAPITAL, la que usan los tests) no cambia y una cuota 2 sin prevision
+#   completa Σ capital_previsto = P; tipo, Hd, vinculos e importes de los efectos sin cambio.
 # Version: 0.1.0 (F06 T3-F06 · F04-R-HIP)
 # ============================================================
 
@@ -94,6 +97,10 @@ def financiacion(dsn: str, owner: uuid.UUID, *, prevision_id: uuid.UUID | None =
          "capital_previsto, interes_previsto, comisiones_previstas, importe_total_previsto, prevision_id) "
          "VALUES (%s, %s, 1, %s, %s, %s, 0, %s, %s)",
          (cuota_id, entidad_id, FECHA, CAPITAL, INTERES, CUOTA, prevision_id)),
+        ("INSERT INTO gapto.financiacion_cuotas (id, financiacion_entidad_id, numero_cuota, fecha_vencimiento, "
+         "capital_previsto, interes_previsto, comisiones_previstas, importe_total_previsto) "
+         "VALUES (%s, %s, 2, %s, %s, 0, 0, %s)",
+         (uuid.uuid4(), entidad_id, dt.date(2026, 7, 1), P - CAPITAL, P - CAPITAL)),
     ]
     como_owner(dsn, owner, sentencias)
     return entidad_id, cuota_id

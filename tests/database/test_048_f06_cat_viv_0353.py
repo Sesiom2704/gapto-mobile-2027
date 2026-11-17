@@ -29,6 +29,10 @@
 #              DISCRIMINACIÓN CONTRA 0352 (WM 12C.2). Sobre una base en 0352
 #              fallan la huella, el contrato, el comportamiento y la aplicacion
 #              simulada (no existe la columna): el modulo solo pasa con 0353.
+# Versión: 0.2.0  -- F06 T3-F06 bloque 2 F06-01H (L-06-T3, mandato v1.1 §5.1): con 0354 aplicada
+#                    (marca: fn_validar_cuadro_hipoteca) la huella CURRENT es la de 0354; el
+#                    CONTRATO por defecto del runner pasa a 0354 (0353 conservado); con 0354, 655
+#                    constraints y la aplicacion simulada retira antes los objetos de 0354.
 # Versión: 0.1.0  -- T2-F06 CAT-VIV N1 (mandato v1.1, lote 34; L-03).
 # ============================================================
 from __future__ import annotations
@@ -85,6 +89,12 @@ def _huellas(db: psycopg.Connection) -> dict:
     return dict(zip([d.name for d in cursor.description], cursor.fetchone()))
 
 
+def _head_0354(db: psycopg.Connection) -> bool:
+    """0354 aplicada (marca: funcion gapto.fn_validar_cuadro_hipoteca, T3-F06 F06-01H)."""
+    return _uno(db, "SELECT count(*) FROM pg_catalog.pg_proc WHERE pronamespace = 'gapto'::regnamespace "
+                    "AND proname = 'fn_validar_cuadro_hipoteca'") == 1
+
+
 def cuerpo_0353() -> str:
     """Cuerpo de 0353 sin su control transaccional, extraido del fichero."""
     texto = MIGRATION.read_text(encoding="utf-8")
@@ -137,7 +147,7 @@ def _como_runtime(db: psycopg.Connection) -> None:
 
 # ------------------------------------------------------------------ huella y desviación
 def test_0353_huella_d111_current(db: psycopg.Connection) -> None:
-    referencia = _runner().HUELLAS_D111_POR_HEAD["0353"]
+    referencia = _runner().HUELLAS_D111_POR_HEAD["0354" if _head_0354(db) else "0353"]
     observadas = _huellas(db)
     assert {k: observadas[k] for k in referencia} == referencia
 
@@ -153,7 +163,7 @@ def test_0353_desviacion_frente_a_0352_solo_h1_y_recuentos() -> None:
 def test_0353_runner_declara_0353_y_conserva_0352() -> None:
     runner = _runner()
     assert runner.CONTRATOS_POR_HEAD["0353"] == runner.CONTRATOS_POR_HEAD["0352"]
-    assert runner.CONTRATO_POR_DEFECTO == runner.CONTRATOS_POR_HEAD["0353"]
+    assert runner.CONTRATO_POR_DEFECTO == runner.CONTRATOS_POR_HEAD["0354"]
     exigidos = runner.TESTS_EXIGIDOS_POR_HEAD
     assert exigidos["0353"] == (*exigidos["0352"], "test_048_f06_cat_viv_0353")
     assert "test_048_f06_cat_viv_0353" not in exigidos["0352"]
@@ -200,7 +210,8 @@ def test_0353_sin_constraint_indice_ni_trigger_nuevos(db: psycopg.Connection) ->
     assert {f[0] for f in filas} == TRIGGERS_TABLA
     assert not any(f[1] for f in filas)
     assert _uno(db, "SELECT count(*) FROM pg_catalog.pg_constraint k JOIN pg_catalog.pg_class c "
-                    "ON c.oid = k.conrelid WHERE c.relnamespace = 'gapto'::regnamespace AND k.contype <> 'n'") == 652
+                    "ON c.oid = k.conrelid WHERE c.relnamespace = 'gapto'::regnamespace AND k.contype <> 'n'") == (
+        655 if _head_0354(db) else 652)
 
 
 def test_0353_force_rls_restaurado(db: psycopg.Connection) -> None:
@@ -260,6 +271,12 @@ def test_0353_runtime_no_ve_la_marca_ajena(esc: Escenario) -> None:
 
 # ------------------------------------------------------------------ aplicación simulada (filas preexistentes)
 def _retirar_columna(db: psycopg.Connection) -> None:
+    if _head_0354(db):
+        # T3-F06 F06-01H: vuelta al estado de 0352 dentro de la transaccion revertida (sin los objetos de 0354)
+        for f in ("fn_guard_cuota_inmutable_no_abierta()", "fn_guard_prevision_cuota_no_reabrible()",
+                  "fn_check_cuadro_hipoteca()", "fn_validar_cuadro_hipoteca(uuid[])",
+                  "fn_guard_financiacion_ambito_hipoteca()", "fn_guard_condiciones_version_historico()"):
+            db.execute(f"DROP FUNCTION gapto.{f} CASCADE")
     db.execute("ALTER TABLE gapto.categorias_financieras DROP COLUMN asociada_vivienda")
 
 

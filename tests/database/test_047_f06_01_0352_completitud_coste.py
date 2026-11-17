@@ -27,6 +27,8 @@
 #              DISCRIMINACIÓN CONTRA 0351 (WM 12C.2). Sobre head 0351 fallan la
 #              huella, el contrato y todos los negativos (no existen las
 #              columnas): el módulo solo pasa con 0352 aplicada.
+# Versión: 0.3.0  -- F06 T3-F06 bloque 2 F06-01H (L-06-T3, mandato v1.1 §5.1, añadido en el handoff):
+#                    con 0354 aplicada la huella CURRENT es la de 0354.
 # Versión: 0.2.0  -- T2-F06 CAT-VIV N1 (literal de autorizacion v1.1): la huella CURRENT distingue el
 #                   head 0353 por su marca (asociada_vivienda) y exige la de 0353; sobre una base
 #                   detenida en 0352 sigue exigiendo exactamente la de 0352.
@@ -102,8 +104,14 @@ def _head_0353(db: psycopg.Connection) -> bool:
                     "AND NOT attisdropped") == 1
 
 
+def _head_0354(db: psycopg.Connection) -> bool:
+    """0354 aplicada (marca: funcion gapto.fn_validar_cuadro_hipoteca, T3-F06 F06-01H)."""
+    return _uno(db, "SELECT count(*) FROM pg_catalog.pg_proc WHERE pronamespace = 'gapto'::regnamespace "
+                    "AND proname = 'fn_validar_cuadro_hipoteca'") == 1
+
+
 def test_0352_huella_d111_current(db: psycopg.Connection) -> None:
-    referencia = _runner().HUELLAS_D111_POR_HEAD["0353" if _head_0353(db) else "0352"]
+    referencia = _runner().HUELLAS_D111_POR_HEAD["0354" if _head_0354(db) else ("0353" if _head_0353(db) else "0352")]
     observadas = _huellas(db)
     assert {k: observadas[k] for k in referencia} == referencia
 
