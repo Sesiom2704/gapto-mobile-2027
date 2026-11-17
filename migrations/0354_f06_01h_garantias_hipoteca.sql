@@ -100,6 +100,9 @@
 --   a 0353; funciones 28 -> 34, triggers no internos 58 -> 65, constraint
 --   triggers 41 -> 44.
 --
+-- Version: 0.1.1 (F06 T3-F06 bloque 2 F06-01H): PO-04 cuenta los privilegios de gapto_runtime con
+--   aclexplode(pg_class.relacl) y no con information_schema.role_table_grants, que solo muestra los
+--   roles habilitados del usuario conectado (en Neon, neondb_owner veia 0; humo FAIL n.1).
 -- Version: 0.1.0 (F06 T3-F06 bloque 2 F06-01H; mandato v1.1 §8, contrato v0.4 §10.1)
 -- ============================================================
 
@@ -697,8 +700,10 @@ BEGIN
     END IF;
 
     SELECT pg_catalog.count(*) INTO v_n
-      FROM information_schema.role_table_grants g
-     WHERE g.grantee = 'gapto_runtime' AND g.table_schema = 'gapto';
+      FROM pg_catalog.pg_class c
+     CROSS JOIN LATERAL pg_catalog.aclexplode(c.relacl) a
+     WHERE c.relnamespace = 'gapto'::pg_catalog.regnamespace AND c.relkind IN ('r', 'v', 'p')
+       AND a.grantee = 'gapto_runtime'::pg_catalog.regrole;
     IF v_n <> 266 THEN
         RAISE EXCEPTION 'F06-01H-0354 POSTCHECK PO-04: privilegios de tabla de gapto_runtime = % (esperados 266)', v_n;
     END IF;
