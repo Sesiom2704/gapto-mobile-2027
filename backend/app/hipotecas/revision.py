@@ -22,6 +22,10 @@
 #   Replay (§3.5.3): misma intencion y mismo contenido -> idempotente, 0 filas; otra tasa, fecha u otra
 #   financiacion -> IDENTIDAD_REUTILIZADA_CON_OTRA_INTENCION. Sin desglose de bonificaciones (Q-T3D-07).
 # Version: 0.1.0 (F06 T3-F06 bloque 2 F06-01H, paso 7)
+# Version: 0.2.0 (F06 T3-F06 bloque 2 F06-01H, paso 11; IC-01 del contrato §6, indicacion de Moises del
+#   2026-11-17): REVISION_SOBRE_CUOTA_PAGADA precede a VERSION_DESFASADA. El desfase se anota tras la financiacion
+#   y se responde despues de mirar las cuotas afectadas (FECHA_REVISION_INCOHERENTE solo sin desfase). El orden de
+#   locks no cambia (financiacion -> version vigente -> cuotas). Mutante M-H-44 (orden anterior).
 # ============================================================
 
 from __future__ import annotations
@@ -143,15 +147,16 @@ def _revisar(sesion: SesionMotor, *, financiacion_id: uuid.UUID, peticion: dict[
         return Rechazo(NO_ACTIVA)
     if apertura is None:
         return Rechazo(INDETERMINADO)
-    if row_version != peticion["row_version_esperada"]:
-        return Rechazo(VERSION_DESFASADA)
+    # IC-01 (contrato §6; indicacion de Moises del 2026-11-17): la cuota pagada se comprueba ANTES que
+    # VERSION_DESFASADA; el desfase se anota aqui y se responde despues de mirar las cuotas afectadas.
+    desfasada = row_version != peticion["row_version_esperada"]
     v = sesion.uno("SELECT id, vigente_desde, tipo_interes, indice_referencia, diferencial_pct "
                    "FROM gapto.financiacion_condiciones_versiones WHERE financiacion_entidad_id = %s "
                    "AND vigente_hasta IS NULL FOR UPDATE", (financiacion_id,))
     if v is None:
         return Rechazo(NO_ENCONTRADA)
     vigente = {"id": v[0], "desde": v[1], "tipo_interes": v[2], "indice": v[3], "diferencial": v[4]}
-    if desde <= vigente["desde"]:
+    if not desfasada and desde <= vigente["desde"]:
         return Rechazo(FECHA_REVISION_INCOHERENTE)
     with sesion.conexion.cursor() as cur:
         cur.execute("SELECT q.id, q.numero_cuota, q.fecha_vencimiento, q.capital_previsto, q.prevision_id "
@@ -168,6 +173,8 @@ def _revisar(sesion: SesionMotor, *, financiacion_id: uuid.UUID, peticion: dict[
                 estados[q[4]] = (fila[0], fila[1])
     if any(q[4] is None or estados.get(q[4], ("", 0))[0] != "ABIERTA" for q in afectadas):
         return Rechazo(SOBRE_CUOTA_PAGADA)
+    if desfasada:
+        return Rechazo(VERSION_DESFASADA)
     if not afectadas:
         return Rechazo(SIN_CUOTAS_FUTURAS)
     for q in afectadas:                                                                # previsiones FU por numero

@@ -15,6 +15,8 @@
 #   rechaza la prevision con regla, la no ABIERTA y la que no es de una cuota de esa financiacion (servicio).
 #   Fechas fijas (hoy del laboratorio 2026-10-10); orden explicito.
 # Version: 0.1.0 (F06 T3-F06 bloque 2 F06-01H, paso 7)
+# Version: 0.2.0 (F06 T3-F06 bloque 2 F06-01H, paso 11): test_o_h9_cuota_pagada_precede_a_version_desfasada (IC-01 sin
+#   concurrencia, contrato §6; revision.py v0.2.0; mata M-H-44).
 # ============================================================
 from __future__ import annotations
 
@@ -123,6 +125,19 @@ def test_o_h9_revision_sobre_cuota_pagada(lab):
     r = lab.revisar(lab.cuerpo_rev(desde="2026-04-21"))
     assert r.status_code == 200, r.text
     assert lab.cuotas()[0] == pagada
+
+
+def test_o_h9_cuota_pagada_precede_a_version_desfasada(lab):
+    """IC-01 sin concurrencia (contrato §6; revision.py v0.2.0; mata M-H-44): revision preparada con la version
+    anterior al pago de c1. Si afecta a c1 -> REVISION_SOBRE_CUOTA_PAGADA; si no -> VERSION_DESFASADA; sin escribir."""
+    vieja = lab.hipoteca()["row_version"]
+    assert lab.pagar(1, lab.cuerpo()).status_code == 200
+    antes = huella()
+    _rechazo(lab.revisar(lab.cuerpo_rev(desde="2026-03-21", version=vieja)), 409, "REVISION_SOBRE_CUOTA_PAGADA")
+    _rechazo(lab.revisar(lab.cuerpo_rev(desde="2026-04-21", version=vieja)), 409, "VERSION_DESFASADA")
+    # con desfase y sin cuotas afectadas, VERSION_DESFASADA precede a SIN_CUOTAS_FUTURAS
+    _rechazo(lab.revisar(lab.cuerpo_rev(desde="2056-03-21", version=vieja)), 409, "VERSION_DESFASADA")
+    assert huella() == antes
 
 
 def test_o_h12_periodicidad_distinta(lab):
