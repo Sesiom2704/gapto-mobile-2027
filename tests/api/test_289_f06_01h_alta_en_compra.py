@@ -13,6 +13,7 @@
 #   2026-10-10); orden explicito en todas las lecturas.
 # Version: 0.1.0 (F06 T3-F06 bloque 2 F06-01H, paso 5)
 # Version: 0.1.1 (F06 T3-F06 bloque 2 F06-01H, paso 6): O-H30 por cuenta_participaciones + aviso (enmienda del STOP n.º 2).
+# Version: 0.1.2 (F06 T3-F06 bloque 2 F06-01H, paso 12, relevo 6): orden de locks del alta por espia (discrimina M-H-38).
 # ============================================================
 from __future__ import annotations
 
@@ -311,3 +312,20 @@ def test_o7_integridad_de_posiciones_no_ve_la_financiacion(lab):
         integridad_posicion.validar(sesion, integridad_posicion.fotografiar(sesion, posiciones, hechos=[hd]))
         return posiciones
     assert c2.unidad().ejecutar(c2.ctx(lab.owner), operacion, nombre="O-7") == []
+
+# ================================================================== orden de locks del alta (R1; discrimina M-H-38)
+def test_o_h_orden_locks_alta_inversiones_propiedad_cuentas(lab, monkeypatch):
+    """R1 (contrato §6; AJ-T3D-08): el alta con hipoteca toma INVERSIONES, despues la fila de la propiedad y solo
+    despues las cuentas. Espia de llamadas (patron de test_280 O-CV-20); mata M-H-38 (cuentas antes que la propiedad),
+    que en concurrencia no es observable porque INVERSIONES serializa antes que ambas."""
+    from app.patrimonio import compra as mod
+
+    llamadas: list[str] = []
+    real_inv, real_prop, real_ctas = mod.tomar_inversiones, mod.repo.bloquear, mod._bloquear_cuentas
+    monkeypatch.setattr(mod, "tomar_inversiones", lambda s: (llamadas.append("INVERSIONES"), real_inv(s))[1])
+    monkeypatch.setattr(mod.repo, "bloquear", lambda s, pid: (llamadas.append("PROPIEDAD"), real_prop(s, pid))[1])
+    monkeypatch.setattr(mod, "_bloquear_cuentas", lambda s, c: (llamadas.append("CUENTAS"), real_ctas(s, c))[1])
+    _ok(lab.compra(lab.peticion_hip()))
+    assert "CUENTAS" in llamadas, llamadas
+    assert llamadas[:2] == ["INVERSIONES", "PROPIEDAD"], llamadas
+    assert llamadas.index("PROPIEDAD") < llamadas.index("CUENTAS"), llamadas

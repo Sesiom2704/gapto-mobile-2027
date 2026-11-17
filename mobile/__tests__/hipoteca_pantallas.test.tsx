@@ -17,6 +17,7 @@
 // Versión: 0.2.0 (F06 T3-F06 bloque 2 F06-01H; N-31, firma 0f3e5633…): `REVISION_TIPO_EXPUESTA` simulable como el pago; test de exposición de la revisión (true ofrece «Revisar el tipo», false no).
 // Versión: 0.3.0 (F06 T3-F06 bloque 2 F06-01H; N-30, firma 0f3e5633…): el pago propone con `titularidad_prestamo` de L-HIP en el vencimiento (no con la de la propiedad) y, con ella, ATRIBUCION_PROPUESTA_DESFASADA recarga la hipoteca.
 // Versión: 0.4.0 (F06 T3-F06 bloque 2 F06-01H; firma e446b4c3…, N-40): la constante real de exposición del pago vale true; el caso «no expuesto» se prueba con el valor simulado false.
+// Versión: 0.5.0 (F06 T3-F06 bloque 2 F06-01H, paso 12, relevo 6; MC-H-04): la compra con hipoteca envía `row_version_esperada` = versión de la propiedad mostrada (vista con row_version 7, distinta de 0 y del fixture).
 // ============================================================
 
 import './tiempos_rn';
@@ -230,6 +231,25 @@ test('compra · petición con el bloque `hipoteca` exacto y aviso `aviso_reparto
   await waitFor(() => screen.getByTestId('compra-hecho'));
   expect(screen.getByTestId('compra-hip-aviso-reparto').props.children).toBe(dominioReal.TEXTO_AVISO_REPARTO);
   sinPalabrasProhibidas();
+});
+
+test('compra · MC-H-04 row_version_esperada: la compra con hipoteca envía la versión de la propiedad mostrada', async () => {
+  const cli = clienteCompra();
+  const pat = patrimonio();
+  render(
+    <SafeAreaProvider initialMetrics={METRICAS}>
+      <ProveedorTema forzar="light">
+        <CompraScreen cliente={cli} patrimonio={pat.api} vista={vista({ row_version: 7 })} nuevoId={nuevoId} ahora={() => new Date(2026, 9, 10, 10)} onCerrar={jest.fn()} onRecargar={jest.fn()} />
+      </ProveedorTema>
+    </SafeAreaProvider>,
+  );
+  await rellenarHipoteca(cli);
+  await hastaGuardar();
+  expect(pat.enviados).toHaveLength(1);
+  expect(pat.api.registrarCompra).toHaveBeenCalledWith('p1', expect.anything());
+  expect(pat.enviados[0].row_version_esperada).toBe(7);              // la de la propiedad mostrada: ni 0 ni la del fixture (1)
+  expect(pat.enviados[0].hipoteca).toStrictEqual(BLOQUE_ESPERADO);    // en la misma petición que el bloque `hipoteca`
+  await waitFor(() => screen.getByTestId('compra-hecho'));
 });
 
 test('compra · sin `aviso_reparto_distinto` no hay aviso; titularidad del préstamo modificable («Otro reparto»)', async () => {

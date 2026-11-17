@@ -19,6 +19,8 @@
 # Version: 0.1.1 (F06 T3-F06 bloque 2 F06-01H, paso 11, relevo 5; N-38): IC-01 «afecta» sin xfail; exige el
 #   resultado del contrato §6 (REVISION_SOBRE_CUOTA_PAGADA) tras corregir el orden de guardas en revision.py
 #   v0.2.0 (indicacion de Moises del 2026-11-17).
+# Version: 0.1.2 (F06 T3-F06 bloque 2 F06-01H, paso 12, relevo 6): IC-12b cuota N+1 concurrente (refuerzo del oraculo
+#   de MS-11, indicacion de Moises: IC-12 no discrimina el lock de G2).
 # ============================================================
 from __future__ import annotations
 
@@ -604,3 +606,43 @@ def test_ic14_retirada_de_recibir_ingreso_frente_a_alta_con_hipoteca(orden):
         assert_g2(lab, datos)
     else:
         assert alta_r[1] == "CUENTA_SIN_CAPACIDAD" and filas == (0, 0), datos
+
+# ================================================================== IC-12b
+@pytest.mark.parametrize("rep", REPS)
+def test_ic12b_cuota_de_mas_concurrente_numeracion(rep):
+    """IC-12b (refuerzo del oraculo de MS-11, indicacion de Moises: «si MS-11 no muere con IC-12, reforzar el
+    oraculo»). En IC-12 la serializacion la dan los locks de fila del UPDATE y de la revision, no el de G2, y el
+    UPDATE falla G2 por la suma en cualquier caso. Aqui A y B insertan, como gapto_runtime y por SQL directo, la
+    MISMA cuota N+1 (capital 0: Σ intacta; sin version: fuera del indice unico parcial) y fuerzan G2 antes de la
+    pausa (SET CONSTRAINTS ALL IMMEDIATE). Con el lock de G2 (FOR NO KEY UPDATE de la financiacion) B espera en la
+    fila de la financiacion, relee tras el COMMIT de A y falla con INV-0354-G2 (numeracion 1..N+2 rota): queda una
+    sola N+1. Sin el lock (MS-11) B no espera y quedan dos cuotas N+1 (write skew de la numeracion)."""
+    lab = LabRev()
+    _, _, n_ini, _, max_ini = g2(lab)
+
+    def insertar(app):
+        def op(s):
+            n = s.ejecutar(
+                "INSERT INTO gapto.financiacion_cuotas (financiacion_entidad_id, numero_cuota, fecha_vencimiento, "
+                "capital_previsto, interes_previsto, comisiones_previstas, importe_total_previsto) "
+                "SELECT financiacion_entidad_id, numero_cuota + 1, fecha_vencimiento + 31, 0, 1, 0, 1 "
+                "FROM gapto.financiacion_cuotas WHERE financiacion_entidad_id = %s "
+                "ORDER BY numero_cuota DESC LIMIT 1", (lab.f,))
+            assert n == 1
+            s.ejecutar("SET CONSTRAINTS ALL IMMEDIATE")
+            _pausa(s)
+            return "INSERT confirmado"
+        return lambda: unidad(app).ejecutar(ContextoOperacion.de_usuario(lab.owner, request_id=uuid.uuid4()), op,
+                                            nombre="IC-12b INSERT directo")
+    t = intercalar("IC-12b", insertar(A), insertar(B), espera=True, hilo=en_hilo_exc)
+    ra, rb = t["_salidas"]
+    datos = cerrar(f"IC-12b_rep{rep}", t, g2=g2(lab), max_inicial=max_ini,
+                   a=ra.get("e") or repr(ra.get("r")), b=rb.get("e") or repr(rb.get("r")))
+    # B espera DENTRO de G2 (sentencia SET CONSTRAINTS) sobre la transaccion de A: el FOR NO KEY UPDATE de la
+    # financiacion espera directamente al xid de A (sin tuple lock visible en pg_locks, a diferencia de IC-12)
+    assert any(f["app"] == B and not f["granted"] and f["locktype"] == "transactionid"
+               and "SET CONSTRAINTS" in (f["query"] or "") for f in datos["pg_locks"]), datos
+    assert "r" in ra and "e" not in ra, datos
+    assert "e" in rb and "INV-0354-G2" in rb["e"], datos
+    assert datos["g2"][2] == n_ini + 1 and datos["g2"][4] == max_ini + 1, datos   # una sola N+1
+    assert_g2(lab, datos)

@@ -11,6 +11,7 @@
 #   SALDO_PRINCIPAL_INDETERMINADO), O-H8 (OP-22 generico con vinculo de financiacion de nivel efecto ->
 #   OWNERSHIP_F07). Fechas fijas; orden explicito.
 # Version: 0.1.0 (F06 T3-F06 bloque 2 F06-01H, paso 6)
+# Version: 0.1.1 (F06 T3-F06 bloque 2 F06-01H, paso 12, relevo 6): orden de locks del pago por espia (discrimina M-H-42).
 # ============================================================
 from __future__ import annotations
 
@@ -198,3 +199,26 @@ def test_o_h35_http_reabrir_la_prevision_de_una_cuota_pagada(lab):
     assert r.status_code in (409, 422), r.text
     assert huella() == antes
     assert lab.sql("SELECT estado FROM gapto.previsiones WHERE id = %s", (pid,)) == [("REALIZADA",)]
+
+# ================================================================== orden de locks del pago (R1; discrimina M-H-42)
+def test_o_h_orden_locks_pago_cuenta_antes_que_financiacion(lab, monkeypatch):
+    """R1 (contrato §6; AJ-T3D-08): el pago toma la cuenta (FOR NO KEY UPDATE) ANTES que la financiacion
+    (FOR NO KEY UPDATE OF e, f) y esta antes que la cuota. Espia de las sentencias de la sesion del motor; mata M-H-42
+    (orden invertido), que en concurrencia no es observable porque INVERSIONES serializa antes que ambas."""
+    from app.core import unidad_trabajo as ut_mod
+
+    orden: list[str] = []
+    real_uno = ut_mod.SesionMotor.uno
+
+    def espia(self, sql, params=()):
+        if "FROM gapto.cuentas WHERE id = %s FOR NO KEY UPDATE" in sql:
+            orden.append("CUENTA")
+        elif "FOR NO KEY UPDATE OF e, f" in sql:
+            orden.append("FINANCIACION")
+        elif "q.numero_cuota = %s FOR UPDATE" in sql:
+            orden.append("CUOTA")
+        return real_uno(self, sql, params)
+    monkeypatch.setattr(ut_mod.SesionMotor, "uno", espia)
+    r = lab.pagar(1, lab.cuerpo())
+    assert r.status_code == 200, r.text
+    assert orden[:3] == ["CUENTA", "FINANCIACION", "CUOTA"], orden

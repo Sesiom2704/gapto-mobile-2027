@@ -32,6 +32,8 @@
 #   test_252); M-O10-28 sigue a la sentencia S1 de la lectura L2 de coste.py; M-V02-02 cambia de discriminante por el
 #   rename de O10.29 a O10.29-H (c). Los discriminantes corren sin forzar el interruptor (retirada de forzados). Los
 #   mutantes propios de A3-0352 van en scripts/mutantes/f06_t2_a3_0352.py.
+# Version: 0.2.1 (F06 T3-F06 F06-01H paso 12): M-ID-15 sigue a la linea protegida de compra.py, que ahora admite la
+#   PARTE_DE del desembolso Hd (`| desembolso`); misma mutacion (if False) y mismo discriminante.
 # ============================================================
 from __future__ import annotations
 
@@ -89,7 +91,7 @@ MUTANTES = (
             "            _op22(sesion).registrar_hecho_compuesto(sesion.contexto, d)\n",
             (n(T250, "test_o6_1_replay_reordenado_es_idempotente_sin_escribir_ni_invocar_op22"),)),
     Mutante("M-ID-15", "El comparador exige la pertenencia exacta al lote: ninguna PARTE_DE ajena hacia H0", COMPRA,
-            "        if _relaciones_hacia(sesion, h0) - compra03 != {(i, hk) for hk, (i, _) in parte_de.items()}:\n",
+            "        if _relaciones_hacia(sesion, h0) - compra03 != {(i, hk) for hk, (i, _) in parte_de.items()} | desembolso:\n",
             "        if False:\n",
             (n(T250, "test_o6_9_o6_16_o6_21_parte_de_ajena_hacia_h0"),)),
     Mutante("M-ID-16", "El comparador compara los CAMPOS de cada fila, no solo las identidades", COMPRA,
