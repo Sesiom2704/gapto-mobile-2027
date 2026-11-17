@@ -16,6 +16,9 @@
 // Versión: 0.1.0 (F06 T1-F06 B2 N1)
 // Versión: 0.2.0 (F06 T2-F06 A3-0352 (L-05)): O10.29 cliente pasa a O10.29-H cliente (chip visible con fecha, payload con la declaración solo si
 //   se marca, estado «Completo» en el resumen) y se añaden O-A3-UX (UX-1..UX-4) y O-A3-TXT del cliente. Nada más cambia.
+// Versión: 0.3.0 (F06 T3-F06 bloque 2 F06-01H; N-32, firma 0f3e5633…, L-06-T3): la comprobación «sin B2b/B2c» (`/Con hipoteca/` nulo) ya no
+//   describe lo cierto; ahora comprueba que el paso de pagos OFRECE añadir la hipoteca («+ Añadir la hipoteca de esta compra») y que el bloque
+//   no viene puesto por defecto. Ficha en ADAPTACIONES_L06_T3 (N-32). Nada más cambia.
 // ============================================================
 
 import './tiempos_rn';
@@ -182,7 +185,9 @@ async function rellenarHastaB3b() {
   await escribir('compra-escritura', '20/03/2026');
   await pulsar('compra-continuar');
   expect(screen.getByTestId('compra-paso-pagos')).toBeTruthy();
-  expect(screen.queryByText(/Con hipoteca/)).toBeNull();                           // sin B2b/B2c
+  // N-32 (L-06-T3): hoy existe el bloque «Hipoteca» (F06-01H): se OFRECE añadirlo, pero no viene puesto por defecto
+  expect(screen.getByTestId('compra-hip-anadir')).toBeTruthy();
+  expect(screen.queryByTestId('compra-hip')).toBeNull();
   expect(screen.getByTestId('compra-sin-hipoteca')).toBeTruthy();
   await waitFor(() => screen.getByTestId(`compra-pago-0-cuenta-${C1}`));
   await pulsar(`compra-pago-0-cuenta-${C1}`);
