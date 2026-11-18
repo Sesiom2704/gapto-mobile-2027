@@ -20,6 +20,10 @@
 #   Ademas: exigir_propiedad tiene firma cerrada (sin parametro de exencion, OBL-VIV-01.5) y se invoca siempre
 #   con cuatro argumentos posicionales; ningun modulo de correccion (OP-21 V3, C-MEJ-03) compone un AFECTA_A.
 # Version: 0.1.0 (F06 T2-F06 CAT-VIV N1)
+# Version: 0.2.0 (F06 T3-F06 bloque 2 F06-01H; L-06-T3 condicion (1); STOP_F06-T3-2_GATE_B_OBL_VIV_01, clase decidida
+#   por Moises el 2026-11-18): REGISTRO admite hipotecas/pago.py::pagar (W-HIP-02) como SIN_GASTO (GASTO de intereses
+#   sin categoria + DEUDA). Nuevo test_obl_viv_01_pago_hipoteca_sin_categoria: si el pago fija categoria o usa C-a,
+#   falla (reclasificar en EXIGE). El inventario cerrado y el control O-CV-14 no cambian.
 # ============================================================
 from __future__ import annotations
 
@@ -52,6 +56,10 @@ REGISTRO: dict[tuple[str, str], tuple[str, str]] = {
     ("api/ejecucion_registro.py", "transferir_bajo_locks"): ("SIN_GASTO", "transferencia: sin efecto ni categoria"),
     ("api/ejecucion_devolucion.py", "registrar_devolucion.operacion"): (
         "REVERSION", "OP-13 sobre un origen existente; categoria heredada, sin seleccion (D-CV-07)"),
+    # T3-F06 F06-01H (L-06-T3; STOP_F06-T3-2_GATE_B_OBL_VIV_01, clase decidida por Moises el 2026-11-18):
+    ("hipotecas/pago.py", "pagar"): (
+        "SIN_GASTO", "W-HIP-02: GASTO de intereses SIN categoria (categoria_id None, sin seleccion) + DEUDA -capital; "
+        "si el pago llegara a fijar una categoria debe pasar a EXIGE (test_obl_viv_01_pago_hipoteca_sin_categoria)"),
 }
 CLASES = {"EXIGE", "POR_CONSTRUCCION", "SIN_GASTO", "REVERSION"}
 CORRECCIONES = ("api/ejecucion_categoria_v3.py", "patrimonio/correccion_clase.py")
@@ -147,6 +155,14 @@ def test_registro_con_clases_validas():
 
 def test_obl_viv_01_inventario_de_writers_de_hechos_cerrado_y_conforme():
     assert violaciones(APP, REGISTRO) == []
+
+
+def test_obl_viv_01_pago_hipoteca_sin_categoria():
+    """T3-F06 F06-01H: el pago W-HIP-02 es SIN_GASTO solo mientras su GASTO de intereses no lleve categoria. Si el
+    writer pasa a fijar `categoria_id` (o a usar la guarda C-a), deja de ser SIN_GASTO y tiene que exigir propiedad."""
+    texto = (APP / "hipotecas" / "pago.py").read_bytes().decode("utf-8")
+    assert "categoria_id" not in texto, "hipotecas/pago.py fija una categoria: reclasificar en OBL-VIV-01 (EXIGE)"
+    assert not any(n in texto for n in C_A), "hipotecas/pago.py usa la guarda C-a: reclasificar en OBL-VIV-01 (EXIGE)"
 
 
 def test_exigir_propiedad_firma_cerrada_sin_exencion():
