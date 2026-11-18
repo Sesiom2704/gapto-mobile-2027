@@ -6,7 +6,7 @@
 #   (mandato T3-F06 bloque 2 v1.1 §12.1; contrato F06-01H consolidado v0.4 §9.2). Mismo motor que
 #   mutantes_f06_01h_f05_q3_hd.py (journal durable, restauracion verificada por SHA-256, journal previo -> se
 #   restaura y se aborta NO-PASS, preflight verde, veredicto a disco con fsync en cuanto se conoce, --solo).
-#   Catalogo del servidor: M-H-01..M-H-22, M-H-25..M-H-32, M-H-34..M-H-36, M-H-39..M-H-44 y M-N30-S (N-30).
+#   Catalogo del servidor: M-H-01..M-H-22, M-H-25..M-H-32, M-H-34..M-H-36, M-H-39..M-H-46 y M-N30-S (N-30).
 #   M-H-23, M-H-33, M-H-37 y M-H-38 van al arnes de la compra (f06_01h_b2_mb2.py); M-H-24 es alias de MB2-08 y no
 #   se cuenta. M-H-10..12 reescritos para el alta dentro de la compra con Hd (D6, D7). Una guarda por mutante:
 #   M-H-41 y M-H-43 se parten en a/b(/c), una por guarda del codigo.
@@ -23,6 +23,8 @@
 #        python -u scripts/dev/mutantes_f06_01h.py [--grupo servidor|cliente|todos] [--solo ID,ID] [--salida fichero]
 #   No ejecutar en paralelo con otro arnes ni con la suite sobre el mismo arbol.
 # Version: 0.1.0 (T3-F06 F06-01H paso 12; mandato v1.1 §12.1; contrato v0.4 §9.2)
+# Version: 0.2.0 (T3-F06 F06-01H; H3, N-10 rama A, firma b7dbf079…): M-H-45 (deuda sin apertura) y M-H-46 (deuda
+#   sin la frontera F04-D053 A1), con discriminantes en test_288 y test_293. Ningun texto anterior cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -245,6 +247,17 @@ MUTANTES = [
        'FROM gapto.entidad_relaciones r WHERE r.entidad_origen_id = %s AND r.tipo_relacion = \'GARANTIZADA_POR\' '
        'ORDER BY r.id LIMIT 1) "')],
      [T288 + "test_l_hip_n30_titularidad_vigente_del_prestamo"], None, 1),
+    # ------------------------------------------------------------ N-10 rama A (firma b7dbf079…; F04-D053 A1)
+    ("M-H-45", "N-10: la deuda pendiente ignora saldo_principal_apertura (solo Σ DEUDA desde el seguimiento)",
+     [(LECT, '"SELECT f.saldo_principal_apertura + coalesce((SELECT sum(e.importe_delta) FROM gapto.hecho_efectos e "',
+       '"SELECT 0 * f.saldo_principal_apertura + coalesce((SELECT sum(e.importe_delta) FROM gapto.hecho_efectos e "')],
+     [T288 + "test_l_hip_n10_apertura_conocida_y_frontera",
+      T293 + "test_n10_pago_con_apertura_conocida_suma_apertura_y_frontera"], None, 1),
+    ("M-H-46", "N-10: la deuda pendiente cuenta los DEUDA anteriores a fecha_inicio_seguimiento (sin frontera A1)",
+     [(LECT, '"AND h.fecha_hecho >= f.fecha_inicio_seguimiento "', '')],
+     [T288 + "test_l_hip_n10_apertura_conocida_y_frontera",
+      T293 + "test_n10_pago_con_apertura_conocida_suma_apertura_y_frontera",
+      T293 + "test_n10_pago_capital_supera_la_deuda_con_apertura"], None, 1),
 ]
 
 #: Lista del CLIENTE (mobile/src/...), mismo formato. La redacta otra persona en un fichero aparte y se incorpora aqui.

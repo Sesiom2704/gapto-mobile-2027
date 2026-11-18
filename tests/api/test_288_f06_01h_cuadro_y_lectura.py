@@ -27,6 +27,9 @@
 # Version: 0.2.0 (F06 T3-F06 bloque 2 F06-01H; N-30, firma 0f3e5633…, enmienda 52ef5511…): oraculo de servidor de
 #   `titularidad_prestamo` (aditivo en L-HIP): participaciones del prestamo con su vigencia, distintas de las de la
 #   propiedad, y proyeccion en cada vencimiento == pago.propuesta (lo que relee W-HIP-02).
+# Version: 0.3.0 (F06 T3-F06 bloque 2 F06-01H; H3, N-10 rama A, firma b7dbf079…): oraculo de la deuda con apertura
+#   conocida (forma RV3 P5/P6 D8-E) y frontera F04-D053 A1: apertura 150,00 + DEUDA -50,00 posterior al seguimiento
+#   = 100,00; el DEUDA +200,00 anterior no cuenta (test_l_hip_n10_apertura_conocida_y_frontera).
 # ============================================================
 
 from __future__ import annotations
@@ -182,6 +185,42 @@ class Esc:
             ("INSERT INTO gapto.hecho_entidades (id, hecho_id, efecto_id, entidad_id, tipo_relacion, principal, "
              "owner_user_id) VALUES (%s, %s, %s, %s, 'AFECTA_A', false, %s)",
              (uuid.uuid4(), deuda, ef["DEUDA"], fid, self.owner)),
+        ])
+        return fid
+
+    def legacy_conocida(self, propiedad_id) -> uuid.UUID:
+        """N-10 (firma b7dbf079…): forma que escribe RV3 P5/P6 (D8-E): HIPOTECA con apertura CONOCIDA = 150,00 y
+        seguimiento desde 2026-02-01; un DEUDA +200,00 del 2026-01-15 (ANTERIOR a la frontera: no cuenta) y un
+        DEUDA -50,00 del 2026-02-15 (posterior: cuenta), ambos a nivel efecto. Cuotas sin prevision (Σ = 200)."""
+        fid = uuid.uuid4()
+        previo, ef_previo, _ = self.hecho_deuda("GENERACION_DERECHO_OBLIGACION", D("200.00"),
+                                                [("DEUDA", D("200.00"))], None, dt.date(2026, 1, 15))
+        fz.marcar_v3(self.dsn, self.owner, previo)
+        pago, ef_pago, _ = self.hecho_deuda("GASTO", D("60.00"), [("GASTO", D("10.00")), ("DEUDA", D("-50.00"))],
+                                            None, dt.date(2026, 2, 15))
+        fz.como_owner(self.dsn, self.owner, [
+            ("INSERT INTO gapto.entidades (id, owner_user_id, tipo_entidad, nombre) "
+             "VALUES (%s, %s, 'FINANCIACION', 'Hipoteca V3 con apertura')", (fid, self.owner)),
+            ("INSERT INTO gapto.financiaciones (entidad_id, tipo_financiacion, moneda, capital_original_contratado, "
+             "saldo_principal_apertura, fecha_inicio_seguimiento, fecha_inicio) "
+             "VALUES (%s, 'HIPOTECA', 'EUR', 200, 150, %s, %s)", (fid, dt.date(2026, 2, 1), dt.date(2026, 1, 15))),
+            ("INSERT INTO gapto.entidad_relaciones (entidad_origen_id, entidad_destino_id, tipo_relacion) "
+             "VALUES (%s, %s, 'GARANTIZADA_POR')", (fid, propiedad_id)),
+            ("INSERT INTO gapto.financiacion_condiciones_versiones (financiacion_entidad_id, vigente_desde, "
+             "motivo_version, tipo_interes, tasa_anual_pct, sistema_amortizacion, periodicidad) VALUES "
+             "(%s, %s, 'ALTA', 'FIJO', 0, 'SIN_INTERES', 'MENSUAL')", (fid, dt.date(2026, 1, 15))),
+            ("INSERT INTO gapto.financiacion_cuotas (financiacion_entidad_id, numero_cuota, fecha_vencimiento, "
+             "capital_previsto, interes_previsto, comisiones_previstas, importe_total_previsto) "
+             "VALUES (%s, 1, %s, 100, 0, 0, 100)", (fid, dt.date(2026, 2, 15))),
+            ("INSERT INTO gapto.financiacion_cuotas (financiacion_entidad_id, numero_cuota, fecha_vencimiento, "
+             "capital_previsto, interes_previsto, comisiones_previstas, importe_total_previsto) "
+             "VALUES (%s, 2, %s, 100, 0, 0, 100)", (fid, dt.date(2026, 3, 15))),
+            ("INSERT INTO gapto.hecho_entidades (id, hecho_id, efecto_id, entidad_id, tipo_relacion, principal, "
+             "owner_user_id) VALUES (%s, %s, %s, %s, 'AFECTA_A', false, %s)",
+             (uuid.uuid4(), previo, ef_previo["DEUDA"], fid, self.owner)),
+            ("INSERT INTO gapto.hecho_entidades (id, hecho_id, efecto_id, entidad_id, tipo_relacion, principal, "
+             "owner_user_id) VALUES (%s, %s, %s, %s, 'AFECTA_A', false, %s)",
+             (uuid.uuid4(), pago, ef_pago["DEUDA"], fid, self.owner)),
         ])
         return fid
 
@@ -368,6 +407,20 @@ def test_l_hip_o_h10_legacy_indeterminada_nunca_cero(esc) -> None:
     assert hip["desembolso"] is None and hip["cuenta_cargo_id"] is None and hip["proxima_cuota"] is None
     assert [(c["numero"], c["pendiente"], c["estado"], c["hecho_pago_id"]) for c in hip["cuotas"]] == [
         (1, "100.00", "SIN_PREVISION", None), (2, "0.00", "SIN_PREVISION", None)]
+
+
+def test_l_hip_n10_apertura_conocida_y_frontera(esc) -> None:
+    """N-10 rama A (firma b7dbf079…; F04-D053 A1): deuda = apertura 150,00 + Σ DEUDA desde el seguimiento (-50,00)
+    = 100,00. Sin apertura daria -50,00; sin frontera, 300,00 (discrimina M-H-45 y M-H-46)."""
+    pid = esc.propiedad("Piso V3 con apertura")
+    fid = esc.legacy_conocida(pid)
+    antes = b.huella()
+    r = esc.cli.get(_url(pid), headers=h.AUTH)
+    assert r.status_code == 200, r.text
+    assert b.huella() == antes
+    hip = r.json()["hipoteca"]
+    assert hip["financiacion_id"] == str(fid)
+    assert hip["deuda_pendiente"] == "100.00" and hip["deuda_indeterminada"] is False
 
 
 def test_l_hip_propiedad_sin_hipoteca_y_aislamiento(esc) -> None:

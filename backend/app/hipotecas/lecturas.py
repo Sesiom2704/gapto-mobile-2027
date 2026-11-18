@@ -13,10 +13,12 @@
 #     hoy (solo en lectura); REALIZADA -> PAGADA; otro estado de la prevision -> ese estado (la cuota no es
 #     PENDIENTE); cuota sin prevision (forma legacy V3) -> SIN_PREVISION.
 #   - pendiente de cada fila = P - Σ capital previsto acumulado (P = capital_original_contratado).
-#   - Deuda pendiente (§1.4): Σ importe_delta de los efectos DEUDA vinculados a la financiacion a NIVEL DE
-#     EFECTO (hecho_entidades.efecto_id = efecto, AFECTA_A) de hechos ACTIVOS. Legacy V3 con saldo inicial
-#     desconocido (saldo_principal_apertura NULL): deuda_pendiente = None y deuda_indeterminada = True, NUNCA 0
-#     (Q-T3D-13).
+#   - Deuda pendiente (§1.4; N-10, firma b7dbf079…, regla F04-D053 A1): saldo_principal_apertura + Σ
+#     importe_delta de los efectos DEUDA vinculados a la financiacion a NIVEL DE EFECTO (hecho_entidades.efecto_id
+#     = efecto, AFECTA_A) de hechos ACTIVOS con fecha_hecho >= fecha_inicio_seguimiento (frontera inclusiva). En el
+#     alta en la compra la apertura es 0 y el seguimiento empieza en la escritura (= fecha de Hd): no cambia. Legacy
+#     V3 con saldo inicial desconocido (saldo_principal_apertura NULL): deuda_pendiente = None y
+#     deuda_indeterminada = True, NUNCA 0 (Q-T3D-13).
 #   - Desembolso: el hecho causa (Hd) de la version ALTA, con su cuenta (movimiento conciliado), fecha e importe
 #     del efecto DEUDA; None si la version ALTA no tiene hecho causa (legacy).
 #   - compra_hecho_id: H0 de la propiedad (hecho ACTIVO ADQUISICION_PATRIMONIAL con VALOR_ACTIVO ADQUISICION y
@@ -30,6 +32,10 @@
 #   L-HIP): campo ADITIVO `titularidad_prestamo` = participaciones del prestamo con su vigencia (actor, porcentaje
 #   a 4 decimales, yo, tercero, nombre, vigente_desde, vigente_hasta); el cliente propone la atribucion de los
 #   intereses con las vigentes en el vencimiento, igual que W-HIP-02 (Q-T3D-08). Sin participaciones: [].
+# Version: 0.4.0 (F06 T3-F06 bloque 2 F06-01H; H3, N-10 rama A, firma b7dbf079…): `deuda_pendiente` suma la
+#   apertura y solo los efectos DEUDA con fecha_hecho >= fecha_inicio_seguimiento (F04-D053 A1), porque RV3 P5/P6
+#   escribe HIPOTECAS con apertura conocida = capital pendiente V3. La usan L-HIP y la comprobacion de capital del
+#   pago (pago.py). Con apertura NULL devuelve None (los llamadores la tratan antes como indeterminada).
 # ============================================================
 
 from __future__ import annotations
@@ -100,13 +106,18 @@ def _estado_cuota(estado_prevision: str | None, vencimiento: dt.date, hoy: dt.da
     return estado_prevision
 
 
-def deuda_pendiente(sesion: SesionMotor, fid: uuid.UUID) -> Decimal:
-    """Σ importe_delta de los efectos DEUDA vinculados a F a nivel de efecto, de hechos ACTIVOS (§1.4)."""
+def deuda_pendiente(sesion: SesionMotor, fid: uuid.UUID) -> Decimal | None:
+    """N-10 (F04-D053 A1): apertura + Σ importe_delta de los efectos DEUDA vinculados a F a nivel de efecto, de
+    hechos ACTIVOS con fecha_hecho >= fecha_inicio_seguimiento (§1.4). None si la apertura es desconocida."""
     fila = sesion.uno(
-        "SELECT coalesce(sum(e.importe_delta), 0) FROM gapto.hecho_efectos e "
+        "SELECT f.saldo_principal_apertura + coalesce((SELECT sum(e.importe_delta) FROM gapto.hecho_efectos e "
         "JOIN gapto.hechos_financieros h ON h.id = e.hecho_id AND h.estado = 'ACTIVO' "
+        "AND h.fecha_hecho >= f.fecha_inicio_seguimiento "
         "WHERE e.tipo_efecto = 'DEUDA' AND EXISTS (SELECT 1 FROM gapto.hecho_entidades x "
-        "WHERE x.efecto_id = e.id AND x.entidad_id = %s AND x.tipo_relacion = 'AFECTA_A')", (fid,))
+        "WHERE x.efecto_id = e.id AND x.entidad_id = f.entidad_id AND x.tipo_relacion = 'AFECTA_A')), 0) "
+        "FROM gapto.financiaciones f WHERE f.entidad_id = %s", (fid,))
+    if fila is None or fila[0] is None:
+        return None
     return calc.r2(Decimal(fila[0]))
 
 

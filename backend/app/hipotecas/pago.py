@@ -19,7 +19,11 @@
 #   sin PAG); prevision REALIZADA por el flujo M5 (OP-17 con marcar_realizada, importe = cuota). Despues: vinculo
 #   AFECTA_A de NIVEL EFECTO de la DEUDA a la financiacion por el writer propio; la financiacion sube su
 #   row_version; auditoria ACTUALIZAR. Rechazo -> estado identico (la UnidadDeTrabajo hace ROLLBACK).
+#   La deuda de «capital > deuda» es lecturas.deuda_pendiente: apertura + Σ DEUDA desde fecha_inicio_seguimiento
+#   (N-10, F04-D053 A1); con apertura desconocida el pago ya salio antes por SALDO_PRINCIPAL_INDETERMINADO.
 # Version: 0.1.0 (F06 T3-F06 bloque 2 F06-01H, paso 6)
+# Version: 0.1.1 (F06 T3-F06 bloque 2 F06-01H; H3, N-10 rama A, firma b7dbf079…): sin cambio de codigo; la
+#   comprobacion de capital usa la deuda con apertura y frontera de lecturas.py v0.4.0 (documentado aqui).
 # ============================================================
 
 from __future__ import annotations

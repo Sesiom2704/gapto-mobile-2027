@@ -12,6 +12,8 @@
 #   OWNERSHIP_F07). Fechas fijas; orden explicito.
 # Version: 0.1.0 (F06 T3-F06 bloque 2 F06-01H, paso 6)
 # Version: 0.1.1 (F06 T3-F06 bloque 2 F06-01H, paso 12, relevo 6): orden de locks del pago por espia (discrimina M-H-42).
+# Version: 0.2.0 (F06 T3-F06 bloque 2 F06-01H; H3, N-10 rama A, firma b7dbf079…): capital del pago contra la deuda con
+#   apertura conocida y frontera F04-D053 A1 (aceptado con 500,00 -> 201,14; EXCEDE_SALDO_POSICION con 100,00).
 # ============================================================
 from __future__ import annotations
 
@@ -147,6 +149,34 @@ def test_o_h10_legacy_indeterminado(lab):
     _rechazo(lab.pagar(1, lab.cuerpo()), 409, "SALDO_PRINCIPAL_INDETERMINADO")
     assert huella() == antes
     assert lab.hipoteca()["deuda_pendiente"] is None and lab.hipoteca()["deuda_indeterminada"] is True
+
+
+def _apertura_conocida(lab, apertura: str) -> None:
+    """N-10: forma RV3 P5/P6 (D8-E) sobre la hipoteca del laboratorio: apertura CONOCIDA y seguimiento desde el dia
+    siguiente a la escritura, de modo que el DEUDA +P de Hd (fecha = escritura) queda ANTES de la frontera."""
+    c2.como_owner(lab.owner, "UPDATE gapto.financiaciones SET saldo_principal_apertura = %s, "
+                             "fecha_inicio_seguimiento = fecha_inicio_seguimiento + 1 WHERE entidad_id = %s",
+                  (Decimal(apertura), lab.f))
+
+
+def test_n10_pago_con_apertura_conocida_suma_apertura_y_frontera(lab):
+    """N-10 rama A (firma b7dbf079…; F04-D053 A1): deuda = 500,00 + Σ DEUDA desde el seguimiento (Hd queda fuera)
+    = 500,00 >= capital 298,86: el pago se acepta y la deuda queda en 201,14. Sin apertura, 0 < 298,86 -> EXCEDE
+    (M-H-45); sin frontera, 160.500,00 -> deuda 160.201,14 (M-H-46)."""
+    _apertura_conocida(lab, "500.00")
+    assert lab.hipoteca()["deuda_pendiente"] == "500.00"
+    r = lab.pagar(1, lab.cuerpo())
+    assert r.status_code == 200, r.text
+    assert r.json()["hipoteca"]["deuda_pendiente"] == "201.14"
+
+
+def test_n10_pago_capital_supera_la_deuda_con_apertura(lab):
+    """N-10: apertura 100,00 < capital 298,86 -> EXCEDE_SALDO_POSICION sin escrituras (sin frontera, el +P de Hd
+    lo taparia: M-H-46)."""
+    _apertura_conocida(lab, "100.00")
+    antes = huella()
+    _rechazo(lab.pagar(1, lab.cuerpo()), 409, "EXCEDE_SALDO_POSICION")
+    assert huella() == antes
 
 
 def test_o_h8_op22_generico_con_vinculo_de_financiacion_rechazado(lab):
