@@ -45,8 +45,10 @@
 #     entorno se retira del subproceso.
 # Uso:
 #   python scripts/mutantes/f06_01h_0354.py --admin-dsn "postgresql://postgres@127.0.0.1:5460/postgres"
-#     --plantilla ref0353 --salida C:\DEV\evidencia_<bloque>\ms0354_<yyyyMMdd-HHmmss> [--solo MS-01 MS-11 ...]
+#     --plantilla ref0353 --salida <dir_evidencia>\ms0354_<yyyyMMdd-HHmmss> [--solo MS-01 MS-11 ...]
 # Version: 0.1.0 (T3-F06 F06-01H paso 12 (mandato v1.1 §12.1/§12.2; contrato v0.4 §10.1.7))
+# Version: 0.1.1 (T3-F06 F06-01H paso 13, STOP_F06-T3-2_GATE_RV3_000): sin ruta absoluta en el comentario de uso
+#   (test_rv3_000); ningun texto de mutante ni discriminante cambia.
 # ============================================================
 from __future__ import annotations
 
