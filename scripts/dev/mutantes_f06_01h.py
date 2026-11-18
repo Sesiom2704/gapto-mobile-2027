@@ -25,6 +25,8 @@
 # Version: 0.1.0 (T3-F06 F06-01H paso 12; mandato v1.1 §12.1; contrato v0.4 §9.2)
 # Version: 0.2.0 (T3-F06 F06-01H; H3, N-10 rama A, firma b7dbf079…): M-H-45 (deuda sin apertura) y M-H-46 (deuda
 #   sin la frontera F04-D053 A1), con discriminantes en test_288 y test_293. Ningun texto anterior cambia.
+# Version: 0.2.1 (H3, N-10): descripcion de M-H-45 sin caracteres fuera de cp1252 (la consola de Windows abortaba
+#   el arnes al imprimirla); ningun texto de mutante ni discriminante cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -248,7 +250,7 @@ MUTANTES = [
        'ORDER BY r.id LIMIT 1) "')],
      [T288 + "test_l_hip_n30_titularidad_vigente_del_prestamo"], None, 1),
     # ------------------------------------------------------------ N-10 rama A (firma b7dbf079…; F04-D053 A1)
-    ("M-H-45", "N-10: la deuda pendiente ignora saldo_principal_apertura (solo Σ DEUDA desde el seguimiento)",
+    ("M-H-45", "N-10: la deuda pendiente ignora saldo_principal_apertura (solo la suma de DEUDA desde el seguimiento)",
      [(LECT, '"SELECT f.saldo_principal_apertura + coalesce((SELECT sum(e.importe_delta) FROM gapto.hecho_efectos e "',
        '"SELECT 0 * f.saldo_principal_apertura + coalesce((SELECT sum(e.importe_delta) FROM gapto.hecho_efectos e "')],
      [T288 + "test_l_hip_n10_apertura_conocida_y_frontera",
