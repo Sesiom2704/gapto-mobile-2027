@@ -422,6 +422,10 @@
 #     inicial): alta aditiva en I1 del comparador ampliado de la compra con hipoteca
 #     (backend/app/hipotecas/comparador.py::_p09_efecto_deuda, clase R: lee categoria_id para comparar la pieza 9,
 #     MB2-09; no escribe). El discriminante (toda aparicion registrada) se conserva. Ninguna entrada previa cambia.
+# Version: 0.43.0 (F06 T3-F06 bloque 2 F06-01H; L-06-T3 condicion (1); STOP_F06-T3-2_GATE_B_INVENTARIOS, opcion A
+#     de Moises del 2026-11-18): I13a registra SOLO los 6 `import type` de ./hipoteca en mobile/src/api/cliente.ts
+#     (tipos de L-HIP, W-HIP-00, pago y revision; paso 10). El discriminante (igualdad exacta del conjunto de
+#     imports) se conserva. Ninguna regla ni entrada previa cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -1806,6 +1810,15 @@ IMPORTS_CAMINO[REG] = IMPORTS_CAMINO[REG] | {
     "TEXTO_OPCION_REEMBOLSO_SUB", "TEXTO_TE_DEBE", "importeReembolso", "totalDe")}
 IMPORTS_CAMINO[CLI] = IMPORTS_CAMINO[CLI] | {
     ("../domain/reembolso", "type PayloadGastoReembolsable"), ("../domain/reembolso", "type ResultadoGastoReembolsable"),
+}
+
+# F06 T3-F06 bloque 2 F06-01H, paso 10 (L-06-T3 condicion (1); STOP_F06-T3-2_GATE_B_INVENTARIOS, opcion A de
+# Moises del 2026-11-18): el cliente HTTP reexporta los TIPOS de la hipoteca (mobile/src/api/hipoteca.ts: L-HIP,
+# W-HIP-00, pago y revision). Solo `import type`; ninguno toca la categoria.
+IMPORTS_CAMINO[CLI] = IMPORTS_CAMINO[CLI] | {
+    ("./hipoteca", "type CuadroPrevio"), ("./hipoteca", "type Hipoteca"), ("./hipoteca", "type PayloadCuadroPrevio"),
+    ("./hipoteca", "type PayloadPagoCuota"), ("./hipoteca", "type PayloadRevisionTipo"),
+    ("./hipoteca", "type ResultadoHipoteca"),
 }
 
 # F06 T1-F06 UX-1 · MANT (alta aditiva, lista cerrada; H-B2-01; regla v2 de T1-F06, `5b54258a…`):

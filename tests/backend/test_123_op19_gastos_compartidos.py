@@ -9,6 +9,15 @@
 #   o NADA, que no invente posiciones y que no duplique ninguna capacidad ya
 #   certificada. El caso C-11 completo y los adversariales A4, A5, A6 y A7
 #   viven aqui.
+# Version: 0.5.0
+#   0.5.0 (F06 T3-F06 bloque 2 F06-01H; L-06-T3 condicion (1), mandato v1.1 §5;
+#   STOP_F06-T3-2_GATE_B_INVENTARIOS, opcion A de Moises del 2026-11-18): N12 admite
+#   un segundo escritor de `PARTE_DE`, backend/app/hipotecas/alta.py (Hd PARTE_DE H0
+#   dentro del lote de la compra; contrato F06-01H v0.4 §3.2.3 y reapertura B2
+#   `669f77b1…`), y un LECTOR, backend/app/hipotecas/lecturas.py, cuyo token solo
+#   puede aparecer como comparacion `tipo_relacion = 'PARTE_DE'` (nunca emitido).
+#   `REPERCUSION_DE` y `REVERSA_A` siguen sin writer; la comprobacion dinamica no
+#   cambia. Ninguna otra prueba cambia.
 # Version: 0.4.0
 #   0.4.0 (F06 T1-F06 B2 N1 · R-B2-N12; adaptacion declarada y minima por la regla
 #   permanente v2 de T1-F06, decision de Moises del 2026-11-12
@@ -463,7 +472,11 @@ def test_ningun_writer_emite_relaciones_reservadas(admin, contexto) -> None:
     emision = _re.compile(r"""['"](PARTE_DE|REPERCUSION_DE|REVERSA_A)['"]""")
     # Lista CERRADA de escritores autorizados por token (regla v2 de T1-F06,
     # `5b54258a…`): solo la compra puede emitir PARTE_DE; los otros dos, nadie.
-    autorizados = {"PARTE_DE": {"patrimonio/compra.py"}}
+    # T3-F06 F06-01H (L-06-T3): segundo escritor, el alta de la hipoteca dentro de la
+    # compra (Hd PARTE_DE H0); y un LECTOR, cuyas apariciones deben ser todas una
+    # comparacion `tipo_relacion = 'PARTE_DE'` (una emision en el lector falla).
+    autorizados = {"PARTE_DE": {"patrimonio/compra.py", "hipotecas/alta.py"}}
+    lectores = {"PARTE_DE": {"hipotecas/lecturas.py"}}
     emisores = sorted(
         (token, ruta.relative_to(servicios).as_posix())
         for ruta in servicios.rglob("*.py")
@@ -472,9 +485,13 @@ def test_ningun_writer_emite_relaciones_reservadas(admin, contexto) -> None:
     no_autorizados = [
         (token, ruta)
         for token, ruta in emisores
-        if ruta not in autorizados.get(token, set())
+        if ruta not in autorizados.get(token, set()) | lectores.get(token, set())
     ]
     assert no_autorizados == []
+    comparacion = _re.compile(r"""tipo_relacion\s*=\s*['"]PARTE_DE['"]""")
+    for ruta in lectores["PARTE_DE"]:
+        texto = (servicios / ruta).read_text(encoding="utf-8")
+        assert len(emision.findall(texto)) == len(comparacion.findall(texto)), (ruta, "PARTE_DE fuera de una comparacion")
 
     assert leer_fila(
         admin,
