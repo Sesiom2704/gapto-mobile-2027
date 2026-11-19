@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F06 T1-F06 B2 N1)
 // Versión: 0.2.0 (F06 T2-F06 A3-0352 (L-05); contrato A3-0352 v1.1 §6): UX-1 el chip «No faltan gastos» de B4 solo con la fecha de adquisición conocida (`puedeDeclararCompleto`), y «Completo» como PROPUESTA del resumen; UX-2 sin fecha, nota y la compra se guarda sin declaración; UX-4 COMPLETITUD_SIN_FECHA_DE_ADQUISICION muestra el texto del servidor, no guarda nada y recupera B4 sin el chip (intención nueva) para guardar sin declaración. GastoCompraScreen no cambia.
 // Versión: 0.3.0 (F06 T3-F06 bloque 2 F06-01H, paso 10; contrato v0.4 §3.2 y §8; mandato v1.1 §15): bloque «Hipoteca» dentro de la compra, en B2 «¿Cómo se pagó el precio?», opcional («+ Añadir la hipoteca de esta compra»; sin ella la compra y su petición no cambian): banco, importe del préstamo, cuenta en la que el banco lo deja (texto sin «ingreso»; cuentas que pueden recibir dinero en la escritura), fijo o variable (sin valor por defecto), tipo anual, plazo en años o meses → n.º de cuotas, primera cuota (posterior a la escritura), cuenta de cargo, titularidad del préstamo propuesta (la de la propiedad en la escritura) y modificable, aviso «Cálculo mensual: tipo anual entre 12» y «Ver el cuadro» (W-HIP-00, sin escritura; CuadroPrevioScreen). B4 añade la hipoteca al resumen; B6 muestra el aviso `aviso_reparto_distinto` (O-H30) si el servidor lo devuelve. Rechazos de la hipoteca con texto propio, sin «ingreso» ni «cobro». La regla «los pagos suman el precio» no cambia.
+// Versión: 0.4.0 (F06 T3-F06 · MANT N1 R-B2-06 (AJ-01), firma b88a3662…): guardar la compra usa `enviarCompraComprobando`: ante un timeout no dice que ha fallado, muestra «Comprobando…» y reenvía el MISMO cuerpo (misma intención; replay idempotente sin duplicar); si sigue sin confirmarse, `TEXTO_COMPRA_SIN_CONFIRMAR` (nunca «fallo» ni «repítela»). El gasto posterior (C-COMPRA-03) no cambia.
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -22,7 +23,7 @@ import { AvisoCaja, CabeceraTarea, Caja, Campo, CampoTexto, estilosFormulario as
 import {
   avisoGastosAnteriores, BorradorCompra, textoPagado, borradorInicial, CONCEPTOS, EleccionAtribucion, faltasAtribucion, faltasGasto,
   faltasGastos, faltasPagos, faltasPrecio, filasDiaADia, GastoBorrador, NOMBRE_CONCEPTO, NOMBRE_ROL, PagoBorrador, payloadCompra,
-  payloadGastoCompra, puedeDeclararCompleto, resumen, ROLES, TEXTO_DESFASADA, TEXTO_GASTOS, TEXTO_INDETERMINADO_COMPRA, TEXTO_NADIE_MARCADO, TEXTO_NOTA_SIN_FECHA, TEXTO_SIN_HIPOTECA,
+  enviarCompraComprobando, payloadGastoCompra, puedeDeclararCompleto, resumen, ROLES, TEXTO_COMPRA_SIN_CONFIRMAR, TEXTO_COMPROBANDO_COMPRA, TEXTO_DESFASADA, TEXTO_GASTOS, TEXTO_INDETERMINADO_COMPRA, TEXTO_NADIE_MARCADO, TEXTO_NOTA_SIN_FECHA, TEXTO_SIN_HIPOTECA,
   TEXTO_SIN_TITULARIDAD, TEXTO_VALOR_REFERENCIA, textoErrorCompra, textoPartes, textoPropuestaEscritura,
 } from '../domain/compra';
 import { ddmmaaaaAIso, diaMesAnioIso, isoADdmmaaaa, isoLocal } from '../domain/fechas';
@@ -181,14 +182,17 @@ export function CompraScreen(p: {
     if (ocupado) return;
     setOcupado(true);
     setAviso(null);
-    const res = await p.patrimonio.registrarCompra(p.vista.id, conHipoteca(payloadCompra(intencion.current, p.vista.row_version, { ...b, completo: ofreceCompleto && b.completo }, propuesta), hip, propuestaHip));
+    // R-B2-06 (AJ-01): el cuerpo se construye UNA vez; ante un INDETERMINADO (timeout) se reenvía el MISMO (replay idempotente).
+    const cuerpo = conHipoteca(payloadCompra(intencion.current, p.vista.row_version, { ...b, completo: ofreceCompleto && b.completo }, propuesta), hip, propuestaHip);
+    const { respuesta: res } = await enviarCompraComprobando(() => p.patrimonio.registrarCompra(p.vista.id, cuerpo),
+      () => setAviso({ tipo: 'AVISO', texto: TEXTO_COMPROBANDO_COMPRA }));
     setOcupado(false);
     if (res.tipo === 'OK') {
       setResultado(res.datos.propiedad);
       setAvisoReparto(res.datos.aviso_reparto_distinto === true);
       return setPaso('HECHO');
     }
-    if (res.tipo === 'INDETERMINADO') return setAviso({ tipo: 'AVISO', texto: TEXTO_INDETERMINADO_COMPRA });
+    if (res.tipo === 'INDETERMINADO') return setAviso({ tipo: 'AVISO', texto: TEXTO_COMPRA_SIN_CONFIRMAR });
     if (res.codigo === 'VERSION_DESFASADA') return setConflicto(true);
     if (res.codigo === 'ATRIBUCION_PROPUESTA_DESFASADA') {
       // Intención nueva: la petición rechazada no escribió nada; el contenido cambia al elegir otra vez.

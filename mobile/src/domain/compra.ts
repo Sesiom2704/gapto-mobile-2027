@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F06 T1-F06 B2 N1)
 // Versión: 0.2.0 (F06 T2-F06 A3-0352 (L-05)): `CONSUMIDORES_0352_HABILITADOS = true`; R15-a en el cliente (contrato A3-0352 v1.1 §6): `puedeDeclararCompleto` (UX-1, solo con la fecha de adquisición conocida), `TEXTO_NOTA_SIN_FECHA` (UX-2), `MOTIVOS_COSTE_ADQUISICION` y `textoEstadoCoste` con SIN_FECHA_DE_ADQUISICION y LECTURA_NO_ESTABLE (UX-3) y `TEXTOS_ERROR` con COMPLETITUD_SIN_FECHA_DE_ADQUISICION, mismo texto que el servidor (UX-4).
 // Versión: 0.3.0 (F06 T3-F06 bloque 2 F06-01H, paso 10): `TEXTO_SIN_HIPOTECA` deja de decir que la hipoteca no se registra (ya se registra dentro de la compra, bloque «Hipoteca» de CompraScreen). Nada más cambia: la lógica de la hipoteca vive en domain/hipoteca.ts.
+// Versión: 0.4.0 (F06 T3-F06 · MANT N1 R-B2-06 (AJ-01), firma b88a3662…): `enviarCompraComprobando` (ante un INDETERMINADO reenvía la MISMA petición, replay idempotente sin duplicar, y devuelve el resultado real), `TEXTO_COMPROBANDO_COMPRA`, `TEXTO_COMPRA_SIN_CONFIRMAR` y `COMPROBACIONES_COMPRA`. La compra con hipoteca larga puede tardar más que el timeout general por la validación G2 de 0354 al COMMIT (≈ 35 ms por cuota; STOP_MANT_RB206_B).
 // ============================================================
 
 import type {
@@ -37,6 +38,34 @@ export const TEXTO_SIN_TITULARIDAD = 'No hay titularidad registrada en la fecha 
 export const TEXTO_DESFASADA = 'La titularidad ha cambiado: revisa el reparto.';
 export const TEXTO_NO_GASTO_MES = 'Coste de la compra · no es gasto del mes';
 export const TEXTO_INDETERMINADO_COMPRA = 'No se ha podido confirmar la compra. Revisa la propiedad antes de repetirla.';
+/** R-B2-06 (AJ-01): mientras se comprueba, tras un timeout, si la compra se guardó (replay idempotente). */
+export const TEXTO_COMPROBANDO_COMPRA = 'Comprobando si la compra se ha guardado…';
+/** R-B2-06 (AJ-01): la comprobación tampoco ha podido confirmar; nunca se dice que ha fallado ni se invita a repetirla. */
+export const TEXTO_COMPRA_SIN_CONFIRMAR =
+  'Todavía no podemos confirmar si la compra se ha guardado. No la repitas: abre la propiedad dentro de unos minutos para comprobarlo.';
+/** R-B2-06 (AJ-01): reenvíos de comprobación tras un INDETERMINADO (timeout o red). */
+export const COMPROBACIONES_COMPRA = 2;
+
+/**
+ * R-B2-06 (AJ-01): envía la compra y, si la respuesta es INDETERMINADO (timeout, red o 5xx), NO la da por fallida: reenvía la
+ * MISMA petición (`enviar` cierra sobre el mismo cuerpo, con la misma `intencion_id`) hasta `n` veces. El servidor resuelve el
+ * reenvío como replay idempotente (`idempotente: true`, sin escribir) si la compra ya se guardó, o la guarda si no llegó; nunca
+ * duplica (identidad de C-COMPRA-01). Devuelve la primera respuesta definitiva (OK o RECHAZADO) o el último INDETERMINADO.
+ */
+export async function enviarCompraComprobando<R extends { tipo: string }>(
+  enviar: () => Promise<R>,
+  alComprobar?: () => void,
+  n: number = COMPROBACIONES_COMPRA,
+): Promise<{ respuesta: R; comprobaciones: number }> {
+  let respuesta = await enviar();
+  let comprobaciones = 0;
+  while (respuesta.tipo === 'INDETERMINADO' && comprobaciones < n) {
+    comprobaciones += 1;
+    alComprobar?.();
+    respuesta = await enviar();
+  }
+  return { respuesta, comprobaciones };
+}
 /** UX-2 (A3-0352): sin fecha de adquisición no se ofrece declarar el coste completo. */
 export const TEXTO_NOTA_SIN_FECHA = 'Para marcar que no faltan gastos, añade antes la fecha de adquisición en la ficha de la propiedad.';
 /** UX-4 (A3-0352): mismo texto que `RECHAZOS` del servidor (backend/app/patrimonio/rutas.py). */

@@ -5,6 +5,7 @@
 // Descripción: Cliente HTTP de B2 · Compra (F06-01 B2; R1 v0.9.5 Parte II; v0.8 DTO RegistrarCompra sin hipoteca). POST /v1/propiedades/{id}/compra (C-COMPRA-01), POST …/{id}/compra/gastos (C-COMPRA-03), GET …/{id}/coste?a_fecha= (L-COSTE) y GET …/{id}/titularidad-en-fecha?fecha= (titularidad vigente en una fecha, P-H2-03, adelantada a B2). Las escrituras usan la clasificación 'CAMBIO' (indeterminado = revisar antes de repetir; el reintento idéntico con la misma intención es un replay). Importes y porcentajes viajan como texto exacto. Va aparte de `ClientePropiedades` (B1) para no ampliar su interfaz. C-PROP-05 no tiene cliente: es un consumidor de 0352 con la habilitación bloqueada (O10.29).
 // Versión: 0.1.0 (F06 T1-F06 B2 N1)
 // Versión: 0.2.0 (F06 T3-F06 bloque 2 F06-01H, paso 10): SOLO aditivo: bloque opcional `hipoteca` en `PayloadCompra` (contrato v0.4 §3.2.1; fin de E4) y, en `ResultadoCompra`, `hipoteca` (L-HIP) y `aviso_reparto_distinto` (O-H30) cuando la compra lleva hipoteca. Sin hipoteca, la petición y la respuesta no cambian.
+// Versión: 0.3.0 (F06 T3-F06 · MANT N1 R-B2-06 (AJ-01), firma b88a3662…): `registrarCompra` usa un timeout propio `TIMEOUT_COMPRA_MS` (45 s, nunca menor que el general): con hipoteca larga la validación G2 de 0354 al COMMIT cuesta ≈ 35 ms por cuota (360 → ≈ 18,6 s en laboratorio). El resto de llamadas conserva el timeout general.
 // ============================================================
 
 import type { BloqueHipotecaWire, Hipoteca } from './hipoteca';
@@ -118,10 +119,14 @@ export interface ClientePatrimonio {
 const una = (id: string) => `/v1/propiedades/${encodeURIComponent(id)}`;
 const post = (cuerpo: unknown): RequestInit => ({ method: 'POST', body: JSON.stringify(cuerpo) });
 
+/** R-B2-06 (AJ-01): timeout propio de la compra (POST .../compra); nunca menor que el general. */
+export const TIMEOUT_COMPRA_MS = 45000;
+
 export function crearClientePatrimonio(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): ClientePatrimonio {
   const llamar = crearLlamada(cfg, fetchImpl);
+  const llamarCompra = crearLlamada({ ...cfg, timeoutMs: Math.max(cfg.timeoutMs, TIMEOUT_COMPRA_MS) }, fetchImpl);
   return {
-    registrarCompra: (id, p) => llamar(`${una(id)}/compra`, post(p), 'CAMBIO'),
+    registrarCompra: (id, p) => llamarCompra(`${una(id)}/compra`, post(p), 'CAMBIO'),
     gastoCompraPosterior: (id, p) => llamar(`${una(id)}/compra/gastos`, post(p), 'CAMBIO'),
     leerCoste: (id, aFecha) => llamar(`${una(id)}/coste${aFecha ? `?a_fecha=${encodeURIComponent(aFecha)}` : ''}`, { method: 'GET' }, false),
     titularidadEnFecha: (id, fecha) => llamar(`${una(id)}/titularidad-en-fecha?fecha=${encodeURIComponent(fecha)}`, { method: 'GET' }, false),
