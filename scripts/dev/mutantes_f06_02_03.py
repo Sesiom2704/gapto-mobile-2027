@@ -37,6 +37,8 @@
 #   y 45 (FORCE RLS).
 # Version: 0.2.1 (paso 6): la 0.2.0 publicada en 6f80102 aplico cinco cambios al mutante SIGUIENTE (tuplas en varias
 #   lineas); se rehacen acotados a la tupla de cada mutante. Ningun texto de mutante cambia.
+# Version: 0.2.2 (paso 9, defecto V-bis de las capturas): MC-CON-23 con el texto nuevo del filtro (`enabled !== false`)
+#   y MC-CON-23b nuevo (volver a exigir `enabled`), que mata el oraculo de la forma real del servidor.
 # ============================================================
 
 from __future__ import annotations
@@ -622,8 +624,11 @@ MUTANTES_CLIENTE: list[tuple] = [
      [(DOMC, "    const homonimo = grupo.length > 1;", "    const homonimo = grupo.length > 0;")],
      [JDOM + "dos .Empresa SL. activas", JTER + "B3c: hom.nimos con naturaleza y uso"], None, 1),
     ("MC-CON-23", "O-30 cliente: los inactivos se listan en el selector de participantes",
-     [(DOMC, "  const activos = lista.filter((t) => t.enabled);", "  const activos = lista;")],
+     [(DOMC, "  const activos: TerceroDelSelector[] = lista.filter((t) => t.enabled !== false).map((t) => ({ ...t, enabled: true })); // el servidor solo manda activos y sin `enabled`", "  const activos: TerceroDelSelector[] = lista.map((t) => ({ ...t, enabled: true }));")],
      [JDOM + "los inactivos no se listan", JTER + "los inactivos no aparecen"], None, 1),
+    ("MC-CON-23b", "V-bis cliente: el selector vuelve a exigir `enabled` (lista vacia con la respuesta real del servidor)",
+     [(DOMC, "  const activos: TerceroDelSelector[] = lista.filter((t) => t.enabled !== false).map((t) => ({ ...t, enabled: true })); // el servidor solo manda activos y sin `enabled`", "  const activos: TerceroDelSelector[] = lista.filter((t) => t.enabled).map((t) => ({ ...t, enabled: true }));")],
+     [JDOM + "forma REAL del servidor"], None, 1),
     ("MC-CON-24", "O-30 cliente: dos filas identicas se eligen directamente (sin pasar por la ficha)",
      [(DOMC, "    const identica = homonimo && grupo.some(", "    const identica = false && grupo.some(")],
      [JDOM + "filas a.n id.nticas", JTER + "O-30: dos filas id.nticas"], None, 1),

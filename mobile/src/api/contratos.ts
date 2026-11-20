@@ -4,6 +4,7 @@
 // Ruta: mobile/src/api/contratos.ts
 // Descripción: Cliente HTTP de F06-02/03 · Contratos de alquiler, servicios y terceros, SIN renta (contrato N1 v1.1: rutas de la Parte I a VI; lámina CON v0.8). Fuente única del DTO del cliente: los tipos siguen el contrato (C-CON-01..06, C-REV-01, C-SRV-01..04, C-TER-01/03, L-CON-01..03, L-SRV-01, L-TER-01 y la lectura del selector con «uso en Gapto», V-bis). Las escrituras usan la clasificación 'CAMBIO' (replay idempotente por `intencion_id`; indeterminado = comprobar antes de repetir). Importes y porcentajes viajan como texto exacto. No existe renta, fianza ni cobro: ninguna petición lleva `renta` ni `fianza` (R-E-01; el servidor respondería RENTA_NO_DISPONIBLE). Va aparte de `cliente.ts` (que no se toca: test_154 I13a) e importa de él como `patrimonio.ts`.
 // Versión: 0.1.0 (F06 T3-F06 Bloque 3 F06-02/03, paso 5 cliente)
+// Versión: 0.1.1 (Bloque 3, paso 9): TerceroParaContrato con `enabled` opcional, como lo manda el servidor (selector V-bis vacío en las capturas).
 // ============================================================
 
 import { ConfigApi, crearLlamada, Respuesta, Tercero } from './cliente';
@@ -233,7 +234,10 @@ export type UsoTercero =
   | { tipo: 'MOVIMIENTO'; fecha: string }
   | { tipo: 'SIN_USO' };
 
-export interface TerceroParaContrato extends Tercero {
+/** Fila del selector V-bis (GET /v1/terceros/asistente-contratos). El servidor solo devuelve ACTIVOS y NO manda `enabled`:
+ *  es opcional aqui para que el tipo diga la forma real de la respuesta (defecto hallado en las capturas del paso 9). */
+export interface TerceroParaContrato extends Omit<Tercero, 'enabled'> {
+  enabled?: boolean;
   uso: UsoTercero;
 }
 

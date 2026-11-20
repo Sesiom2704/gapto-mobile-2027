@@ -5,6 +5,7 @@
 // Descripción: Dominio puro de F06-02/03 (contrato N1 v1.1; lámina CON v0.8): solape simétrico y bloqueante para firmados con ocupación hasta el FIN REAL (O-2, O-25; el fin previsto no libera; un borrador no cuenta; OTRO no solapa), reglas de personas de D25 (principal solo en PROPIETARIO, GESTOR e INQUILINO; el usuario no es inquilino ni agencia ni administrador; AGENCIA y ADMINISTRADOR no cuentan para firmar; O-22..O-24), payload de C-CON-01 sin `renta` ni `fianza` (O-14) y «No lo sé» sin fila, porcentajes, ocupación de A1 (O-1b), códigos de error con texto (O-31: motivo de renta frente a motivo de regla de servicio), homónimos y uso en Gapto (O-30, O-32), propuesta de rol sin AGENCIA/ADMINISTRADOR (E3) y textos literales de la lámina.
 // Versión: 0.1.0 (F06 T3-F06 Bloque 3 F06-02/03, paso 5 cliente)
 // Versión: 0.1.1 (F06 T3-F06 Bloque 3, paso 6): oráculo de «para firmar hace falta un inquilino» (MC-CON-10 vivo).
+// Versión: 0.1.2 (Bloque 3, paso 9): oráculo con la forma REAL de la respuesta del selector V-bis (sin `enabled`); mata MC-CON-23b.
 // ============================================================
 
 import type { FilaContrato } from '../src/api/contratos';
@@ -14,6 +15,7 @@ import {
   resumenServiciosContrato, rolPropuesto, solapadosDeDetalle, textoClausulaDetalle, textoCoincide, textoErrorContrato, textoOcupacionHabitacion, textoProponerRol, textoSinRol,
   textoUso, tratamientosWire, TEXTO_INQUILINO_NO_YO, TEXTO_RENTA_PENDIENTE, TEXTO_SERVICIO_BAJA_REGLA, textoSituacion, ROLES_TERCERO, NOMBRE_ROL_TERCERO,
 } from '../src/domain/contratos';
+import type { TerceroParaContrato } from '../src/api/contratos';
 import { detalle, escenarioA1, fila, T_CARLOS, T_ELENA, T_LAURA, terceroUso } from './contratos_fixtures';
 
 const per = (rol: PersonaBorrador['rol'], terceroId: string | null, principal = false, nombre = 'X'): PersonaBorrador => ({ clave: `${rol}-${terceroId ?? 'yo'}`, terceroId, nombre, rol, principal });
@@ -306,6 +308,18 @@ describe('V-bis · homónimos y uso en Gapto (O-30, O-32)', () => {
   test('filas aún idénticas (mismo nombre, naturaleza y uso) no se eligen directamente: ficha (O-30)', () => {
     const f = filasSelector([terceroUso('a', 'Carlos Ruiz', { tipo: 'SIN_USO' }), terceroUso('b', 'carlos ruíz', { tipo: 'SIN_USO' })]);
     expect(f.every((x) => x.homonimo && x.identica)).toBe(true);
+  });
+
+  test('forma REAL del servidor (V-bis, sin `enabled`): las filas se listan (defecto CON-B3c de las capturas del paso 9)', () => {
+    // Claves exactas de lecturas.selector_asistente: id, nombre, naturaleza, row_version, homonimo, uso. Solo activos, sin `enabled`.
+    const delServidor = JSON.parse(JSON.stringify([
+      { id: 'a', nombre: 'Carlos Ruiz', naturaleza: 'PERSONA', row_version: 1, homonimo: true, uso: { tipo: 'SIN_USO' } },
+      { id: 'b', nombre: 'Carlos Ruiz', naturaleza: 'PERSONA', row_version: 1, homonimo: true, uso: { tipo: 'MOVIMIENTO', fecha: '2026-10-12' } },
+      { id: 'c', nombre: 'Elena Sanz', naturaleza: 'PERSONA', row_version: 2, homonimo: false, uso: { tipo: 'SIN_USO' } },
+    ])) as TerceroParaContrato[];
+    const f = filasSelector(delServidor);
+    expect(f.map((x) => x.tercero.id)).toEqual(['a', 'b', 'c']);
+    expect(f.map((x) => x.homonimo)).toEqual([true, true, false]);
   });
 
   test('los inactivos no se listan en el selector de participantes (O-30)', () => {

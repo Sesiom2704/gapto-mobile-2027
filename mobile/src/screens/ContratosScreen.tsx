@@ -4,6 +4,7 @@
 // Ruta: mobile/src/screens/ContratosScreen.tsx
 // Descripción: Contratos de una propiedad y su vida (F06-02/03; lámina CON v0.8 validada; contrato N1 v1.1 L-CON-01/02, C-CON-02..05). A1 lista por situación DERIVADA (vigentes, próximos, borradores, finalizados) con la ocupación de hoy por habitación («3 ocupadas · 1 próxima · 1 libre»; un borrador no ocupa; un vigente con el fin previsto pasado y sin fin real sigue ocupando y lleva «Termina o prorroga»; decisión 6) y SIN importes (la renta llega con la parte de cobros); A3 sin contratos; A2 detalle (personas con agencia o administrador, condiciones, servicios, «Renta y fianza · Se añadirán con la parte de cobros»); C2 prórroga con motivo; C3 terminar (último día real; no se borra nada); C3b terminación BLOQUEADA y explicada para contratos de V3 con renta (`terminable = false`, motivo RENTA_PENDIENTE_DE_F06_04; el botón aparece desactivado y la explicación va antes; el servidor responde lo mismo); C4 borrador («Completar y firmar» repite el solape: si coincide con un firmado, B2b y sigue en borrador; «Cancelar borrador» con motivo); C1 cambio de inquilino en una habitación (termina el actual y crea el nuevo en una sola operación). `ContratosFlujo` encadena lista, detalle, asistente, servicios y ficha de tercero sin librería de navegación.
 // Versión: 0.1.0 (F06 T3-F06 Bloque 3 F06-02/03, paso 5 cliente)
+// Versión: 0.1.1 (Bloque 3, paso 9): los chips de «Copiar al contrato nuevo» (C1) van en columna a todo el ancho para que el texto largo parta (desborde horizontal en las capturas).
 // ============================================================
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -244,7 +245,7 @@ export function ContratoDetalleScreen(p: {
           <Campo etiqueta={`Último día de ${nombreInq}`}><CampoFechaIso testID="contrato-sucesor-fin" etiqueta="Último día del inquilino actual, día barra mes barra año" iso={ultimoDia} hoyIso={hoyIso} onCambiar={setUltimoDia} /></Campo>
           <Campo etiqueta="El nuevo inquilino entra el"><CampoFechaIso testID="contrato-sucesor-inicio" etiqueta="Inicio del contrato nuevo, día barra mes barra año" iso={nuevoInicio} hoyIso={hoyIso} onCambiar={setNuevoInicio} /></Campo>
           <RotuloGrupo texto="Copiar al contrato nuevo" />
-          <View style={ef.chips}>
+          <View style={sl.chipsColumna}>
             <Chip testID="contrato-sucesor-copiar-clausula" etiqueta={`Revisión: ${textoClausulaDetalle(ct.clausula)}`} seleccionado={copiarClausula} onPress={() => setCopiarClausula(!copiarClausula)} />
             <Chip testID="contrato-sucesor-copiar-servicios" etiqueta={`Servicios: ${resumenServiciosContrato(ct) || 'ninguno'}`} seleccionado={copiarServicios} onPress={() => setCopiarServicios(!copiarServicios)} />
           </View>
@@ -410,3 +411,7 @@ export function ContratosFlujo(p: {
   return <ContratosListaScreen contratos={p.contratos} propiedad={p.propiedad} refresco={refresco} etiquetaAtras={p.etiquetaAtras} onAtras={p.onSalir}
     onNuevo={() => ir({ t: 'ALTA' })} onAbrir={(id) => ir({ t: 'DETALLE', id })} onServicios={() => ir({ t: 'SERVICIOS' })} />;
 }
+
+const sl = StyleSheet.create({
+  chipsColumna: { gap: espacio.s },
+});

@@ -4,6 +4,7 @@
 // Ruta: mobile/src/components/SelectorParticipante.tsx
 // Descripción: Selector de persona del asistente de contratos (F06-02/03 V-bis y V-ter; lámina CON v0.8 B3c y B3d; decisión 7 = A y decisión 5 = B de Moisés, 18-11). V-bis (n.º 132 parcial): lista SOLO terceros ACTIVOS; cuando hay dos o más con el mismo nombre normalizado cada fila muestra su naturaleza (persona o empresa) y su USO EN GAPTO (contrato más reciente con rol y etiqueta, o último movimiento, o «sin uso»), derivado al leer por el servidor, nunca almacenado. Si dos filas siguen idénticas, la fila NO se elige directamente: abre su ficha y se confirma desde ella («Es esta persona»). Nada viene elegido. V-ter: «+ Nuevo tercero» abre el `SelectorTercero` EXISTENTE de F05 tal como está (su hoja `tercero-duplicado` con Usar / Reactivar / Crear otro; reactivar es el circuito de F05); aquí no se crea ninguna hoja ni lectura de duplicados nueva, y un inactivo nunca se elige sin reactivarlo antes. No toca `SelectorTercero`.
 // Versión: 0.1.0 (F06 T3-F06 Bloque 3 F06-02/03, paso 5 cliente)
+// Versión: 0.1.1 (Bloque 3, paso 9): la ficha del homónimo usa TerceroDelSelector (activo, con `enabled` fijado al filtrar).
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -11,7 +12,7 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-
 
 import type { ClienteApi, Tercero } from '../api/cliente';
 import type { ClienteContratos, FichaTercero, TerceroParaContrato } from '../api/contratos';
-import { detalleHomonimo, filasSelector, textoNaturaleza, textoUso, TEXTO_HOMONIMOS_AYUDA } from '../domain/contratos';
+import { detalleHomonimo, filasSelector, type TerceroDelSelector, textoNaturaleza, textoUso, TEXTO_HOMONIMOS_AYUDA } from '../domain/contratos';
 import { useTema } from '../theme/tema';
 import { espacio, radio, TACTIL_MIN, tipo } from '../theme/tokens';
 import { BotonPrimario, BotonTexto, EstadoDato } from './Basicos';
@@ -32,7 +33,7 @@ export function SelectorParticipante(p: {
   const { c } = useTema();
   const [filtro, setFiltro] = useState('');
   const [carga, setCarga] = useState<Carga>({ fase: 'CARGANDO' });
-  const [ficha, setFicha] = useState<{ t: TerceroParaContrato; f: FichaTercero | null } | null>(null);
+  const [ficha, setFicha] = useState<{ t: TerceroDelSelector; f: FichaTercero | null } | null>(null);
   const [nuevo, setNuevo] = useState(false);
   const peticion = useRef(0);
 
@@ -47,7 +48,7 @@ export function SelectorParticipante(p: {
     void cargar(filtro.trim());
   }, [filtro]);
 
-  const abrirFicha = async (t: TerceroParaContrato) => {
+  const abrirFicha = async (t: TerceroDelSelector) => {
     setFicha({ t, f: null });
     const r = await p.contratos.fichaTercero(t.id);
     setFicha({ t, f: r.tipo === 'OK' ? r.datos : null });

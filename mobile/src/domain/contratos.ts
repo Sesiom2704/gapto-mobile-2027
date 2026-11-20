@@ -4,6 +4,7 @@
 // Ruta: mobile/src/domain/contratos.ts
 // Descripción: Lógica pura de F06-02/03 · Contratos de alquiler, servicios y terceros, SIN renta (contrato N1 v1.1; lámina CON v0.8 validada): textos literales de la lámina, borrador del asistente de 5 pasos (qué, fechas, personas, revisión, servicios), validaciones previas de cada paso con las MISMAS reglas que el servidor (D25: principal solo en PROPIETARIO, GESTOR e INQUILINO; el usuario no es inquilino ni agencia ni administrador; partes para firmar; AGENCIA y ADMINISTRADOR nunca cuentan como parte), solape simétrico y bloqueante para firmados con ocupación hasta el FIN REAL (decisiones 3 y 6; el fin previsto no libera; un borrador no cuenta), payload de C-CON-01 (nunca `renta` ni `fianza`), situación/ocupación para A1, tratamientos de servicio (M-9), «uso en Gapto» de V-bis con homónimos y la propuesta de rol de E3 (sin propuesta para agencia ni administrador), y la traducción de TODOS los códigos de error del contrato a texto. El servidor sigue siendo la autoridad: esta capa solo evita enviar lo que se sabe que se rechaza.
 // Versión: 0.1.0 (F06 T3-F06 Bloque 3 F06-02/03, paso 5 cliente)
+// Versión: 0.1.1 (Bloque 3, paso 9): filasSelector no exige `enabled` (la respuesta del servidor no lo trae; selector vacío en CON-B3c).
 // ============================================================
 
 import type {
@@ -463,8 +464,11 @@ export function textoUso(u: UsoTercero): string {
 /** Segunda línea de una fila de homónimos: «Persona · inquilino en 26-HAB1-CR». */
 export const detalleHomonimo = (t: TerceroParaContrato): string => `${textoNaturaleza(t.naturaleza)} · ${textoUso(t.uso)}`;
 
+export type TerceroDelSelector = TerceroParaContrato & { enabled: boolean };
+
 export interface FilaSelector {
-  tercero: TerceroParaContrato;
+  /** Activo por construcción: `enabled` se fija a true al filtrar (el servidor no lo manda). */
+  tercero: TerceroDelSelector;
   /** Hay otro activo con el mismo nombre normalizado: se muestra naturaleza y uso. */
   homonimo: boolean;
   /** Sigue idéntica a otra (mismo nombre, naturaleza y uso): no se elige directamente, se abre su ficha (B3c). */
@@ -473,8 +477,8 @@ export interface FilaSelector {
 
 /** V-bis: solo ACTIVOS; los homónimos muestran naturaleza y uso; las filas aún idénticas exigen pasar por la ficha. Nada viene elegido. */
 export function filasSelector(lista: TerceroParaContrato[]): FilaSelector[] {
-  const activos = lista.filter((t) => t.enabled);
-  const porNombre = new Map<string, TerceroParaContrato[]>();
+  const activos: TerceroDelSelector[] = lista.filter((t) => t.enabled !== false).map((t) => ({ ...t, enabled: true })); // el servidor solo manda activos y sin `enabled`
+  const porNombre = new Map<string, TerceroDelSelector[]>();
   for (const t of activos) porNombre.set(norm(t.nombre), [...(porNombre.get(norm(t.nombre)) ?? []), t]);
   return activos.map((t) => {
     const grupo = porNombre.get(norm(t.nombre)) ?? [];
