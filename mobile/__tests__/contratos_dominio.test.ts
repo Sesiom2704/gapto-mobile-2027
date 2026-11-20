@@ -4,6 +4,7 @@
 // Ruta: mobile/__tests__/contratos_dominio.test.ts
 // Descripción: Dominio puro de F06-02/03 (contrato N1 v1.1; lámina CON v0.8): solape simétrico y bloqueante para firmados con ocupación hasta el FIN REAL (O-2, O-25; el fin previsto no libera; un borrador no cuenta; OTRO no solapa), reglas de personas de D25 (principal solo en PROPIETARIO, GESTOR e INQUILINO; el usuario no es inquilino ni agencia ni administrador; AGENCIA y ADMINISTRADOR no cuentan para firmar; O-22..O-24), payload de C-CON-01 sin `renta` ni `fianza` (O-14) y «No lo sé» sin fila, porcentajes, ocupación de A1 (O-1b), códigos de error con texto (O-31: motivo de renta frente a motivo de regla de servicio), homónimos y uso en Gapto (O-30, O-32), propuesta de rol sin AGENCIA/ADMINISTRADOR (E3) y textos literales de la lámina.
 // Versión: 0.1.0 (F06 T3-F06 Bloque 3 F06-02/03, paso 5 cliente)
+// Versión: 0.1.1 (F06 T3-F06 Bloque 3, paso 6): oráculo de «para firmar hace falta un inquilino» (MC-CON-10 vivo).
 // ============================================================
 
 import type { FilaContrato } from '../src/api/contratos';
@@ -84,6 +85,9 @@ describe('personas (D25; O-22, O-23, O-24)', () => {
   test('para firmar hacen falta arrendador (o gestor) e inquilino; AGENCIA y ADMINISTRADOR no cuentan (O-23)', () => {
     const solo = borr({ personas: [per('AGENCIA', T_ELENA, true), per('INQUILINO', T_CARLOS, true)] });
     expect(faltasPersonas(solo).join(' ')).toMatch(/arrendador \(o gestor\)/);
+    // arrendador sin inquilino: tampoco se firma (D25; mata MC-CON-10)
+    const sinInquilino = borr({ personas: [per('PROPIETARIO', null, true), per('AVALISTA', T_ELENA)] });
+    expect(faltasPersonas(sinInquilino)).toContain('Para firmar hace falta un inquilino.');
     const ok = borr({ personas: [per('PROPIETARIO', null, true), per('INQUILINO', T_CARLOS, true), per('AGENCIA', T_ELENA)] });
     expect(faltasPersonas(ok)).toEqual([]);
     // un gestor tercero sustituye al propietario
