@@ -25,6 +25,9 @@
 #   propiedad (K1/K2 en rojo); C-CON-01 con terceros antes que la propiedad y C-CON-05 con terceros antes que la
 #   propiedad (K5/K6 en rojo).
 #   ESCRITO SIN EJECUTAR (sin base esta noche).
+# Version: 0.3.0 (F06 T3-F06 Bloque 3, B3-COMP, decision 11 de Moises): K9 O-29 sucesor con tercero nuevo || C-MEJ-01 v2
+#   de PAG (writer certificado) sobre la misma propiedad, con foto de pg_locks en el punto de espera (la propiedad
+#   antes que los terceros) y discriminante M-CON-46b (C-CON-05 con terceros antes que la propiedad).
 # Version: 0.2.0 (F06 T3-F06 Bloque 3, paso 7): K7 y K8, los dos escenarios de concurrencia del mandato v1.2 §8 que
 #   faltaban (C-CON-02 || C-CON-06 y C-SRV-04 || C-SRV-03).
 #   Primera ejecucion con base: K5 se detiene en el advisory de terceros de F05 (repo_ter.tomar_advisory), que toman
@@ -332,3 +335,91 @@ def test_k8_tratamiento_frente_a_baja_del_servicio(t, monkeypatch, caplog, orden
     assert _uno(owner, "SELECT fecha_fin_real FROM gapto.servicios WHERE entidad_id = %s", (sid,)) == dt.date(2026, 11, 30)
     assert _uno(owner, "SELECT count(*) FROM gapto.contrato_servicios WHERE servicio_entidad_id = %s "
                        "AND vigente_hasta IS NULL", (sid,)) == 0
+
+
+# ------------------------------------------------------------------ K9 · O-29 contra PAG (B3-COMP, decision 11)
+# C-CON-05 (sucesor con tercero NUEVO, writer de F05) || C-MEJ-01 v2 de PAG (writer certificado, `gasto_propiedad`)
+# sobre la MISMA propiedad. Orden certificado de los dos: 0P/raiz -> propiedad (el sucesor FOR NO KEY UPDATE, PAG FOR
+# SHARE; conflictan) -> terceros. Foto de pg_locks con el primero retenido tras tomar la propiedad y el segundo ya
+# esperando: ninguno de los dos tiene todavia el advisory de terceros (gapto:TERCEROS) y hay una espera real sobre la
+# propiedad. Ambos acaban bien; 0 x 40P01 y 0 deadlocks nuevos. Discriminante: M-CON-46b (C-CON-05 con terceros
+# antes que la propiedad) deja el advisory de terceros tomado en la foto -> este caso falla.
+def _entorno_con_cuenta():
+    import f05_05_helpers as x5
+    return x5.entorno("2026-10-10T12:00:00")
+
+
+def _gasto_pag(owner, cli, pid, cuenta, categoria):
+    from app.patrimonio import gasto_propiedad
+    from app.patrimonio.dto_b3 import GastoPropiedad
+    fecha = "2026-05-15"
+    r = cli.get(f"/v1/propiedades/{pid}/propuesta-gasto", params={"fecha": fecha}, headers=h.AUTH)
+    assert r.status_code == 200, r.text
+    vista = {"criterio": "TITULARIDAD_EN_FECHA_HECHO", "fecha_referencia": fecha,
+             "partes": [{"actor_id": x["actor_id"], "porcentaje": x["porcentaje"]} for x in r.json()["partes"]]}
+    iid = uuid.uuid4()
+    cuerpo = {"intencion_id": str(iid), "propiedad_id": str(pid), "clase": "REPARACION", "importe": "300.00",
+              "fecha_hecho": fecha, "cuenta_id": str(cuenta), "categoria_id": str(categoria), "presupuestable": True,
+              "atribucion": {"modo": "SEGUN_TITULARIDAD_ACEPTADA", "propuesta_vista": vista},
+              "deuda": [], "derechos_confirmados": []}
+    peticion = GastoPropiedad(**cuerpo).model_dump()
+    return iid, lambda: ejecutar(owner, iid, lambda s: gasto_propiedad.registrar_gasto(s, peticion=peticion, reloj=RELOJ))
+
+
+def _foto_k9(dsn: str, pid) -> dict:
+    with psycopg.connect(dsn, autocommit=True) as cn:
+        esperas = cn.execute("SELECT count(*) FROM pg_locks WHERE NOT granted").fetchone()[0]
+        return {"advisory_terceros": _advisory(cn, "gapto:TERCEROS"), "esperas_no_concedidas": esperas,
+                "propiedad_bloqueada": _propiedad_bloqueada(cn, pid),
+                "pg_locks": [list(f) for f in cn.execute(
+                    "SELECT l.locktype, l.mode, l.granted, c.relname FROM pg_locks l LEFT JOIN pg_class c "
+                    "ON c.oid = l.relation WHERE l.pid <> pg_backend_pid() AND (l.locktype = 'advisory' OR "
+                    "c.relnamespace = 'gapto'::regnamespace OR NOT l.granted) ORDER BY 1, 2, 4").fetchall()]}
+
+
+@pytest.mark.parametrize("orden", ORDENES)
+def test_k9_sucesor_con_tercero_nuevo_frente_a_pag_cmej01_en_la_misma_propiedad(monkeypatch, caplog, orden):
+    import logging
+    import time
+    from app.patrimonio import gasto_propiedad
+    from test_200_f05_06_m3_concurrencia_serial import LOGGER, deadlocks, reintentos
+    owner, _actor, cli, cuenta, _ = _entorno_con_cuenta()
+    pid, ana = _propiedad(cli), c.tercero(cli, "Ana")
+    categoria = fh.crear_categoria(owner, "Hogar · Reparaciones", "GASTO")
+    actual = c.crear_firmado(cli, pid, ana, habitacion=1, inicio="2026-01-01")
+    iid_pag, f_pag = _gasto_pag(owner, cli, pid, cuenta, categoria)
+    a = ("SUCESOR", _sucesor_con_tercero_nuevo(owner, actual, uuid.uuid4()), (repo_prop, "bloquear"))
+    b_ = ("PAG", f_pag, (gasto_propiedad, "bloquear_propiedad_compartida"))
+    primero, segundo = (a, b_) if orden == "A-primero" else (b_, a)
+    dsn = h.dsn()
+    caplog.clear()
+    caplog.set_level(logging.DEBUG, logger=LOGGER)
+    antes = deadlocks(dsn)
+    pausa = Pausa(monkeypatch, *primero[2], hilo=primero[0])
+    p1, p2 = Paso(primero[0], primero[1]), Paso(segundo[0], segundo[1])
+    traza: dict = {"escenario": "k9_sucesor_frente_a_pag_cmej01", "orden": [primero[0], segundo[0]]}
+    try:
+        p1.start()
+        traza["primero_retenido"] = pausa.llego.wait(30)
+        p2.start()
+        esperar(lambda: not p2.is_alive() or len(bloqueados(dsn)) >= 1, 30)
+        traza["segundo_bloqueado"] = p2.is_alive()
+        traza["foto"] = _foto_k9(dsn, pid)
+    finally:
+        pausa.sigue.set()
+        for p in (p1, p2):
+            p.join(60)
+    time.sleep(1.1)
+    traza.update({p.name: p.codigo for p in (p1, p2)})
+    traza.update({"vivos": [p.name for p in (p1, p2) if p.is_alive()],
+                  "reintentos_40P01": reintentos(caplog, "40P01"), "reintentos_40001": reintentos(caplog, "40001"),
+                  "deadlocks_delta": deadlocks(dsn) - antes})
+    evidencia(f"k9_sucesor_frente_a_pag_cmej01_{orden}", traza)
+    assert traza["primero_retenido"] and traza["segundo_bloqueado"], traza            # espera real en la propiedad
+    assert traza["vivos"] == [] and traza["reintentos_40P01"] == 0 and traza["deadlocks_delta"] == 0, traza
+    # la propiedad antes que los terceros: en el punto de espera nadie tiene el advisory de terceros
+    assert traza["foto"]["advisory_terceros"] == 0, traza
+    assert traza["foto"]["propiedad_bloqueada"] is True and traza["foto"]["esperas_no_concedidas"] >= 1, traza
+    assert (traza["SUCESOR"], traza["PAG"]) == (OK, OK), traza
+    assert _uno(owner, "SELECT count(*) FROM gapto.contratos WHERE propiedad_entidad_id = %s", (pid,)) == 2
+    assert _uno(owner, "SELECT count(*) FROM gapto.hechos_financieros WHERE id = %s", (iid_pag,)) == 1

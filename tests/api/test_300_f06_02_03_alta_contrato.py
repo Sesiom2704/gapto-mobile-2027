@@ -9,6 +9,9 @@
 #   Todo rechazo deja la HUELLA del estado identica. Orden de validaciones (§I): propiedad -> renta -> inicio ->
 #   habitacion -> fechas -> personas -> solape.
 #   ESCRITO SIN EJECUTAR (sin base esta noche): se ejecuta cuando haya GAPTO_TEST_DATABASE_URL, tras la 0355.
+# Version: 0.1.2 (F06 T3-F06 Bloque 3, B3-COMP, decision 11 de Moises): O-30 en el servidor con la MISMA alta (misma
+#   intencion y mismo cuerpo): inactivo -> TERCERO_NO_DISPONIBLE sin cambios; reactivado por F05 -> 200. Discriminante
+#   M-CON-42a (la validacion de participantes ignora `enabled`).
 # Version: 0.1.1 (F06 T3-F06 Bloque 3, pasos 3-4 con base): fixture: la salida del patrimonio exige motivo_salida (ck_propiedades__salida_exige_motivo).
 # Version: 0.1.0 (F06 T3-F06 Bloque 3, paso 4)
 # ============================================================
@@ -270,6 +273,28 @@ def test_tercero_ajeno_inexistente_o_inactivo_es_tercero_no_disponible(t):
     ver = c.uno(owner, "SELECT row_version FROM gapto.terceros WHERE id = %s", (baja,))
     assert c.post(cli, f"/v1/terceros/{baja}/reactivar", {"row_version": ver}).status_code == 200
     assert c.alta(cli, pid, personas=c.partes(baja)).status_code == 200
+
+
+def test_o_30_la_misma_alta_con_tercero_inactivo_sale_tras_reactivarlo_por_f05(t):
+    """O-30 (B3-COMP): la MISMA peticion (misma intencion_id, mismo cuerpo) con un inquilino inactivo se rechaza con
+    TERCERO_NO_DISPONIBLE y estado identico; reactivado por POST /v1/terceros/{id}/reactivar (writer de F05), la misma
+    peticion sale 200 y el contrato lleva a ese tercero como inquilino."""
+    owner, _, cli = t
+    pid, ines = c.propiedad(cli), c.tercero(cli, "Inés")
+    ver = c.uno(owner, "SELECT row_version FROM gapto.terceros WHERE id = %s", (ines,))
+    assert c.post(cli, f"/v1/terceros/{ines}/desactivar", {"row_version": ver}).status_code == 200
+    cid = uuid.uuid4()
+    peticion = dict(intencion_id=cid, habitacion=1, personas=c.partes(ines), nombre="26-HAB1-IN")
+    antes = c.huella()
+    c.rechazo_sin_cambios(cli, c.alta(cli, pid, **peticion), 409, "TERCERO_NO_DISPONIBLE", antes)
+    ver = c.uno(owner, "SELECT row_version FROM gapto.terceros WHERE id = %s", (ines,))
+    assert c.post(cli, f"/v1/terceros/{ines}/reactivar", {"row_version": ver}).status_code == 200
+    r = c.alta(cli, pid, **peticion)
+    assert r.status_code == 200, r.text
+    assert r.json()["contrato_id"] == str(cid) and r.json()["idempotente"] is False
+    assert c.uno(owner, "SELECT count(*) FROM gapto.contrato_participantes cp JOIN gapto.actores_financieros a "
+                        "ON a.id = cp.actor_id WHERE cp.contrato_entidad_id = %s AND a.tercero_id = %s "
+                        "AND cp.rol = 'INQUILINO'", (cid, ines)) == 1
 
 
 def test_actor_repetido_en_el_mismo_rol(t):

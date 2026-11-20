@@ -11,6 +11,9 @@
 #   con `GET /v1/terceros/candidatos`. Los contratos del escenario A1 que solapan por construccion (datos
 #   «migrados») se fijan con SQL bajo gapto_owner: el alta bloquea el solape entre firmados.
 #   ESCRITO SIN EJECUTAR (sin base esta noche).
+# Version: 0.1.1 (F06 T3-F06 Bloque 3, B3-COMP, decision 11 de Moises): INV-ALQ-12 de catalogo: ninguna tabla de
+#   contratos u ocupacion tiene una columna de situacion u ocupacion persistida (information_schema, lista
+#   explicita de tablas y de nombres prohibidos). Discriminante: base temporal con esa columna -> falla.
 # Version: 0.1.0 (F06 T3-F06 Bloque 3, paso 4)
 # ============================================================
 
@@ -247,3 +250,27 @@ def test_o_33_aislamiento_del_uso_y_una_sola_consulta(t, monkeypatch):
     for i in range(25):
         c.tercero(cli, f"Tercero {i}")
     assert una == 1 and contar() == 1
+
+
+# ================================================================== INV-ALQ-12 · catalogo (B3-COMP, decision 11)
+# La situacion del contrato y la ocupacion de la propiedad son DERIVADAS (L-CON-01..03): ninguna tabla de contratos u
+# ocupacion las persiste. Lista explicita de tablas (deben existir todas: si una se renombra, el test falla en vez de
+# pasar en vacio) y de nombres de columna prohibidos, mas prefijos prohibidos. Se lee information_schema con la
+# conexion de la base de pruebas (catalogo completo, no filtrado por privilegios de gapto_runtime).
+TABLAS_CONTRATOS_Y_OCUPACION = ("contratos", "contrato_participantes", "contrato_servicios",
+                                "contrato_revision_renta_versiones", "propiedades", "propiedad_servicios")
+COLUMNAS_PROHIBIDAS = ("situacion", "situacion_contrato", "estado_situacion", "estado_contrato", "estado_vigencia",
+                       "vigente", "en_vigor", "finalizado", "proximo", "fin_previsto_vencido", "terminable",
+                       "ocupacion", "estado_ocupacion", "ocupada", "ocupado", "ocupadas", "habitaciones_ocupadas",
+                       "habitaciones_libres", "habitaciones_proximas", "libre", "libres", "libre_desde")
+PREFIJOS_PROHIBIDOS = ("situacion", "ocupa", "libre")
+
+
+def test_inv_alq_12_sin_columna_de_situacion_ni_de_ocupacion_en_el_catalogo():
+    with psycopg.connect(h.dsn(), autocommit=True) as cn:
+        filas = cn.execute("SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = 'gapto' "
+                           "AND table_name = ANY(%s) ORDER BY 1, 2", (list(TABLAS_CONTRATOS_Y_OCUPACION),)).fetchall()
+    assert {f[0] for f in filas} == set(TABLAS_CONTRATOS_Y_OCUPACION), filas          # todas existen
+    indebidas = [f for f in filas
+                 if f[1].lower() in COLUMNAS_PROHIBIDAS or f[1].lower().startswith(PREFIJOS_PROHIBIDOS)]
+    assert indebidas == [], indebidas
