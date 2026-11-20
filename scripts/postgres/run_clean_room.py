@@ -56,6 +56,14 @@
 # ROLE DRIFT, que es correcto y deliberado. En ese caso se usa --desde 0002
 # y el clean-room demuestra reproducibilidad DE LA BASE, no de la instancia.
 # Reproducir tambien la instancia exige un proyecto nuevo.
+# Versión: 0.21.0 -- F06 T3-F06 Bloque 3 F06-02/03 (mandato v1.2 §5 L-06-T3 y §9;
+#                    contrato v1.1 §IX). Se DECLARA el head 0355 (MIG-ALQ-ROLES):
+#                    CONTRATO_0355 = 0354 (la CHECK sustituida la cubre h2),
+#                    tests de 0354 + test_050 exigidos y 0355 en
+#                    HEADS_QUE_EXIGEN_REFERENCIA_D111. La referencia D-111 de 0355
+#                    queda PENDIENTE_REPLAY (None, fail-closed) hasta medirla en
+#                    el replay 0001..0355. Sin --head el contrato por defecto
+#                    pasa a 0355 (mismos valores que 0354).
 # Versión: 0.20.0 -- F06 T3-F06 bloque 2 F06-01H (mandato v1.1 §8.5; contrato v0.4
 #                    §10.1.8). Se DECLARA el head 0354 (MIG-HIP-GAR): seis
 #                    funciones y siete triggers (tres constraint triggers
@@ -286,7 +294,7 @@ from pathlib import Path
 
 # Version del runner que se materializa en el manifest. Debe coincidir con la
 # primera linea "Versión:" de la cabecera; test_040 lo comprueba.
-VERSION_RUNNER = "0.20.0"
+VERSION_RUNNER = "0.21.0"
 
 try:
     import psycopg
@@ -386,6 +394,12 @@ CONTRATO_0353 = {**CONTRATO_0352}
 # tablas, columnas, indices, FK, policies ni ACL nuevos.
 CONTRATO_0354 = {**CONTRATO_0353, "funciones": 34, "triggers_no_internos": 65, "constraint_triggers": 44}
 
+# T3-F06 F06-02/03 / 0355 (MIG-ALQ-ROLES; contrato v1.1 §IX): sustituye
+# ck_contrato_participantes__rol conservando el nombre (+ AGENCIA y
+# ADMINISTRADOR). Ningun campo del CONTRATO cambia: la definicion la cubre h2;
+# sin tablas, columnas, indices, FK, policies, ACL, funciones ni triggers.
+CONTRATO_0355 = {**CONTRATO_0354}
+
 CONTRATOS_POR_HEAD = {
     "0300": CONTRATO_0300,
     "0310": CONTRATO_0310,
@@ -397,10 +411,11 @@ CONTRATOS_POR_HEAD = {
     "0352": CONTRATO_0352,
     "0353": CONTRATO_0353,
     "0354": CONTRATO_0354,
+    "0355": CONTRATO_0355,
 }
 
 # Head vigente de la cadena cuando no se declara --head.
-CONTRATO_POR_DEFECTO = CONTRATO_0354
+CONTRATO_POR_DEFECTO = CONTRATO_0355
 
 
 # ------------------------------------------------------------
@@ -446,11 +461,20 @@ TESTS_EXIGIDOS_POR_HEAD = {
              "test_047_f06_01_0352_completitud_coste",
              "test_048_f06_cat_viv_0353",
              "test_049_f06_01h_0354_garantias"),
+    "0355": ("test_041_f03_04_0320_delete_correccion_agregada",
+             "test_042_f03_04_0330_geolocalizacion_y_presentacion",
+             "test_043_f03_05_0340_categoria_icon_key",
+             "test_045_f03_06_0350_tipo_hecho_condonacion",
+             "test_046_f06_01_0351_base_patrimonial",
+             "test_047_f06_01_0352_completitud_coste",
+             "test_048_f06_cat_viv_0353",
+             "test_049_f06_01h_0354_garantias",
+             "test_050_f06_02_03_0355_roles_participante"),
 }
 
 # Heads cuya certificacion exige comparar las ocho huellas D-111 contra una
 # REFERENCIA aprobada. Sin referencia declarada NO hay PASS: fail-closed.
-HEADS_QUE_EXIGEN_REFERENCIA_D111 = ("0330", "0340", "0350", "0351", "0352", "0353", "0354")
+HEADS_QUE_EXIGEN_REFERENCIA_D111 = ("0330", "0340", "0350", "0351", "0352", "0353", "0354", "0355")
 
 # Referencia aprobada de las ocho huellas D-111 por head (D-187 DEC-8).
 #
@@ -571,6 +595,13 @@ HUELLAS_D111_POR_HEAD = {
         "h8_vistas":      "bc29f409364899f99402b8ed06f77149",
         "recuentos":      "788/655/287/82/65/34/1024/3",
     },
+    # T3-F06 F06-02/03 / 0355 (MIG-ALQ-ROLES). PENDIENTE_REPLAY: la referencia
+    # solo puede salir del replay 0001..0355 de la clean-room (huellas_d111.sql
+    # sobre la base resultante) y NUNCA se declara a mano. None = referencia
+    # pendiente: el veredicto la trata como fallo (fail-closed) y test_050
+    # falla con el mensaje PENDIENTE_REPLAY. Esperado (a confirmar, no a
+    # copiar): cambia solo h2; h1, h3..h8 y los recuentos iguales a 0354.
+    "0355": None,  # PENDIENTE_REPLAY
 }
 
 

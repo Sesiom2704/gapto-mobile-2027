@@ -46,6 +46,8 @@
 #              DISCRIMINACIÓN CONTRA 0350 (WM 12C.2). Sobre head 0350 fallan la
 #              huella, el contrato, los negativos que dependen de columnas nuevas
 #              y la denegación de DELETE.
+# Versión: 0.8.0  -- F06 T3-F06 Bloque 3 F06-02/03 (L-06-T3, mandato v1.2 §5): con 0355 aplicada
+#                    (marca: ck_contrato_participantes__rol admite AGENCIA) la huella CURRENT es la de 0355.
 # Versión: 0.7.0  -- F06 T3-F06 bloque 2 F06-01H (L-06-T3, mandato v1.1 §5.1): con 0354 aplicada
 #                    (marca: fn_validar_cuadro_hipoteca) la huella CURRENT es la de 0354.
 # Versión: 0.6.0  -- T2-F06 CAT-VIV N1 (literal de autorizacion v1.1): la huella CURRENT distingue
@@ -161,12 +163,21 @@ def _head_0354(db: psycopg.Connection) -> bool:
                     "AND proname = 'fn_validar_cuadro_hipoteca'") == 1
 
 
+def _head_0355(db: psycopg.Connection) -> bool:
+    """0355 aplicada (marca: ck_contrato_participantes__rol admite AGENCIA; T3-F06 F06-02/03)."""
+    return _uno(db, "SELECT count(*) FROM pg_catalog.pg_constraint WHERE conrelid = "
+                    "'gapto.contrato_participantes'::regclass AND conname = 'ck_contrato_participantes__rol' "
+                    "AND pg_catalog.pg_get_constraintdef(oid) LIKE '%%''AGENCIA''%%'") == 1
+
+
 def test_0351_huella_d111_current(db: psycopg.Connection) -> None:
     # 0352 (AJ-0352-06, R-0352-14): el head esperado se DISTINGUE por su marca; sobre una
     # base detenida en 0351 se sigue exigiendo exactamente la referencia de 0351, y sobre 0352
     # la de 0352 (que test_047 compara ademas campo a campo con 0351).
     # T2-F06 CAT-VIV: con 0353 aplicada, la de 0353 (test_048 la compara con 0352).
-    head = "0354" if _head_0354(db) else ("0353" if _head_0353(db) else ("0352" if _head_0352(db) else "0351"))
+    # T3-F06 F06-02/03: con 0355 aplicada, la de 0355 (test_050 la compara con 0354).
+    head = "0355" if _head_0355(db) else ("0354" if _head_0354(db) else (
+        "0353" if _head_0353(db) else ("0352" if _head_0352(db) else "0351")))
     referencia = _runner().HUELLAS_D111_POR_HEAD[head]
     sql = (RAIZ / "scripts" / "postgres" / "huellas_d111.sql").read_text(encoding="utf-8")
     cursor = db.execute(sql)

@@ -29,6 +29,9 @@
 #                    condicion (b): discriminante de la PO-04 de 0354 v0.1.1
 #                    (aclexplode): con un privilegio indebido de gapto_runtime
 #                    el postcheck falla; sin el, pasa (control).
+# Versión: 0.3.0  -- F06 T3-F06 Bloque 3 F06-02/03 (L-06-T3, mandato v1.2 §5; añadido por D-DISC-01 de la
+#                    revalidacion del paso 1): la huella CURRENT depende del head; con 0355 aplicada (marca:
+#                    ck_contrato_participantes__rol admite AGENCIA) es la de 0355 y, si no, la de 0354.
 # ============================================================
 from __future__ import annotations
 
@@ -394,8 +397,15 @@ def test_0354_inventario_siete_triggers(db):
         assert filas[nombre] == (tabla, diferido, diferido, "O"), (nombre, filas[nombre])
 
 
+def _head_0355(db: psycopg.Connection) -> bool:
+    """0355 aplicada (marca: ck_contrato_participantes__rol admite AGENCIA; T3-F06 F06-02/03)."""
+    return _uno(db, "SELECT count(*) FROM pg_catalog.pg_constraint WHERE conrelid = "
+                    "'gapto.contrato_participantes'::regclass AND conname = 'ck_contrato_participantes__rol' "
+                    "AND pg_catalog.pg_get_constraintdef(oid) LIKE '%''AGENCIA''%'") == 1
+
+
 def test_0354_huella_d111_current(db):
-    referencia = _runner().HUELLAS_D111_POR_HEAD["0354"]
+    referencia = _runner().HUELLAS_D111_POR_HEAD["0355" if _head_0355(db) else "0354"]
     sql = (RAIZ / "scripts" / "postgres" / "huellas_d111.sql").read_text(encoding="utf-8")
     cursor = db.execute(sql)
     observadas = dict(zip([d.name for d in cursor.description], cursor.fetchone()))
