@@ -4,6 +4,7 @@
 // Ruta: mobile/src/screens/RevisarTipoScreen.tsx
 // Descripción: Revisar el tipo de la hipoteca con fecha, hacia delante (F06-01H W-HIP-03/04; contrato v0.4 §3.5 y §8; Q-H-11). Condiciones vigentes; «Desde» y nuevo tipo anual (fijo/variable, índice y diferencial opcionales e informativos); alcance «Se recalculan N cuotas desde …; las M pagadas no cambian» (cuenta las cuotas, no calcula importes). Cubre la revisión del Euríbor y cada cambio de bonificación sin nombrarla: nunca «bonificación de X» (la versión solo dice el tipo). Rechazos: VERSION_DESFASADA vuelve a cargar la hipoteca; el resto con su texto, sin «ingreso» ni «cobro». Tras la revisión se pinta la hipoteca que devuelve el servidor.
 // Versión: 0.1.0 (F06 T3-F06 bloque 2 F06-01H, paso 10)
+// Versión: 0.2.0 (F06 T3 · MANT N1 de revisión del tipo, A3; dictamen MANT R-B2-06 punto 3 y AJ-03; decisión 14): revisar usa `enviarRevisionComprobando`: el cuerpo se construye UNA vez; ante un timeout no dice que ha fallado, muestra «Comprobando…» y reenvía el MISMO cuerpo (misma intención; replay idempotente sin duplicar); si sigue sin confirmarse, `TEXTO_REVISION_SIN_CONFIRMAR` (nunca «fallo» ni «repítela»). La hipoteca revisada solo se pinta con la confirmación del servidor.
 // ============================================================
 
 import React, { useRef, useState } from 'react';
@@ -17,8 +18,8 @@ import { CampoFecha } from '../components/CampoFecha';
 import { AvisoCaja, CabeceraTarea, Caja, Campo, CampoTexto, estilosFormulario as ef } from '../components/Formulario';
 import { ddmmaaaaAIso, diaMesAnioIso } from '../domain/fechas';
 import {
-  BorradorRevision, borradorRevision, condicionesVigentes, cuotasAfectadas, faltasRevision, NOMBRE_TIPO, nombreTipoInteres, payloadRevision, TEXTO_CONVENCION,
-  TEXTO_INDETERMINADO, TEXTO_REVISION, textoAlcance, textoErrorHipoteca, textoSeguro, textoTasa, TIPOS_INTERES,
+  BorradorRevision, borradorRevision, condicionesVigentes, cuotasAfectadas, enviarRevisionComprobando, faltasRevision, NOMBRE_TIPO, nombreTipoInteres, payloadRevision, TEXTO_COMPROBANDO_REVISION, TEXTO_CONVENCION,
+  TEXTO_REVISION, TEXTO_REVISION_SIN_CONFIRMAR, textoAlcance, textoErrorHipoteca, textoSeguro, textoTasa, TIPOS_INTERES,
 } from '../domain/hipoteca';
 import { formatearEur } from '../domain/importe';
 import { useTema } from '../theme/tema';
@@ -50,10 +51,14 @@ export function RevisarTipoScreen(p: {
     if (ocupado || faltas.length > 0 || !p.cliente.revisarTipoHipoteca) return;
     setOcupado(true);
     setAviso(null);
-    const x = await p.cliente.revisarTipoHipoteca(h.financiacion_id, payloadRevision(r, h, intencion.current));
+    // MANT de revisión del tipo (A3): el cuerpo se construye UNA vez; ante un INDETERMINADO (timeout) se reenvía el MISMO (replay idempotente).
+    const revisarTipo = p.cliente.revisarTipoHipoteca;
+    const cuerpo = payloadRevision(r, h, intencion.current);
+    const { respuesta: x } = await enviarRevisionComprobando(() => revisarTipo(h.financiacion_id, cuerpo),
+      () => setAviso({ tipo: 'AVISO', texto: TEXTO_COMPROBANDO_REVISION }));
     setOcupado(false);
     if (x.tipo === 'OK') return p.onRevisada(x.datos.hipoteca);
-    if (x.tipo === 'INDETERMINADO') return setAviso({ tipo: 'AVISO', texto: TEXTO_INDETERMINADO });
+    if (x.tipo === 'INDETERMINADO') return setAviso({ tipo: 'AVISO', texto: TEXTO_REVISION_SIN_CONFIRMAR });
     if (x.codigo === 'VERSION_DESFASADA') return p.onRecargar();
     setAviso({ tipo: 'AVISO', texto: textoErrorHipoteca(x.codigo, x.detalle) ?? textoSeguro(x.mensaje) });
   };
