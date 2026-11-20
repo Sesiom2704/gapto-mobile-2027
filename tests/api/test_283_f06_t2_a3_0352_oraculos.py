@@ -15,6 +15,10 @@
 #     O-A3-T2 (consumidores tras B1-R, PAG y CAT-VIV).
 #   Exige GAPTO_TEST_DATABASE_URL (base desechable; estos tests confirman filas).
 # Version: 0.1.0 (F06 T2-F06 A3-0352 N1)
+# Version: 0.1.1 (F06 T3-F06 bloque 3 F06-02/03, paso 8; L-06-T3 del mandato v1.2 §5, añadido en el handoff, solo
+#   test_o_a3_r15_inv_estatico_escritores_cerrados): P-L2-5 admite los UPDATE del nombre de contrato y de servicio
+#   (contratos/repositorio.py, C-CON-02 y C-SRV-02), cerrados por funcion; el nombre solo llega por `editar`, que sube
+#   la version despues de escribir, y el resto de llamadas pasan un dict literal sin «nombre». Lo de propiedades no cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -414,6 +418,7 @@ def _funciones_con(patron: str) -> set[tuple[str, str]]:
 
 
 REPO = "backend/app/propiedades/repositorio.py"
+REPO_CONTRATOS = "backend/app/contratos/repositorio.py"  # bloque 3 F06-02/03 (L-06-T3)
 
 
 def test_o_a3_r15_inv_estatico_escritores_cerrados():
@@ -444,7 +449,25 @@ def test_o_a3_r15_inv_estatico_escritores_cerrados():
                 assert re.search(r"row_version\s*=\s*(?:e\.)?row_version\s*\+\s*1", clausula), (f, clausula)
                 assert len(re.findall(r"row_version\s*=", clausula)) == 1, (f, clausula)
             else:
-                assert f.relative_to(RAIZ).as_posix() == REPO and "nombre = %s" in clausula, (f, clausula)
+                assert f.relative_to(RAIZ).as_posix() in (REPO, REPO_CONTRATOS) and "nombre = %s" in clausula, (f, clausula)
+    # Bloque 3 F06-02/03 (L-06-T3): los UPDATE de nombre sin version estan cerrados (propiedad, contrato y servicio)
+    assert _funciones_con(r"(?i)UPDATE gapto\.entidades SET nombre") == {(REPO, "actualizar_propiedad"),
+                                                                         (REPO_CONTRATOS, "actualizar_contrato"),
+                                                                         (REPO_CONTRATOS, "actualizar_servicio")}
+    # ...el nombre solo llega por `editar` (C-CON-02 y C-SRV-02), que sube la version DESPUES de escribir...
+    for fichero, escritor in (("backend/app/contratos/servicio.py", "repo.actualizar_contrato("),
+                              ("backend/app/contratos/servicios.py", "repo.actualizar_servicio(")):
+        texto = _py(RAIZ / fichero)
+        editar = next(n for n in ast.parse(texto).body if isinstance(n, ast.FunctionDef) and n.name == "editar")
+        cuerpo = ast.get_source_segment(texto, editar)
+        assert cuerpo.index(escritor) < cuerpo.index("repo.subir_version(sesion"), (fichero, "editar")
+        # ...y el resto de llamadas pasan un dict literal sin «nombre»
+        for funcion in (n for n in ast.parse(texto).body if isinstance(n, ast.FunctionDef) and n.name != "editar"):
+            for x in ast.walk(funcion):
+                if isinstance(x, ast.Call) and isinstance(x.func, ast.Attribute) and x.func.attr == escritor[5:-1]:
+                    cambios = x.args[2]
+                    assert isinstance(cambios, ast.Dict), (fichero, funcion.name)
+                    assert "nombre" not in {k.value for k in cambios.keys if isinstance(k, ast.Constant)}, (fichero, funcion.name)
 
 
 def test_o_a3_r15_inv_catalogo_de_la_base():

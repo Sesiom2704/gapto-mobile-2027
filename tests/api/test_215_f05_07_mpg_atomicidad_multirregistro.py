@@ -81,6 +81,10 @@
 #   la ruta POST de W-HIP-03/04 (/v1/hipotecas/{financiacion_id}/revision, contrato v0.4 §3.5 y §7.1) se clasifica
 #   como ajena a F05-06: atomicidad propia (una transaccion de UnidadDeTrabajo; rechazo y defecto CUADRO_NO_CUADRA
 #   tras escribir = estado identico, test_294 O-H25). Ninguna otra ruta ni comando cambia; el barrido no cambia.
+# Version: 0.6.4 (F06 T3-F06 bloque 3 F06-02/03, paso 8; L-06-T3 del mandato v1.2 §5, añadido en el handoff, solo
+#   test_inventario_post_cerrado): las 23 rutas POST de contratos, servicios y terceros (contratos/rutas.py) se
+#   clasifican como ajenas a F05-06: atomicidad propia (savepoint de ejecutar_escritura; rechazo = estado identico,
+#   test_300..306). Ninguna otra ruta ni comando cambia; el barrido no cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -611,6 +615,23 @@ AJENAS_A_F05_06 = {
                                                             "transaccion, OP-22 adscrito; test_293 estado identico)",
     "/v1/hipotecas/{financiacion_id}/revision": "F06 T3-F06 F06-01H W-HIP-03/04: atomicidad propia (una transaccion; "
                                                 "test_294 O-H25 estado identico, tambien tras CUADRO_NO_CUADRA)",
+    **{ruta: "F06 T3-F06 bloque 3 F06-02/03: atomicidad propia (una transaccion de UnidadDeTrabajo; la escritura va en "
+             "el savepoint de ejecutar_escritura y un rechazo deja el estado identico, test_300..306; sucesor con fallo "
+             "inyectado, test_302 O-3)"
+       for ruta in ("/v1/intenciones/contrato-alquiler", "/v1/contratos/{contrato_id}/editar",
+                    "/v1/contratos/{contrato_id}/terminar", "/v1/contratos/{contrato_id}/corregir-terminacion",
+                    "/v1/contratos/{contrato_id}/formalizar", "/v1/contratos/{contrato_id}/cancelar",
+                    "/v1/contratos/{contrato_id}/sucesor", "/v1/contratos/{contrato_id}/personas",
+                    "/v1/contratos/{contrato_id}/personas/{persona_id}/cerrar",
+                    "/v1/contratos/{contrato_id}/personas/{persona_id}/corregir",
+                    "/v1/contratos/{contrato_id}/clausula", "/v1/contratos/{contrato_id}/clausula/{version_id}/corregir",
+                    "/v1/intenciones/servicio", "/v1/servicios/{servicio_id}/editar", "/v1/servicios/{servicio_id}/baja",
+                    "/v1/contratos/{contrato_id}/servicios/{servicio_id}", "/v1/terceros/{tercero_id}/roles",
+                    "/v1/terceros/{tercero_id}/clasificaciones", "/v1/clasificaciones-tercero",
+                    "/v1/clasificaciones-tercero/{clasificacion_id}/renombrar",
+                    "/v1/clasificaciones-tercero/{clasificacion_id}/mover",
+                    "/v1/clasificaciones-tercero/{clasificacion_id}/desactivar",
+                    "/v1/clasificaciones-tercero/{clasificacion_id}/reactivar")},
 }
 
 

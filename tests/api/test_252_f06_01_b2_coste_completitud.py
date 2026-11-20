@@ -22,6 +22,10 @@
 #   los arneses de B1 y B2 como discriminante. Nada mas cambia.
 # Version: 0.2.0 (F06 T2-F06 A3-0352 (L-05)): O10.29 -> O10.29-H (a/b/c); el fixture `on` deja de forzar el
 #   interruptor (retirada de forzados). El resto de oraculos no cambia.
+# Version: 0.2.1 (F06 T3-F06 bloque 3 F06-02/03, paso 8; L-06-T3 del mandato v1.2 §5, añadido en el handoff, solo
+#   test_o11_22): el inventario de llamadas al 0P admite las 8 de los writers de contratos/servicios/terceros que el
+#   contrato v1.2 §1.3 exige (INV-ALQ-11). Se conservan las 6 anteriores y el resto del oraculo (import, sin advisory
+#   propio, primera llamada de `declarar`).
 # ============================================================
 
 from __future__ import annotations
@@ -522,8 +526,13 @@ def test_o10_28_writers_de_las_columnas_de_0352():
 
 def test_o11_22_cinco_llamadas_a_la_funcion_unica_del_0p():
     # B1-R (L-06): seis llamadas productivas; el nombre de la funcion se conserva (discriminante de los arneses)
+    # Bloque 3 F06-02/03 (L-06-T3): + 8 llamadas de los writers de contratos, servicios y terceros (0P como primer
+    # recurso, contrato v1.2 §1.3 e INV-ALQ-11), importada de propiedades/servicio.py y nunca copiada (contratos/base.py)
     assert _llamadas("bloquear_intencion_propiedad") == {"backend/app/propiedades/servicio.py": 5,
-                                                         "backend/app/patrimonio/completitud.py": 1}
+                                                         "backend/app/patrimonio/completitud.py": 1,
+                                                         "backend/app/contratos/servicio.py": 2,
+                                                         "backend/app/contratos/servicios.py": 3,
+                                                         "backend/app/contratos/terceros.py": 3}
     texto = (RAIZ / "backend" / "app" / "patrimonio" / "completitud.py").read_text(encoding="utf-8")
     assert "from app.propiedades.servicio import bloquear_intencion_propiedad" in texto
     assert "pg_advisory" not in texto and "gapto:INTENCION" not in texto

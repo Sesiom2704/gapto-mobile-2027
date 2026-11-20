@@ -38,6 +38,13 @@
 #   para admitir la ruta nueva POST /v1/hipotecas/{financiacion_id}/cuotas/{numero}/pago, el owner B tiene una
 #   financiacion HIPOTECA real (fixture sintetico bajo gapto_owner, sin cuadro: fuera del ambito de 0354) que
 #   sustituye a {financiacion_id}, y {numero} = 1. El oraculo y las rutas recorridas no cambian.
+# Version: 0.5.0 (F06 T3-F06 bloque 3 F06-02/03, paso 8; L-06-T3 del mandato v1.2 §5, test_212 FUERA de la lista
+#   inicial, motivo en el handoff: el gate local del paso 8 dio rojo en este test por las rutas nuevas autorizadas de
+#   contratos, servicios y clasificaciones): el owner B tiene tambien un contrato real (con persona, version de clausula
+#   y servicio asociado) y una clasificacion de tercero real, que sustituyen a {contrato_id}, {persona_id},
+#   {version_id}, {servicio_id} y {clasificacion_id}; CONSULTA gana `tipo` en la lectura de la propuesta de contrato
+#   (L-CON-03, parametro obligatorio). El oraculo, las rutas recorridas (todas, desde la propia app) y las demas
+#   sustituciones no cambian.
 # ============================================================
 
 from __future__ import annotations
@@ -61,6 +68,7 @@ import f05_05_helpers as x5
 import f05_06_m2_helpers as m2
 import f05_06_m3_helpers as m3
 import f05_06_m5_helpers as m5
+import f06_02_03_helpers as c6
 import vs01_api_helpers as h
 
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
@@ -173,18 +181,28 @@ def b():
                          "(%s, %s, 'FINANCIACION', 'Hipoteca de B')", (financiacion, owner))
         conexion.execute("INSERT INTO gapto.financiaciones (entidad_id, tipo_financiacion, moneda) VALUES "
                          "(%s, 'HIPOTECA', 'EUR')", (financiacion,))
+    piso = c6.propiedad(cli, nombre="Piso contratos de B")      # F06-02/03: contrato real de B con todo lo que lo cuelga
+    servicio = c6.servicio(cli, piso, tipo="LUZ", nombre="Luz de B")
+    contrato = c6.crear_firmado(cli, piso, c6.tercero(cli, "Inquilino de B"), habitacion=1, clausula_revision={"tipo": "IPC"},
+                                servicios=[{"servicio_id": str(servicio), "modo": "INCLUIDO"}])
+    r = c6.post(cli, "/v1/clasificaciones-tercero", {"intencion_id": str(uuid.uuid4()), "nombre": "Clasificación de B"})
+    assert r.status_code == 200, r.text
+    clasificacion = r.json()["clasificacion"]["id"]
     ids = {"categoria_id": categoria, "asociacion_id": aid, "magnitud_id": mid, "preferencia_id": pref, "cuenta_id": cta,
            "capacidad": "PAGAR_GASTO", "tercero_id": tercero, "contexto_id": contexto, "plantilla_id": plt,
            "accion_id": acc, "origen_id": gasto, "devolucion_id": devolucion, "entidad_id": posicion, "hecho_id": gasto,
            "prevision_id": prevision, "afinidad_id": afi, "propiedad_id": propiedad,
-           "gasto_propiedad": gasto_propiedad, "financiacion_id": financiacion, "numero": 1}
+           "gasto_propiedad": gasto_propiedad, "financiacion_id": financiacion, "numero": 1,
+           "contrato_id": contrato["id"], "persona_id": contrato["personas"][0]["id"],
+           "version_id": contrato["clausula"]["id"], "servicio_id": servicio, "clasificacion_id": clasificacion}
     return {"owner": owner, "cli": cli, "ids": ids, "cena": cena, "transferencia": transf, "tania": tania}
 
 
 #: Parametros de consulta obligatorios de algunas lecturas (sin ellos la respuesta seria un 422 de validacion).
 CONSULTA = {"/v1/terceros/{tercero_id}/afinidades": "?fecha=2026-10-10",
             "/v1/propiedades/{propiedad_id}/propuesta-gasto": "?fecha=2026-10-10",
-            "/v1/propiedades/{propiedad_id}/gastos/{hecho_id}/impacto-correccion": "?clase_nueva=REPARACION"}
+            "/v1/propiedades/{propiedad_id}/gastos/{hecho_id}/impacto-correccion": "?clase_nueva=REPARACION",
+            "/v1/propiedades/{propiedad_id}/contratos/propuesta": "?tipo=HABITACION"}
 #: Cuerpos validos explicitos donde el DTO es una union discriminada (el generado no pasaria la validacion).
 CUERPOS = {("POST", "/v1/categorias/{categoria_id}/magnitudes"): lambda: {
     "origen": "NUEVA", "obligatoria": False, "magnitud": {"magnitud_id": str(uuid.uuid4()), "nombre": "Kilos G9",
