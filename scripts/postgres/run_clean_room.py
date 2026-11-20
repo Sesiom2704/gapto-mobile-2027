@@ -56,6 +56,10 @@
 # ROLE DRIFT, que es correcto y deliberado. En ese caso se usa --desde 0002
 # y el clean-room demuestra reproducibilidad DE LA BASE, no de la instancia.
 # Reproducir tambien la instancia exige un proyecto nuevo.
+# Versión: 0.22.0 -- F06 T3-F06 Bloque 3 F06-02/03 (mandato v1.2 §9, paso 2). Se
+#                    DECLARA la referencia D-111 de 0355 MEDIDA en el replay local
+#                    0001..0355 (PostgreSQL 17.5, UTC, commit 101e90e): solo cambia
+#                    h2 frente a 0354; h1, h3..h8 y recuentos iguales.
 # Versión: 0.21.0 -- F06 T3-F06 Bloque 3 F06-02/03 (mandato v1.2 §5 L-06-T3 y §9;
 #                    contrato v1.1 §IX). Se DECLARA el head 0355 (MIG-ALQ-ROLES):
 #                    CONTRATO_0355 = 0354 (la CHECK sustituida la cubre h2),
@@ -294,7 +298,7 @@ from pathlib import Path
 
 # Version del runner que se materializa en el manifest. Debe coincidir con la
 # primera linea "Versión:" de la cabecera; test_040 lo comprueba.
-VERSION_RUNNER = "0.21.0"
+VERSION_RUNNER = "0.22.0"
 
 try:
     import psycopg
@@ -595,13 +599,23 @@ HUELLAS_D111_POR_HEAD = {
         "h8_vistas":      "bc29f409364899f99402b8ed06f77149",
         "recuentos":      "788/655/287/82/65/34/1024/3",
     },
-    # T3-F06 F06-02/03 / 0355 (MIG-ALQ-ROLES). PENDIENTE_REPLAY: la referencia
-    # solo puede salir del replay 0001..0355 de la clean-room (huellas_d111.sql
-    # sobre la base resultante) y NUNCA se declara a mano. None = referencia
-    # pendiente: el veredicto la trata como fallo (fail-closed) y test_050
-    # falla con el mensaje PENDIENTE_REPLAY. Esperado (a confirmar, no a
-    # copiar): cambia solo h2; h1, h3..h8 y los recuentos iguales a 0354.
-    "0355": None,  # PENDIENTE_REPLAY
+    # T3-F06 F06-02/03 / 0355 (MIG-ALQ-ROLES). MEDIDA en el replay local
+    # 0001..0355 (laboratorio local PostgreSQL 17.5 UTC, commit 101e90e,
+    # evidencia_f06_t3_alq3/02_0355_20261120-0145/huellas_0355.json), no
+    # declarada a mano. Frente a 0354 solo cambia h2 (la CHECK sustituida);
+    # h1, h3..h8 y los recuentos son identicos. Provisional hasta el humo de
+    # Neon del paso 10.
+    "0355": {
+        "h1_columnas":    "5139e53d2f4a86e66ce588c7b782bc74",
+        "h2_constraints": "261c2039f18d373cdb501c39d5a2facb",
+        "h3_indices":     "aceb34183f2156348a3c58ff033c1d53",
+        "h4_policies":    "e1b1dd81a40b8e10c7f1744b25611fb1",
+        "h5_triggers":    "ec83234794da88cc77d5f9846ef67ae6",
+        "h6_funciones":   "8501af31d791fe5cfe5e7fb8c349b407",
+        "h7_grants":      "933a65b3869cc2030163e60c34e9b163",
+        "h8_vistas":      "bc29f409364899f99402b8ed06f77149",
+        "recuentos":      "788/655/287/82/65/34/1024/3",
+    },
 }
 
 

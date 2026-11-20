@@ -36,6 +36,9 @@
 #              HUELLA D-111. HUELLAS_D111_POR_HEAD['0355'] esta PENDIENTE_REPLAY
 #              (None, fail-closed) hasta medirla en el replay 0001..0355: los
 #              tests de huella y desviacion FALLAN mientras tanto, a proposito.
+# Version: 0.1.1 (F06 T3-F06 Bloque 3 F06-02/03, paso 2): fixture: cada actor sintetico con su tercero
+#   (uq_actores_financieros__owner_tercero) y el actor YO del owner (fn_check_actor_self_unico); la referencia
+#   D-111 de 0355 ya esta medida.
 # Version: 0.1.0 (F06 T3-F06 Bloque 3 F06-02/03; mandato v1.2 §9, contrato v1.1 §IX): test nuevo.
 # ============================================================
 from __future__ import annotations
@@ -125,11 +128,20 @@ class Esc:
         db.execute("INSERT INTO gapto.propiedades (entidad_id, tipo_propiedad) VALUES (%s, 'VIVIENDA')", (self.prop,))
         db.execute("INSERT INTO gapto.contratos (entidad_id, propiedad_entidad_id, tipo_contrato) "
                    "VALUES (%s, %s, 'ALQUILER_VIVIENDA')", (self.contrato, self.prop))
+        # fn_check_actor_self_unico (diferido): exactamente un actor YO (tercero_id NULL) por owner
+        self.yo = str(uuid.uuid4())
+        db.execute("INSERT INTO gapto.actores_financieros (id, owner_user_id, tercero_id) VALUES (%s, %s, NULL)",
+                   (self.yo, OWNER))
         self.actores = [self.actor() for _ in range(3)]
 
     def actor(self) -> str:
-        aid = str(uuid.uuid4())
-        self.db.execute("INSERT INTO gapto.actores_financieros (id, owner_user_id) VALUES (%s, %s)", (aid, OWNER))
+        # Cada actor sintetico es un tercero propio: uq_actores_financieros__owner_tercero (0080) admite un unico
+        # actor con tercero_id NULL (YO) por owner.
+        aid, tid = str(uuid.uuid4()), str(uuid.uuid4())
+        self.db.execute("INSERT INTO gapto.terceros (id, owner_user_id, nombre, naturaleza) VALUES (%s, %s, %s, 'PERSONA')",
+                        (tid, OWNER, f"0355 tercero {tid[:8]}"))
+        self.db.execute("INSERT INTO gapto.actores_financieros (id, owner_user_id, tercero_id) VALUES (%s, %s, %s)",
+                        (aid, OWNER, tid))
         return aid
 
     def participante(self, rol: str, actor: str, *, principal: bool = False, desde: dt.date = INICIO,
