@@ -283,6 +283,10 @@
 # Version: 0.38.0 (F06 T3-F06 bloque 2 F06-01H, paso 4; contrato v0.4 §3.1, §3.3, §7.1): dos rutas de la hipoteca
 #   registradas con UNA llamada a app.hipotecas.rutas.registrar: POST /v1/hipotecas/cuadro (W-HIP-00, sin
 #   escritura) y GET /v1/propiedades/{propiedad_id}/hipoteca (L-HIP). Ninguna ruta existente cambia.
+# Version: 0.39.0 (F06 T3-F06 Bloque 3 F06-02/03, pasos 3 y 4 del servidor): rutas de contratos de alquiler, clausula,
+#   servicios y terceros SIN RENTA registradas con UNA llamada a app.contratos.rutas.registrar, DESPUES de
+#   GET /v1/terceros/candidatos (la ruta nueva GET /v1/terceros/{tercero_id} no puede preceder a `/candidatos`).
+#   Ninguna ruta existente cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -488,6 +492,7 @@ from app.patrimonio import rutas as rutas_patrimonio
 from app.patrimonio import rutas_b3 as rutas_patrimonio_b3
 from app.patrimonio import rutas_pag as rutas_patrimonio_pag
 from app.hipotecas import rutas as rutas_hipotecas
+from app.contratos import rutas as rutas_contratos
 from app.terceros import lecturas as lect_ter
 from app.terceros import servicio as serv_ter
 from app.comun import elegibilidad_cuentas as eleg
@@ -1095,6 +1100,9 @@ def create_app(
     rutas_patrimonio_pag.registrar(app, unidad=unidad, contexto=contexto, autorizar=autorizar)
     # ------------------------------------------------------------ T3-F06 F06-01H hipoteca (modulo hipotecas)
     rutas_hipotecas.registrar(app, unidad=unidad, contexto=contexto, autorizar=autorizar, reloj=reloj)
+    # ------------------------------------------------------------ T3-F06 Bloque 3 F06-02/03 contratos (modulo contratos)
+    rutas_contratos.registrar(app, unidad=unidad, owner=lambda: cfg.owner_user_id, contexto=contexto,
+                              autorizar=autorizar, reloj=reloj)
 
     # ------------------------------------------------------------ F05-03 J2 §1.6 plantillas y acciones
     def _comando_plantilla(nombre_op: str, operacion, clave: str) -> dict | JSONResponse:
