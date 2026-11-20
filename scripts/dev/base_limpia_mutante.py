@@ -29,6 +29,9 @@
 # Version: 0.2.1 (F06 T3 · MANT N1 arneses, B3): la linea de resumen de pytest se reconoce tambien con CRLF y sin
 #   « - mensaje» (en la v0.2.0 esas muertes por discriminante salian como FALLO_INFRA «sin nodo FAILED»: falso positivo
 #   del clasificador, no del arnes); los FALLO_INFRA guardan una muestra de la salida para auditarlos.
+# Version: 0.2.2 (F06 T3 · MANT N1 arneses, B3): arneses que lanzan pytest con -rsx (no imprime lineas FAILED): se
+#   reconocen las cabeceras de fallo «____ test ____» (y «ERROR at setup of») con el recuento final; cada fila registra
+#   la version del clasificador y una muestra de la salida de la primera ejecucion fallida.
 # ============================================================
 from __future__ import annotations
 
@@ -57,6 +60,11 @@ INFRA = re.compile(r"OperationalError|BD_NO_DISPONIBLE|could not reserve shared 
 # acepta CRLF y la linea sin « - mensaje» (pytest la omite si el mensaje no cabe): «FAILED ruta::test<CR>»
 _NODO_FALLIDO = re.compile(r"^(FAILED|ERROR) (\S+?)(?: - (.*?))?\s*$", re.M)
 _JEST_FALLIDO = re.compile(r"^\s*● (.+)$", re.M)
+# sin lineas FAILED (arneses con -rsx, que sustituye al resumen -rfE por defecto): cabeceras de fallo y recuento final
+_CABECERA_FALLO = re.compile(r"^_{3,} (ERROR at setup of |ERROR at teardown of )?(\S+?) _{3,}\s*$", re.M)
+_RECUENTO = re.compile(r"(\d+) (failed|errors?)\b")
+_LINEA_FINAL = re.compile(r"^=*\s*(\d+ (?:failed|passed|errors?)\b.* in [\d.]+s.*?)\s*=*\s*$", re.M)
+VERSION = "0.2.2"
 
 
 def _partes(url: str):
@@ -133,6 +141,13 @@ def clasificar(tests: list[str], ejecuciones: list[dict]) -> dict:
         if e["tipo"] == "pytest":
             nodos = _NODO_FALLIDO.findall(salida)
             if not nodos:
+                # -rsx: «____ test_x ____» por fallo; error de setup/teardown -> en fixture; recuento final coherente
+                cab = _CABECERA_FALLO.findall(salida)
+                finales = _LINEA_FINAL.findall(salida)
+                rec = {k.rstrip("s"): int(n) for n, k in _RECUENTO.findall(finales[-1] if finales else "")}
+                if cab and rec.get("failed", 0) + rec.get("error", 0) >= 1:
+                    nodos = [("ERROR" if pre else "FAILED", nombre, "") for pre, nombre in cab]
+            if not nodos:
                 return {"clase": "FALLO_INFRA_PREPARACION_EJECUCION", "causa": f"pytest rc={e['rc']} sin nodo FAILED",
                         "cmd": e["cmd"][:200], "muestra": salida[-1500:]}
             for tipo, nodo, msg in nodos:
@@ -178,7 +193,9 @@ def _anotar(tests, resultado, base, ejecuciones) -> None:
         return
     rc = resultado if isinstance(resultado, int) else (resultado[0] if isinstance(resultado, tuple) else None)
     tl = [tests] if isinstance(tests, str) else list(tests)
-    fila = {"llamada": next(_N_CALL), "base": base, "tests": tl, "rc_arnes": rc,
+    fallidas = [e for e in ejecuciones if e["rc"] != 0]
+    fila = {"llamada": next(_N_CALL), "version_clasificador": VERSION, "base": base, "tests": tl, "rc_arnes": rc,
+            "muestra_fallo": fallidas[0]["salida"][-4000:] if fallidas else None,
             **clasificar(tests if isinstance(tests, str) else tl, ejecuciones),
             "rc_subprocesos": [e["rc"] for e in ejecuciones]}
     with open(ruta, "a", encoding="utf-8") as f:
