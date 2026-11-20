@@ -26,6 +26,9 @@
 #   No cambia oraculos, discriminantes, mutaciones ni la restauracion por SHA de cada arnes.
 # Version: 0.1.0 (F06 T3 · MANT N1 arneses, AJ-03 del 19-11): base limpia por llamada.
 # Version: 0.2.0 (F06 T3 · MANT N1 arneses, enmienda 01 §3; requisitos B3 v1.1 punto 4): clasificacion de la muerte.
+# Version: 0.2.1 (F06 T3 · MANT N1 arneses, B3): la linea de resumen de pytest se reconoce tambien con CRLF y sin
+#   « - mensaje» (en la v0.2.0 esas muertes por discriminante salian como FALLO_INFRA «sin nodo FAILED»: falso positivo
+#   del clasificador, no del arnes); los FALLO_INFRA guardan una muestra de la salida para auditarlos.
 # ============================================================
 from __future__ import annotations
 
@@ -51,7 +54,8 @@ INFRA = re.compile(r"OperationalError|BD_NO_DISPONIBLE|could not reserve shared 
                    r"server closed the connection|too many clients|INTERNALERROR|ERROR collecting|ModuleNotFoundError|"
                    r"ImportError|SyntaxError|IndentationError|Test suite failed to run|Cannot find module|no tests ran|"
                    r"PermissionError|MemoryError", re.I)
-_NODO_FALLIDO = re.compile(r"^(FAILED|ERROR) (\S+?)(?: - (.*))?$", re.M)
+# acepta CRLF y la linea sin « - mensaje» (pytest la omite si el mensaje no cabe): «FAILED ruta::test<CR>»
+_NODO_FALLIDO = re.compile(r"^(FAILED|ERROR) (\S+?)(?: - (.*?))?\s*$", re.M)
 _JEST_FALLIDO = re.compile(r"^\s*● (.+)$", re.M)
 
 
@@ -124,16 +128,17 @@ def clasificar(tests: list[str], ejecuciones: list[dict]) -> dict:
         salida = e["salida"]
         m = INFRA.search(salida)
         if m:
-            return {"clase": "FALLO_INFRA_PREPARACION_EJECUCION", "causa": m.group(0), "cmd": e["cmd"][:200]}
+            return {"clase": "FALLO_INFRA_PREPARACION_EJECUCION", "causa": m.group(0), "cmd": e["cmd"][:200],
+                    "muestra": salida[-1500:]}
         if e["tipo"] == "pytest":
             nodos = _NODO_FALLIDO.findall(salida)
             if not nodos:
                 return {"clase": "FALLO_INFRA_PREPARACION_EJECUCION", "causa": f"pytest rc={e['rc']} sin nodo FAILED",
-                        "cmd": e["cmd"][:200]}
+                        "cmd": e["cmd"][:200], "muestra": salida[-1500:]}
             for tipo, nodo, msg in nodos:
                 if declarados and not _es_declarado(nodo, declarados):
                     return {"clase": "FALLO_INFRA_PREPARACION_EJECUCION",
-                            "causa": f"{tipo} fuera de lo previsto: {nodo} {msg or ''}"[:300]}
+                            "causa": f"{tipo} fuera de lo previsto: {nodo} {msg or ''}"[:300], "muestra": salida[-1500:]}
                 if tipo == "ERROR":
                     en_fixture = True
                 causas.append(f"{tipo} {nodo} - {msg or ''}"[:240])
@@ -141,7 +146,7 @@ def clasificar(tests: list[str], ejecuciones: list[dict]) -> dict:
             fallidos = _JEST_FALLIDO.findall(salida)
             if not fallidos:
                 return {"clase": "FALLO_INFRA_PREPARACION_EJECUCION", "causa": f"jest rc={e['rc']} sin test fallido",
-                        "cmd": e["cmd"][:200]}
+                        "cmd": e["cmd"][:200], "muestra": salida[-1500:]}
             causas += [x[:240] for x in fallidos[:3]]
     # un ERROR (no FAILED) en un nodo DECLARADO sin patron de infraestructura: el discriminante cae en su fixture por el
     # codigo mutado (precedente: scripts/mutantes/f06_01_b2.py 0.1.1, M-CO-09); clase propia para revisarla una a una
