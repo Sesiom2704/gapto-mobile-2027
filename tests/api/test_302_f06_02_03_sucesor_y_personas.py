@@ -9,6 +9,8 @@
 #   CONTRATO_SIN_ARRENDADOR; con un GESTOR anadido antes, OK; correccion de fechas que deja un hueco -> 409),
 #   O-29 (sucesor con tercero nuevo por el writer de F05; la prueba concurrente esta en test_307).
 #   ESCRITO SIN EJECUTAR (sin base esta noche).
+# Version: 0.1.1 (F06 T3-F06 Bloque 3, paso 6): vigencias invertidas al terminar, cerrar o corregir una persona
+#   (mata M-CON-39b/39c/39f) y tercero inactivo en C-CON-06 (O-30, mata M-CON-42b).
 # Version: 0.1.0 (F06 T3-F06 Bloque 3, paso 4)
 # ============================================================
 
@@ -242,3 +244,39 @@ def test_la_edicion_de_personas_nunca_cambia_la_titularidad(t):
     despues = leer_propiedad(cli, pid)
     assert despues["titularidad"] == antes["titularidad"] and despues["row_version"] == antes["row_version"]
     assert ct
+
+
+# ================================================================== AJ-DELTA-06 / O-30 (paso 6: mutantes vivos)
+def test_vigencias_invertidas_al_terminar_cerrar_o_corregir_una_persona(t):
+    """Mata M-CON-39b/39c/39f: un avalista que entra DESPUES del inicio no puede quedar con `hasta < desde`, ni por
+    terminar el contrato antes de su entrada, ni al cerrarlo, ni al corregirlo. Sin la validacion previa la base
+    rechaza con una CHECK que no esta en el mapa (error generico): el codigo de dominio solo sale de la validacion."""
+    _, cli, pid, ana = t
+    av = c.tercero(cli, "Aval")
+    ct = c.crear_firmado(cli, pid, ana, habitacion=1, inicio="2026-03-01")
+    r = c.post(cli, c.ruta(ct["id"], "/personas"), c.cuerpo_v(ct, actor={"tercero_id": str(av)}, rol="AVALISTA",
+                                                              desde="2026-06-01"))
+    assert r.status_code == 200, r.text
+    ct = r.json()["contrato"]
+    fila = next(p for p in ct["personas"] if p["tercero_id"] == str(av))
+    antes = c.huella()
+    r = c.post(cli, c.ruta(ct["id"], "/terminar"), c.cuerpo_v(ct, fecha_fin_real="2026-05-31"))       # 39b
+    c.rechazo_sin_cambios(cli, r, 422, "FECHA_FIN_ANTERIOR_A_VIGENCIA", antes)
+    r = c.post(cli, c.ruta(ct["id"], f"/personas/{fila['id']}/cerrar"), c.cuerpo_v(ct, hasta="2026-05-15"))  # 39c
+    c.rechazo_sin_cambios(cli, r, 422, "FECHA_FIN_ANTERIOR_A_VIGENCIA", antes)
+    r = c.post(cli, c.ruta(ct["id"], f"/personas/{fila['id']}/corregir"),
+               c.cuerpo_v(ct, hasta="2026-05-15", motivo="Error de fecha"))                               # 39f
+    c.rechazo_sin_cambios(cli, r, 422, "FECHA_FIN_ANTERIOR_A_VIGENCIA", antes)
+
+
+def test_o_30_tercero_inactivo_no_se_anade_como_persona(t):
+    """Mata M-CON-42b: C-CON-06 con un tercero desactivado -> TERCERO_NO_DISPONIBLE, estado identico."""
+    owner, cli, pid, ana = t
+    baja = c.tercero(cli, "Baja")
+    ver = c.uno(owner, "SELECT row_version FROM gapto.terceros WHERE id = %s", (baja,))
+    assert c.post(cli, f"/v1/terceros/{baja}/desactivar", {"row_version": ver}).status_code == 200
+    ct = c.crear_firmado(cli, pid, ana, habitacion=1, inicio="2026-03-01")
+    antes = c.huella()
+    r = c.post(cli, c.ruta(ct["id"], "/personas"), c.cuerpo_v(ct, actor={"tercero_id": str(baja)}, rol="AVALISTA",
+                                                              desde="2026-04-01"))
+    c.rechazo_sin_cambios(cli, r, 409, "TERCERO_NO_DISPONIBLE", antes)

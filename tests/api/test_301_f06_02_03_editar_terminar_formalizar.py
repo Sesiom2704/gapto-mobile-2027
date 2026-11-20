@@ -9,6 +9,7 @@
 #   O-25 (solape habitacion <-> vivienda en los DOS sentidos; borrador y OTRO no solapan) y O-28 (negativos
 #   temporales: inicio que solapa, vigencia invertida, fin anterior a una vigencia abierta; huella antes = despues).
 #   Hoy = 2026-11-18. ESCRITO SIN EJECUTAR (sin base esta noche).
+# Version: 0.1.2 (F06 T3-F06 Bloque 3, paso 6): test_o_28_mover_el_inicio_detras_de_una_vigencia_ya_cerrada (mata M-CON-39e).
 # Version: 0.1.1 (F06 T3-F06 Bloque 3, pasos 3-4 con base): la huella de antes se toma despues de crear terceros o contratos auxiliares (solo mide el rechazo); O-2 con la forma de ocupacion del cliente (desde/hasta).
 # Version: 0.1.0 (F06 T3-F06 Bloque 3, paso 4)
 # ============================================================
@@ -345,3 +346,22 @@ def test_formalizar_con_solape_sigue_siendo_borrador_y_no_cuenta_otro_borrador(t
     b1 = c.crear(cli, pid, habitacion=1, estado="BORRADOR", inicio="2026-10-01", personas=c.partes(luis))
     c.rechazo(c.post(cli, c.ruta(b1["id"], "/formalizar"), c.cuerpo_v(b1)), 409, "SOLAPE_CON_CONTRATO_FIRMADO")
     assert c.leer(cli, b1["id"])["estado_documental"] == "BORRADOR"
+
+
+def test_o_28_mover_el_inicio_detras_de_una_vigencia_ya_cerrada(t):
+    """Mata M-CON-39e: una persona que entro el dia del inicio y ya salio no puede quedar con `hasta < desde` al
+    retrasar el inicio del contrato: 409 VIGENCIA_INVERTIDA, estado identico."""
+    _, cli, pid, ana = t
+    av = c.tercero(cli, "Aval")
+    ct = c.crear_firmado(cli, pid, ana, habitacion=1, inicio="2026-03-01")
+    r = c.post(cli, c.ruta(ct["id"], "/personas"), c.cuerpo_v(ct, actor={"tercero_id": str(av)}, rol="AVALISTA",
+                                                              desde="2026-03-01"))
+    assert r.status_code == 200, r.text
+    ct = r.json()["contrato"]
+    fila = next(p for p in ct["personas"] if p["tercero_id"] == str(av))
+    r = c.post(cli, c.ruta(ct["id"], f"/personas/{fila['id']}/cerrar"), c.cuerpo_v(ct, hasta="2026-03-31"))
+    assert r.status_code == 200, r.text
+    ct = r.json()["contrato"]
+    antes = c.huella()
+    r = c.post(cli, c.ruta(ct["id"], "/editar"), c.cuerpo_v(ct, fecha_inicio="2026-04-15"))
+    c.rechazo_sin_cambios(cli, r, 409, "OPERACION_NO_PERMITIDA_EN_ESTADO", antes, motivo="VIGENCIA_INVERTIDA")
