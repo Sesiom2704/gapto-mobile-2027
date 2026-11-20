@@ -9,6 +9,7 @@
 #   Todo rechazo deja la HUELLA del estado identica. Orden de validaciones (§I): propiedad -> renta -> inicio ->
 #   habitacion -> fechas -> personas -> solape.
 #   ESCRITO SIN EJECUTAR (sin base esta noche): se ejecuta cuando haya GAPTO_TEST_DATABASE_URL, tras la 0355.
+# Version: 0.1.1 (F06 T3-F06 Bloque 3, pasos 3-4 con base): fixture: la salida del patrimonio exige motivo_salida (ck_propiedades__salida_exige_motivo).
 # Version: 0.1.0 (F06 T3-F06 Bloque 3, paso 4)
 # ============================================================
 
@@ -141,7 +142,7 @@ def test_propiedad_ajena_o_inexistente_es_404_sin_eco(t):
 def test_propiedad_fuera_del_patrimonio_antes_del_inicio(t):
     owner, _, cli = t
     pid = c.propiedad(cli)
-    h.como_owner(owner, "UPDATE gapto.propiedades SET fecha_salida_patrimonio = '2026-06-30' WHERE entidad_id = %s",
+    h.como_owner(owner, "UPDATE gapto.propiedades SET fecha_salida_patrimonio = '2026-06-30', motivo_salida = 'VENTA' WHERE entidad_id = %s",
                  (pid,))
     antes = c.huella()
     c.rechazo_sin_cambios(cli, c.alta(cli, pid, inicio="2026-09-01"), 422, "PROPIEDAD_FUERA_DE_PATRIMONIO", antes)

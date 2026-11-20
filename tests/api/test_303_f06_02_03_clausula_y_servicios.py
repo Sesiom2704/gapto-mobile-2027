@@ -10,6 +10,7 @@
 #   igual), O-28 (DESDE_IGUAL_A_VERSION_ABIERTA) y O-31 (baja de servicio con regla: REGLA_SERVICIO_PENDIENTE_DE_F06_04,
 #   nunca el motivo de renta). La clausula NUNCA toca la renta; el tratamiento no crea ningun derecho de cobro.
 #   ESCRITO SIN EJECUTAR (sin base esta noche).
+# Version: 0.1.1 (F06 T3-F06 Bloque 3, pasos 3-4 con base): O-7: la huella de antes se toma despues de crear la otra propiedad y su servicio.
 # Version: 0.1.0 (F06 T3-F06 Bloque 3, paso 4)
 # ============================================================
 
@@ -166,6 +167,7 @@ def test_o_7_negativos_del_tratamiento(t):
     # servicio de OTRA propiedad: no vinculado a la del contrato
     otra = c.propiedad(cli, nombre="Otra")
     ajeno = c.servicio(cli, otra, nombre="Luz de otra")
+    antes = c.huella()  # la otra propiedad y su servicio ya existen: solo se mide el rechazo
     r = c.alta(cli, pid, habitacion=1, personas=base, servicios=[{"servicio_id": str(ajeno), "modo": "INCLUIDO"}])
     c.rechazo_sin_cambios(cli, r, 422, "SERVICIO_NO_VINCULADO_A_PROPIEDAD", antes)
     dos = [{"servicio_id": str(luz), "modo": "INCLUIDO"}, {"servicio_id": str(luz), "modo": "NO_REPERCUTIDO"}]

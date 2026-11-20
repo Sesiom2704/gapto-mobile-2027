@@ -9,6 +9,7 @@
 #   O-25 (solape habitacion <-> vivienda en los DOS sentidos; borrador y OTRO no solapan) y O-28 (negativos
 #   temporales: inicio que solapa, vigencia invertida, fin anterior a una vigencia abierta; huella antes = despues).
 #   Hoy = 2026-11-18. ESCRITO SIN EJECUTAR (sin base esta noche).
+# Version: 0.1.1 (F06 T3-F06 Bloque 3, pasos 3-4 con base): la huella de antes se toma despues de crear terceros o contratos auxiliares (solo mide el rechazo); O-2 con la forma de ocupacion del cliente (desde/hasta).
 # Version: 0.1.0 (F06 T3-F06 Bloque 3, paso 4)
 # ============================================================
 
@@ -35,9 +36,11 @@ def test_o_2_fin_previsto_vencido_no_libera_la_habitacion(t):
                             nombre="25-HAB1-AN")
     assert viejo["fin_previsto_vencido"] is True and viejo["situacion"] == "VIGENTE"
     ocupacion = c.get(cli, f"/v1/propiedades/{pid}/contratos").json()["ocupacion"]
-    assert ocupacion[0] == {"habitacion": 1, "estado": "OCUPADA", "contrato_id": viejo["id"]}
-    antes = c.huella()
+    # forma alineada con el cliente (OcupacionHabitacion: desde/hasta para el texto de la habitacion)
+    assert ocupacion[0] == {"habitacion": 1, "estado": "OCUPADA", "contrato_id": viejo["id"], "desde": "2025-01-01",
+                            "hasta": "2026-06-30"}
     luis = c.tercero(cli, "Luis")
+    antes = c.huella()  # despues de crear el tercero: solo se mide el rechazo
     # un nuevo FORMALIZADO posterior al fin previsto sigue chocando: solo el fin REAL libera
     r = c.alta(cli, pid, habitacion=1, inicio="2026-09-01", personas=c.partes(luis), nombre="26-HAB1-LU")
     cuerpo = c.rechazo(r, 409, "SOLAPE_CON_CONTRATO_FIRMADO")
@@ -67,8 +70,8 @@ def test_o_25_vivienda_primero_y_despues_habitacion(t):
     owner, cli, pid, ana = t
     viv = c.crear_firmado(cli, pid, ana, tipo="VIVIENDA_COMPLETA", habitacion=None, inicio="2026-09-01",
                           fecha_fin_prevista="2027-08-31", nombre="26-VIV-AN")
-    antes = c.huella()
     luis = c.tercero(cli, "Luis")
+    antes = c.huella()  # despues de crear el tercero: solo se mide el rechazo
     r = c.alta(cli, pid, habitacion=2, inicio="2026-11-01", personas=c.partes(luis))
     cuerpo = c.rechazo(r, 409, "SOLAPE_CON_CONTRATO_FIRMADO")
     assert [(x["id"], x["tipo"]) for x in cuerpo["detalle"]["solapados"]] == [(viv["id"], "VIVIENDA_COMPLETA")]
@@ -157,6 +160,7 @@ def test_o_28_cambio_de_inicio_o_habitacion_que_solapa_con_un_firmado(t):
     c.rechazo_sin_cambios(cli, r, 409, "SOLAPE_CON_CONTRATO_FIRMADO", antes)
     # mover B a la habitacion 2 esta libre; moverlo de vuelta con A encima se prueba creando C en la 2 y moviendo B
     c.crear_firmado(cli, pid, ana, habitacion=2, inicio="2026-07-01", nombre="C")
+    antes = c.huella()  # C ya existe: solo se mide el rechazo de mover B
     r = c.post(cli, c.ruta(b2["id"], "/editar"), c.cuerpo_v(b2, habitacion=2))
     c.rechazo_sin_cambios(cli, r, 409, "SOLAPE_CON_CONTRATO_FIRMADO", antes)
 

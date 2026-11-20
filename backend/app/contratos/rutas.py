@@ -29,6 +29,8 @@
 #   V-ter reutiliza GET /v1/terceros/candidatos y POST /v1/terceros/{id}/reactivar de F05, sin cambios.
 #   Las rutas de DIRECCIONES de terceros (C-TER-02) NO existen en este bloque.
 #   (Rutas del arbol de clasificaciones: el contrato v1.1 no fija su ruta; esta es una propuesta a confirmar.)
+# Version: 0.1.1 (F06 T3-F06 Bloque 3, pasos 3-4 con base): L-TER-01 devuelve la ficha sin doble envoltorio
+#   («tercero» dentro de «tercero»), con la forma FichaTercero del cliente.
 # Version: 0.1.0 (F06 T3-F06 Bloque 3, pasos 3 y 4)
 # ============================================================
 
@@ -305,7 +307,7 @@ def registrar(app: FastAPI, *, unidad, owner: Callable[[], uuid.UUID], contexto:
                                 nombre="F06-02/03 L-TER-01")
         if vista is None:
             return _rechazo(Rechazo(e.TERCERO_NO_ENCONTRADO))
-        return _texto({"tercero": vista})
+        return _texto(vista)   # FichaTercero {tercero, roles, clasificaciones, uso, uso_en_gapto}: sin doble envoltorio
 
     @app.get("/v1/clasificaciones-tercero", dependencies=dep)
     def arbol_clasificaciones():
