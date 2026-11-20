@@ -30,6 +30,7 @@
 # Version: 0.1.0 (F05-D052 paso 2; F05 §66.A.11.8)
 # Version: 0.1.1 (F06 T2-F06 CAT-VIV N1, mandato §9.4): texto de C03-ORD1 actualizado (bloque `propiedad` entre
 #   INVERSIONES y la cuenta); misma mutacion (cuenta antes que INVERSIONES) y mismo discriminante.
+# Version: 0.2.0 (F06 T3 · MANT N1 arneses, AJ-03 del 19-11; enmienda 01): base limpia por mutante (cada llamada a correr clona la plantilla de GAPTO_TEST_DATABASE_URL y la elimina al terminar) y clasificacion de la muerte, con scripts/dev/base_limpia_mutante.py; sin cambios en mutaciones, discriminantes ni restauracion.
 # ============================================================
 
 from __future__ import annotations
@@ -40,6 +41,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import base_limpia_mutante  # MANT N1 arneses, AJ-03 del 19-11
 
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
 JOURNAL = RAIZ / ".mutantes_f05_d052_c03.journal.json"
@@ -174,6 +176,7 @@ def sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
+@base_limpia_mutante.por_llamada
 def correr(tests: list[str]) -> int:
     """Ejecuta los nodeids: los de tests/backend y los de tests/api (con su
     --rootdir) por separado. rc != 0 si alguno falla."""

@@ -32,6 +32,7 @@
 #   No ejecutar en paralelo con otro arnes ni con la suite sobre el mismo arbol.
 # Version: 0.2.0 (F04-R1 CORR pasos 1.3 y 3.1): mutantes R18, R19 y R20; R15 equivalente.
 # Version: 0.1.0 (F04-R1 IMPL F5)
+# Version: 0.2.0 (F06 T3 · MANT N1 arneses, AJ-03 del 19-11; enmienda 01): base limpia por mutante (cada llamada a correr clona la plantilla de GAPTO_TEST_DATABASE_URL y la elimina al terminar) y clasificacion de la muerte, con scripts/dev/base_limpia_mutante.py; sin cambios en mutaciones, discriminantes ni restauracion.
 # ============================================================
 
 from __future__ import annotations
@@ -42,6 +43,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import base_limpia_mutante  # MANT N1 arneses, AJ-03 del 19-11
 
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
 JOURNAL = RAIZ / ".mutantes_f04_r1.journal.json"
@@ -151,6 +153,7 @@ def sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
+@base_limpia_mutante.por_llamada
 def correr(tests: list[str]) -> int:
     cmd = [sys.executable, "-m", "pytest", *tests, "-q", "-x", "-p", "no:cacheprovider"]
     return subprocess.run(cmd, cwd=RAIZ, capture_output=True).returncode

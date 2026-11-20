@@ -31,6 +31,7 @@
 #   (previsiones_service.py): sin reanclaje.
 # Version: 0.2.1 (F05-07/GATE adenda 2, integracion MANT-PRE-GATE: la cabecera nombra los
 #   worktrees historicos sin ruta absoluta (test_rv3_000, ruta_absoluta_windows))
+# Version: 0.3.0 (F06 T3 · MANT N1 arneses, AJ-03 del 19-11; enmienda 01): base limpia por mutante (cada llamada a correr clona la plantilla de GAPTO_TEST_DATABASE_URL y la elimina al terminar) y clasificacion de la muerte, con scripts/dev/base_limpia_mutante.py; sin cambios en mutaciones, discriminantes ni restauracion.
 # ============================================================
 
 from __future__ import annotations
@@ -41,6 +42,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import base_limpia_mutante  # MANT N1 arneses, AJ-03 del 19-11
 
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
 JOURNAL = RAIZ / ".mutantes_mant_vinculo.journal.json"
@@ -57,6 +59,7 @@ def sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
+@base_limpia_mutante.por_llamada
 def correr() -> subprocess.CompletedProcess:
     cmd = [sys.executable, "-m", "pytest", *TESTS, "-q", "-p", "no:cacheprovider"]
     return subprocess.run(cmd, cwd=RAIZ, capture_output=True, text=True, encoding="utf-8", errors="replace")

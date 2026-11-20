@@ -55,6 +55,7 @@
 #   `corroborante`: se informa si tambien cae, pero no decide el veredicto.
 #   Un oraculo concurrente podia reportar DUDOSO sobre un mutante muerto.
 # Version: 0.1.0
+# Version: 0.2.0 (F06 T3 · MANT N1 arneses, AJ-03 del 19-11; enmienda 01): base limpia por mutante (cada llamada a correr clona la plantilla de GAPTO_TEST_DATABASE_URL y la elimina al terminar) y clasificacion de la muerte, con scripts/dev/base_limpia_mutante.py; sin cambios en mutaciones, discriminantes ni restauracion.
 # ============================================================
 
 from __future__ import annotations
@@ -64,6 +65,9 @@ import pathlib
 import subprocess
 import sys
 from dataclasses import dataclass
+
+sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'dev'))  # MANT N1 arneses
+import base_limpia_mutante  # noqa: E402  MANT N1 arneses, AJ-03 del 19-11
 
 # El root se deduce de la posicion del fichero: scripts/mutantes/f0405.py
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
@@ -340,6 +344,7 @@ def ejecutar_suite(suite: str) -> tuple[str, list[str]]:
     return resumen, fallidos
 
 
+@base_limpia_mutante.por_llamada
 def correr(lote: list[Mutante]) -> list[tuple[Mutante, str, int, list[str]]]:
     filas: list[tuple[Mutante, str, int, list[str]]] = []
     for mut in lote:

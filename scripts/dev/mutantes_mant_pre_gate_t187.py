@@ -34,6 +34,7 @@
 #   resuelve. No ejecutar en paralelo con otro arnes ni con la suite sobre el
 #   mismo arbol.
 # Version: 0.1.0 (F05-07/GATE adenda 2, MANT-PRE-GATE test_187/test_206; F05-D050 §64.3)
+# Version: 0.2.0 (F06 T3 · MANT N1 arneses, AJ-03 del 19-11; enmienda 01): base limpia por mutante (cada llamada a correr clona la plantilla de GAPTO_TEST_DATABASE_URL y la elimina al terminar) y clasificacion de la muerte, con scripts/dev/base_limpia_mutante.py; sin cambios en mutaciones, discriminantes ni restauracion.
 # ============================================================
 
 from __future__ import annotations
@@ -48,6 +49,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 
 from psycopg import conninfo
+import base_limpia_mutante  # MANT N1 arneses, AJ-03 del 19-11
 
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
 JOURNAL = RAIZ / ".mutantes_mant_pre_gate_t187.journal.json"
@@ -129,6 +131,7 @@ def resultados(xml: pathlib.Path) -> dict[str, str]:
     return salida
 
 
+@base_limpia_mutante.por_llamada_base(2)
 def correr(nodos: list[str], entorno: str, base: str, ev: pathlib.Path, etiqueta: str) -> dict[str, str]:
     xml = ev / f"{etiqueta}.xml"
     env = dict(os.environ, PYTHONIOENCODING="utf-8", GAPTO_K5_EVIDENCIA=str(ev / f"{etiqueta}_k5"))

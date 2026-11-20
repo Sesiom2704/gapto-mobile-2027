@@ -135,6 +135,7 @@
 # Version: 0.17.0
 # Version: 0.17.1 (F06 T2-F06 CAT-VIV N1, mandato §9.4): textos de A12 y A17 actualizados a ejecucion_gasto_pagado
 #   0.12.0 (bloque `propiedad` y exigir_propiedad); misma mutacion y mismos discriminantes. Relanzados solos.
+# Version: 0.18.0 (F06 T3 · MANT N1 arneses, AJ-03 del 19-11; enmienda 01): base limpia por mutante (cada llamada a correr clona la plantilla de GAPTO_TEST_DATABASE_URL y la elimina al terminar) y clasificacion de la muerte, con scripts/dev/base_limpia_mutante.py; sin cambios en mutaciones, discriminantes ni restauracion.
 # ============================================================
 
 from __future__ import annotations
@@ -146,6 +147,7 @@ import pathlib
 import shutil
 import subprocess
 import sys
+import base_limpia_mutante  # MANT N1 arneses, AJ-03 del 19-11
 
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
 JOURNAL = RAIZ / ".mutantes_vs01.journal.json"
@@ -306,6 +308,7 @@ def sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
+@base_limpia_mutante.por_llamada
 def correr(suite: str, preflight: bool = False) -> int:
     if suite == "py":
         return subprocess.run(PY, cwd=RAIZ, capture_output=True).returncode

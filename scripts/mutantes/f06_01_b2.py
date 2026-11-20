@@ -34,6 +34,7 @@
 #   mutantes propios de A3-0352 van en scripts/mutantes/f06_t2_a3_0352.py.
 # Version: 0.2.1 (F06 T3-F06 F06-01H paso 12): M-ID-15 sigue a la linea protegida de compra.py, que ahora admite la
 #   PARTE_DE del desembolso Hd (`| desembolso`); misma mutacion (if False) y mismo discriminante.
+# Version: 0.3.0 (F06 T3 · MANT N1 arneses, AJ-03 del 19-11; enmienda 01): base limpia por mutante (cada llamada a correr clona la plantilla de GAPTO_TEST_DATABASE_URL y la elimina al terminar) y clasificacion de la muerte, con scripts/dev/base_limpia_mutante.py; sin cambios en mutaciones, discriminantes ni restauracion.
 # ============================================================
 from __future__ import annotations
 
@@ -44,6 +45,9 @@ import pathlib
 import subprocess
 import sys
 from dataclasses import dataclass
+
+sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'dev'))  # MANT N1 arneses
+import base_limpia_mutante  # noqa: E402  MANT N1 arneses, AJ-03 del 19-11
 
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
 COMPRA = "backend/app/patrimonio/compra.py"
@@ -317,6 +321,7 @@ def _estado_arbol() -> str:
     return subprocess.run(["git", "status", "--porcelain"], cwd=RAIZ, capture_output=True, text=True).stdout
 
 
+@base_limpia_mutante.por_llamada
 def _pytest(nodos: tuple[str, ...]) -> tuple[int, str]:
     proceso = subprocess.run(
         [sys.executable, "-m", "pytest", *nodos, "-q", "-p", "no:cacheprovider", "--rootdir=tests/api", "-rfE"],

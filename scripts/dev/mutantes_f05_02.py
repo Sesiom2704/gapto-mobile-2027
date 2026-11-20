@@ -51,6 +51,7 @@
 #   linea protegida de _hoy, retirada por la fecha funcional del owner, ya no
 #   existe). Mismo discriminante (test_170 paquete sin writer de terceros).
 # Version: 0.5.0
+# Version: 0.6.0 (F06 T3 · MANT N1 arneses, AJ-03 del 19-11; enmienda 01): base limpia por mutante (cada llamada a correr clona la plantilla de GAPTO_TEST_DATABASE_URL y la elimina al terminar) y clasificacion de la muerte, con scripts/dev/base_limpia_mutante.py; sin cambios en mutaciones, discriminantes ni restauracion.
 # ============================================================
 
 from __future__ import annotations
@@ -61,6 +62,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import base_limpia_mutante  # MANT N1 arneses, AJ-03 del 19-11
 
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
 JOURNAL = RAIZ / ".mutantes_f05_02.journal.json"
@@ -251,6 +253,7 @@ def sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
+@base_limpia_mutante.por_llamada
 def correr(tests: list[str]) -> int:
     cmd = [sys.executable, "-m", "pytest", *tests, "-q", "-x", "-p", "no:cacheprovider", "--rootdir=tests/api"]
     return subprocess.run(cmd, cwd=RAIZ, capture_output=True).returncode

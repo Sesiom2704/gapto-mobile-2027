@@ -26,6 +26,7 @@
 #   saldria VIVO. No ejecutar en paralelo con otro arnes ni con la suite sobre
 #   el mismo arbol.
 # Version: 0.1.0 (F05-06 M4 F3)
+# Version: 0.2.0 (F06 T3 · MANT N1 arneses, AJ-03 del 19-11; enmienda 01): base limpia por mutante (cada llamada a correr clona la plantilla de GAPTO_TEST_DATABASE_URL y la elimina al terminar) y clasificacion de la muerte, con scripts/dev/base_limpia_mutante.py; sin cambios en mutaciones, discriminantes ni restauracion.
 # ============================================================
 
 from __future__ import annotations
@@ -37,6 +38,7 @@ import pathlib
 import shutil
 import subprocess
 import sys
+import base_limpia_mutante  # MANT N1 arneses, AJ-03 del 19-11
 
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
 JOURNAL = RAIZ / ".mutantes_f05_06_m4.journal.json"
@@ -113,6 +115,7 @@ def sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
+@base_limpia_mutante.por_llamada
 def correr(tests: list[str]) -> int:
     py = [t for t in tests if not t.startswith("mobile/")]
     js = [t.removeprefix("mobile/") for t in tests if t.startswith("mobile/")]

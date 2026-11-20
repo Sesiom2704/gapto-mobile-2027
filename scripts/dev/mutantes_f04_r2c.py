@@ -31,6 +31,7 @@
 #   escritura de auditoria de OP-03P que quita SOLO esa llamada y deja la
 #   escritura: W14a/W14b/W14c (ELIMINAR de W1/W2/W3) y W15a/W15b (ANULAR con
 #   fotos de W4/W5), discriminados por test_14i y comprobar_feliz de test_14e.
+# Version: 0.4.0 (F06 T3 · MANT N1 arneses, AJ-03 del 19-11; enmienda 01): base limpia por mutante (cada llamada a correr clona la plantilla de GAPTO_TEST_DATABASE_URL y la elimina al terminar) y clasificacion de la muerte, con scripts/dev/base_limpia_mutante.py; sin cambios en mutaciones, discriminantes ni restauracion.
 # ============================================================
 
 from __future__ import annotations
@@ -41,6 +42,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import base_limpia_mutante  # MANT N1 arneses, AJ-03 del 19-11
 
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
 JOURNAL = RAIZ / ".mutantes_f04_r2c.journal.json"
@@ -312,6 +314,7 @@ def sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
+@base_limpia_mutante.por_llamada
 def correr(tests: list[str]) -> int:
     """Ejecuta los nodeids (tests/backend). rc != 0 si alguno falla."""
     cmd = [sys.executable, "-m", "pytest", *tests, "-q", "-x", "-p", "no:cacheprovider"]

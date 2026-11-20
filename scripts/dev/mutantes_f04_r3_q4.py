@@ -31,6 +31,7 @@
 # Version: 0.2.0 (F05-D052 paso 2/3): reanclaje de SALDO, LECTURA, BUCLE y NETO (Q5, Q6):
 #   la lectura de posiciones del reparto pasa a ejecucion_reparto._lecturas_posiciones,
 #   UNA lectura por entidad (§66.5). Mismas mutaciones semanticas.
+# Version: 0.3.0 (F06 T3 · MANT N1 arneses, AJ-03 del 19-11; enmienda 01): base limpia por mutante (cada llamada a correr clona la plantilla de GAPTO_TEST_DATABASE_URL y la elimina al terminar) y clasificacion de la muerte, con scripts/dev/base_limpia_mutante.py; sin cambios en mutaciones, discriminantes ni restauracion.
 # ============================================================
 
 from __future__ import annotations
@@ -41,6 +42,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import base_limpia_mutante  # MANT N1 arneses, AJ-03 del 19-11
 
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
 JOURNAL = RAIZ / ".mutantes_f04_r3_q4.journal.json"
@@ -108,6 +110,7 @@ def sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
+@base_limpia_mutante.por_llamada
 def correr(tests: list[str]) -> int:
     """Ejecuta los nodeids: los de tests/backend y los de tests/api (con su
     --rootdir) por separado. rc != 0 si alguno falla."""

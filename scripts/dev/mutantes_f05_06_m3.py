@@ -26,6 +26,11 @@
 #        python scripts/dev/mutantes_f05_06_m3.py [--solo ID,ID] [--salida fichero]
 #   No ejecutar en paralelo con otro arnes ni con la suite sobre el mismo arbol.
 # Version: 0.1.0 (F05-06 M3 §A8)
+# Version: 0.2.0 (F06 T3 · MANT N1 arneses, AJ-03 del 19-11; enmienda 01): base limpia por mutante (cada llamada a correr clona la plantilla de GAPTO_TEST_DATABASE_URL y la elimina al terminar) y clasificacion de la muerte, con scripts/dev/base_limpia_mutante.py; sin cambios en mutaciones, discriminantes ni restauracion.
+# Version: 0.3.0 (F06 T3 · MANT N1 arneses, reanclaje AJ-T3C-03; AJ-05 del 19-11): M27 y M28 reanclados al codigo
+#   vigente (5a37a59, CAT-VIV: condicion `if declaradas or bloque is not None:` y bloque de la propiedad entre el advisory y
+#   la cuenta), con la forma del reanclaje en memoria del bloque 1: M27 quita el advisory INVERSIONES; M28 toma el lock
+#   FNKU de la cuenta ANTES del advisory. Misma guarda (orden advisory -> cuenta) y mismo discriminante (test_201).
 # ============================================================
 
 from __future__ import annotations
@@ -36,6 +41,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import base_limpia_mutante  # MANT N1 arneses, AJ-03 del 19-11
 
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
 JOURNAL = RAIZ / ".mutantes_f05_06_m3.journal.json"
@@ -156,15 +162,14 @@ MUTANTES = [
      [a("test_cobro_sin_capacidad_y_posicion_ajena")], None),
     # ---------------------------------------------------------------- orden de P4
     ("M27", "orden (i): OP-22 sin el advisory antes de la cuenta (lo pide OP-22 despues)",
-     [(REP, "        if declaradas:\n            tomar_inversiones(sesion)\n", "")],
+     [(REP, "        if declaradas or bloque is not None:\n            tomar_inversiones(sesion)\n", "")],
      [T201 + "test_orden_op22_con_posicion"], None),
     ("M28", "orden (ii): OP-22 bloquea la cuenta ANTES del advisory (candidato A)",
-     [(REP, "        if declaradas:\n            tomar_inversiones(sesion)\n        # 1. Cuenta FNKU (solo si pague yo).\n"
-            "        if isinstance(intencion.pagado_por, PagadoConCuenta):\n"
-            "            bloquear_cuentas(sesion, intencion.pagado_por.cuenta_id)\n",
+     [(REP, "        bloque = intencion.propiedad\n        if declaradas or bloque is not None:\n            tomar_inversiones(sesion)\n",
+       "        bloque = intencion.propiedad\n"
        "        if isinstance(intencion.pagado_por, PagadoConCuenta):\n"
        "            bloquear_cuentas(sesion, intencion.pagado_por.cuenta_id)\n"
-       "        if declaradas:\n            tomar_inversiones(sesion)\n        # 1. Cuenta FNKU (solo si pague yo).\n")],
+       "        if declaradas or bloque is not None:\n            tomar_inversiones(sesion)\n")],
      [T201 + "test_orden_op22_con_posicion"], None),
     ("M29", "orden (ii): cobro/pago bloquean la cuenta ANTES del advisory",
      [(REP, "        tomar_inversiones(sesion)\n        if cuenta_id is not None:\n            bloquear_cuentas(sesion, cuenta_id)\n",
@@ -181,6 +186,7 @@ def sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
+@base_limpia_mutante.por_llamada
 def correr(tests: list[str]) -> int:
     """Ejecuta los nodeids por suite (api con su rootdir; backend aparte). rc != 0 si alguno falla."""
     api = [t for t in tests if t.startswith("tests/api/")]

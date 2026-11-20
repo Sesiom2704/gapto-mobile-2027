@@ -26,6 +26,7 @@
 #   `test_i3_m5_excepcion_limitada_a_los_metodos_autorizados` en 32253e8 (F05-06 M5-B,
 #   mismo contrato: la frontera de ejecucion_prevision.py solo usa los metodos
 #   autorizados de PrevisionesService). Mismos mutantes; censo sin cambios.
+# Version: 0.2.0 (F06 T3 · MANT N1 arneses, AJ-03 del 19-11; enmienda 01): base limpia por mutante (cada llamada a correr clona la plantilla de GAPTO_TEST_DATABASE_URL y la elimina al terminar) y clasificacion de la muerte, con scripts/dev/base_limpia_mutante.py; sin cambios en mutaciones, discriminantes ni restauracion.
 # ============================================================
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import base_limpia_mutante  # MANT N1 arneses, AJ-03 del 19-11
 
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
 JOURNAL = RAIZ / ".mutantes_f05_06_m5.journal.json"
@@ -217,6 +219,7 @@ def sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
+@base_limpia_mutante.por_llamada
 def correr(tests: list[str]) -> int:
     """pytest por suite (api con su rootdir; backend aparte) y Jest en mobile/. rc != 0 si alguno falla."""
     api = [t for t in tests if t.startswith("tests/api/")]

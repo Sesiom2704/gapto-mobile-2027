@@ -34,6 +34,7 @@
 # Version: 0.2.0 (F05-D052 paso 2): AT18 frontera del gasto reembolsable C-03
 #   (ejecucion_reembolsable) y reanclaje de AT16: la entrada HTTP de «Anular por
 #   duplicado» tiene ahora su propia transaccion (guarda POSICIONES de §66.A.9).
+# Version: 0.3.0 (F06 T3 · MANT N1 arneses, AJ-03 del 19-11; enmienda 01): base limpia por mutante (cada llamada a correr clona la plantilla de GAPTO_TEST_DATABASE_URL y la elimina al terminar) y clasificacion de la muerte, con scripts/dev/base_limpia_mutante.py; sin cambios en mutaciones, discriminantes ni restauracion.
 # ============================================================
 
 from __future__ import annotations
@@ -44,6 +45,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import base_limpia_mutante  # MANT N1 arneses, AJ-03 del 19-11
 
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
 JOURNAL = RAIZ / ".mutantes_mant_pre_gate_atomicidad.journal.json"
@@ -180,6 +182,7 @@ def sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
+@base_limpia_mutante.por_llamada
 def correr(tests: list[str], detalle: pathlib.Path | None = None) -> int:
     """pytest de tests/api con su rootdir. rc != 0 si alguno falla. Con
     `detalle`, guarda la salida de pytest (motivo del fallo de cada mutante)."""

@@ -27,6 +27,7 @@
 #   sin la frontera F04-D053 A1), con discriminantes en test_288 y test_293. Ningun texto anterior cambia.
 # Version: 0.2.1 (H3, N-10): descripcion de M-H-45 sin caracteres fuera de cp1252 (la consola de Windows abortaba
 #   el arnes al imprimirla); ningun texto de mutante ni discriminante cambia.
+# Version: 0.3.0 (F06 T3 · MANT N1 arneses, AJ-03 del 19-11; enmienda 01): base limpia por mutante (cada llamada a correr clona la plantilla de GAPTO_TEST_DATABASE_URL y la elimina al terminar) y clasificacion de la muerte, con scripts/dev/base_limpia_mutante.py; sin cambios en mutaciones, discriminantes ni restauracion.
 # ============================================================
 
 from __future__ import annotations
@@ -38,6 +39,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import base_limpia_mutante  # MANT N1 arneses, AJ-03 del 19-11
 
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
 JOURNAL = RAIZ / ".mutantes_f06_01h.journal.json"
@@ -458,6 +460,7 @@ def sha(b: bytes) -> str:
 _OMITIDOS = re.compile(r"\b\d+ (skipped|xfailed|xpassed)\b")
 
 
+@base_limpia_mutante.por_llamada
 def correr(tests: list[str]) -> tuple[int, bool]:
     """pytest por grupo (tests/api con su rootdir; test_295 aparte con GAPTO_F06HIP_CONCURRENCIA=1; el resto de
     tests/ sin rootdir) y Jest en mobile/. Devuelve (rc, hubo_omitidos): rc != 0 si alguno falla."""

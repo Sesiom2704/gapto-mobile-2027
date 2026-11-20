@@ -154,6 +154,10 @@
 #   considera tambien las desconocidas) actualizados. Mismas mutaciones y
 #   mismos discriminantes; censo sin cambios (125).
 # Version: 0.14.0
+# Version: 0.15.0 (F06 T3 · MANT N1 arneses, AJ-03 del 19-11; enmienda 01): base limpia por mutante (cada llamada a correr clona la plantilla de GAPTO_TEST_DATABASE_URL y la elimina al terminar) y clasificacion de la muerte, con scripts/dev/base_limpia_mutante.py; sin cambios en mutaciones, discriminantes ni restauracion.
+# Version: 0.16.0 (F06 T3 · MANT N1 arneses, reanclaje AJ-T3C-03; AJ-05 del 19-11): I16 reanclado al texto vigente
+#   de COLUMNAS_EDITABLES (5a37a59, CAT-VIV, anadio asociada_vivienda): misma mutacion (sin icon_key) y mismos discriminantes
+#   (test_154, test_159).
 # ============================================================
 
 from __future__ import annotations
@@ -164,6 +168,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import base_limpia_mutante  # MANT N1 arneses, AJ-03 del 19-11
 
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
 JOURNAL = RAIZ / ".mutantes_f05_01.journal.json"
@@ -412,7 +417,7 @@ MUTANTES = [
     ("I15", "cambiar_icono reactiva la categoria",
      [(SERV, '{"icon_key": icon_key}))', '{"icon_key": icon_key, "enabled": True}))')], [T159]),
     ("I16", "icon_key fuera de COLUMNAS_EDITABLES",
-     [(REPO, '"ambito", "icon_key"})', '"ambito"})')], [T154, T159]),
+     [(REPO, '"ambito", "icon_key", "asociada_vivienda"})', '"ambito", "asociada_vivienda"})')], [T154, T159]),
     ("I17", "ICONO_CATEGORIA_NO_VALIDO como 409",
      [(ERRH, '"ICONO_CATEGORIA_NO_VALIDO": (422,', '"ICONO_CATEGORIA_NO_VALIDO": (409,')], [T159]),
     ("I18", "comparacion con la clave persistida antes del row_version",
@@ -578,6 +583,7 @@ def sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
+@base_limpia_mutante.por_llamada
 def correr(tests: list[str]) -> int:
     cmd = [sys.executable, "-m", "pytest", *tests, "-q", "-x", "-p", "no:cacheprovider", "--rootdir=tests/api"]
     return subprocess.run(cmd, cwd=RAIZ, capture_output=True).returncode

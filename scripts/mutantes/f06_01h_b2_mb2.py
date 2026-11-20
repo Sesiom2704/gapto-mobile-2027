@@ -24,6 +24,7 @@
 #   M-H-38 activa GAPTO_F06HIP_CONCURRENCIA=1 en el subproceso (bateria serial test_295, COMMIT real: base
 #   desechable). No ejecutar en paralelo con otro arnes ni con la suite sobre el mismo arbol.
 # Version: 0.1.0 (T3-F06 F06-01H paso 12; mandato v1.1 §11.3/§12.1)
+# Version: 0.2.0 (F06 T3 · MANT N1 arneses, AJ-03 del 19-11; enmienda 01): base limpia por mutante (cada llamada a correr clona la plantilla de GAPTO_TEST_DATABASE_URL y la elimina al terminar) y clasificacion de la muerte, con scripts/dev/base_limpia_mutante.py; sin cambios en mutaciones, discriminantes ni restauracion.
 # ============================================================
 
 from __future__ import annotations
@@ -34,6 +35,9 @@ import os
 import pathlib
 import subprocess
 import sys
+
+sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'dev'))  # MANT N1 arneses
+import base_limpia_mutante  # noqa: E402  MANT N1 arneses, AJ-03 del 19-11
 
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
 JOURNAL = RAIZ / ".mutantes_f06_01h_b2_mb2.journal.json"
@@ -117,6 +121,7 @@ def sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
+@base_limpia_mutante.por_llamada
 def correr(tests: list[str]) -> tuple[str, str]:
     """pytest de tests/api con su rootdir. Devuelve ('pasa' | 'falla' | 'rc=<n>', salida)."""
     entorno = dict(os.environ)

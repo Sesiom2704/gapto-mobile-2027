@@ -39,6 +39,7 @@
 #   lineas); se rehacen acotados a la tupla de cada mutante. Ningun texto de mutante cambia.
 # Version: 0.2.2 (paso 9, defecto V-bis de las capturas): MC-CON-23 con el texto nuevo del filtro (`enabled !== false`)
 #   y MC-CON-23b nuevo (volver a exigir `enabled`), que mata el oraculo de la forma real del servidor.
+# Version: 0.3.0 (F06 T3 · MANT N1 arneses, AJ-03 del 19-11; enmienda 01): base limpia por mutante (cada llamada a correr clona la plantilla de GAPTO_TEST_DATABASE_URL y la elimina al terminar) y clasificacion de la muerte, con scripts/dev/base_limpia_mutante.py; sin cambios en mutaciones, discriminantes ni restauracion.
 # ============================================================
 
 from __future__ import annotations
@@ -50,6 +51,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import base_limpia_mutante  # MANT N1 arneses, AJ-03 del 19-11
 
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
 JOURNAL = RAIZ / ".mutantes_f06_02_03.journal.json"
@@ -660,6 +662,7 @@ def sha(b: bytes) -> str:
 _OMITIDOS = re.compile(r"\b\d+ (skipped|xfailed|xpassed)\b")
 
 
+@base_limpia_mutante.por_llamada
 def correr(tests: list[str]) -> tuple[int, bool]:
     """pytest por grupo (tests/api con su rootdir; test_307 aparte con GAPTO_F060203_CONCURRENCIA=1; el resto de
     tests/ sin rootdir) y Jest en mobile/. Devuelve (rc, hubo_omitidos): rc != 0 si alguno falla."""

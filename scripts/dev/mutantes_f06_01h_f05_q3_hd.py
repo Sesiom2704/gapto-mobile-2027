@@ -17,6 +17,7 @@
 # Version: 0.2.0 (F06 T3-F06 bloque 2 F06-01H; enmienda 52ef5511…, firma 0f3e5633…, STOP_F06-T3-2_3 opcion A):
 #   MQ3-C5 (lados() de SwipePrevision.tsx ofrece gestos sobre la fila de la cuota); discriminante Jest
 #   prevision_cuota_lados (Q3-C5).
+# Version: 0.3.0 (F06 T3 · MANT N1 arneses, AJ-03 del 19-11; enmienda 01): base limpia por mutante (cada llamada a correr clona la plantilla de GAPTO_TEST_DATABASE_URL y la elimina al terminar) y clasificacion de la muerte, con scripts/dev/base_limpia_mutante.py; sin cambios en mutaciones, discriminantes ni restauracion.
 # ============================================================
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import base_limpia_mutante  # MANT N1 arneses, AJ-03 del 19-11
 
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
 JOURNAL = RAIZ / ".mutantes_f06_01h_f05_q3_hd.journal.json"
@@ -90,6 +92,7 @@ def sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
+@base_limpia_mutante.por_llamada
 def correr(tests: list[str]) -> int:
     """pytest por suite (api con su rootdir; backend aparte) y Jest en mobile/. rc != 0 si alguno falla."""
     api = [t for t in tests if t.startswith("tests/api/")]
