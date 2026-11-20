@@ -34,6 +34,7 @@
 // v0.24.0 (F06 T3-F06 · F04-R-HIP, subhito F05 S7/S10; D-08): campo aditivo OPCIONAL `AccionPrevision.codigo` (PREVISION_DE_CUOTA). Ninguna llamada existente cambia.
 // v0.25.0 (F06 T3-F06 bloque 2 F06-01H; literal F05 Q3-Hd v1.1): Q3-C1 `FilaPrevision.codigo?` (PREVISION_DE_CUOTA) y HD-C1 rol aditivo `PRESTAMO_RECIBIDO` de `CuentaFila`. Ninguna llamada existente cambia.
 // v0.26.0 (F06 T3-F06 bloque 2 F06-01H, paso 10): llamadas OPCIONALES de la hipoteca (tipos en api/hipoteca.ts; opcionales en `ClienteApi` para que los dobles de test no cambien): `cuadroHipoteca` (POST /v1/hipotecas/cuadro, W-HIP-00, sin escritura), `hipotecaDePropiedad` (GET /v1/propiedades/{id}/hipoteca, L-HIP), `pagarCuotaHipoteca` (POST /v1/hipotecas/{id}/cuotas/{n}/pago, W-HIP-02) y `revisarTipoHipoteca` (POST /v1/hipotecas/{id}/revision, W-HIP-03/04), las dos escrituras con la clasificación 'CAMBIO'. Ninguna llamada existente cambia.
+// v0.27.0 (F06 T3 · MANT N1 de revisión del tipo, A3; dictamen MANT R-B2-06 punto 3 y AJ-03; decisión 14): `revisarTipoHipoteca` usa un timeout propio `TIMEOUT_REVISION_MS` (nunca menor que el general), dimensionado con la medición por fases de A2 (06_revision_latencia); el resto de llamadas conserva el timeout general de 10 s.
 // ============================================================
 
 import type { Ambito, CategoriaNodo } from '../domain/categoria';
@@ -1026,8 +1027,12 @@ export function crearLlamada(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): L
   };
 }
 
+/** MANT N1 de revisión del tipo (A3): timeout propio de POST /v1/hipotecas/{id}/revision; nunca menor que el general. */
+export const TIMEOUT_REVISION_MS = 45000;
+
 export function crearCliente(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): ClienteApi {
   const llamar = crearLlamada(cfg, fetchImpl);
+  const llamarRevision = crearLlamada({ ...cfg, timeoutMs: Math.max(cfg.timeoutMs, TIMEOUT_REVISION_MS) }, fetchImpl);
   return {
     registrarGastoPagado: (p) =>
       llamar('/v1/intenciones/gasto-pagado', { method: 'POST', body: JSON.stringify(p) }, true),
@@ -1166,6 +1171,6 @@ export function crearCliente(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): C
     cuadroHipoteca: (payload) => llamar('/v1/hipotecas/cuadro', post(payload), false),
     hipotecaDePropiedad: (id) => llamar(`/v1/propiedades/${encodeURIComponent(id)}/hipoteca`, { method: 'GET' }, false),
     pagarCuotaHipoteca: (id, numero, payload) => llamar(`/v1/hipotecas/${encodeURIComponent(id)}/cuotas/${numero}/pago`, post(payload), 'CAMBIO'),
-    revisarTipoHipoteca: (id, payload) => llamar(`/v1/hipotecas/${encodeURIComponent(id)}/revision`, post(payload), 'CAMBIO'),
+    revisarTipoHipoteca: (id, payload) => llamarRevision(`/v1/hipotecas/${encodeURIComponent(id)}/revision`, post(payload), 'CAMBIO'),
   };
 }

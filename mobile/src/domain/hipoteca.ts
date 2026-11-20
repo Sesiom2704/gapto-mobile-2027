@@ -7,6 +7,7 @@
 // Versión: 0.2.0 (F06 T3-F06 bloque 2 F06-01H; N-31, firma 0f3e5633…): constante de código propia `REVISION_TIPO_EXPUESTA = true` y `ofreceRevisionTipo` (revisión solo expuesta, ACTIVA y con deuda conocida).
 // Versión: 0.3.0 (F06 T3-F06 bloque 2 F06-01H; N-30, firma 0f3e5633…, enmienda 52ef5511…): `titularidadPrestamoEnFecha`: la propuesta del reparto de los intereses sale de la titularidad DEL PRÉSTAMO de L-HIP vigente en el vencimiento (Q-T3D-08), no de la de la propiedad.
 // Versión: 0.4.0 (F06 T3-F06 bloque 2 F06-01H; firma e446b4c3…, N-40): `PAGO_CUOTA_EXPUESTO = true` antes del gate (Q3-C5 implementada, STOP 3 resuelto); vuelve a false sin nueva firma si al final falla #96 (D17), el bloque 1, Q3, el botón o el no swipe.
+// Versión: 0.5.0 (F06 T3 · MANT N1 de revisión del tipo, A3; dictamen MANT R-B2-06 punto 3 y AJ-03; decisión 14): `enviarRevisionComprobando` (ante un INDETERMINADO reenvía la MISMA petición, misma intención: el servidor la resuelve como replay idempotente sin escribir; máximo `COMPROBACIONES_REVISION` = 2), `TEXTO_COMPROBANDO_REVISION` y `TEXTO_REVISION_SIN_CONFIRMAR` (nunca «fallo» ni «repítela»). Mismo patrón que la compra (1a36dc6). No cambia el cálculo, las guardas, la exposición ni el límite de cuotas.
 // ============================================================
 
 import type {
@@ -60,6 +61,34 @@ export const TEXTO_REPARTO_INTERESES = 'Los intereses se reparten según la titu
 export const TEXTO_SIN_TITULARIDAD_CUOTA = 'No hay titularidad del préstamo en el vencimiento: no se puede proponer el reparto.';
 export const TEXTO_REVISION = 'Las cuotas ya pagadas no cambian. Se recalculan, con el mismo plazo, las que vencen desde esa fecha.';
 export const TEXTO_INDETERMINADO = 'No se ha podido confirmar. Vuelve a cargar la hipoteca antes de repetir.';
+/** MANT de revisión del tipo (A3): mientras se comprueba, tras un timeout, si la revisión se guardó (replay idempotente). */
+export const TEXTO_COMPROBANDO_REVISION = 'Comprobando si la revisión se ha guardado…';
+/** MANT de revisión del tipo (A3): la comprobación tampoco ha podido confirmar; nunca se dice que ha fallado ni se invita a repetirla. */
+export const TEXTO_REVISION_SIN_CONFIRMAR =
+  'Todavía no podemos confirmar si la revisión se ha guardado. No la repitas: vuelve a abrir la hipoteca dentro de unos minutos para comprobarlo.';
+/** MANT de revisión del tipo (A3): reenvíos de comprobación tras un INDETERMINADO (timeout o red). */
+export const COMPROBACIONES_REVISION = 2;
+
+/**
+ * MANT de revisión del tipo (A3): envía la revisión y, si la respuesta es INDETERMINADO (timeout, red o 5xx), NO la da por fallida:
+ * reenvía la MISMA petición (`enviar` cierra sobre el mismo cuerpo, con la misma `intencion_id`) hasta `n` veces. El servidor resuelve
+ * el reenvío como replay idempotente (`idempotente: true`, sin escribir) si la revisión ya se guardó, o la guarda si no llegó; nunca
+ * duplica (identidad uuid5 de la versión). Devuelve la primera respuesta definitiva (OK o RECHAZADO) o el último INDETERMINADO.
+ */
+export async function enviarRevisionComprobando<R extends { tipo: string }>(
+  enviar: () => Promise<R>,
+  alComprobar?: () => void,
+  n: number = COMPROBACIONES_REVISION,
+): Promise<{ respuesta: R; comprobaciones: number }> {
+  let respuesta = await enviar();
+  let comprobaciones = 0;
+  while (respuesta.tipo === 'INDETERMINADO' && comprobaciones < n) {
+    comprobaciones += 1;
+    alComprobar?.();
+    respuesta = await enviar();
+  }
+  return { respuesta, comprobaciones };
+}
 export const TEXTO_GENERICO = 'No se ha podido guardar. Revisa los datos.';
 
 export const NOMBRE_TIPO: Record<TipoInteresHipoteca, string> = { FIJO: 'Fijo', VARIABLE: 'Variable' };
