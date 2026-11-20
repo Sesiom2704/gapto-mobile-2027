@@ -9,6 +9,7 @@
 // Versión: 0.3.1 (F06 T1-F06 B3 ajuste N3 · decisión de Moisés 2026-11-13 «B3 alcance y CAT-VIV» v1.0): la fila pasa a «Reforma o mejora» (obras que suben el valor); los gastos corrientes y las reparaciones se registran desde «Registrar gasto».
 // Versión: 0.4.0 (F06 T2-F06 · B1-R (L-01/L-01b), mandato §4.6): SOLO aditivo: prop opcional `onCorregirInicio` y la fila «Corregir desde cuándo» (C-PROP-03bis) con el inicio vigente, visible solo si el servidor la ofrece (`inicio_titularidad.inicio_corregible`); el cliente no la deduce.
 // Versión: 0.5.0 (F06 T3-F06 bloque 2 F06-01H, paso 10; contrato v0.4 §8): SOLO aditivo: props opcionales `hipoteca` (L-HIP) y `onHipoteca`, y la fila «Hipoteca» SOLO con hipoteca (lo que queda por pagar —«no disponible» si el saldo es desconocido, nunca 0— y la cuota). Es una fila normal, sin swipe. Sin esas props la ficha no cambia.
+// Versión: 0.6.0 (F06 T3-F06 Bloque 3 F06-02/03, paso 5 cliente): SOLO aditivo: prop opcional `onContratos` y la fila «Contratos» (lámina CON v0.8 A1; sin importes: la renta llega con la parte de cobros). Sin esa prop la ficha no cambia.
 // ============================================================
 
 import React from 'react';
@@ -52,6 +53,8 @@ export function PropiedadFichaScreen(p: {
   /** F06-01H: L-HIP de la propiedad (null o ausente = sin hipoteca: no hay fila). */
   hipoteca?: Hipoteca | null;
   onHipoteca?: () => void;
+  /** F06-02/03: contratos de la propiedad (A1). Sin la prop no hay fila. */
+  onContratos?: () => void;
 }) {
   const { c } = useTema();
   const inset = useSafeAreaInsets();
@@ -107,6 +110,7 @@ export function PropiedadFichaScreen(p: {
           {p.onHipoteca && p.hipoteca ? (
             <FilaLista testID="prop-accion-hipoteca" titulo="Hipoteca" detalle={detalleFichaHipoteca(p.hipoteca)} onPress={p.onHipoteca} />
           ) : null}
+          {p.onContratos ? <FilaLista testID="prop-accion-contratos" titulo="Contratos" detalle="Alquileres, personas y servicios" onPress={p.onContratos} /> : null}
           {p.onGastos ? <FilaLista testID="prop-accion-gastos" titulo="Reforma o mejora" detalle="Obras que suben el valor: cocina, ventanas, pintura…" onPress={p.onGastos} /> : null}
           <FilaLista testID="prop-accion-valor" titulo="Revisar valor" detalle={sinDatos ? 'Para saber lo que vale' : undefined} onPress={p.onRevisarValor} />
           <FilaLista testID="prop-accion-historico" titulo="Histórico de valoraciones" detalle={`${v.valoraciones.length} ${v.valoraciones.length === 1 ? 'valoración' : 'valoraciones'}`} onPress={p.onHistorico} />
