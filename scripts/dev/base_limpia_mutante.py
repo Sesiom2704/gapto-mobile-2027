@@ -38,6 +38,9 @@
 # Version: 0.2.4 (F06 T3 · MANT N1 arneses, B3): un nodo fallido sin ruta y con parametros («test_x[p]») casa con el
 #   nodo declarado «ruta::test_x[p]»; la muestra se guarda desde la seccion FAILURES/ERRORS (hasta 8000 caracteres) mas
 #   la cola, para que la cabecera del fallo quede siempre en la evidencia.
+# Version: 0.2.5 (F06 T3 · MANT N1 arneses, B3): nodos con espacios en el valor del parametro («test_x[ clave]»):
+#   la linea FAILED y la cabecera se leen hasta « - » o el final de linea (en 0.2.4 tres muertes de f05_01 salian como
+#   FALLO_INFRA).
 # ============================================================
 from __future__ import annotations
 
@@ -64,13 +67,13 @@ INFRA = re.compile(r"OperationalError|BD_NO_DISPONIBLE|could not reserve shared 
                    r"ImportError|SyntaxError|IndentationError|Test suite failed to run|Cannot find module|no tests ran|"
                    r"PermissionError|MemoryError", re.I)
 # acepta CRLF y la linea sin « - mensaje» (pytest la omite si el mensaje no cabe): «FAILED ruta::test<CR>»
-_NODO_FALLIDO = re.compile(r"^(FAILED|ERROR) (\S+?)(?: - (.*?))?\s*$", re.M)
+_NODO_FALLIDO = re.compile(r"^(FAILED|ERROR) (\S.*?)(?: - (.*?))?\s*$", re.M)
 _JEST_FALLIDO = re.compile(r"^\s*● (.+)$", re.M)
 # sin lineas FAILED (arneses con -rsx, que sustituye al resumen -rfE por defecto): cabeceras de fallo y recuento final
-_CABECERA_FALLO = re.compile(r"^_+ (ERROR at setup of |ERROR at teardown of )?([A-Za-z]\S*?) _+\s*$", re.M)
+_CABECERA_FALLO = re.compile(r"^_+ (ERROR at setup of |ERROR at teardown of )?([A-Za-z].*?) _+\s*$", re.M)
 _RECUENTO = re.compile(r"(\d+) (failed|errors?)\b")
 _LINEA_FINAL = re.compile(r"^=*\s*(\d+ (?:failed|passed|errors?)\b.* in [\d.]+s.*?)\s*=*\s*$", re.M)
-VERSION = "0.2.4"
+VERSION = "0.2.5"
 
 
 def _partes(url: str):
