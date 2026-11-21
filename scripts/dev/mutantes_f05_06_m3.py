@@ -31,6 +31,9 @@
 #   vigente (5a37a59, CAT-VIV: condicion `if declaradas or bloque is not None:` y bloque de la propiedad entre el advisory y
 #   la cuenta), con la forma del reanclaje en memoria del bloque 1: M27 quita el advisory INVERSIONES; M28 toma el lock
 #   FNKU de la cuenta ANTES del advisory. Misma guarda (orden advisory -> cuenta) y mismo discriminante (test_201).
+# Version: 0.4.0 (F06 T3 · cadena de noche 21->22-11, T-C MANT N1 RK-ARN-02; dictamen del 21-11 §3 y AJ-03): M26
+#   sustituye la linea por `pass` en lugar de borrarla (antes dejaba el if vacio: IndentationError, muerte por
+#   preparacion); misma mutacion (sin comprobar la capacidad) y mismo discriminante.
 # ============================================================
 
 from __future__ import annotations
@@ -158,7 +161,7 @@ MUTANTES = [
     # ---------------------------------------------------------------- capacidad (M4) en cobro/pago
     ("M26", "cobro sin comprobar la capacidad de la cuenta",
      [(REP, "                rechazo_cuenta(sesion, cuenta_id, \"INGRESO\" if operacion_motor == \"COBRO\" else \"GASTO\", fecha)\n",
-       "")],
+       "                pass\n")],  # RK-ARN-02 (0.4.0): `pass` en lugar de borrar la unica linea del if
      [a("test_cobro_sin_capacidad_y_posicion_ajena")], None),
     # ---------------------------------------------------------------- orden de P4
     ("M27", "orden (i): OP-22 sin el advisory antes de la cuenta (lo pide OP-22 despues)",
