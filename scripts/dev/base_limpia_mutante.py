@@ -35,6 +35,9 @@
 # Version: 0.2.3 (F06 T3 · MANT N1 arneses, B3): la cabecera de fallo de pytest puede llevar un solo guion bajo
 #   («_ test_largo[param] _») cuando el nombre es largo: se acepta «_+» y un nombre que empiece por letra (los
 #   separadores «_ _ _» entre marcos del traceback no casan). En 0.2.2 dos muertes de M-H salian como FALLO_INFRA.
+# Version: 0.2.4 (F06 T3 · MANT N1 arneses, B3): un nodo fallido sin ruta y con parametros («test_x[p]») casa con el
+#   nodo declarado «ruta::test_x[p]»; la muestra se guarda desde la seccion FAILURES/ERRORS (hasta 8000 caracteres) mas
+#   la cola, para que la cabecera del fallo quede siempre en la evidencia.
 # ============================================================
 from __future__ import annotations
 
@@ -67,7 +70,7 @@ _JEST_FALLIDO = re.compile(r"^\s*● (.+)$", re.M)
 _CABECERA_FALLO = re.compile(r"^_+ (ERROR at setup of |ERROR at teardown of )?([A-Za-z]\S*?) _+\s*$", re.M)
 _RECUENTO = re.compile(r"(\d+) (failed|errors?)\b")
 _LINEA_FINAL = re.compile(r"^=*\s*(\d+ (?:failed|passed|errors?)\b.* in [\d.]+s.*?)\s*=*\s*$", re.M)
-VERSION = "0.2.3"
+VERSION = "0.2.4"
 
 
 def _partes(url: str):
@@ -117,8 +120,10 @@ def _es_declarado(nodo: str, declarados: list[str]) -> bool:
     base = n.split("[")[0]
     for d in declarados:
         d = d.replace("\\", "/")
+        ultimo = d.split("::")[-1]
         if n == d or base == d or n.startswith(d + "::") or n.startswith(d + "[") or d.endswith(base) or \
-                (("::" not in d) and n.startswith(d)):
+                (("::" not in d) and n.startswith(d)) or n == ultimo or n.split("::")[-1] == ultimo or \
+                ultimo.split("[")[0] == base.split("::")[-1]:
             return True
     return False
 
@@ -190,6 +195,15 @@ def _capturar(ejecuciones: list[dict]):
         subprocess.run = original
 
 
+def _muestra(salida: str) -> str:
+    """Desde la seccion FAILURES/ERRORS de pytest (cabeceras incluidas), hasta 8000 caracteres, mas la cola."""
+    i = max(salida.find("= FAILURES ="), salida.find("= ERRORS ="))
+    if i < 0:
+        return salida[-4000:]
+    cuerpo = salida[i:i + 8000]
+    return cuerpo + ("\n[...]\n" + salida[-1500:] if len(salida) > i + 8000 else "")
+
+
 def _anotar(tests, resultado, base, ejecuciones) -> None:
     ruta = os.environ.get("GAPTO_MUTANTES_CLASIFICACION")
     if not ruta:
@@ -198,7 +212,7 @@ def _anotar(tests, resultado, base, ejecuciones) -> None:
     tl = [tests] if isinstance(tests, str) else list(tests)
     fallidas = [e for e in ejecuciones if e["rc"] != 0]
     fila = {"llamada": next(_N_CALL), "version_clasificador": VERSION, "base": base, "tests": tl, "rc_arnes": rc,
-            "muestra_fallo": fallidas[0]["salida"][-4000:] if fallidas else None,
+            "muestra_fallo": _muestra(fallidas[0]["salida"]) if fallidas else None,
             **clasificar(tests if isinstance(tests, str) else tl, ejecuciones),
             "rc_subprocesos": [e["rc"] for e in ejecuciones]}
     with open(ruta, "a", encoding="utf-8") as f:
