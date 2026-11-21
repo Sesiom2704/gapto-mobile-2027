@@ -29,6 +29,9 @@
 #                    condicion (b): discriminante de la PO-04 de 0354 v0.1.1
 #                    (aclexplode): con un privilegio indebido de gapto_runtime
 #                    el postcheck falla; sin el, pasa (control).
+# Versión: 0.4.0  -- F06 T4 P-RB206-1 (mandato 753bebb2… §2.6): con 0356 aplicada (marca: funcion
+#                    fn_borrar_memo_cuadro_hipoteca) la huella CURRENT es la de 0356; el control del postcheck de 0354
+#                    retira antes, en la transaccion revertida, los objetos de 0356 (patron de test_048). Solo cambia la eleccion del head.
 # Versión: 0.3.0  -- F06 T3-F06 Bloque 3 F06-02/03 (L-06-T3, mandato v1.2 §5; añadido por D-DISC-01 de la
 #                    revalidacion del paso 1): la huella CURRENT depende del head; con 0355 aplicada (marca:
 #                    ck_contrato_participantes__rol admite AGENCIA) es la de 0355 y, si no, la de 0354.
@@ -404,8 +407,23 @@ def _head_0355(db: psycopg.Connection) -> bool:
                     "AND pg_catalog.pg_get_constraintdef(oid) LIKE '%''AGENCIA''%'") == 1
 
 
+def _head_0356(db: psycopg.Connection) -> bool:
+    """0356 aplicada (marca: funcion gapto.fn_borrar_memo_cuadro_hipoteca; F06 T4 P-RB206-1)."""
+    return _uno(db, "SELECT count(*) FROM pg_catalog.pg_proc WHERE pronamespace = 'gapto'::regnamespace "
+                    "AND proname = 'fn_borrar_memo_cuadro_hipoteca'") == 1
+
+
+def _retirar_0356(db: psycopg.Connection) -> None:
+    """L-06-T4: dentro de una transaccion que termina en ROLLBACK, retira la funcion de invalidacion de 0356
+    y sus tres triggers (CASCADE) para que el bloque literal de una migration anterior vea su head."""
+    if _head_0356(db):
+        db.execute("SET LOCAL ROLE gapto_owner")
+        db.execute("DROP FUNCTION gapto.fn_borrar_memo_cuadro_hipoteca() CASCADE")
+        db.execute("RESET ROLE")
+
+
 def test_0354_huella_d111_current(db):
-    referencia = _runner().HUELLAS_D111_POR_HEAD["0355" if _head_0355(db) else "0354"]
+    referencia = _runner().HUELLAS_D111_POR_HEAD["0356" if _head_0356(db) else "0355" if _head_0355(db) else "0354"]
     sql = (RAIZ / "scripts" / "postgres" / "huellas_d111.sql").read_text(encoding="utf-8")
     cursor = db.execute(sql)
     observadas = dict(zip([d.name for d in cursor.description], cursor.fetchone()))
@@ -451,8 +469,10 @@ def test_0354_po04_discrimina_privilegio_indebido(db):
     bloque = _postcheck_0354()
     assert "aclexplode" in bloque and "information_schema" not in bloque
     with db.transaction(force_rollback=True):
+        _retirar_0356(db)                                                         # L-06-T4
         db.execute(bloque)                                                        # control: head 0354 intacto
     with db.transaction(force_rollback=True):
+        _retirar_0356(db)                                                         # L-06-T4
         db.execute("SET LOCAL ROLE gapto_owner")
         db.execute("GRANT TRUNCATE ON gapto.financiacion_cuotas TO gapto_runtime")  # privilegio indebido
         db.execute("RESET ROLE")

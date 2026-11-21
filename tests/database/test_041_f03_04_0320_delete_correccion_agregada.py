@@ -31,6 +31,7 @@
 #              y bajo FORCE ROW LEVEL SECURITY. Si el rol de conexión del arnés
 #              no puede asumir gapto_runtime, esos tests SE SALTAN con mensaje
 #              explícito, nunca en silencio (mismo criterio que test_038).
+# Versión: 0.1.8  -- F06 T4 P-RB206-1 (L-06-T4, mandato 753bebb2… §2.6): con 0356 35 funciones y 68 triggers no internos.
 # Versión: 0.1.7  -- F06 T3-F06 bloque 2 F06-01H (L-06-T3, mandato v1.1 §5.1; añadido en el handoff): con 0354 aplicada (marca fn_validar_cuadro_hipoteca) triggers 65/44 y funciones 34.
 # Versión: 0.1.6  -- T2-F06 CAT-VIV N1 (literal de autorizacion v1.1, ampliacion de L-06 solo para este
 #                   bloque): el conjunto finito admite 788 (0353, asociada_vivienda); 787 se conserva.
@@ -155,6 +156,12 @@ def _head_0354(db: psycopg.Connection) -> bool:
     """0354 aplicada (marca: funcion gapto.fn_validar_cuadro_hipoteca, T3-F06 F06-01H)."""
     return _uno(db, "SELECT count(*) FROM pg_catalog.pg_proc WHERE pronamespace = 'gapto'::regnamespace "
                     "AND proname = 'fn_validar_cuadro_hipoteca'") == 1
+
+
+def _head_0356(db: psycopg.Connection) -> bool:
+    """0356 aplicada (marca: funcion gapto.fn_borrar_memo_cuadro_hipoteca; F06 T4 P-RB206-1)."""
+    return _uno(db, "SELECT count(*) FROM pg_catalog.pg_proc WHERE pronamespace = 'gapto'::regnamespace "
+                    "AND proname = 'fn_borrar_memo_cuadro_hipoteca'") == 1
 
 
 def _priv(db: psycopg.Connection, rol: str, tabla: str, priv: str) -> bool:
@@ -306,7 +313,7 @@ def test_0320_no_crea_ni_modifica_triggers(db: psycopg.Connection) -> None:
         SELECT count(*) FROM pg_catalog.pg_trigger t
           JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid
          WHERE c.relnamespace='gapto'::regnamespace AND NOT t.tgisinternal
-    """) == (65 if _head_0354(db) else 58)
+    """) == (68 if _head_0356(db) else 65 if _head_0354(db) else 58)
     assert _uno(db, """
         SELECT count(*) FROM pg_catalog.pg_trigger t
           JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid
@@ -398,7 +405,7 @@ def test_0320_es_acl_puro(db: psycopg.Connection) -> None:
     assert _uno(db, "SELECT count(*) FROM pg_catalog.pg_policies WHERE schemaname='gapto'") == 82
     assert _uno(db, """
         SELECT count(*) FROM pg_catalog.pg_proc WHERE pronamespace='gapto'::regnamespace
-    """) == (34 if _head_0354(db) else 28)
+    """) == (35 if _head_0356(db) else 34 if _head_0354(db) else 28)
 
 
 def test_0320_no_afecta_a_owner_ni_backup(db: psycopg.Connection) -> None:

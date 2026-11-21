@@ -26,6 +26,7 @@
 #              materializa; corresponde a 0310 y a su propio modulo.
 #
 # PRECONDICIÓN: requiere 0300 aplicada.
+# Versión: 0.1.4  -- F06 T4 P-RB206-1 (L-06-T4, mandato 753bebb2… §2.6): 35 funciones con 0356.
 # Versión: 0.1.3  -- F06 T3-F06 bloque 2 F06-01H (L-06-T3, mandato v1.1 §5.1; añadido en el handoff): estado autorizado de 34 funciones (0354).
 # Versión: 0.1.2  -- SUCESORA 0330 / D-185. El recuento global de indices deja de
 #                   ser igualdad y pasa a conjunto explicito y FINITO, con cada
@@ -292,7 +293,7 @@ TRIGGERS_AUTORIZADOS_EN_APORTACIONES = (
     frozenset(),                                              # 0300: ninguno
     frozenset({"trg_hecho_aportaciones_pago__conciliacion_suma"}),  # 0310
 )
-FUNCIONES_AUTORIZADAS = (26, 28, 34)   # 26 en 0300; 28 con el nucleo y el despachador de 0310; 34 con 0354
+FUNCIONES_AUTORIZADAS = (26, 28, 34, 35)   # 26 en 0300; 28 con el nucleo y el despachador de 0310; 34 con 0354; 35 con 0356
 
 
 def test_0300_no_introduce_triggers_ni_funciones(db: psycopg.Connection) -> None:

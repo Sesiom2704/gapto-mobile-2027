@@ -29,6 +29,8 @@
 #              DISCRIMINACIÓN CONTRA 0352 (WM 12C.2). Sobre una base en 0352
 #              fallan la huella, el contrato, el comportamiento y la aplicacion
 #              simulada (no existe la columna): el modulo solo pasa con 0353.
+# Versión: 0.4.0  -- F06 T4 P-RB206-1 (mandato 753bebb2… §2.6): con 0356 aplicada (marca: funcion
+#                    fn_borrar_memo_cuadro_hipoteca) la huella CURRENT es la de 0356. Solo cambia la eleccion del head.
 # Versión: 0.3.0  -- F06 T3-F06 Bloque 3 F06-02/03 (L-06-T3, mandato v1.2 §5): con 0355 aplicada (marca:
 #                    ck_contrato_participantes__rol admite AGENCIA) la huella CURRENT es la de 0355.
 # Versión: 0.2.0  -- F06 T3-F06 bloque 2 F06-01H (L-06-T3, mandato v1.1 §5.1): con 0354 aplicada
@@ -104,6 +106,12 @@ def _head_0355(db: psycopg.Connection) -> bool:
                     "AND pg_catalog.pg_get_constraintdef(oid) LIKE '%''AGENCIA''%'") == 1
 
 
+def _head_0356(db: psycopg.Connection) -> bool:
+    """0356 aplicada (marca: funcion gapto.fn_borrar_memo_cuadro_hipoteca; F06 T4 P-RB206-1)."""
+    return _uno(db, "SELECT count(*) FROM pg_catalog.pg_proc WHERE pronamespace = 'gapto'::regnamespace "
+                    "AND proname = 'fn_borrar_memo_cuadro_hipoteca'") == 1
+
+
 def cuerpo_0353() -> str:
     """Cuerpo de 0353 sin su control transaccional, extraido del fichero."""
     texto = MIGRATION.read_text(encoding="utf-8")
@@ -156,7 +164,7 @@ def _como_runtime(db: psycopg.Connection) -> None:
 
 # ------------------------------------------------------------------ huella y desviación
 def test_0353_huella_d111_current(db: psycopg.Connection) -> None:
-    referencia = _runner().HUELLAS_D111_POR_HEAD["0355" if _head_0355(db) else ("0354" if _head_0354(db) else "0353")]
+    referencia = _runner().HUELLAS_D111_POR_HEAD["0356" if _head_0356(db) else "0355" if _head_0355(db) else ("0354" if _head_0354(db) else "0353")]
     observadas = _huellas(db)
     assert {k: observadas[k] for k in referencia} == referencia
 

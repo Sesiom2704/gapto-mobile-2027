@@ -56,6 +56,16 @@
 # ROLE DRIFT, que es correcto y deliberado. En ese caso se usa --desde 0002
 # y el clean-room demuestra reproducibilidad DE LA BASE, no de la instancia.
 # Reproducir tambien la instancia exige un proyecto nuevo.
+# Versión: 0.23.0 -- F06 T4 P-RB206-1 (mandato 753bebb2… §2.6, enmienda 01 257be460…):
+#                    se DECLARA el head 0356 (G2 deduplicada con memo de transaccion):
+#                    CONTRATO_0356 = 0355 con funciones 35 y triggers no internos 68
+#                    (constraint triggers 44, sin cambios); tests de 0355 + test_051
+#                    exigidos; 0356 en HEADS_QUE_EXIGEN_REFERENCIA_D111; referencia
+#                    D-111 MEDIDA en el replay local 0001..0356 (PostgreSQL 17.5 UTC):
+#                    cambian h5, h6 y los recuentos; h1..h4, h7 y h8 identicas a 0355.
+#                    Provisional hasta el humo de Neon. El contrato por defecto (sin
+#                    --head) SIGUE en 0355: 0356 se certifica con --head 0356 y asi no
+#                    cambian los tests que fijan el defecto (test_048..050).
 # Versión: 0.22.0 -- F06 T3-F06 Bloque 3 F06-02/03 (mandato v1.2 §9, paso 2). Se
 #                    DECLARA la referencia D-111 de 0355 MEDIDA en el replay local
 #                    0001..0355 (PostgreSQL 17.5, UTC, commit 101e90e): solo cambia
@@ -298,7 +308,7 @@ from pathlib import Path
 
 # Version del runner que se materializa en el manifest. Debe coincidir con la
 # primera linea "Versión:" de la cabecera; test_040 lo comprueba.
-VERSION_RUNNER = "0.22.0"
+VERSION_RUNNER = "0.23.0"
 
 try:
     import psycopg
@@ -404,6 +414,11 @@ CONTRATO_0354 = {**CONTRATO_0353, "funciones": 34, "triggers_no_internos": 65, "
 # sin tablas, columnas, indices, FK, policies, ACL, funciones ni triggers.
 CONTRATO_0355 = {**CONTRATO_0354}
 
+# F06 T4 / 0356 (P-RB206-1, opcion M): una funcion de invalidacion del memo de G2 y
+# tres triggers ordinarios AFTER ROW; el despachador de G2 se reemplaza (h6). Sin
+# tablas, columnas, indices, FK, policies, ACL ni constraint triggers nuevos.
+CONTRATO_0356 = {**CONTRATO_0355, "funciones": 35, "triggers_no_internos": 68}
+
 CONTRATOS_POR_HEAD = {
     "0300": CONTRATO_0300,
     "0310": CONTRATO_0310,
@@ -416,6 +431,7 @@ CONTRATOS_POR_HEAD = {
     "0353": CONTRATO_0353,
     "0354": CONTRATO_0354,
     "0355": CONTRATO_0355,
+    "0356": CONTRATO_0356,
 }
 
 # Head vigente de la cadena cuando no se declara --head.
@@ -474,11 +490,21 @@ TESTS_EXIGIDOS_POR_HEAD = {
              "test_048_f06_cat_viv_0353",
              "test_049_f06_01h_0354_garantias",
              "test_050_f06_02_03_0355_roles_participante"),
+    "0356": ("test_041_f03_04_0320_delete_correccion_agregada",
+             "test_042_f03_04_0330_geolocalizacion_y_presentacion",
+             "test_043_f03_05_0340_categoria_icon_key",
+             "test_045_f03_06_0350_tipo_hecho_condonacion",
+             "test_046_f06_01_0351_base_patrimonial",
+             "test_047_f06_01_0352_completitud_coste",
+             "test_048_f06_cat_viv_0353",
+             "test_049_f06_01h_0354_garantias",
+             "test_050_f06_02_03_0355_roles_participante",
+             "test_051_f06_t4_0356_g2_dedup"),
 }
 
 # Heads cuya certificacion exige comparar las ocho huellas D-111 contra una
 # REFERENCIA aprobada. Sin referencia declarada NO hay PASS: fail-closed.
-HEADS_QUE_EXIGEN_REFERENCIA_D111 = ("0330", "0340", "0350", "0351", "0352", "0353", "0354", "0355")
+HEADS_QUE_EXIGEN_REFERENCIA_D111 = ("0330", "0340", "0350", "0351", "0352", "0353", "0354", "0355", "0356")
 
 # Referencia aprobada de las ocho huellas D-111 por head (D-187 DEC-8).
 #
@@ -615,6 +641,23 @@ HUELLAS_D111_POR_HEAD = {
         "h7_grants":      "933a65b3869cc2030163e60c34e9b163",
         "h8_vistas":      "bc29f409364899f99402b8ed06f77149",
         "recuentos":      "788/655/287/82/65/34/1024/3",
+    },
+    # F06 T4 / 0356 (P-RB206-1). MEDIDA en el replay local 0001..0356 (laboratorio
+    # local PostgreSQL 17.5 UTC, evidencia_t4_g2/<ts>/02_migration/
+    # huellas_replay_0356_vs_0355.json), no declarada a mano. Frente a 0355 cambian
+    # h5 (tres triggers de invalidacion), h6 (funcion nueva y despachador
+    # reemplazado) y los recuentos; h1..h4, h7 y h8 identicas. Provisional hasta el
+    # humo de Neon.
+    "0356": {
+        "h1_columnas":    "5139e53d2f4a86e66ce588c7b782bc74",
+        "h2_constraints": "261c2039f18d373cdb501c39d5a2facb",
+        "h3_indices":     "aceb34183f2156348a3c58ff033c1d53",
+        "h4_policies":    "e1b1dd81a40b8e10c7f1744b25611fb1",
+        "h5_triggers":    "e3673ef5513224a43985a14d7e696d3b",
+        "h6_funciones":   "0226a362fbc13e5130346ec5b0cec19b",
+        "h7_grants":      "933a65b3869cc2030163e60c34e9b163",
+        "h8_vistas":      "bc29f409364899f99402b8ed06f77149",
+        "recuentos":      "788/655/287/82/68/35/1024/3",
     },
 }
 

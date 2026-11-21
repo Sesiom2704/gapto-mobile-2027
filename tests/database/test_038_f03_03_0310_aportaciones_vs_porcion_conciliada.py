@@ -46,6 +46,7 @@
 #              sesiones simultaneas y viven en el arnes R7.
 #
 # PRECONDICIÓN: requiere 0310 aplicada.
+# Versión: 0.1.5  -- F06 T4 P-RB206-1 (L-06-T4, mandato 753bebb2… §2.6): con 0356 (marca fn_borrar_memo_cuadro_hipoteca) 35 funciones y 68 triggers no internos.
 # Versión: 0.1.4  -- F06 T3-F06 bloque 2 F06-01H (L-06-T3, mandato v1.1 §5.1; añadido en el handoff): con 0354 aplicada (marca fn_validar_cuadro_hipoteca) el contrato fisico es 34/65/44.
 # Versión: 0.1.3  -- SUCESORA 0330 / D-185. Mismo criterio que test_037: el
 #                   recuento global de indices pasa a conjunto explicito y FINITO.
@@ -113,6 +114,12 @@ def _head_0354(db: psycopg.Connection) -> bool:
     """0354 aplicada (marca: funcion gapto.fn_validar_cuadro_hipoteca, T3-F06 F06-01H)."""
     return _uno(db, "SELECT count(*) FROM pg_catalog.pg_proc WHERE pronamespace = 'gapto'::regnamespace "
                     "AND proname = 'fn_validar_cuadro_hipoteca'") == 1
+
+
+def _head_0356(db: psycopg.Connection) -> bool:
+    """0356 aplicada (marca: funcion gapto.fn_borrar_memo_cuadro_hipoteca; F06 T4 P-RB206-1)."""
+    return _uno(db, "SELECT count(*) FROM pg_catalog.pg_proc WHERE pronamespace = 'gapto'::regnamespace "
+                    "AND proname = 'fn_borrar_memo_cuadro_hipoteca'") == 1
 
 
 class Escenario:
@@ -240,12 +247,12 @@ def test_0310_trigger_no_dispara_en_delete(db: psycopg.Connection, nombre: str) 
 
 def test_0310_contrato_fisico(db: psycopg.Connection) -> None:
     assert _uno(db, "SELECT count(*) FROM pg_catalog.pg_proc p "
-                    "WHERE p.pronamespace = 'gapto'::regnamespace") == (34 if _head_0354(db) else 28)
+                    "WHERE p.pronamespace = 'gapto'::regnamespace") == (35 if _head_0356(db) else 34 if _head_0354(db) else 28)
     assert _uno(db, """
         SELECT count(*) FROM pg_catalog.pg_trigger t
           JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid
          WHERE c.relnamespace = 'gapto'::regnamespace AND NOT t.tgisinternal
-    """) == (65 if _head_0354(db) else 58)
+    """) == (68 if _head_0356(db) else 65 if _head_0354(db) else 58)
     assert _uno(db, """
         SELECT count(*) FROM pg_catalog.pg_trigger t
           JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid

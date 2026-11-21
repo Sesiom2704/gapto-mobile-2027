@@ -36,6 +36,10 @@
 #              HUELLA D-111. HUELLAS_D111_POR_HEAD['0355'] esta PENDIENTE_REPLAY
 #              (None, fail-closed) hasta medirla en el replay 0001..0355: los
 #              tests de huella y desviacion FALLAN mientras tanto, a proposito.
+# Version: 0.2.0 (F06 T4 P-RB206-1, mandato 753bebb2… §2.6): con 0356 aplicada (marca: funcion
+#   fn_borrar_memo_cuadro_hipoteca) la huella CURRENT es la de 0356; la regla del bloque admite migrations
+#   de bloques posteriores (> 0355) detras de esta; la aplicacion simulada retira antes, en la transaccion
+#   revertida, los objetos de 0356 (patron de test_048). Solo cambia la enumeracion del head.
 # Version: 0.1.1 (F06 T3-F06 Bloque 3 F06-02/03, paso 2): fixture: cada actor sintetico con su tercero
 #   (uq_actores_financieros__owner_tercero) y el actor YO del owner (fn_check_actor_self_unico); la referencia
 #   D-111 de 0355 ya esta medida.
@@ -308,8 +312,18 @@ def _filas(db: psycopg.Connection) -> str:
     return huella
 
 
+def _retirar_0356(db: psycopg.Connection) -> None:
+    """L-06-T4: dentro de una transaccion que termina en ROLLBACK, retira la funcion de invalidacion de 0356
+    y sus tres triggers (CASCADE) para que el bloque literal de una migration anterior vea su head."""
+    if _head_0356(db):
+        db.execute("SET LOCAL ROLE gapto_owner")
+        db.execute("DROP FUNCTION gapto.fn_borrar_memo_cuadro_hipoteca() CASCADE")
+        db.execute("RESET ROLE")
+
+
 def test_0355_aplicacion_simulada_sobre_0354(db):
     with db.transaction(force_rollback=True):
+        _retirar_0356(db)  # L-06-T4
         _sembrar_en_0354(db, ROLES_0354)
         assert _definicion(db) == DEF_0354
         antes = _filas(db)
@@ -355,9 +369,10 @@ def test_0355_fichero_forma():
 
 
 def test_0355_regla_de_migrations_del_bloque():
-    """Mandato v1.2 §1: tras 0354 la unica migration nueva es esta 0355."""
+    """Mandato v1.2 §1: tras 0354 la unica migration nueva del bloque es esta 0355 (las posteriores son de
+    otros bloques: 0356 en adelante, F06 T4)."""
     posteriores = sorted(p.name for p in (RAIZ / "migrations").glob("*.sql") if p.name[:4] > "0354")
-    assert posteriores == [MIGRATION.name]
+    assert posteriores[0] == MIGRATION.name and all(p[:4] > "0355" for p in posteriores[1:])
 
 
 def test_0355_runner_declara_0355_y_conserva_0354():
@@ -371,8 +386,14 @@ def test_0355_runner_declara_0355_y_conserva_0354():
     assert "0355" in runner.HUELLAS_D111_POR_HEAD
 
 
+def _head_0356(db: psycopg.Connection) -> bool:
+    """0356 aplicada (marca: funcion gapto.fn_borrar_memo_cuadro_hipoteca; F06 T4 P-RB206-1)."""
+    return _uno(db, "SELECT count(*) FROM pg_catalog.pg_proc WHERE pronamespace = 'gapto'::regnamespace "
+                    "AND proname = 'fn_borrar_memo_cuadro_hipoteca'") == 1
+
+
 def test_0355_huella_d111_current(db):
-    referencia = _runner().HUELLAS_D111_POR_HEAD["0355"]
+    referencia = _runner().HUELLAS_D111_POR_HEAD["0356" if _head_0356(db) else "0355"]
     assert referencia is not None, PENDIENTE
     sql = (RAIZ / "scripts" / "postgres" / "huellas_d111.sql").read_text(encoding="utf-8")
     cursor = db.execute(sql)
