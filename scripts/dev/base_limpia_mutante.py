@@ -32,6 +32,9 @@
 # Version: 0.2.2 (F06 T3 · MANT N1 arneses, B3): arneses que lanzan pytest con -rsx (no imprime lineas FAILED): se
 #   reconocen las cabeceras de fallo «____ test ____» (y «ERROR at setup of») con el recuento final; cada fila registra
 #   la version del clasificador y una muestra de la salida de la primera ejecucion fallida.
+# Version: 0.2.3 (F06 T3 · MANT N1 arneses, B3): la cabecera de fallo de pytest puede llevar un solo guion bajo
+#   («_ test_largo[param] _») cuando el nombre es largo: se acepta «_+» y un nombre que empiece por letra (los
+#   separadores «_ _ _» entre marcos del traceback no casan). En 0.2.2 dos muertes de M-H salian como FALLO_INFRA.
 # ============================================================
 from __future__ import annotations
 
@@ -61,10 +64,10 @@ INFRA = re.compile(r"OperationalError|BD_NO_DISPONIBLE|could not reserve shared 
 _NODO_FALLIDO = re.compile(r"^(FAILED|ERROR) (\S+?)(?: - (.*?))?\s*$", re.M)
 _JEST_FALLIDO = re.compile(r"^\s*● (.+)$", re.M)
 # sin lineas FAILED (arneses con -rsx, que sustituye al resumen -rfE por defecto): cabeceras de fallo y recuento final
-_CABECERA_FALLO = re.compile(r"^_{3,} (ERROR at setup of |ERROR at teardown of )?(\S+?) _{3,}\s*$", re.M)
+_CABECERA_FALLO = re.compile(r"^_+ (ERROR at setup of |ERROR at teardown of )?([A-Za-z]\S*?) _+\s*$", re.M)
 _RECUENTO = re.compile(r"(\d+) (failed|errors?)\b")
 _LINEA_FINAL = re.compile(r"^=*\s*(\d+ (?:failed|passed|errors?)\b.* in [\d.]+s.*?)\s*=*\s*$", re.M)
-VERSION = "0.2.2"
+VERSION = "0.2.3"
 
 
 def _partes(url: str):
