@@ -4,6 +4,7 @@
 // Ruta: mobile/src/domain/textosCola.ts
 // Descripción: Mensajes veraces de COLA-AR (F05 §70.A.5) por acción financiera. Antes de la confirmación solo el verbo de la acción en curso («Cobrando…», «Pagando…», «Confirmando…», «Registrando…»), nunca un resultado; tras la confirmación, el resultado pertinente («Cobro registrado», «Electricidad pagada»); durante la reconciliación, «Comprobando el cobro…»; tras una ausencia, la pregunta «Cobro pendiente: …». «Saldado · no cuenta como ingreso» lo decide la cola con la respuesta del servidor, nunca estos textos.
 // Versión: 0.1.0 (F05-D056 paso 2, COLA-AR v1.0)
+// Versión: 0.2.0 (F06 T4 · D-C7-10, mandato 7041970a…; Q3-Hd v1.2 candidato): `textosPagoCuota` («Pagando… · <cuota> · 632,19 €»; «<cuota> pagada»).
 // ============================================================
 
 import type { FilaActividad, FilaPrevision } from '../api/cliente';
@@ -42,6 +43,13 @@ export function textosPrevision(f: Pick<FilaPrevision, 'concepto' | 'tipo' | 'im
   const cobro = f.tipo === 'INGRESO';
   return { enCurso: `${cobro ? 'Cobrando…' : 'Pagando…'} · ${f.concepto}${i}`, confirmada: `${f.concepto} ${cobro ? 'cobrada' : 'pagada'}${i}`,
     comprobando: cobro ? 'Comprobando el cobro…' : 'Comprobando el pago…', pendiente: `${cobro ? 'Cobro' : 'Pago'} pendiente: ${f.concepto}${i}` };
+}
+
+/** D-C7-10: «Pagado» de una cuota por W-HIP-02 (nunca «cobro» ni «ingreso»). */
+export function textosPagoCuota(f: Pick<FilaPrevision, 'concepto' | 'importe_esperado'>): TextosCola {
+  const i = eur(f.importe_esperado);
+  return { enCurso: `Pagando… · ${f.concepto}${i}`, confirmada: `${f.concepto} pagada${i}`,
+    comprobando: 'Comprobando el pago de la cuota…', pendiente: `Pago pendiente: ${f.concepto}${i}` };
 }
 
 /** F5 previsión «No hubo». */

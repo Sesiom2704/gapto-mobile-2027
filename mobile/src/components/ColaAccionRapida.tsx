@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-D056 paso 2, COLA-AR v1.0)
 // Versión: 0.2.0 (pre-S2, AJ-F0507G8-02): el ejecutor da la IDENTIDAD de la cola, `<URL base>|<nombre del owner servido>` de `GET /v1/yo` (la misma lectura que antes hacía de comprobación de conexión; el servidor no expone otro identificador del owner), y el almacén guarda con la clave de esa identidad. Residuo documentado: dos owners con el mismo nombre en el mismo backend compartirían cola (la RLS sigue impidiendo escribir en el de otro).
 // Versión: 0.3.0 (pre-S2, AJ-F0507G8-13): `manejarEstadoApp` trata «inactive» de iOS como ausencia, igual que «background».
+// Versión: 0.5.0 (F06 T4 · D-C7-10, mandato 7041970a…; Q3-Hd v1.2 candidato): `ejecutorDe` envía `PAGO_CUOTA` a W-HIP-02 (`pagarCuotaHipoteca(financiación, número, payload)`, recurso «<financiación>/<número>») con los textos de rechazo de `hipoteca.ts`.
 // Versión: 0.4.0 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el ✓ del aviso flotante lleva un anillo de 2 px `onAccent` (opción C), igual que en AccionRapida.
 // ============================================================
 
@@ -16,6 +17,7 @@ import { AccessibilityInfo, Animated, AppState, Pressable, StyleSheet, Text, Vie
 
 import type { ClienteApi, Respuesta } from '../api/cliente';
 import { configApi } from '../api/config';
+import { textoErrorHipoteca } from '../domain/hipoteca';
 import { motivoRechazoPosicion } from '../domain/reparto';
 import {
   ColaAccionRapida,
@@ -53,6 +55,16 @@ export function ejecutorDe(cliente: ClienteApi, base: string = configApi.baseUrl
           return cliente.registrarTransferencia(p);
         case 'NO_HUBO':
           return cliente.omitirPrevision(id, p);
+        case 'PAGO_CUOTA': {
+          // D-C7-10: W-HIP-02 con la misma intención en todo reenvío; el 2xx (también `idempotente: true`) confirma.
+          const [fid, num] = id.split('/');
+          const numero = Number(num);
+          if (!cliente.pagarCuotaHipoteca || !fid || !Number.isInteger(numero) || numero < 1) {
+            return { tipo: 'RECHAZADO', codigo: 'RUTA_DESCONOCIDA', mensaje: 'Esta acción no se puede enviar.' };
+          }
+          const r = await cliente.pagarCuotaHipoteca(fid, numero, p);
+          return r.tipo === 'RECHAZADO' ? { ...r, mensaje: textoErrorHipoteca(r.codigo) ?? r.mensaje } : r;
+        }
         default:
           return { tipo: 'RECHAZADO', codigo: 'RUTA_DESCONOCIDA', mensaje: 'Esta acción no se puede enviar.' };
       }

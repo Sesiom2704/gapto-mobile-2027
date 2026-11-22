@@ -18,6 +18,10 @@
 #   MQ3-C5 (lados() de SwipePrevision.tsx ofrece gestos sobre la fila de la cuota); discriminante Jest
 #   prevision_cuota_lados (Q3-C5).
 # Version: 0.3.0 (F06 T3 · MANT N1 arneses, AJ-03 del 19-11; enmienda 01): base limpia por mutante (cada llamada a correr clona la plantilla de GAPTO_TEST_DATABASE_URL y la elimina al terminar) y clasificacion de la muerte, con scripts/dev/base_limpia_mutante.py; sin cambios en mutaciones, discriminantes ni restauracion.
+# Version: 0.4.0 (F06 T4 · D-C7-10, mandato 7041970a…; Q3-Hd v1.2 candidato): MQ3-C1 y MQ3-C5 se reescriben para la
+#   regla nueva (sus lineas protegidas cambian: la cuota tiene el gesto «Pagado» solo con `gestoPagoCuota`); la mutacion
+#   sigue siendo «ignorar la marca» y los discriminantes son los mismos ficheros Jest versionados. MQ3-S1/S2/S2b,
+#   MQ3-C2 (texto intacto) y MHD-* sin cambios.
 # ============================================================
 
 from __future__ import annotations
@@ -59,13 +63,17 @@ MUTANTES = [
        "    presupuestable: bool  # propuesta «De la prevision» del registro\n    codigo: str | None = None\n")],
      LISTAS, None),
     ("MQ3-C1", "admiteSwipe ignora la marca",
-     [(DOMP, "  if (f.codigo === 'PREVISION_DE_CUOTA') return false; // Q3-C2: la cuota no tiene gesto (se paga con botón)\n",
+     [(DOMP, "  if (f.codigo === 'PREVISION_DE_CUOTA') return gestoPagoCuota(f); // Q3-C2 v1.2: solo el gesto «Pagado» sin dudas (D-C7-10)\n",
        "")], [JQ3 + "Q3-C2"], None),
     ("MQ3-C2", "planRapidoPrevision ignora la marca",
      [(DOMP, "  if (f.codigo === 'PREVISION_DE_CUOTA') return null; // Q3-C3: comprobación propia, sin apoyarse en admiteSwipe\n",
        "")], [JQ3 + "Q3-C3"], None),
     ("MQ3-C5", "lados() ofrece gestos sobre la fila de la cuota",
-     [(SWP, "    if (f.codigo === 'PREVISION_DE_CUOTA') return {}; // Q3-C5: la cuota no ofrece gestos (se paga con botón)\n",
+     [(SWP, "    if (f.codigo === 'PREVISION_DE_CUOTA') {\n"
+            "      // Q3-C5 v1.2 (D-C7-10): solo el lado principal «Pagado» y solo sin dudas; nunca «No hubo».\n"
+            "      if (!gestoPagoCuota(f)) return {};\n"
+            "      return { principal: { etiqueta: 'Pagado', icono: 'checkmark', tono: 'confirmar', onEjecutar: () => pagarCuota(f) } };\n"
+            "    }\n",
        "")], [JC5 + "Q3-C5"], None),
     ("MHD-S1", "el rol del Hd vuelve a COBRO",
      [(LACT, '            elif c["importe"] > 0 and hid in desembolsos:\n', '            elif False:\n')],

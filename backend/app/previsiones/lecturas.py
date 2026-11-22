@@ -73,6 +73,10 @@
 #   cuota no propone ninguno, y un hecho de financiacion (vinculo FINANCIACION
 #   de nivel efecto) no es candidato de ninguna prevision.
 # Version: 0.5.0 (F06 T3-F06 bloque 2 F06-01H; literal F05 Q3-Hd v1.1): Q3-S2: marca aditiva codigo PREVISION_DE_CUOTA en las filas de lista (_marcar_cuotas, una consulta por lista, sin lock).
+# Version: 0.6.0 (F06 T4 · D-C7-10, mandato 7041970a…; Q3-Hd v1.2 candidato): las filas de cuota de Inicio y
+#   Pendientes (no las resueltas) ganan el bloque `cuota` (hipotecas.swipe_cuota.anadir_bloques, lectura en
+#   lote, sin lock, solo sobre las filas que se publican), despues de la marca. Las filas ordinarias, el orden y
+#   los recuentos no cambian.
 # ============================================================
 
 from __future__ import annotations
@@ -178,6 +182,13 @@ def _abiertas(sesion: SesionMotor, hoy: dt.date) -> list[dict[str, Any]]:
         return _marcar_cuotas(sesion, [_fila(f, nodos, hoy) for f in cur.fetchall()])
 
 
+def _con_bloques(sesion: SesionMotor, publicadas: list[dict[str, Any]], hoy: dt.date) -> None:
+    """D-C7-10: bloque `cuota` del gesto «Pagado» en las filas de cuota QUE SE PUBLICAN (una lectura en lote; el resto
+    de abiertas no se calcula). Import tardio: hipotecas -> api -> previsiones."""
+    from app.hipotecas import swipe_cuota
+    swipe_cuota.anadir_bloques(sesion, publicadas, hoy)
+
+
 def _marcar_cuotas(sesion: SesionMotor, filas: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """F06-01H (literal F05 Q3-Hd, Q3-S2): marca aditiva `codigo` = PREVISION_DE_CUOTA en las filas que son la
     prevision de una cuota (mismo predicado que es_prevision_de_cuota). Una consulta por lista, sin lock; no
@@ -211,6 +222,7 @@ def inicio(sesion: SesionMotor, hoy: dt.date) -> dict[str, Any]:
     atencion = _requiere_atencion(filas)
     proximos = sorted((f for f in filas if not f["con_realidad"] and f["_ref"] is not None and f["_ref"] >= hoy),
                       key=_clave)
+    _con_bloques(sesion, atencion[:MAX_REQUIERE_ATENCION_INICIO] + proximos[:MAX_PROXIMOS], hoy)
     return {
         "hoy": hoy,
         "requiere_atencion": {"n": len(atencion),
@@ -234,6 +246,7 @@ def pendientes(sesion: SesionMotor, hoy: dt.date) -> dict[str, Any]:
     sumar, «Resueltas este mes» (v0.3.0)."""
     filas = _abiertas(sesion, hoy)
     atencion = _requiere_atencion(filas)
+    _con_bloques(sesion, atencion + [f for f in filas if f["_ref"] is None], hoy)
     return {
         "hoy": hoy,
         "n": len(atencion),

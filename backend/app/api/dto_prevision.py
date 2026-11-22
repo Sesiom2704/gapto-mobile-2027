@@ -35,6 +35,9 @@
 #   `CandidatosCuota` (lote 42, firma del STOP n.º 2): candidatos de la prevision
 #   de una cuota con `codigo` PREVISION_DE_CUOTA; los demas, sin cambio.
 # Version: 0.5.0 (F06 T3-F06 bloque 2 F06-01H; literal F05 Q3-Hd v1.1): Q3-S1: FilaPrevisionCuota/FilaResueltaCuota con codigo aditivo; las demas filas sin la clave.
+# Version: 0.6.0 (F06 T4 · D-C7-10, mandato 7041970a…; Q3-Hd v1.2 candidato): FilaPrevisionCuota (solo listas de
+#   Inicio y Pendientes) gana el bloque `cuota` (BloqueCuota) despues de `codigo`. FilaResueltaCuota y las filas
+#   ordinarias no cambian (extra="forbid" intacto).
 # ============================================================
 
 from __future__ import annotations
@@ -150,10 +153,30 @@ class FilaPrevision(_Estricto):
     presupuestable: bool  # propuesta «De la prevision» del registro
 
 
+class ParteCuota(_Estricto):
+    actor_id: uuid.UUID
+    porcentaje: str
+
+
+class BloqueCuota(_Estricto):
+    """D-C7-10 (§2.3): datos del gesto «Pagado» de la cuota, calculados en el servidor (hipotecas.swipe_cuota).
+    El gesto se ofrece solo con `swipe_disponible` y `sin_dudas`; el pago lo decide W-HIP-02 con sus guardas."""
+    financiacion_id: uuid.UUID | None
+    numero: int | None
+    financiacion_row_version: int | None
+    fecha_vencimiento: dt.date | None
+    cuenta_cargo: Ref | None
+    propuesta_atribucion: list[ParteCuota] | None
+    swipe_disponible: bool
+    sin_dudas: bool
+
+
 class FilaPrevisionCuota(FilaPrevision):
     """F06-01H (literal F05 Q3-Hd, Q3-S1): fila de la prevision de una cuota, con la marca aditiva `codigo`.
-    Las demas filas validan como FilaPrevision (extra="forbid") y no llevan la clave (sin `codigo: null`)."""
+    Las demas filas validan como FilaPrevision (extra="forbid") y no llevan la clave (sin `codigo: null`).
+    D-C7-10: en Inicio y Pendientes lleva ademas el bloque `cuota`."""
     codigo: Literal["PREVISION_DE_CUOTA"]
+    cuota: BloqueCuota
 
 
 #: Fila de lista: la de cuota o la ordinaria (solo una de las dos valida con extra="forbid").

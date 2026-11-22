@@ -9,6 +9,7 @@
 // Versión: 0.3.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2): `lados(fila)` da los dos lados de la fila. Derecha «Pagado» / «Cobrado» (transferencia: «Hecha»): acción rápida si no hay dudas; si las hay, la hoja (esperado y cuenta conocidos) o el formulario completo ya rellenado (importe desconocido, pago parcial, transferencia). Izquierda «No hubo» solo sin pagos enlazados (`admiteNoHubo`): omite con motivo vacío y la misma identidad que la hoja de omitir, tras el aviso de 5 s.
 // Versión: 0.5.0 (F05-D056 paso 2, COLA-AR v1.0, F05 §70.A): «Pagado» / «Cobrado» (F4) y «No hubo» (F5) son acciones de la cola de la app (`useAccionFinanciera`): la petición se compone al soltar con la identidad del swipe, sobrevive a la navegación y a cerrar la app, y el aviso dice «Pagando…» / «Confirmando…» hasta la confirmación del servidor. «No hubo» se reconcilia leyendo la previsión (decisión 1 de Moisés del 2026-10-29). La hoja y el formulario no cambian.
 // Versión: 0.6.0 (F06 T3-F06 bloque 2 F06-01H; literal F05 Q3-Hd v1.1 enmendado, pieza Q3-C5, firma 0f3e5633…): `lados()` no ofrece gestos (ni «Pagado» ni «No hubo») sobre una fila marcada `codigo = PREVISION_DE_CUOTA`; comprobación propia, sin apoyarse en `admiteSwipe`.
+// Versión: 0.7.0 (F06 T4 · D-C7-10, mandato 7041970a…; Q3-Hd v1.2 candidato; opción A: con dudas no hay gesto; F09 §12.106 punto 1): la fila de una cuota ofrece SOLO el lado principal (izquierda) «Pagado», en verde, cuando `gestoPagoCuota` (comprobación propia, sin apoyarse en `admiteSwipe`); nunca «No hubo» ni lado alternativo. El gesto va a la cola COLA-AR por la ruta `PAGO_CUOTA` (W-HIP-02) con el payload del bloque `cuota`: «Deshacer» 5 s, nada en segundo plano, misma intención en todo reenvío. Sin el gesto, la cuota no tiene lados (se paga con el botón del cuadro). Las capacidades de hoy no se leen por una cuota.
 // ============================================================
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -20,13 +21,16 @@ import {
   admiteNoHubo,
   admiteSwipe,
   componerRegistro,
+  gestoPagoCuota,
+  payloadPagoCuotaSwipe,
+  recursoPagoCuota,
   importeFormulario,
   planRapidoPrevision,
   textoEditable,
   verboSwipe,
   type CapacidadesHoy,
 } from '../domain/prevision';
-import { textosNoHubo, textosPrevision } from '../domain/textosCola';
+import { textosNoHubo, textosPagoCuota, textosPrevision } from '../domain/textosCola';
 import { type LadoSwipe } from './AccionRapida';
 import { useAccionFinanciera } from './ColaAccionRapida';
 import { HojaSwipe, usarIntencion } from './Prevision';
@@ -50,7 +54,8 @@ export function useSwipePrevision(p: {
   const rapida = useAccionFinanciera({ cliente: p.cliente, nuevoId: p.nuevoId, onHecha: () => p.onRegistrado() });
 
   // Capacidades de hoy de las cuentas previstas, leídas con las filas (nunca en el gesto ni en «Deshacer»).
-  const conGesto = p.filas.filter(admiteSwipe);
+  // D-C7-10: la cuota no usa las capacidades de hoy (su cuenta y su elegibilidad las da el servidor en el bloque).
+  const conGesto = p.filas.filter((f) => f.codigo !== 'PREVISION_DE_CUOTA' && admiteSwipe(f));
   const hayGasto = conGesto.some((f) => f.tipo === 'GASTO');
   const hayIngreso = conGesto.some((f) => f.tipo === 'INGRESO');
   const claveFilas = conGesto.map((f) => `${f.id}:${f.row_version}`).join('|');
@@ -83,6 +88,7 @@ export function useSwipePrevision(p: {
 
   /** Derecha (gesto o acción accesible): acción rápida si es inequívoca; si no, la hoja o el formulario rellenado. */
   const deslizar = (f: FilaPrevision) => {
+    if (f.codigo === 'PREVISION_DE_CUOTA') return pagarCuota(f); // D-C7-10: nunca GASTO, hoja ni formulario
     const plan = planRapidoPrevision(f, capacidades, hoy);
     // Comprobación previa con una identidad de prueba: la petición real se compone con la identidad del swipe.
     const prueba = plan ? componerRegistro(f, plan, 'x') : null;
@@ -93,6 +99,18 @@ export function useSwipePrevision(p: {
       recursoId: null,
       textos: textosPrevision(f),
       componer: (id) => componerRegistro(f, plan, id)!.payload as Record<string, unknown> & { intencion_id: string },
+    });
+  };
+
+  /** D-C7-10: «Pagado» de una cuota sin dudas por W-HIP-02 (cola COLA-AR). Sin el gesto no hace nada. */
+  const pagarCuota = (f: FilaPrevision) => {
+    if (!gestoPagoCuota(f)) return;
+    rapida.lanzar({
+      clave: f.id,
+      ruta: 'PAGO_CUOTA',
+      recursoId: recursoPagoCuota(f),
+      textos: textosPagoCuota(f),
+      componer: (id) => payloadPagoCuotaSwipe(f, id)! as unknown as Record<string, unknown> & { intencion_id: string },
     });
   };
 
@@ -111,7 +129,11 @@ export function useSwipePrevision(p: {
   /** Los dos lados de una fila (null fuera de gasto, ingreso o transferencia abiertos). */
   const lados = (f: FilaPrevision): { principal?: LadoSwipe; alternativa?: LadoSwipe } => {
     if (f.estado !== 'ABIERTA' || !['GASTO', 'INGRESO', 'TRANSFERENCIA'].includes(f.tipo)) return {};
-    if (f.codigo === 'PREVISION_DE_CUOTA') return {}; // Q3-C5: la cuota no ofrece gestos (se paga con botón)
+    if (f.codigo === 'PREVISION_DE_CUOTA') {
+      // Q3-C5 v1.2 (D-C7-10): solo el lado principal «Pagado» y solo sin dudas; nunca «No hubo».
+      if (!gestoPagoCuota(f)) return {};
+      return { principal: { etiqueta: 'Pagado', icono: 'checkmark', tono: 'confirmar', onEjecutar: () => pagarCuota(f) } };
+    }
     return {
       principal: { etiqueta: f.tipo === 'TRANSFERENCIA' ? 'Hecha' : verboSwipe(f.tipo), icono: 'checkmark', tono: 'confirmar', onEjecutar: () => deslizar(f) },
       alternativa: admiteNoHubo(f) ? { etiqueta: 'No hubo', icono: 'remove-circle-outline', tono: 'neutro', onEjecutar: () => noHubo(f) } : undefined,

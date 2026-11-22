@@ -10,9 +10,12 @@
 // Versión: 0.5.0 (F05-06 M5-B v1.1): «Resueltas este mes». `etiquetaResuelta` («No hubo» en una OMITIDA; «Pagada» / «Cobrada» en una REALIZADA cubierta del todo; «Cubierta» en el resto: dada por cubierta, transferencia o sin registro activo) y `lineaResuelta` («Pagada · 22 oct»).
 // Versión: 0.6.0 (F05-06 M5-B cierre, AJ-M5BM1-CIERRE-02): procedencia de la fecha. Con `resuelta_por = OBJETIVO` (sin auditoría de la transición) la línea dice «prevista el …»: la fecha objetivo nunca se rotula como fecha de resolución.
 // Versión: 0.7.0 (F06 T3-F06 bloque 2 F06-01H; literal F05 Q3-Hd v1.1): Q3-C2/Q3-C3: `admiteSwipe` y `planRapidoPrevision` excluyen la fila marcada `codigo = PREVISION_DE_CUOTA` (sin gesto ni acción rápida).
+// Versión: 0.8.0 (F06 T4 · D-C7-10, mandato 7041970a…; Q3-Hd v1.2 candidato; opción A de Moisés: con dudas no hay gesto): la cuota tiene UN gesto, «Pagado» por W-HIP-02, solo si `gestoPagoCuota` (constante `PAGO_CUOTA_EXPUESTO`, `cuota.swipe_disponible`, `cuota.sin_dudas` y todos los datos del payload, sin inferir nada). `admiteSwipe` (Q3-C2) lo refleja; `planRapidoPrevision` (Q3-C3) sigue en null para la cuota: su acción rápida nunca es un registro por GASTO, es `payloadPagoCuotaSwipe` (fecha = vencimiento, versión de la FINANCIACIÓN, cuenta de cargo y propuesta del servidor).
 // ============================================================
 
 import type { BloquePrevisionWire, CuentaElegible, CuentaPago, DetallePrevision, FilaPrevision, FilaResuelta, ImportePorNaturaleza } from '../api/cliente';
+import type { PayloadPagoCuota } from '../api/hipoteca';
+import { PAGO_CUOTA_EXPUESTO } from './hipoteca';
 import { diaMesAnioIso, diaMesIso } from './fechas';
 import { formatearEur } from './importe';
 
@@ -203,12 +206,39 @@ export function textoEditable(decimal: string | null): string {
 /** Swipe «Pagado» / «Cobrado» (D-PREV-08): gasto o ingreso, esperado conocido, EUR, cuenta prevista y sin pagos previos.
  *  Espejo de las acciones del detalle; la autoridad sigue siendo el servidor al registrar. */
 export function admiteSwipe(f: FilaPrevision): boolean {
-  if (f.codigo === 'PREVISION_DE_CUOTA') return false; // Q3-C2: la cuota no tiene gesto (se paga con botón)
+  if (f.codigo === 'PREVISION_DE_CUOTA') return gestoPagoCuota(f); // Q3-C2 v1.2: solo el gesto «Pagado» sin dudas (D-C7-10)
   if (f.estado !== 'ABIERTA' || f.moneda !== 'EUR' || f.con_realidad || f.importe_esperado === null) return false;
   if (f.tipo === 'GASTO') return f.cuenta_salida !== null;
   if (f.tipo === 'INGRESO') return f.cuenta_entrada !== null;
   return false;
 }
+
+/**
+ * D-C7-10 (opción A): la fila de una cuota ofrece el gesto «Pagado» SOLO si la exposición está activa, el servidor la
+ * declara disponible y sin dudas, y trae todos los datos del payload de W-HIP-02. Ante cualquier falta: sin gesto (la
+ * cuota se paga con el botón del cuadro). Nunca «No hubo».
+ */
+export function gestoPagoCuota(f: FilaPrevision, expuesto: boolean = PAGO_CUOTA_EXPUESTO): boolean {
+  const q = f.cuota;
+  if (!expuesto || f.codigo !== 'PREVISION_DE_CUOTA' || f.estado !== 'ABIERTA' || !q) return false;
+  if (q.swipe_disponible !== true || q.sin_dudas !== true) return false;
+  return !!q.financiacion_id && typeof q.numero === 'number' && typeof q.financiacion_row_version === 'number'
+    && !!q.fecha_vencimiento && !!q.cuenta_cargo && !!q.propuesta_atribucion && q.propuesta_atribucion.length > 0;
+}
+
+/** D-C7-10: payload de W-HIP-02 del gesto, compuesto SOLO con el bloque `cuota` (null si la cuota no ofrece el gesto). */
+export function payloadPagoCuotaSwipe(f: FilaPrevision, intencionId: string): PayloadPagoCuota | null {
+  if (!gestoPagoCuota(f)) return null;
+  const q = f.cuota!;
+  const partes = q.propuesta_atribucion!.map((x) => ({ actor_id: x.actor_id, porcentaje: x.porcentaje }));
+  return {
+    intencion_id: intencionId, row_version_esperada: q.financiacion_row_version!, cuenta_id: q.cuenta_cargo!.id,
+    fecha_pago: q.fecha_vencimiento!, atribucion: { propuesta_vista: { partes }, partes: partes.map((x) => ({ ...x })) },
+  };
+}
+
+/** D-C7-10: recurso de la cola para W-HIP-02 («<financiación>/<número>»). */
+export const recursoPagoCuota = (f: FilaPrevision): string => `${f.cuota?.financiacion_id ?? ''}/${f.cuota?.numero ?? ''}`;
 
 /** Cuentas que hoy tienen la capacidad: pagar (gasto) y recibir dinero (ingreso). null = no se sabe (no se pudo leer). */
 export interface CapacidadesHoy {

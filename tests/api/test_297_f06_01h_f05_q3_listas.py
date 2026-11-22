@@ -13,6 +13,10 @@
 #   Mutantes que matan: MQ3-S1 (sin marca) y MQ3-S2 (marca en todas las filas o codigo: null en las ordinarias).
 #   Discriminacion: en el HEAD de inicio (superficies identicas en c5e4ff8 y 7eed34c) falla por falta de marca.
 # Version: 0.1.0 (F06 T3-F06 bloque 2 F06-01H; literal F05 Q3-Hd v1.1, paso 9)
+# Version: 0.2.0 (F06 T4 · D-C7-10, mandato 7041970a…; STOP STOP_F06-T4_DC710_TEST297_CLAVES_v1.0, opcion A de
+#   Moises): solo la FORMA de O-Q3-1: la fila de cuota de Inicio y Pendientes lleva `codigo` y despues el bloque
+#   `cuota`; `_quitar_marca` quita tambien `cuota`. Filas ordinarias, recuentos, orden, resueltas y el caso
+#   «sin cuotas» (byte a byte) sin cambios.
 # ============================================================
 
 from __future__ import annotations
@@ -82,9 +86,9 @@ def _filas(cuerpo) -> list[dict]:
 
 
 def _quitar_marca(cuerpo):
-    """Copia profunda sin la clave codigo (solo en las filas de cuota)."""
+    """Copia profunda sin la clave codigo ni el bloque cuota (D-C7-10; solo en las filas de cuota)."""
     if isinstance(cuerpo, dict):
-        return {k: _quitar_marca(v) for k, v in cuerpo.items() if k != "codigo"}
+        return {k: _quitar_marca(v) for k, v in cuerpo.items() if k not in ("codigo", "cuota")}
     if isinstance(cuerpo, list):
         return [_quitar_marca(v) for v in cuerpo]
     return cuerpo
@@ -100,8 +104,10 @@ def _marcas(lab, final: dict):
     assert filas, final
     for f in filas:
         if f["id"] in cuotas:
-            # la marca solo en la fila de una cuota, como ultima clave y con su valor exacto
-            assert f.get("codigo") == MARCA and list(f) == _claves(f) + ["codigo"], f
+            # la marca solo en la fila de una cuota, con su valor exacto; despues, en Inicio y Pendientes (no en las
+            # resueltas), el bloque `cuota` de D-C7-10 como ultima clave (decision de Moises, opcion A del STOP)
+            extra = ["codigo"] if "resuelta_el" in f else ["codigo", "cuota"]
+            assert f.get("codigo") == MARCA and list(f) == _claves(f) + extra, f
         else:
             # la ordinaria: sin la clave (ni codigo: null) y con las claves de c5e4ff8 en su orden
             assert "codigo" not in f and list(f) == _claves(f), f

@@ -34,6 +34,7 @@
 // v0.24.0 (F06 T3-F06 · F04-R-HIP, subhito F05 S7/S10; D-08): campo aditivo OPCIONAL `AccionPrevision.codigo` (PREVISION_DE_CUOTA). Ninguna llamada existente cambia.
 // v0.25.0 (F06 T3-F06 bloque 2 F06-01H; literal F05 Q3-Hd v1.1): Q3-C1 `FilaPrevision.codigo?` (PREVISION_DE_CUOTA) y HD-C1 rol aditivo `PRESTAMO_RECIBIDO` de `CuentaFila`. Ninguna llamada existente cambia.
 // v0.26.0 (F06 T3-F06 bloque 2 F06-01H, paso 10): llamadas OPCIONALES de la hipoteca (tipos en api/hipoteca.ts; opcionales en `ClienteApi` para que los dobles de test no cambien): `cuadroHipoteca` (POST /v1/hipotecas/cuadro, W-HIP-00, sin escritura), `hipotecaDePropiedad` (GET /v1/propiedades/{id}/hipoteca, L-HIP), `pagarCuotaHipoteca` (POST /v1/hipotecas/{id}/cuotas/{n}/pago, W-HIP-02) y `revisarTipoHipoteca` (POST /v1/hipotecas/{id}/revision, W-HIP-03/04), las dos escrituras con la clasificación 'CAMBIO'. Ninguna llamada existente cambia.
+// v0.28.0 (F06 T4 · D-C7-10, mandato 7041970a…; Q3-Hd v1.2 candidato): `FilaPrevision.cuota?` (bloque `BloqueCuota` del servidor, solo en la fila de cuota de Inicio y Pendientes): financiación, número, versión de la financiación, vencimiento, cuenta de cargo, propuesta de atribución, `swipe_disponible` y `sin_dudas`. Ninguna llamada cambia.
 // v0.27.0 (F06 T3 · MANT N1 de revisión del tipo, A3; dictamen MANT R-B2-06 punto 3 y AJ-03; decisión 14): `revisarTipoHipoteca` usa un timeout propio `TIMEOUT_REVISION_MS` (nunca menor que el general), dimensionado con la medición por fases de A2 (06_revision_latencia); el resto de llamadas conserva el timeout general de 10 s.
 // ============================================================
 
@@ -619,9 +620,23 @@ export interface RefNombre {
   id: string;
   nombre: string;
 }
+/** D-C7-10: datos del gesto «Pagado» de una cuota, calculados en el servidor (nunca inferidos aquí). */
+export interface BloqueCuota {
+  financiacion_id: string | null;
+  numero: number | null;
+  financiacion_row_version: number | null;
+  fecha_vencimiento: string | null;
+  cuenta_cargo: RefNombre | null;
+  /** Titularidad del préstamo en el vencimiento (la del escritor); null si la cuota no ofrece el gesto. */
+  propuesta_atribucion: { actor_id: string; porcentaje: string }[] | null;
+  swipe_disponible: boolean;
+  sin_dudas: boolean;
+}
 export interface FilaPrevision {
-  /** Q3-C1: marca aditiva del servidor, solo en la fila de la previsión de una cuota (sin swipe ni acción rápida). */
+  /** Q3-C1: marca aditiva del servidor, solo en la fila de la previsión de una cuota. */
   codigo?: 'PREVISION_DE_CUOTA';
+  /** D-C7-10: solo en la fila de cuota de Inicio y Pendientes. */
+  cuota?: BloqueCuota;
   id: string;
   row_version: number;
   estado: string;
