@@ -118,7 +118,8 @@ def test_c02_b_c_transaction_timeout_corta_el_commit_diferido_indeterminado_y_se
     -> 503 RESULTADO_NO_CONFIRMADO, nunca TIEMPO_AGOTADO ni BACKEND_NO_DISPONIBLE. Reconciliacion: el reenvio con la MISMA
     intencion y el mismo cuerpo deja la cardinalidad exacta de UNA operacion, sin duplicados ni auditoria del intento
     cortado."""
-    aj.plazo(monkeypatch, a=2.0)
+    plazo = float(__import__("os").environ.get("AJ05_PLAZO_C02", "2.0"))   # Neon: mas plazo (latencia), mismo oraculo
+    aj.plazo(monkeypatch, a=plazo)
     cuerpo = h.intencion(t["cta"])
     audit_antes = aj.auditoria(t["owner"])
     t["prov"].antes_commit = _trigger_diferido_lento
@@ -131,7 +132,7 @@ def test_c02_b_c_transaction_timeout_corta_el_commit_diferido_indeterminado_y_se
     intento = tr["unidades"][0]["intentos"][-1]
     assert intento["sqlstate"] == "25P04" and intento["estado"] == "COMMIT_INDETERMINADO", tr
     assert tr["persistencia"] == "COMMIT_INDETERMINADO" and tr["desenlace"] == "INDETERMINADO", tr
-    assert dur <= 2.0 + pet.MARGEN_TRANSACTION_TIMEOUT_S + 1.0, dur
+    assert dur <= plazo + pet.MARGEN_TRANSACTION_TIMEOUT_S + 1.0, dur
     # persistencia real del intento cortado: ninguna (la sesion murio antes del registro de COMMIT)
     assert _cardinalidad(t["owner"], cuerpo["intencion_id"]) == {"hechos": 0, "efectos": 0, "conciliaciones": 0}
     assert aj.auditoria(t["owner"]) == audit_antes
@@ -487,6 +488,14 @@ def _app_con_rutas(t, monkeypatch=None):
         u.ejecutar(ctx(), lambda s: s.uno("SELECT 1"), nombre="AJ05 confirma")
         raise ErrorMotor(CodigoError.VERSION_DESFASADA, "rechazo funcional tras un COMMIT (prueba)")
 
+    @app.post("/v1/_aj05/corte-en-la-operacion")
+    def corte_en_la_operacion():
+        def op(s):
+            s.uno("SELECT set_config('statement_timeout', '0', true)")   # solo el transaction_timeout puede cortar
+            s.uno("SELECT pg_sleep(10)")
+        u.ejecutar(ctx(), op, nombre="AJ05 corte en la operacion")
+        return {"ok": True}
+
     @app.post("/v1/_aj05/falla")
     def falla():
         raise RuntimeError("password=secreto-aj05 CONCEPTO-SECRETO-AJ05 postgresql://u:p@host/db")
@@ -751,3 +760,30 @@ def test_c18_55p03_de_otro_origen_en_clase_b_no_es_plazo(t):
         pet.terminar(token)
     assert not isinstance(e.value, pet.PlazoAgotado), e.value
     assert estado.unidades[0].intentos[0].sqlstate == "55P03"
+
+
+def test_c19_corte_de_sesion_antes_del_commit_es_indeterminado_nunca_500_ni_no_guardado(t, monkeypatch):
+    """Diseno §5.2 (hallazgo en Neon): el transaction_timeout corta la sesion (25P04) DURANTE la operacion, antes de pedir
+    el COMMIT, en una unidad potencialmente persistente -> CORTE_ANTES_DEL_COMMIT -> 503 RESULTADO_NO_CONFIRMADO
+    (reintentable); nunca un 500 INTERNO no reintentable ni TIEMPO_AGOTADO."""
+    aj.plazo(monkeypatch, a=1.5)
+    cli = _app_con_rutas(t)
+    r = cli.post("/v1/_aj05/corte-en-la-operacion", headers=h.AUTH)
+    tr = aj.ultima(t["reg"], "/v1/_aj05/corte-en-la-operacion")
+    assert r.status_code == 503 and _codigo(r) == "RESULTADO_NO_CONFIRMADO", json.dumps(tr["unidades"])
+    assert r.json()["reintentable"] is True
+    i = tr["unidades"][0]["intentos"][-1]
+    assert i["sqlstate"] == "25P04" and i["estado"] == "CORTE_ANTES_DEL_COMMIT", i
+    assert tr["persistencia"] == "ESCRITURA_INTERRUMPIDA"
+
+
+def test_c19b_sin_llegar_a_conectar_es_backend_no_disponible(t):
+    t["prov"].al_abrir = aj.corte
+    r = _post(t["cli"], GASTO, h.intencion(t["cta"]))
+    t["prov"].limpiar()
+    # el desenlace VIGENTE de una base inalcanzable (BD_NO_DISPONIBLE de la traduccion del motor o
+    # BACKEND_NO_DISPONIBLE del adaptador): 503 reintentable, sin afirmar que no se guardo nada
+    assert r.status_code == 503 and _codigo(r) in ("BD_NO_DISPONIBLE", "BACKEND_NO_DISPONIBLE"), r.text
+    assert r.json()["reintentable"] is True and "nada" not in r.json()["mensaje"].lower()
+    tr = aj.ultima(t["reg"], GASTO)
+    assert tr["unidades"][0]["intentos"][-1]["estado"] == "ABORTADA_SIN_COMMIT" and tr["persistencia"] == "NINGUNA"

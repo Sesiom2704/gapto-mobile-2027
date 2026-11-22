@@ -183,3 +183,26 @@ def test_statement_timeout_propio_por_la_unidad_de_trabajo_es_plazo_y_cero_filas
     assert estado.unidades[0].intentos[-1].estado is pet.EstadoUnidad.ROLLBACK_CONFIRMADO
     assert estado.persistencia() is pet.Persistencia.NINGUNA
     assert _filas(sonda, 5) == 0
+
+
+def test_corte_por_transaction_timeout_antes_del_commit_por_la_unidad_de_trabajo(sonda):
+    """Corte de sesion (25P04) DURANTE la operacion, antes del COMMIT: CORTE_ANTES_DEL_COMMIT, persistencia
+    ESCRITURA_INTERRUMPIDA (conservador; nunca «no guardado»); sin filas."""
+    u = UnidadDeTrabajo(lambda: psycopg.connect(h.dsn()))
+    estado, token = pet.iniciar("POST", "/v1/intenciones/gasto-pagado")
+
+    def op(s):
+        s.ejecutar(f"INSERT INTO {sonda} (id) VALUES (6)")
+        s.uno("SELECT set_config('statement_timeout', '0', true)")
+        s.uno("SELECT pg_sleep(10)")
+    try:
+        estado.deadline = estado.t0 + 1.0
+        with pytest.raises(BaseException) as e:
+            u.ejecutar(ContextoOperacion.de_usuario(uuid.uuid4(), request_id=uuid.uuid4()), op, nombre="sonda")
+    finally:
+        pet.terminar(token)
+    assert not isinstance(e.value, pet.PlazoAgotado)
+    intento = estado.unidades[0].intentos[-1]
+    assert intento.sqlstate == "25P04" and intento.estado is pet.EstadoUnidad.CORTE_ANTES_DEL_COMMIT, intento
+    assert estado.persistencia() is pet.Persistencia.ESCRITURA_INTERRUMPIDA
+    assert _filas(sonda, 6) == 0

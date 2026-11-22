@@ -6,6 +6,7 @@
 #   24113472… y adenda 02 9744307e… §5). Un mutante por guarda: los del diseno v0.2 §8 (DS1-DS15, con DS9b), uno por
 #   guarda de AJ-R2 (R1-R8; R6 coincide con DS14 y no se duplica; R4b es la variante del manejador global) y los de la
 #   adenda 02 (A02: COMMIT_INDETERMINADO -> TIEMPO_AGOTADO; A02b: el 25P04 del COMMIT sin persistencia indeterminada).
+#   C19 (hallazgo en Neon, diseno §5.2): corte de sesion antes del COMMIT tratado como sin persistencia.
 #   Mismo motor que mutantes_f06_t4_dc710.py (journal durable, preflight verde, restauracion verificada por SHA-256,
 #   veredicto a disco en cuanto se conoce) con base limpia por llamada y clasificacion de la muerte
 #   (scripts/dev/base_limpia_mutante.py; GAPTO_MUTANTES_CLASIFICACION). Discriminantes: tests/api/test_314 y test_315.
@@ -59,6 +60,8 @@ RED = T + "test_red_de_seguridad_sustituye_solo_un_no_guardado_falso"
 SOLO = T + "test_solo_lectura_es_read_only_desde_la_primera_sentencia"
 S_ST = S + "test_statement_timeout_propio_por_la_unidad_de_trabajo_es_plazo_y_cero_filas"
 S_B = S + "test_adenda02_b_por_la_unidad_de_trabajo_commit_indeterminado"
+C19 = T + "test_c19_corte_de_sesion_antes_del_commit_es_indeterminado_nunca_500_ni_no_guardado"
+S_C = S + "test_corte_por_transaction_timeout_antes_del_commit_por_la_unidad_de_trabajo"
 
 EXC_REG = "        except BaseException:  # noqa: BLE001 - nada del registro puede alterar la respuesta\n"
 
@@ -152,6 +155,9 @@ MUTANTES = [
     ("A02b", "25P04 durante el COMMIT sin persistencia indeterminada (acaba en un 5xx sin «no confirmado»)",
      [(PET, "        if EstadoUnidad.COMMIT_INDETERMINADO in estados:\n            return Persistencia.COMMIT_INDETERMINADO\n",
        "")], [C02, S_B], None),
+    ("C19", "corte de sesion antes del COMMIT, ya conectada, tratado como sin persistencia (acaba en 500 o no guardado)",
+     [(UT, "        return pet.EstadoUnidad.CORTE_ANTES_DEL_COMMIT if conectada else pet.EstadoUnidad.ABORTADA_SIN_COMMIT",
+       "        return pet.EstadoUnidad.ABORTADA_SIN_COMMIT")], [C19, S_C], None),
 ]
 
 

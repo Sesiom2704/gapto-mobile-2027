@@ -68,7 +68,9 @@ class EstadoUnidad(str, enum.Enum):
     COMMIT_CONFIRMADO = "COMMIT_CONFIRMADO"           # el servidor confirmo el COMMIT
     COMMIT_INDETERMINADO = "COMMIT_INDETERMINADO"     # se perdio la conexion o se corto la sesion durante el COMMIT
     ROLLBACK_CONFIRMADO = "ROLLBACK_CONFIRMADO"       # error SQL del servidor antes o durante el COMMIT: abortada
-    ABORTADA_SIN_COMMIT = "ABORTADA_SIN_COMMIT"       # se perdio la conexion ANTES de pedir el COMMIT (no confirma)
+    ABORTADA_SIN_COMMIT = "ABORTADA_SIN_COMMIT"       # no llego a conectar: ni la operacion empezo (no confirma)
+    CORTE_ANTES_DEL_COMMIT = "CORTE_ANTES_DEL_COMMIT" # conectada, se perdio la conexion o se corto la sesion (25P04)
+                                                      # antes de pedir el COMMIT: diseno §5.2, indeterminado
 
 
 @dataclass(slots=True)
@@ -96,6 +98,8 @@ class Persistencia(str, enum.Enum):
 
     NINGUNA = "NINGUNA"
     COMMIT_INDETERMINADO = "COMMIT_INDETERMINADO"
+    ESCRITURA_INTERRUMPIDA = "ESCRITURA_INTERRUMPIDA"   # corte antes del COMMIT en una unidad potencialmente
+                                                        # persistente: conservador, nunca «no guardado»
     ESCRITURA_CONFIRMADA = "ESCRITURA_CONFIRMADA"
 
 
@@ -125,6 +129,8 @@ class EstadoPeticion:
             return Persistencia.ESCRITURA_CONFIRMADA
         if EstadoUnidad.COMMIT_INDETERMINADO in estados:
             return Persistencia.COMMIT_INDETERMINADO
+        if EstadoUnidad.CORTE_ANTES_DEL_COMMIT in estados:
+            return Persistencia.ESCRITURA_INTERRUMPIDA
         return Persistencia.NINGUNA
 
     def connect_timeout_s(self) -> int:

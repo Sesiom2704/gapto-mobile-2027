@@ -37,7 +37,9 @@
 #     las duraciones de conexion, transaccion y COMMIT; el XID asignado se guarda solo como evidencia auxiliar;
 #   - convierte en `PlazoAgotado` (fuera de ErrorMotor) solo un 57014 del statement_timeout propio (llega con el
 #     deadline cumplido) o un 55P03 del lock_timeout propio (clase A). 57014 no se reintenta.
-#   Un COMMIT confirmado no se rebaja nunca, ni por un error posterior (cierre de la conexion).
+#   Un COMMIT confirmado no se rebaja nunca, ni por un error posterior (cierre de la conexion). Un corte de sesion
+#   o de conexion ANTES del COMMIT, ya conectada (p. ej. transaction_timeout 25P04 durante la operacion), es
+#   CORTE_ANTES_DEL_COMMIT -> persistencia ESCRITURA_INTERRUMPIDA -> RESULTADO_NO_CONFIRMADO (diseno §5.2).
 #   `solo_lectura=True` (de cualquier llamante) abre la transaccion en READ ONLY ANTES de cualquier consulta, incluida
 #   la de contexto. Fuera de una peticion HTTP la unidad no cambia de comportamiento.
 # ============================================================
@@ -230,7 +232,7 @@ class UnidadDeTrabajo:
                 if intento is not None:
                     intento.sqlstate = sqlstate
                     if not solo_lectura:
-                        intento.estado = _estado_tras_error(intento.estado, exc)
+                        intento.estado = _estado_tras_error(intento.estado, exc, intento.conexion_ms is not None)
                     motivo = (None if intento.estado is pet.EstadoUnidad.COMMIT_CONFIRMADO
                               else _plazo_propio(exc, peticion))
                     if motivo is not None:
@@ -340,7 +342,7 @@ def _es_corte(exc: BaseException) -> bool:
     return sqlstate is not None and (sqlstate.startswith("08") or sqlstate in _CORTE_DE_SESION)
 
 
-def _estado_tras_error(previo: pet.EstadoUnidad, exc: BaseException) -> pet.EstadoUnidad:
+def _estado_tras_error(previo: pet.EstadoUnidad, exc: BaseException, conectada: bool = True) -> pet.EstadoUnidad:
     """AJ-R2-02. Durante el COMMIT: un corte deja el resultado INDETERMINADO; una respuesta de error del servidor
     (trigger diferido, 57014, 40P01...) prueba el aborto. Antes del COMMIT nunca puede haber confirmado.
     Un COMMIT ya confirmado NUNCA se rebaja (p. ej. un error al cerrar la conexion despues del COMMIT)."""
@@ -348,7 +350,11 @@ def _estado_tras_error(previo: pet.EstadoUnidad, exc: BaseException) -> pet.Esta
         return previo
     if previo is pet.EstadoUnidad.COMMIT_INICIADO:
         return pet.EstadoUnidad.COMMIT_INDETERMINADO if _es_corte(exc) else pet.EstadoUnidad.ROLLBACK_CONFIRMADO
-    return pet.EstadoUnidad.ABORTADA_SIN_COMMIT if _es_corte(exc) else pet.EstadoUnidad.ROLLBACK_CONFIRMADO
+    if _es_corte(exc):
+        # Diseno §5.2: corte (perdida de conexion o transaction_timeout, 25P04) en una unidad potencialmente
+        # persistente -> indeterminado (conservador). Solo si nunca llego a conectar es ABORTADA_SIN_COMMIT.
+        return pet.EstadoUnidad.CORTE_ANTES_DEL_COMMIT if conectada else pet.EstadoUnidad.ABORTADA_SIN_COMMIT
+    return pet.EstadoUnidad.ROLLBACK_CONFIRMADO
 
 
 def _plazo_propio(exc: BaseException, peticion: pet.EstadoPeticion | None) -> str | None:

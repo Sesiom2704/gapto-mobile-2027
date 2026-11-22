@@ -92,6 +92,8 @@ def traza_persistencia(persistencia: pet.Persistencia, estado_http: int | None) 
         return "ESCRITURA_CONFIRMADA" if completa else "ESCRITURA_CONFIRMADA / RESPUESTA_NO_COMPLETADA"
     if persistencia is pet.Persistencia.COMMIT_INDETERMINADO:
         return "COMMIT_INDETERMINADO"
+    if persistencia is pet.Persistencia.ESCRITURA_INTERRUMPIDA:
+        return "ESCRITURA_INTERRUMPIDA"
     return "NINGUNA"
 
 
