@@ -287,6 +287,15 @@
 #   servicios y terceros SIN RENTA registradas con UNA llamada a app.contratos.rutas.registrar, DESPUES de
 #   GET /v1/terceros/candidatos (la ruta nueva GET /v1/terceros/{tercero_id} no puede preceder a `/candidatos`).
 #   Ninguna ruta existente cambia.
+# Version: 0.40.0 (F06 T4 · AJ-05 ampliado + R-C7-07, mandato b4ff6b70…; diseno v0.2 con AJ-R2-01..08):
+#   - `MiddlewarePeticion` (ASGI): estado de peticion, deadline unico por clase, RECIBIDA/TERMINADA y red de
+#     seguridad acotada; `create_app(registro=...)` lo recibe inyectado; `create_app_desde_entorno` exige
+#     GAPTO_LOG_DIR y comprueba la escritura (fail-closed).
+#   - Manejador unico de `PlazoAgotado` (fuera de ErrorMotor): TIEMPO_AGOTADO solo con persistencia NINGUNA; si no,
+#     RESULTADO_NO_CONFIRMADO. Los de ErrorMotor (5xx), OperationalError y Exception devuelven RESULTADO_NO_CONFIRMADO
+#     cuando la peticion tiene un COMMIT confirmado o indeterminado; los rechazos 4xx no cambian.
+#   - Proveedor por defecto: `connect_timeout = min(5, restante)`. CORS: X-Gapto-Intento-Id y X-Gapto-Intencion-Id.
+#   - `_escritura_edicion`: la segunda lectura (`estado`) se declara solo_lectura. Nada mas cambia en esa ruta.
 # ============================================================
 
 from __future__ import annotations
@@ -503,9 +512,12 @@ from app.magnitudes import servicio as serv_mag
 from app.preferencias import lecturas as lect_pref
 from app.preferencias import servicio as serv_pref
 from app.senales import lecturas as senales
+from app.core import peticion as pet
 from app.core.contexto import ContextoOperacion
 from app.core.errores import CodigoError, ErrorMotor
 from app.core.unidad_trabajo import UnidadDeTrabajo
+from app.api import registro_peticiones as regp
+from app.api.middleware_peticion import MiddlewarePeticion
 
 _LOG = logging.getLogger("gapto.api.f05_00_b")
 import decimal
@@ -525,7 +537,9 @@ class _NoAutorizado(Exception):
 def _proveedor_por_defecto(dsn: str) -> Callable[[], object]:
     @contextmanager
     def _abrir() -> Iterator[psycopg.Connection]:
-        with psycopg.connect(dsn, connect_timeout=5) as conexion:
+        # AJ-05 (diseno §3): dentro de una peticion, connect_timeout = min(5, restante); fuera, 5 como antes.
+        estado = pet.actual()
+        with psycopg.connect(dsn, connect_timeout=estado.connect_timeout_s() if estado else 5) as conexion:
             yield conexion
 
     return _abrir
@@ -537,6 +551,7 @@ def create_app(
     proveedor_conexion: Callable[[], object] | None = None,
     origenes_cors: tuple[str, ...] = (),
     reloj: Reloj = reloj_sistema,
+    registro: regp.RegistroPeticiones | None = None,
 ) -> FastAPI:
     cfg = cfg or cargar_desde_entorno()
     proveedor = proveedor_conexion or _proveedor_por_defecto(cfg.dsn)
@@ -557,8 +572,30 @@ def create_app(
             CORSMiddleware,
             allow_origins=list(origenes_cors),
             allow_methods=["GET", "POST"],
-            allow_headers=["Authorization", "Content-Type"],
+            allow_headers=["Authorization", "Content-Type", "X-Gapto-Intento-Id", "X-Gapto-Intencion-Id"],
         )
+    # AJ-05: el ultimo middleware anadido es el mas externo: el estado de la peticion existe antes que CORS.
+    app.add_middleware(MiddlewarePeticion, registro=registro)
+
+    def _persistencia(request: Request) -> pet.Persistencia:
+        estado = request.scope.get("gapto_peticion")
+        return estado.persistencia() if estado is not None else pet.Persistencia.NINGUNA
+
+    def _no_confirmado_si_persistio(request: Request, status: int, cuerpo: dict) -> JSONResponse:
+        # AJ-05 §5.2: un error tecnico (5xx) con un COMMIT confirmado o indeterminado en la peticion nunca dice
+        # «no guardado» ni «error interno»: es RESULTADO_NO_CONFIRMADO. Un rechazo funcional 4xx no se toca.
+        if status >= 500 and _persistencia(request) is not pet.Persistencia.NINGUNA:
+            status, cuerpo = eh.resultado_no_confirmado()
+        return JSONResponse(cuerpo, status_code=status)
+
+    @app.exception_handler(pet.PlazoAgotado)
+    def _h_plazo(request: Request, exc: pet.PlazoAgotado) -> JSONResponse:
+        _LOG.warning("plazo agotado: %s", exc.motivo)
+        if _persistencia(request) is pet.Persistencia.NINGUNA:
+            status, cuerpo = eh.tiempo_agotado()
+        else:
+            status, cuerpo = eh.resultado_no_confirmado()
+        return JSONResponse(cuerpo, status_code=status)
 
     def contexto() -> ContextoOperacion:
         # El owner NO procede de la peticion: es configuracion del servidor.
@@ -576,16 +613,16 @@ def create_app(
         return JSONResponse(cuerpo, status_code=status)
 
     @app.exception_handler(ErrorMotor)
-    def _h_motor(_: Request, exc: ErrorMotor) -> JSONResponse:
+    def _h_motor(request: Request, exc: ErrorMotor) -> JSONResponse:
         _LOG.warning("error de motor", extra=exc.diagnostico_interno())
         status, cuerpo = eh.traducir_error_motor(exc.codigo)
-        return JSONResponse(cuerpo, status_code=status)
+        return _no_confirmado_si_persistio(request, status, cuerpo)
 
     @app.exception_handler(psycopg.OperationalError)
-    def _h_bd(_: Request, exc: psycopg.OperationalError) -> JSONResponse:
+    def _h_bd(request: Request, exc: psycopg.OperationalError) -> JSONResponse:
         _LOG.warning("BD no disponible: %s", type(exc).__name__)
         status, cuerpo = eh.backend_no_disponible()
-        return JSONResponse(cuerpo, status_code=status)
+        return _no_confirmado_si_persistio(request, status, cuerpo)
 
     @app.exception_handler(RequestValidationError)
     def _h_validacion(_: Request, exc: RequestValidationError) -> JSONResponse:
@@ -605,10 +642,10 @@ def create_app(
         )
 
     @app.exception_handler(Exception)
-    def _h_interno(_: Request, exc: Exception) -> JSONResponse:
+    def _h_interno(request: Request, exc: Exception) -> JSONResponse:
         _LOG.error("error no clasificado: %s", type(exc).__name__)
         status, cuerpo = eh.interno()
-        return JSONResponse(cuerpo, status_code=status)
+        return _no_confirmado_si_persistio(request, status, cuerpo)
 
     @app.get("/v1/salud", dependencies=[Depends(autorizar)])
     def salud() -> dict:
@@ -1451,7 +1488,8 @@ def create_app(
             status, cuerpo = eh.rechazo_integracion(salida.codigo, salida.detalle)
             return JSONResponse(cuerpo, status_code=status)
         estado = unidad.ejecutar(contexto(), lambda s: s.uno(
-            "SELECT estado FROM gapto.hechos_financieros WHERE id = %s", (hecho_id,)), nombre="F05-06 M1 estado")
+            "SELECT estado FROM gapto.hechos_financieros WHERE id = %s", (hecho_id,)), nombre="F05-06 M1 estado",
+            solo_lectura=True)   # AJ-05 (AJ-R2-01): READ ONLY; un fallo aqui es RESULTADO_NO_CONFIRMADO + replay
         return {"intencion_id": intencion.intencion_id, "hecho_id": hecho_id, "row_version": salida.hecho_row_version,
                 "estado": estado[0] if estado else "ACTIVO", "idempotente": salida.idempotente}
 
@@ -1696,4 +1734,5 @@ def create_app_desde_entorno() -> FastAPI:
     import os
 
     origenes = tuple(o for o in os.environ.get("GAPTO_DEV_CORS_ORIGINS", "").split(",") if o)
-    return create_app(origenes_cors=origenes)
+    # AJ-05 (AJ-R2-07): fail-closed al arrancar: sin GAPTO_LOG_DIR escribible fuera del repo, no arranca.
+    return create_app(origenes_cors=origenes, registro=regp.desde_entorno())

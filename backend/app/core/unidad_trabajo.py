@@ -24,6 +24,22 @@
 #   aporta el llamante y NO se regenera entre intentos: esa es la pieza que
 #   hace seguro el reintento de un alta.
 # Version: 0.1.0
+# Version: 0.2.0 (F06 T4 · AJ-05 ampliado + R-C7-07, mandato b4ff6b70… y adenda 01 24113472… (perfil BETA_LOCAL,
+#   AJ-R3-02); diseno v0.2 §3-§5 con AJ-R2-01/02/05):
+#   DENTRO de una peticion HTTP (estado de `app.core.peticion`, creado por el middleware) cada intento:
+#   - mide el restante del deadline UNICO de la peticion antes del intento y antes del backoff, y no empieza con
+#     menos de 0,5 s (`PlazoAgotado`); el deadline nunca se reinicia;
+#   - fija en la sesion, en autocommit (sin transaccion implicita), `transaction_timeout = restante + margen`, y
+#     despues abre un BEGIN real; dentro, junto al contexto, `statement_timeout = restante` y `lock_timeout`
+#     (3 s en A; 0 EXPLICITO en B);
+#   - deja su estado en el seguimiento ACUMULADO de la peticion (SIN_ESCRITURA_POSIBLE / ESCRITURA_POSIBLE /
+#     COMMIT_INICIADO / COMMIT_CONFIRMADO / COMMIT_INDETERMINADO / ROLLBACK_CONFIRMADO / ABORTADA_SIN_COMMIT), con
+#     las duraciones de conexion, transaccion y COMMIT; el XID asignado se guarda solo como evidencia auxiliar;
+#   - convierte en `PlazoAgotado` (fuera de ErrorMotor) solo un 57014 del statement_timeout propio (llega con el
+#     deadline cumplido) o un 55P03 del lock_timeout propio (clase A). 57014 no se reintenta.
+#   Un COMMIT confirmado no se rebaja nunca, ni por un error posterior (cierre de la conexion).
+#   `solo_lectura=True` (de cualquier llamante) abre la transaccion en READ ONLY ANTES de cualquier consulta, incluida
+#   la de contexto. Fuera de una peticion HTTP la unidad no cambia de comportamiento.
 # ============================================================
 
 from __future__ import annotations
@@ -37,6 +53,7 @@ from typing import Any, Callable, Generic, Iterator, TypeVar
 
 import psycopg
 
+from app.core import peticion as pet
 from app.core.clasificacion_errores import es_reintentable, traducir
 from app.core.contexto import ContextoOperacion
 from app.core.errores import CodigoError, ErrorMotor
@@ -147,8 +164,9 @@ class UnidadDeTrabajo:
         operacion: Callable[[SesionMotor], T],
         *,
         nombre: str = "operacion",
+        solo_lectura: bool = False,
     ) -> T:
-        return self.ejecutar_con_traza(contexto, operacion, nombre=nombre).valor
+        return self.ejecutar_con_traza(contexto, operacion, nombre=nombre, solo_lectura=solo_lectura).valor
 
     def ejecutar_con_traza(
         self,
@@ -156,24 +174,67 @@ class UnidadDeTrabajo:
         operacion: Callable[[SesionMotor], T],
         *,
         nombre: str = "operacion",
+        solo_lectura: bool = False,
     ) -> Resultado[T]:
         traza = Traza(operacion=nombre, request_id=contexto.request_id)
+        peticion = pet.actual()
+        registro: pet.RegistroUnidad | None = None
+        if peticion is not None:
+            registro = pet.RegistroUnidad(nombre=nombre, audit_request_id=str(contexto.request_id),
+                                          solo_lectura=solo_lectura)
+            peticion.unidades.append(registro)   # acumulado: nunca se borra lo de otra unidad
 
         for numero in range(1, self._max_intentos + 1):
             traza.intentos_realizados = numero
+            intento: pet.RegistroIntento | None = None
+            if peticion is not None:
+                if peticion.restante() < pet.MINIMO_PARA_INTENTO_S:
+                    raise pet.PlazoAgotado("SIN_PLAZO_PARA_INTENTO", unidad=nombre)
+                intento = pet.RegistroIntento(
+                    numero=numero, solo_lectura=solo_lectura,
+                    estado=pet.EstadoUnidad.SIN_ESCRITURA_POSIBLE if solo_lectura else pet.EstadoUnidad.ESCRITURA_POSIBLE)
+                registro.intentos.append(intento)
+            t_intento = time.monotonic()
+            t_commit = t_intento
             try:
                 with self._proveedor() as conexion:
+                    if peticion is not None:
+                        intento.conexion_ms = _ms(t_intento)
+                        _ajustar_sesion(conexion, peticion)
+                    t_tx = time.monotonic()
                     with conexion.transaction():
-                        self._fijar_contexto(conexion, contexto)
+                        if solo_lectura:
+                            # Primera sentencia de la transaccion: PostgreSQL impide que escriba (AJ-R2-01).
+                            conexion.execute("SET TRANSACTION READ ONLY")
+                        self._fijar_contexto(conexion, contexto, peticion)
                         sesion = SesionMotor(conexion, contexto, numero)
                         valor = operacion(sesion)
+                        if intento is not None:
+                            intento.xid_auxiliar = conexion.execute(
+                                "SELECT pg_current_xact_id_if_assigned() IS NOT NULL").fetchone()[0]
+                            intento.transaccion_ms = _ms(t_tx)
+                            if not solo_lectura:
+                                intento.estado = pet.EstadoUnidad.COMMIT_INICIADO
+                            t_commit = time.monotonic()
                     # Salir del bloque `transaction()` sin excepcion equivale a
                     # COMMIT confirmado, incluida la validacion de constraints
                     # diferidas de 0310.
+                    if intento is not None:
+                        intento.commit_ms = _ms(t_commit)
+                        if not solo_lectura:
+                            intento.estado = pet.EstadoUnidad.COMMIT_CONFIRMADO
                     return Resultado(valor=valor, traza=traza)
             except BaseException as exc:  # noqa: BLE001 - se reclasifica abajo
                 reintentable = es_reintentable(exc)
                 sqlstate = getattr(exc, "sqlstate", None)
+                if intento is not None:
+                    intento.sqlstate = sqlstate
+                    if not solo_lectura:
+                        intento.estado = _estado_tras_error(intento.estado, exc)
+                    motivo = (None if intento.estado is pet.EstadoUnidad.COMMIT_CONFIRMADO
+                              else _plazo_propio(exc, peticion))
+                    if motivo is not None:
+                        raise pet.PlazoAgotado(motivo, sqlstate=sqlstate, unidad=nombre) from exc
                 if reintentable:
                     traza.fallidos.append(
                         IntentoFallido(
@@ -193,7 +254,11 @@ class UnidadDeTrabajo:
                         },
                     )
                     if numero < self._max_intentos:
-                        time.sleep(self._espera_inicial_s * (2 ** (numero - 1)))
+                        espera = self._espera_inicial_s * (2 ** (numero - 1))
+                        if peticion is not None and peticion.restante() - espera < pet.MINIMO_PARA_INTENTO_S:
+                            # El backoff consume el MISMO presupuesto: si tras esperar no quedaria plazo, no se espera.
+                            raise pet.PlazoAgotado("SIN_PLAZO_PARA_INTENTO", sqlstate=sqlstate, unidad=nombre) from exc
+                        time.sleep(espera)
                         continue
                     raise ErrorMotor(
                         CodigoError.CONFLICTO_CONCURRENCIA,
@@ -218,6 +283,7 @@ class UnidadDeTrabajo:
         self,
         conexion: psycopg.Connection,
         contexto: ContextoOperacion,
+        peticion: pet.EstadoPeticion | None = None,
     ) -> None:
         """Fija rol y GUC dentro de la transaccion en curso.
 
@@ -241,6 +307,63 @@ class UnidadDeTrabajo:
                     str(contexto.request_id),
                 ),
             )
+            if peticion is not None:
+                # AJ-05 (diseno §4.2): limites LOCALES de esta transaccion; revierten al terminar.
+                cursor.execute(
+                    "SELECT set_config('statement_timeout', %s, true),"
+                    "       set_config('lock_timeout',      %s, true)",
+                    (f"{max(1, int(peticion.restante() * 1000))}ms", f"{peticion.lock_timeout_ms()}ms"),
+                )
+
+
+def _ms(desde: float) -> float:
+    return round((time.monotonic() - desde) * 1000, 2)
+
+
+def _ajustar_sesion(conexion: psycopg.Connection, peticion: pet.EstadoPeticion) -> None:
+    """Diseno §4.1: ajuste de SESION sin transaccion implicita. En autocommit, `set_config(..., false)` no abre
+    transaccion; despues `conexion.transaction()` emite un BEGIN real (no un savepoint). La conexion es de este
+    intento y se cierra con el: el ajuste muere con ella."""
+    conexion.autocommit = True
+    ms = int((peticion.restante() + pet.MARGEN_TRANSACTION_TIMEOUT_S) * 1000)
+    conexion.execute("SELECT set_config('transaction_timeout', %s, false)", (f"{max(1, ms)}ms",))
+
+
+# SQLSTATE con los que el servidor corta la sesion: no prueban que la transaccion abortase antes del COMMIT.
+_CORTE_DE_SESION = ("57P01", "57P02", "57P03", "57P04", "57P05", "25P04")
+
+
+def _es_corte(exc: BaseException) -> bool:
+    sqlstate = getattr(exc, "sqlstate", None)
+    if isinstance(exc, psycopg.OperationalError) and sqlstate is None:
+        return True    # conexion perdida sin respuesta del servidor
+    return sqlstate is not None and (sqlstate.startswith("08") or sqlstate in _CORTE_DE_SESION)
+
+
+def _estado_tras_error(previo: pet.EstadoUnidad, exc: BaseException) -> pet.EstadoUnidad:
+    """AJ-R2-02. Durante el COMMIT: un corte deja el resultado INDETERMINADO; una respuesta de error del servidor
+    (trigger diferido, 57014, 40P01...) prueba el aborto. Antes del COMMIT nunca puede haber confirmado.
+    Un COMMIT ya confirmado NUNCA se rebaja (p. ej. un error al cerrar la conexion despues del COMMIT)."""
+    if previo is pet.EstadoUnidad.COMMIT_CONFIRMADO:
+        return previo
+    if previo is pet.EstadoUnidad.COMMIT_INICIADO:
+        return pet.EstadoUnidad.COMMIT_INDETERMINADO if _es_corte(exc) else pet.EstadoUnidad.ROLLBACK_CONFIRMADO
+    return pet.EstadoUnidad.ABORTADA_SIN_COMMIT if _es_corte(exc) else pet.EstadoUnidad.ROLLBACK_CONFIRMADO
+
+
+def _plazo_propio(exc: BaseException, peticion: pet.EstadoPeticion | None) -> str | None:
+    """Diseno §5.4: 57014/55P03 son plazo SOLO si los provoco un limite que fijo la propia unidad.
+    - 57014: la unidad fija statement_timeout = restante, asi que el suyo solo salta con el deadline cumplido; uno
+      anterior (p. ej. una cancelacion externa) conserva el error original.
+    - 55P03: solo con lock_timeout propio > 0 (clase A). En B es 0: un 55P03 no puede venir de su limite."""
+    if peticion is None:
+        return None
+    sqlstate = getattr(exc, "sqlstate", None)
+    if sqlstate == "57014" and time.monotonic() >= peticion.deadline - pet.TOLERANCIA_DEADLINE_S:
+        return "STATEMENT_TIMEOUT"
+    if sqlstate == "55P03" and peticion.lock_timeout_ms() > 0:
+        return "LOCK_TIMEOUT"
+    return None
 
 
 @contextmanager

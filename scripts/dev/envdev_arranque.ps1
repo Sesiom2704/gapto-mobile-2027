@@ -16,6 +16,10 @@
 #   de ENV-DEV deducida de la ubicacion del script (<Base>\repo\scripts\dev).
 #   Si se ejecuta desde otro clon, el paso 1 falla cerrado (falta pgdata).
 #   -PgBin, o $env:GAPTO_PG_BIN, o por defecto PostgreSQL 17 en Program Files.
+# Version: 0.3.0
+#   0.3.0: F06 T4 AJ-05 (mandato b4ff6b70...): el backend exige GAPTO_LOG_DIR
+#          (registro de peticiones, fail-closed al arrancar); se fija a
+#          <Base>\logs, fuera del repositorio.
 # Version: 0.2.0
 #   0.2.0: MANT H-B, sin rutas de maquina versionadas ($PSScriptRoot y
 #          variables de entorno); misma interfaz.
@@ -33,6 +37,7 @@ $R = Join-Path $Base 'repo'
 $V = Join-Path $Base 'venv'
 $D = Join-Path $Base 'pgdata'
 $L = Join-Path $Base 'local'
+$G = Join-Path $Base 'logs'   # AJ-05: GAPTO_LOG_DIR (fuera del repo)
 $M = Join-Path $R 'mobile'
 
 function Paso([int]$n, [string]$t) { Write-Host ("[{0}] {1}/5 {2}" -f (Get-Date -Format HH:mm:ss), $n, $t) -ForegroundColor Cyan }
@@ -80,6 +85,7 @@ if (@(Get-NetTCPConnection -State Listen -LocalPort 8027 -ErrorAction SilentlyCo
     $env:GAPTO_DATABASE_URL = 'host=127.0.0.1 port=5434 dbname=gapto2027_dev user=app_dev'
     $env:GAPTO_DEV_OWNER_USER_ID = (Get-Content "$L\owner.txt").Trim()
     $env:GAPTO_DEV_TOKEN = $token
+    $env:GAPTO_LOG_DIR = $G
     $cmdBackend = "`$host.UI.RawUI.WindowTitle='GAPTO BACKEND 8027 (no cerrar)'; & '$V\Scripts\python.exe' -m uvicorn app.api.app:create_app_desde_entorno --factory --host $ip --port 8027"
     Start-Process powershell.exe -WorkingDirectory "$R\backend" -ArgumentList @('-NoExit', '-NoProfile', '-Command', $cmdBackend)
     Remove-Item Env:GAPTO_DEV_TOKEN

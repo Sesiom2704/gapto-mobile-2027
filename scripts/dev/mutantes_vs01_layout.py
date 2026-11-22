@@ -38,6 +38,8 @@
 #   gapto2027_dev. No ejecutar en paralelo con otro arnes ni con otro E2E que
 #   use los mismos puertos o la misma base. EVIDENCIA WEB/VIEWPORT, no iOS.
 # Version: 0.1.0 (F05-D051 paso 3; F05 §65.3)
+# Version: 0.1.1 (F06 T4 · AJ-05, mandato b4ff6b70… y adenda 01): la API del arbol arranca con GAPTO_LOG_DIR
+#   en la evidencia del mutante (el backend no arranca sin registro de peticiones). Ningun mutante cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -159,7 +161,8 @@ def ejecutar_e2e(etiqueta: str, dist: pathlib.Path, a: argparse.Namespace, token
     params = conninfo.conninfo_to_dict(a.admin_dsn)
     dsn = f"postgresql://{params.get('user', 'postgres')}@{params['host']}:{params.get('port', 5432)}/gapto2027_dev"
     env = dict(os.environ, GAPTO_ENV="development", GAPTO_DATABASE_URL=dsn, GAPTO_DEV_TOKEN=token,
-               GAPTO_DEV_OWNER_USER_ID=owner, GAPTO_DEV_CORS_ORIGINS=web, PYTHONIOENCODING="utf-8")
+               GAPTO_DEV_OWNER_USER_ID=owner, GAPTO_DEV_CORS_ORIGINS=web, PYTHONIOENCODING="utf-8",
+               GAPTO_LOG_DIR=str(dirE / "registro_peticiones"))  # AJ-05: el backend no arranca sin registro
     with (dirE / "api.log").open("w", encoding="utf-8") as fapi:
         proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "app.api.app:create_app_desde_entorno", "--factory",
                                  "--host", "127.0.0.1", "--port", str(a.api_puerto)],

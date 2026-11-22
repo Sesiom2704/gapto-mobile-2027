@@ -217,6 +217,10 @@
 # Version: 0.33.0
 # Version: 0.34.0 (F06 T3-F06 bloque 2 F06-01H, paso 5; firma 53972c8c): CUENTA_SIN_CAPACIDAD conoce la operacion
 #   DESEMBOLSO_FINANCIACION («recibir dinero»; nunca «ingreso»). Ningun codigo existente cambia.
+# Version: 0.35.0 (F06 T4 · AJ-05 ampliado + R-C7-07, mandato b4ff6b70…; diseno v0.2 §5.2): dos desenlaces nuevos,
+#   ambos 503 y reintentables con la MISMA intencion: TIEMPO_AGOTADO (no guardado: solo si ninguna unidad de la
+#   peticion confirmo ni quedo indeterminada) y RESULTADO_NO_CONFIRMADO (puede haberse guardado; no afirma que la
+#   escritura fallara). Ningun codigo existente cambia de significado ni de status.
 # ============================================================
 
 from __future__ import annotations
@@ -338,6 +342,25 @@ def backend_no_disponible() -> tuple[int, dict]:
     return 503, {
         "codigo": "BACKEND_NO_DISPONIBLE",
         "mensaje": "No se ha podido confirmar el registro. Puedes reintentar: no se duplicará.",
+        "reintentable": True,
+    }
+
+
+def tiempo_agotado() -> tuple[int, dict]:
+    """AJ-05 §5.2 «No guardado»: el plazo se agoto y la peticion no tiene ninguna escritura confirmada ni posible."""
+    return 503, {
+        "codigo": "TIEMPO_AGOTADO",
+        "mensaje": "El servidor ha tardado demasiado y no ha guardado nada. Puedes reintentar.",
+        "reintentable": True,
+    }
+
+
+def resultado_no_confirmado() -> tuple[int, dict]:
+    """AJ-05 §5.2 «Indeterminado»: puede haberse guardado. No afirma que la escritura fallara; la misma intencion
+    lo resuelve (replay)."""
+    return 503, {
+        "codigo": "RESULTADO_NO_CONFIRMADO",
+        "mensaje": "No se ha podido confirmar el resultado. Puedes reintentar: no se duplicará.",
         "reintentable": True,
     }
 

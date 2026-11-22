@@ -36,6 +36,7 @@
 // v0.26.0 (F06 T3-F06 bloque 2 F06-01H, paso 10): llamadas OPCIONALES de la hipoteca (tipos en api/hipoteca.ts; opcionales en `ClienteApi` para que los dobles de test no cambien): `cuadroHipoteca` (POST /v1/hipotecas/cuadro, W-HIP-00, sin escritura), `hipotecaDePropiedad` (GET /v1/propiedades/{id}/hipoteca, L-HIP), `pagarCuotaHipoteca` (POST /v1/hipotecas/{id}/cuotas/{n}/pago, W-HIP-02) y `revisarTipoHipoteca` (POST /v1/hipotecas/{id}/revision, W-HIP-03/04), las dos escrituras con la clasificación 'CAMBIO'. Ninguna llamada existente cambia.
 // v0.28.0 (F06 T4 · D-C7-10, mandato 7041970a…; Q3-Hd v1.2 candidato): `FilaPrevision.cuota?` (bloque `BloqueCuota` del servidor, solo en la fila de cuota de Inicio y Pendientes): financiación, número, versión de la financiación, vencimiento, cuenta de cargo, propuesta de atribución, `swipe_disponible` y `sin_dudas`. Ninguna llamada cambia.
 // v0.27.0 (F06 T3 · MANT N1 de revisión del tipo, A3; dictamen MANT R-B2-06 punto 3 y AJ-03; decisión 14): `revisarTipoHipoteca` usa un timeout propio `TIMEOUT_REVISION_MS` (nunca menor que el general), dimensionado con la medición por fases de A2 (06_revision_latencia); el resto de llamadas conserva el timeout general de 10 s.
+// v0.29.0 (F06 T4 · AJ-05 ampliado + R-C7-07, mandato b4ff6b70…; diseño v0.2 §7): `crearLlamada` añade `X-Gapto-Intento-Id` (UUID nuevo por intento HTTP; solo traza) y, en escrituras, `X-Gapto-Intencion-Id` tomado del `intencion_id` del cuerpo, sin perder `Authorization` ni `Content-Type`. Mismo cuerpo y misma intención en los reenvíos (vigente). Sin cambios de clasificación: 5xx sigue siendo INDETERMINADO.
 // ============================================================
 
 import type { Ambito, CategoriaNodo } from '../domain/categoria';
@@ -1010,16 +1011,43 @@ const post = (cuerpo: unknown): RequestInit => ({ method: 'POST', body: JSON.str
 export type Llamada = <T>(ruta: string, init: RequestInit, esEscritura: boolean | 'CAMBIO') => Promise<Respuesta<T>>;
 
 /** Llamada HTTP clasificada: OK, RECHAZADO (4xx con `codigo`, definitivo) o INDETERMINADO (timeout, red, 5xx u otro 4xx). */
-export function crearLlamada(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): Llamada {
+/** AJ-05 (diseño §7): identificador de un intento HTTP. Solo traza: el servidor no lo usa para nada funcional. */
+export function uuidIntento(): string {
+  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (c && typeof c.randomUUID === 'function') return c.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (ch) => {
+    const r = Math.floor(Math.random() * 16);
+    return (ch === 'x' ? r : (r % 4) + 8).toString(16);
+  });
+}
+
+/** AJ-05: la intención de una escritura es la del cuerpo (la que manda en el motor); la cabecera solo la copia. */
+export function intencionDelCuerpo(body: unknown): string | null {
+  if (typeof body !== 'string') return null;
+  try {
+    const o = JSON.parse(body) as { intencion_id?: unknown } | null;
+    return o && typeof o.intencion_id === 'string' ? o.intencion_id : null;
+  } catch {
+    return null;
+  }
+}
+
+export function crearLlamada(cfg: ConfigApi, fetchImpl: typeof fetch = fetch, nuevoIntento: () => string = uuidIntento): Llamada {
   return async function llamar<T>(ruta: string, init: RequestInit, esEscritura: boolean | 'CAMBIO'): Promise<Respuesta<T>> {
     const msgIndeterminado = esEscritura === 'CAMBIO' ? MSG_INDETERMINADO_CAMBIO : esEscritura ? MSG_INDETERMINADO : MSG_SIN_CONEXION;
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), cfg.timeoutMs);
+    const intencion = esEscritura ? intencionDelCuerpo(init.body) : null;
     try {
       const r = await fetchImpl(`${cfg.baseUrl}${ruta}`, {
         ...init,
         signal: ctrl.signal,
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.token}` },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${cfg.token}`,
+          'X-Gapto-Intento-Id': nuevoIntento(),
+          ...(intencion ? { 'X-Gapto-Intencion-Id': intencion } : {}),
+        },
       });
       let cuerpo: any = null;
       try {
