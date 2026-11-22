@@ -9,6 +9,7 @@
 // Versión: 0.3.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2): la fila recibe los dos lados (`derecha` / `izquierda`) y va en tarjeta; las acciones accesibles «derecha» / «izquierda» llevan la etiqueta de cada lado. «Próximos» sigue siendo una lista de solo lectura, sin tarjeta ni gesto.
 // Versión: 0.5.0 (F05-06 M5-B; F04-D065, F05-D047; contrato M5-B §5): HojaDarPorCubierta (Esperado / Registrado / Queda sin cubrir ±X €, motivo con sugerencias y texto, confirmación explícita), HojaMas («Reabrir», atenuada con su motivo) y HojaReabrir (motivo obligatorio; avisa de que se retira el sucesor sin realidad). Ninguna tiene swipe. AvisoEstadoActual ya no dice que deshacer una omisión no exista: remite a «Reabrir» en «Más».
 // Versión: 0.5.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
+// Versión: 0.6.0 (F06 T3 · cadena de noche 21->22-11, T-D MANT N3 cliente; D-C7-07): los campos de importe ponen los puntos de miles al teclear (`formatearImporteAlTeclear`).
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -17,7 +18,7 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { AccionPrevision as AccionPrevisionWire, DetallePrevision, FilaPrevision } from '../api/cliente';
-import { formatearEur } from '../domain/importe';
+import { formatearEur, formatearImporteAlTeclear } from '../domain/importe';
 import {
   consecuencia,
   estadoLegible,
@@ -158,7 +159,7 @@ export function HojaSwipe(p: {
           testID="swipe-importe"
           accessibilityLabel="Importe real"
           value={p.importeTexto}
-          onChangeText={p.onImporte}
+          onChangeText={(t) => p.onImporte(formatearImporteAlTeclear(t, p.importeTexto))}
           keyboardType="decimal-pad"
           style={[tipo.body, s.input, { color: c.textPrimary, borderColor: c.borderStandard, backgroundColor: c.surfacePrimary }]}
         />

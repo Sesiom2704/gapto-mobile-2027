@@ -4,6 +4,7 @@
 // Ruta: mobile/src/screens/MovimientosCuentaScreen.tsx
 // Descripción: T2-F06 PAG · «Movimientos de la cuenta» (L-MOV-CUENTA; L-09, Q-VP-01; mandato PAG §1.3.3 y §1.4.5). Pantalla nueva de F06, de SOLO LECTURA, que se abre desde el detalle de un gasto de la propiedad («Ver el movimiento en la cuenta») para ver el movimiento real (−750 si pagaste tu parte, −1.500 si pagaste todo): los movimientos de esa cuenta en orden cronológico, cada uno con el hecho al que está asociado, y el del gasto resaltado. Sin estado de punteo ni acciones de conciliación (el punteo es de un bloque propio de tesorería). No toca pantallas de F05; el acceso desde Cuentas va a otro bloque.
 // Versión: 0.1.0 (F06 T2-F06 PAG N1)
+// Versión: 0.2.0 (F06 T3 · cadena de noche 21->22-11, T-D MANT N3 cliente; D-C7-09 / OBS-03 y AJ-06 del 19-11): el concepto del desembolso de la hipoteca se presenta «Préstamo recibido» (`conceptoPresentado`).
 // ============================================================
 
 import React, { useEffect, useState } from 'react';
@@ -16,6 +17,7 @@ import { BotonTexto, EstadoDato } from '../components/Basicos';
 import { CabeceraTarea, estilosFormulario as ef, Tarjeta } from '../components/Formulario';
 import { diaMesAnioIso } from '../domain/fechas';
 import { formatearEur } from '../domain/importe';
+import { conceptoPresentado } from '../domain/titulos_dia';
 import { useTema } from '../theme/tema';
 import { espacio, tipo } from '../theme/tokens';
 
@@ -52,7 +54,7 @@ export function MovimientosCuentaScreen(p: {
           <Tarjeta testID="movs-lista">
             {movs.map((m, i) => {
               const delGasto = !!p.resaltar && m.hechos.some((h) => h.hecho_id === p.resaltar);
-              const concepto = m.hechos.map((h) => h.concepto ?? h.tipo_hecho).join(' · ') || m.descripcion || 'Movimiento';
+              const concepto = m.hechos.map((h) => conceptoPresentado(h.concepto ?? null) ?? h.tipo_hecho).join(' · ') || m.descripcion || 'Movimiento';
               return (
                 <View key={m.movimiento_id} testID={`movs-fila-${m.movimiento_id}`}
                   style={[s.fila, i < movs.length - 1 ? { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.borderDefault } : null]}>

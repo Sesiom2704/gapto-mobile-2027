@@ -8,6 +8,7 @@
 // Versión: 0.3.0 (F05-D052 paso 2 · C-03, §66.A.9): el rechazo GASTO_CON_DERECHO_DE_COBRO al guardar se explica con el mismo motivo que la lectura.
 // Versión: 0.3.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // Versión: 0.4.0 (F06 T1 UX-1 · M-07, DM-06: la fecha usa el componente único `CampoFecha` (chips, campo dd/mm/aaaa con máscara y calendario en JS); se conservan el estado, las reglas de cada campo, los testID y los textos de validación; regla ≤ hoy).
+// Versión: 0.5.0 (F06 T3 · cadena de noche 21->22-11, T-D MANT N3 cliente; D-C7-07): los campos de importe ponen los puntos de miles al teclear (`formatearImporteAlTeclear`).
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -36,7 +37,7 @@ import {
   tituloOrigen,
 } from '../domain/devolucion';
 import { ayer, ddmmaaaaAIso, diaMesAnioIso, diaMesIso, fechaCortaIso, isoADdmmaaaa, isoLocal, mesAnioIso } from '../domain/fechas';
-import { formatearEur, parsearImporte } from '../domain/importe';
+import { formatearEur, formatearImporteAlTeclear, parsearImporte } from '../domain/importe';
 import { esFechaIso } from '../domain/intencion';
 import { notaCanonica } from '../domain/registro';
 import { useTema } from '../theme/tema';
@@ -310,7 +311,7 @@ export function DevolucionScreen(p: {
                   <View style={[s.importeCaja, { backgroundColor: c.surfacePrimary, borderColor: supera ? c.critical : c.borderStandard }]}>
                     <Text style={[importe.primary, { color: c.textSecondary }]}>€</Text>
                     <TextInput testID="campo-importe" accessibilityLabel="Importe devuelto en euros" value={importeTexto}
-                      onChangeText={(t) => editar(() => setImporte(t))} editable={!bloqueado} keyboardType="decimal-pad" inputMode="decimal"
+                      onChangeText={(t) => editar(() => setImporte(formatearImporteAlTeclear(t, importeTexto)))} editable={!bloqueado} keyboardType="decimal-pad" inputMode="decimal"
                       placeholder="0,00" placeholderTextColor={c.textSecondary}
                       style={[importe.hero, { flex: 1, minWidth: 0, color: c.textPrimary, paddingVertical: espacio.s }]} />
                   </View>

@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F06 Lote 12 · B1 Propiedad, N1)
 // Versión: 0.2.0 (F06-01 B1 MANT N3 del selector, AJ-B1C-01 / PC-B1-04 opción A): la fecha de D3 se elige con «Hoy · Ayer · Otra fecha», el patrón de AbonoHoja (propuesta Hoy; Hoy y Ayer en la fecha civil del dispositivo con `isoLocal` y `ayer` de domain/fechas; «Otra fecha» abre el campo dd/mm/aaaa y solo admite una fecha que exista en el calendario, `esFechaIso`). Sin límite nuevo: C-PROP-04 solo exige una fecha (`fecha_valoracion: date`, no nula). La petición no cambia (fecha_valoracion ISO).
 // Versión: 0.3.0 (F06 T1 UX-1 · M-07, DM-06: la fecha usa el componente único `CampoFecha` (chips, campo dd/mm/aaaa con máscara y calendario en JS); se conservan el estado, las reglas de cada campo, los testID y los textos de validación; sin mínimo ni máximo, C-PROP-04; con D-M2-04 acepta años 0001–0099, p. ej. 0050-06-15).
+// Versión: 0.4.0 (F06 T3 · cadena de noche 21->22-11, T-D MANT N3 cliente; D-C7-07): los campos de importe ponen los puntos de miles al teclear (`formatearImporteAlTeclear`).
 // ============================================================
 
 import React, { useRef, useState } from 'react';
@@ -114,7 +115,7 @@ export function ValoracionFormScreen(p: {
           )}
         </View>
         <Campo etiqueta="¿Cuánto vale hoy el inmueble completo?">
-          <CampoTexto testID="prop-val-valor" etiqueta="Valor del inmueble completo" marcador="Ej.: 250.000,00" valor={f.valor} onCambiar={(t) => setF({ ...f, valor: t })} />
+          <CampoTexto importe testID="prop-val-valor" etiqueta="Valor del inmueble completo" marcador="Ej.: 250.000,00" valor={f.valor} onCambiar={(t) => setF({ ...f, valor: t })} />
         </Campo>
         <Campo etiqueta="Fecha">
           <CampoFecha

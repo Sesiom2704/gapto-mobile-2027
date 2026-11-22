@@ -11,6 +11,7 @@
 // Versión: 0.6.0 (F05-D052 paso 2 · C-03 C4, F05 §66.2/§66.A.8; D-F0507L-06): `entidadId` abre directamente el derecho elegido (si la contraparte tiene varios, el cobro se aplica solo a ese). En el derecho de un gasto reembolsable («Pendiente de cobro · …») el origen es «<quién> · Pendiente de cobro · <categoría> · te debe X» y la explicación «No es un ingreso: solo salda lo que te deben. Tu Resultado no cambia.». «Registrar cobro» sigue deshabilitado hasta elegir cuenta. Tras cualquier cobro, el título es «Saldado · no cuenta como ingreso» solo si extingue el saldo conocido; si no, «Cobro registrado · quedan X €» (nunca «Saldado» con saldo indeterminado).
 // Versión: 0.7.0 (F05-D056 paso 2, COLA-AR v1.0, F05 §70.A; STOP-PA-A6-R): el swipe «Cobrado» / «Pagado» con una sola cuenta elegible (F1) es una acción de la cola de la app (`useAccionFinanciera`): la intención sobrevive a salir de la pantalla y a cerrar la app, el aviso dice «Cobrando…» / «Pagando…» hasta el 2xx del servidor y solo entonces «Cobro registrado» o, si el servidor deja el saldo conocido a cero, «Saldado · no cuenta como ingreso». Nunca ✓ antes de la confirmación.
 // Versión: 0.8.0 (F06 T1 UX-1 · M-07, DM-06: la fecha usa el componente único `CampoFecha` (chips, campo dd/mm/aaaa con máscara y calendario en JS); se conservan el estado, las reglas de cada campo, los testID y los textos de validación; regla ≤ hoy) y M-09: el botón atrás es «‹ Atrás» y ya no repite el nombre del título (conserva `pendiente-atras`).
+// Versión: 0.9.0 (F06 T3 · cadena de noche 21->22-11, T-D MANT N3 cliente; D-C7-07): los campos de importe ponen los puntos de miles al teclear (`formatearImporteAlTeclear`).
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -25,7 +26,7 @@ import { BotonPrimario, BotonTexto, Chip, EstadoDato } from '../components/Basic
 import { CampoFecha } from '../components/CampoFecha';
 import { Aviso, CabeceraTarea, Campo, Inicial, s } from '../components/Reparto';
 import { ayer, ddmmaaaaAIso, diaMesIso, fechaCortaIso, isoADdmmaaaa, isoLocal } from '../domain/fechas';
-import { formatearEur, parsearImporte } from '../domain/importe';
+import { formatearEur, formatearImporteAlTeclear, parsearImporte } from '../domain/importe';
 import { esFechaIso } from '../domain/intencion';
 import {
   activasDe,
@@ -259,7 +260,7 @@ export function PendienteConScreen(p: {
             <View style={[s.fila, { backgroundColor: c.surfacePrimary, borderColor: c.borderStandard, borderWidth: 1 }]}>
               <Text style={[importe.primary, { color: c.textSecondary }]}>€</Text>
               <TextInput testID="accion-importe" accessibilityLabel={`${titulo}, importe en euros`} value={importeTexto} editable={!bloqueado}
-                onChangeText={(t) => editar(() => setImporte(t))} keyboardType="decimal-pad" inputMode="decimal" placeholder="0,00"
+                onChangeText={(t) => editar(() => setImporte(formatearImporteAlTeclear(t, importeTexto)))} keyboardType="decimal-pad" inputMode="decimal" placeholder="0,00"
                 placeholderTextColor={c.textSecondary} style={[importe.primary, { flex: 1, minWidth: 0, color: c.textPrimary }]} />
             </View>
           </Campo>

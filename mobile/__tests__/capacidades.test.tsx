@@ -6,6 +6,7 @@
 // Versión: 0.3.0 (MANT D18, lote 40): se elimina el jest.setTimeout(30000) propio; el límite (90 s) lo fija solo tiempos_rn (R-TEST-TIMEOUT); sin cambios de aserciones.
 //   previa: 0.1.0 (F05-06 M4 F2)
 // Versión: 0.2.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
+// Versión: 0.4.0 (F06 T3 · cadena de noche 21->22-11, T-D MANT N3 cliente; D-C7-07): el importe tecleado se conserva con sus puntos de miles («1.500»).
 // ============================================================
 
 import './tiempos_rn';
@@ -345,7 +346,7 @@ test('B2: «¿Falta una cuenta? N sin configurar ›» en «Cobrado en»; abre C
   expect(screen.getByTestId('cap-atras').props.accessibilityLabel).toBe('Atrás: Nuevo ingreso');
   await pulsar('cap-atras');
   expect(screen.queryByTestId('panel-cuentas')).toBeNull();
-  expect(screen.getByTestId('campo-importe').props.value).toBe('1500');
+  expect(screen.getByTestId('campo-importe').props.value).toBe('1.500'); // D-C7-07: puntos de miles al teclear
   expect(await screen.findByTestId(`cuenta-${ING}`)).toBeTruthy(); // ya puede cobrar
   await waitFor(() => expect(screen.queryByTestId('falta-cuenta')).toBeNull()); // N = 0: sin aviso
 });
@@ -390,7 +391,7 @@ test('B3: CUENTA_SIN_CAPACIDAD al guardar un ingreso: mensaje, formulario conser
   expect(screen.getByText(`${MSG_B3} ${TEXTO_FORMULARIO_SE_CONSERVA}`)).toBeTruthy();
   await waitFor(() => expect(screen.queryByTestId(`cuenta-${NOMINA}`)).toBeNull());
   expect(screen.getByTestId(`cuenta-${AHORRO}`).props.accessibilityState.checked).toBe(false); // ninguna se rellena sola
-  expect(screen.getByTestId('campo-importe').props.value).toBe('1500');
+  expect(screen.getByTestId('campo-importe').props.value).toBe('1.500'); // D-C7-07: puntos de miles al teclear
   expect(screen.getByTestId('registrar').props.accessibilityState.disabled).toBe(true);
 });
 
