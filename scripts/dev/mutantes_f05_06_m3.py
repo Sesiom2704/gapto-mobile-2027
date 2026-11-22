@@ -34,6 +34,8 @@
 # Version: 0.4.0 (F06 T3 · cadena de noche 21->22-11, T-C MANT N1 RK-ARN-02; dictamen del 21-11 §3 y AJ-03): M26
 #   sustituye la linea por `pass` en lugar de borrarla (antes dejaba el if vacio: IndentationError, muerte por
 #   preparacion); misma mutacion (sin comprobar la capacidad) y mismo discriminante.
+# Version: 0.5.0 (F06 T3 · cadena de noche 21->22-11, T-C MANT N1 RK-ARN-01): M13 pasa al discriminante
+#   determinista test_200::test_p2_determinista_el_writer_retiene_el_tercero_en_share (misma mutacion).
 # ============================================================
 
 from __future__ import annotations
@@ -116,7 +118,8 @@ MUTANTES = [
     ("M13", "writer: tercero sin FOR SHARE (no serializa frente a desactivarlo)",
      [(ACTR, "        \"AND owner_user_id = current_setting('gapto.owner_user_id')::uuid FOR SHARE\",\n",
        "        \"AND owner_user_id = current_setting('gapto.owner_user_id')::uuid\",\n")],
-     [T200 + "test_p2_alta_del_actor_frente_a_desactivar_el_tercero[B-primero]"], None),
+     # RK-ARN-01 (0.5.0): discriminante DETERMINISTA (P2-D). El de antes (P2 [B-primero]) dejaba vivo M13 ~1/13.
+     [T200 + "test_p2_determinista_el_writer_retiene_el_tercero_en_share"], None),
     ("M14", "writer: INSERT sin ON CONFLICT (segunda alta del mismo tercero falla)",
      [(ACTR, "        \"ON CONFLICT ON CONSTRAINT uq_actores_financieros__owner_tercero DO NOTHING \"\n", "")],
      [a("test_writer_actor_idempotente_y_auditado")], None),

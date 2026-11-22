@@ -40,6 +40,9 @@
 # Version: 0.2.2 (paso 9, defecto V-bis de las capturas): MC-CON-23 con el texto nuevo del filtro (`enabled !== false`)
 #   y MC-CON-23b nuevo (volver a exigir `enabled`), que mata el oraculo de la forma real del servidor.
 # Version: 0.3.0 (F06 T3 · MANT N1 arneses, AJ-03 del 19-11; enmienda 01): base limpia por mutante (cada llamada a correr clona la plantilla de GAPTO_TEST_DATABASE_URL y la elimina al terminar) y clasificacion de la muerte, con scripts/dev/base_limpia_mutante.py; sin cambios en mutaciones, discriminantes ni restauracion.
+# Version: 0.4.0 (F06 T3 · cadena de noche 21->22-11, T-C MANT N1 RK-ARN-03): MK6-01 y MK6-02, mutantes del
+#   instrumento de advisory de test_307 (sin filtro de base; sin filtro de backend), con su oraculo K6-AIS.
+#   Ningun otro mutante cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -75,6 +78,7 @@ T305 = "tests/api/test_305_f06_02_03_lecturas.py::"
 T306 = "tests/api/test_306_f06_02_03_traduccion_fisica.py::"
 T307 = "tests/api/test_307_f06_02_03_concurrencia_serial.py::"
 T308 = "tests/api/test_308_f06_02_03_inventario_op21_y_ordenes.py::"
+T307F = "tests/api/test_307_f06_02_03_concurrencia_serial.py"   # RK-ARN-03: mutantes del INSTRUMENTO de K6/K9
 T14P = "tests/backend/test_14p_f06_02_03_modelos_y_errores_puros.py::"
 CONCURRENCIA = "tests/api/test_307_f06_02_03_concurrencia_serial.py"
 
@@ -436,6 +440,14 @@ MUTANTES: list[tuple] = [
      [(LEC, '    f" WHERE a.tercero_id = t.id AND a.owner_user_id = {repo.OWNER} AND ce.owner_user_id = {repo.OWNER} "\n',
        '    " WHERE a.tercero_id = t.id "\n')],
      [T305 + "test_o_33_aislamiento_del_uso_y_una_sola_consulta"], 'bajo gapto_runtime con FORCE RLS en terceros, actores, contratos y participantes, las filas de otro owner no son visibles: el filtro explicito de owner es defensa en profundidad y no cambia el resultado (O-33 lo comprueba en verde con dos owners)', 1),
+    # ---------------------------------------------------------------- RK-ARN-03: instrumento de advisory aislado
+    ("MK6-01", "medida de advisory sin filtro de base (cuenta locks de otra base del cluster)",
+     [(T307F, "        \"database = (SELECT oid FROM pg_database WHERE datname = current_database()) AND \"\n", "")],
+     [T307 + "test_k6_ais_la_medida_ignora_advisory_de_otra_base_y_de_otro_backend"], None, 1),
+    ("MK6-02", "medida de advisory de K6 sin filtro de backend (cuenta locks de otro backend de la base)",
+     [(T307F, "        \"(%s::int IS NULL OR pid = %s::int) AND \"\n",
+       "        \"(%s::int IS NULL OR %s::int IS NOT NULL) AND \"\n")],
+     [T307 + "test_k6_ais_la_medida_ignora_advisory_de_otra_base_y_de_otro_backend"], None, 1),
     ("M-CON-46a", "C-CON-01 con terceros antes que la propiedad (O-29)",
      [(SRV, L('    if repo_prop.bloquear(sesion, propiedad_id) is None:                                     # nivel 3',
               '        return Rechazo(e.AGREGADO_NO_ENCONTRADO)',

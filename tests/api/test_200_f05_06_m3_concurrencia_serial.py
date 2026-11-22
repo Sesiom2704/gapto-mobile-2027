@@ -30,6 +30,10 @@
 #   Oraculos comunes: nadie colgado, 0 reintentos 40P01 y 0 deadlocks nuevos;
 #   ningun derecho por debajo de lo cobrado/perdonado; ningun huerfano.
 # Version: 0.1.0 (F05-06 M3 §A7)
+# Version: 0.2.0 (F06 T3 · cadena de noche 21->22-11, T-C MANT N1 RK-ARN-01; dictamen del 21-11 §3 y AJ-03):
+#   P2-D, discriminante DETERMINISTA del FOR SHARE del writer de actores sobre el tercero: con OP-22 retenido
+#   justo despues de `leer_tercero_compartido`, otra conexion NO puede tomar FOR NO KEY UPDATE NOWAIT del tercero
+#   (lo que toma desactivarlo o editarlo). Sin FOR SHARE (M13) lo toma siempre: no depende del planificador.
 # ============================================================
 
 from __future__ import annotations
@@ -323,6 +327,47 @@ def test_p2_alta_del_actor_frente_a_desactivar_el_tercero(t, monkeypatch, caplog
         assert (traza["OP22"], traza["DESACTIVAR"], hecho) == ("TERCERO_NO_DISPONIBLE", OK, 0), traza
         assert m.actor_de(owner, simon) is None  # sin huerfanos
     assert m.uno(owner, "SELECT enabled FROM gapto.terceros WHERE id = %s", (simon,))[0] is False
+
+
+# ------------------------------------------------------------------ P2-D · RK-ARN-01 (determinista)
+def _tercero_admite_no_key_update(dsn: str, tercero) -> bool:
+    """True si otra conexion toma YA el FOR NO KEY UPDATE del tercero (el lock de desactivarlo o editarlo)."""
+    with psycopg.connect(dsn, autocommit=True) as cn:
+        try:
+            with cn.transaction():
+                cn.execute("SET LOCAL lock_timeout = '200ms'")
+                cn.execute("SELECT 1 FROM gapto.terceros WHERE id = %s FOR NO KEY UPDATE NOWAIT", (tercero,))
+            return True
+        except psycopg.errors.LockNotAvailable:
+            return False
+
+
+def test_p2_determinista_el_writer_retiene_el_tercero_en_share(t, monkeypatch):
+    """RK-ARN-01: OP-22 retenido tras leer el tercero (FOR SHARE) -> desactivar/editar el tercero tiene que esperar.
+    Sin FOR SHARE (M13) el FOR NO KEY UPDATE se concede siempre. FOR NO KEY UPDATE no conflicta con el FOR KEY
+    SHARE de una FK, asi que solo lo impide el FOR SHARE de la lectura."""
+    from app.actores import repositorio as repo_act
+    owner, _, cli, cta, _, _, _ = t
+    simon = m.persona(cli, "Simón")
+    cuerpo = _nuevo_gasto(cta, simon)
+    pausa = Pausa(monkeypatch, repo_act, "leer_tercero_compartido", hilo="OP22")
+    paso = Paso("OP22", op22(owner, cuerpo))
+    admite = None
+    try:
+        paso.start()
+        retenido = pausa.llego.wait(30)
+        if retenido:
+            admite = _tercero_admite_no_key_update(h.dsn(), simon)
+    finally:
+        pausa.sigue.set()
+        paso.join(60)
+    traza = {"retenido": retenido, "no_key_update_concedido_con_op22_retenido": admite, "OP22": paso.codigo,
+             "vivo": paso.is_alive()}
+    evidencia("p2_determinista_tercero_share", traza)
+    assert retenido and not traza["vivo"], traza
+    assert admite is False, traza          # el FOR SHARE de la lectura serializa frente a desactivar/editar
+    assert paso.codigo == OK, traza
+    assert m.actor_de(owner, simon) is not None
 
 
 @pytest.mark.parametrize("orden", ORDENES)
