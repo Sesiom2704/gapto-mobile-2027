@@ -158,6 +158,9 @@
 # Version: 0.16.0 (F06 T3 · MANT N1 arneses, reanclaje AJ-T3C-03; AJ-05 del 19-11): I16 reanclado al texto vigente
 #   de COLUMNAS_EDITABLES (5a37a59, CAT-VIV, anadio asociada_vivienda): misma mutacion (sin icon_key) y mismos discriminantes
 #   (test_154, test_159).
+# Version: 0.17.0 (F06 T3 · cadena de noche 21->22-11, T-C MANT N1 RK-ARN-02; dictamen del 21-11 §3 y AJ-03): S18
+#   reanclado a la indentacion real de la linea (16 espacios): misma mutacion (solo se audita el nodo raiz de la
+#   RAMA) y mismo discriminante (test_155); ahora produce codigo sintacticamente valido.
 # ============================================================
 
 from __future__ import annotations
@@ -312,7 +315,9 @@ MUTANTES = [
     ("S15", "traduccion por texto libre del error", [(SERV, "        return _funcion_trigger(diag.context)\n", "        return diag.message_primary if _funcion_trigger(diag.context) else None\n")], [T155]),
     ("S16", "DESACTIVAR auditado con otro motivo valido", [(SERV, 'operacion = "DESACTIVAR_RAMA" if modo == "RAMA" else "DESACTIVAR"', 'operacion = "DESACTIVAR_RAMA" if modo == "RAMA" else "REACTIVAR"')], [T155]),
     ("S17", "DESACTIVAR_RAMA auditado como DESACTIVAR", [(SERV, 'operacion = "DESACTIVAR_RAMA" if modo == "RAMA" else "DESACTIVAR"', 'operacion = "DESACTIVAR"')], [T155]),
-    ("S18", "RAMA sin auditar descendientes", [(SERV, "        _auditar(sesion, cid, operacion, antes)\n", "        if cid == categoria_id:\n            _auditar(sesion, cid, operacion, antes)\n")], [T155]),
+    # RK-ARN-02 (0.17.0): texto viejo con la indentacion REAL (16 espacios); antes casaba como sufijo de la linea y
+    # dejaba el cuerpo del if menos indentado que el if (IndentationError: muerte por preparacion, no funcional).
+    ("S18", "RAMA sin auditar descendientes", [(SERV, "                _auditar(sesion, cid, operacion, antes)\n", "                if cid == categoria_id:\n                    _auditar(sesion, cid, operacion, antes)\n")], [T155]),
     ("S19", "request_id distinto por nodo en RAMA",
      [(SERV, "        _auditar(sesion, cid, operacion, antes)\n", "        sesion.uno(\"SELECT set_config('gapto.request_id', gen_random_uuid()::text, true)\")\n        _auditar(sesion, cid, operacion, antes)\n")], [T155]),
     ("S20", "accion fisica incorrecta", [(SERV, "auditoria.ACCION_CREAR if operacion == \"ALTA\" else auditoria.ACCION_ACTUALIZAR", "auditoria.ACCION_CREAR if operacion == \"ALTA\" else \"ANULAR\"")], [T155]),

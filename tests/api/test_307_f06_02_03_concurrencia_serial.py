@@ -25,6 +25,10 @@
 #   propiedad (K1/K2 en rojo); C-CON-01 con terceros antes que la propiedad y C-CON-05 con terceros antes que la
 #   propiedad (K5/K6 en rojo).
 #   ESCRITO SIN EJECUTAR (sin base esta noche).
+# Version: 0.4.0 (F06 T3 · cadena de noche 21->22-11, T-C MANT N1 RK-ARN-03; dictamen del 21-11 §3 y AJ-03): la
+#   medida de advisory locks (_advisory) y de esperas (K9) queda AISLADA: solo locks de la base del test y, en K6,
+#   solo del backend retenido (pid capturado en el punto de pausa). K6-AIS demuestra que un advisory con la misma
+#   clave en OTRA base del cluster o en OTRO backend de la misma base no entra en la medida.
 # Version: 0.3.0 (F06 T3-F06 Bloque 3, B3-COMP, decision 11 de Moises): K9 O-29 sucesor con tercero nuevo || C-MEJ-01 v2
 #   de PAG (writer certificado) sobre la misma propiedad, con foto de pg_locks en el punto de espera (la propiedad
 #   antes que los terceros) y discriminante M-CON-46b (C-CON-05 con terceros antes que la propiedad).
@@ -56,6 +60,7 @@ from app.propiedades import repositorio as repo_prop
 from app.terceros import repositorio as repo_ter
 from app.propiedades import servicio as serv_prop
 from test_200_f05_06_m3_concurrencia_serial import Paso, Pausa, bloqueados, esperar
+from test_201_f05_06_m3_orden_locks import PausaEn
 from test_232_f06_01_b1_concurrencia_serial import ORDENES, OK, RELOJ, correr, evidencia
 
 pytestmark = pytest.mark.skipif(os.getenv("GAPTO_F060203_CONCURRENCIA") != "1",
@@ -226,10 +231,14 @@ def test_k5_sucesor_con_tercero_nuevo_frente_a_c_prop_02_de_b1(t, monkeypatch, c
 
 
 # ------------------------------------------------------------------ K6 · orden observado con pg_locks
-def _advisory(cn, clave: str) -> int:
+def _advisory(cn, clave: str, pid: int | None = None) -> int:
+    """Advisory `clave` concedidos en la base de `cn` (RK-ARN-03: nunca de otra base del cluster) y, si se da `pid`,
+    solo los de ese backend (el retenido en el punto de pausa)."""
     return cn.execute(
         "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted AND "
-        "classid::bigint = ((hashtext(%s)::bigint + 4294967296) %% 4294967296)", (clave,)).fetchone()[0]
+        "database = (SELECT oid FROM pg_database WHERE datname = current_database()) AND "
+        "(%s::int IS NULL OR pid = %s::int) AND "
+        "classid::bigint = ((hashtext(%s)::bigint + 4294967296) %% 4294967296)", (pid, pid, clave)).fetchone()[0]
 
 
 def _propiedad_bloqueada(cn, pid) -> bool:
@@ -249,13 +258,14 @@ def test_k6_la_propiedad_se_bloquea_antes_que_los_terceros(t, monkeypatch):
     personas = [Persona(rol="PROPIETARIO", yo=True, principal=True), Persona(rol="INQUILINO", principal=True,
                                                                               nuevo=NuevoTercero(id=nid, nombre="Nuevo"))]
     cid = uuid.uuid4()
-    pausa = Pausa(monkeypatch, repo_prop, "bloquear", hilo="ALTA")                     # tras el nivel 3
+    pausa = PausaEn(monkeypatch, repo_prop, "bloquear", hilo="ALTA")                   # tras el nivel 3 (con pid)
     paso = Paso("ALTA", alta(owner, pid, cid, ana, personas=personas))
     try:
         paso.start()
         assert pausa.llego.wait(30)
         with psycopg.connect(h.dsn(), autocommit=True) as cn:
-            tras_propiedad = {"0p": _advisory(cn, "gapto:INTENCION"), "terceros": _advisory(cn, "gapto:TERCEROS"),
+            tras_propiedad = {"0p": _advisory(cn, "gapto:INTENCION", pausa.pid),
+                              "terceros": _advisory(cn, "gapto:TERCEROS", pausa.pid),
                               "propiedad_bloqueada": _propiedad_bloqueada(cn, pid)}
     finally:
         pausa.sigue.set()
@@ -266,6 +276,40 @@ def test_k6_la_propiedad_se_bloquea_antes_que_los_terceros(t, monkeypatch):
     assert paso.codigo == OK
     # y no se toman INVERSIONES ni la raiz de OP-22 (el bloque no compone OP-22)
     assert _uno(owner, "SELECT count(*) FROM gapto.hechos_financieros") == 0
+
+
+# ------------------------------------------------------------------ K6-AIS · RK-ARN-03 (instrumento aislado)
+def _dsn_otra_base(dsn: str, base: str) -> str:
+    from psycopg import conninfo
+    partes = conninfo.conninfo_to_dict(dsn)
+    partes["dbname"] = base
+    return conninfo.make_conninfo(**partes)
+
+
+def test_k6_ais_la_medida_ignora_advisory_de_otra_base_y_de_otro_backend():
+    """RK-ARN-03: el mismo advisory gapto:TERCEROS tomado en OTRA base del cluster (postgres) y en OTRO backend de
+    esta base no entra en la medida de K6 (por pid) ni en la de K9 (por base). Control: el lock existe en el cluster."""
+    clave = "gapto:TERCEROS"
+    sql_tomar = "SELECT pg_advisory_lock(hashtext(%s), 0)"     # forma de dos claves, como la app (classid)
+    dsn = h.dsn()
+    with psycopg.connect(_dsn_otra_base(dsn, "postgres"), autocommit=True) as otra_base, \
+            psycopg.connect(dsn, autocommit=True) as otro_backend, psycopg.connect(dsn, autocommit=True) as cn:
+        otra_base.execute(sql_tomar, (clave,))
+        foto = {"cluster": cn.execute(
+            "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted AND "
+            "classid::bigint = ((hashtext(%s)::bigint + 4294967296) %% 4294967296)", (clave,)).fetchone()[0],
+            "k9_por_base_con_lock_en_otra_base": _advisory(cn, clave)}
+        otro_backend.execute(sql_tomar, (clave,))
+        pid_medido = cn.execute("SELECT pg_backend_pid()").fetchone()[0]
+        foto.update({"k9_por_base_con_lock_en_esta_base": _advisory(cn, clave),
+                     "k6_medido_en_un_backend_sin_el_lock": _advisory(cn, clave, pid_medido)})
+        otro_backend.execute("SELECT pg_advisory_unlock_all()")
+        otra_base.execute("SELECT pg_advisory_unlock_all()")
+    evidencia("k6_ais_instrumento_aislado", foto)
+    assert foto["cluster"] >= 1, foto                          # control: el lock ajeno existe
+    assert foto["k9_por_base_con_lock_en_otra_base"] == 0, foto  # otra base del cluster: fuera
+    assert foto["k9_por_base_con_lock_en_esta_base"] == 1, foto  # control positivo de la medida por base
+    assert foto["k6_medido_en_un_backend_sin_el_lock"] == 0, foto         # otro backend de esta base: fuera
 
 
 # ------------------------------------------------------------------ K7 · mandato v1.2 §8: C-CON-02 || C-CON-06
@@ -368,7 +412,8 @@ def _gasto_pag(owner, cli, pid, cuenta, categoria):
 
 def _foto_k9(dsn: str, pid) -> dict:
     with psycopg.connect(dsn, autocommit=True) as cn:
-        esperas = cn.execute("SELECT count(*) FROM pg_locks WHERE NOT granted").fetchone()[0]
+        esperas = cn.execute("SELECT count(*) FROM pg_locks WHERE NOT granted AND pid IN (SELECT pid FROM "
+                             "pg_stat_activity WHERE datname = current_database())").fetchone()[0]
         return {"advisory_terceros": _advisory(cn, "gapto:TERCEROS"), "esperas_no_concedidas": esperas,
                 "propiedad_bloqueada": _propiedad_bloqueada(cn, pid),
                 "pg_locks": [list(f) for f in cn.execute(
