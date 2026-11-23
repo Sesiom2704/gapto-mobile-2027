@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-03/F05-04 J2 §2.5)
 // Versión: 0.3.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): el lado de «Desactivar» se llama `alternativa` (se desliza a la derecha, lo decide el componente común).
 // Versión: 0.2.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2 S9): `FilaLista` admite `enTarjeta` (la fila es una tarjeta, sin separador) e `izquierda` (lado izquierdo del swipe común, p. ej. «Desactivar», con su acción accesible).
+// Versión: 0.4.0 (F06 T3 · cadena de noche 21->22-11, T-D MANT N3 cliente; D-C7-07): `CampoTexto` admite `importe`: teclado decimal y puntos de miles al teclear.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -17,6 +18,7 @@ import { useTema } from '../theme/tema';
 import { espacio, radio, TACTIL_MIN, tipo } from '../theme/tokens';
 import { accesibilidadLados, FilaDeslizable, type LadoSwipe } from './AccionRapida';
 import { BotonTexto } from './Basicos';
+import { formatearImporteAlTeclear } from '../domain/importe';
 
 export type AvisoCaja = { tipo: 'OK' | 'AVISO'; texto: string } | null;
 
@@ -87,6 +89,8 @@ export function CampoTexto(p: {
   marcador?: string;
   maximo?: number;
   multilinea?: boolean;
+  /** D-C7-07: campo de importe en euros: teclado decimal y puntos de miles al teclear. */
+  importe?: boolean;
 }) {
   const { c } = useTema();
   return (
@@ -94,7 +98,9 @@ export function CampoTexto(p: {
       testID={p.testID}
       accessibilityLabel={p.etiqueta}
       value={p.valor}
-      onChangeText={p.onCambiar}
+      onChangeText={p.importe ? (t) => p.onCambiar(formatearImporteAlTeclear(t, p.valor)) : p.onCambiar}
+      keyboardType={p.importe ? 'decimal-pad' : undefined}
+      inputMode={p.importe ? 'decimal' : undefined}
       placeholder={p.marcador}
       placeholderTextColor={c.textSecondary}
       maxLength={p.maximo}

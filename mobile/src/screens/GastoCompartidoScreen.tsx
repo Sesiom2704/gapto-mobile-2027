@@ -9,6 +9,7 @@
 // v0.2.0 (F05-D052 paso 2 · R6, F05 §66.A.10): espejo de R6 en «Reparto»: con alguna parte sin indicar y las indicadas sumando el total, aviso propio «reparto-sin-margen» (no sugiere poner 0), «Revisar» bloqueado y el rechazo del servidor `REPARTO_SIN_MARGEN_PARA_DESCONOCIDO` se explica con el mismo texto. El exceso («Supera el total») y la suma incompleta no cambian.
 // v0.3.0 (F06 T1 UX-1 · M-08 y M-09; Q-UX-04): en «Revisar», el bloque se titula «Reparto» y las etiquetas son «Te lo tiene que devolver» / «Se lo tienes que devolver» (mismos testID); en «Gasto registrado», el ✓ con el token `textPrimary` (contraste máximo en claro y oscuro; `positiveText` está acotado por PT-04) y, por persona, el resumen compacto «Pendiente con X» (lectura OP-20) con el enlace de siempre mientras no está (mismo testID `compartido-ver-pendiente-<tid>`).
 // Versión: 0.3.0
+// Versión: 0.4.0 (F06 T3 · cadena de noche 21->22-11, T-D MANT N3 cliente; D-C7-07): los campos de importe ponen los puntos de miles al teclear (`formatearImporteAlTeclear`).
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -21,7 +22,7 @@ import { PendienteCompacto } from '../components/PendienteCompacto';
 import { Aviso, Bloque, CabeceraTarea, Campo, FilaRevision, Inicial, s, SelectorPersona } from '../components/Reparto';
 import { TEXTO_FORMULARIO_SE_CONSERVA } from '../domain/capacidades';
 import { diaMesAnioIso } from '../domain/fechas';
-import { formatearEur, parsearImporte } from '../domain/importe';
+import { formatearEur, formatearImporteAlTeclear, parsearImporte } from '../domain/importe';
 import {
   BaseCompartido,
   componerPayload,
@@ -315,7 +316,7 @@ export function GastoCompartidoScreen(p: {
                 <Inicial nombre={x.terceroId === null ? 'Yo' : x.nombre} />
                 <Text style={[tipo.body, { color: c.textPrimary, flex: 1 }]}>{x.nombre}</Text>
                 <TextInput testID={`reparto-importe-${x.terceroId ?? 'yo'}`} accessibilityLabel={`Parte de ${x.nombre} en euros`} value={x.importeTexto}
-                  onChangeText={(t) => cambiarImporte(i, t)} editable={!bloqueado} keyboardType="decimal-pad" inputMode="decimal" placeholder="—"
+                  onChangeText={(t) => cambiarImporte(i, formatearImporteAlTeclear(t, x.importeTexto))} editable={!bloqueado} keyboardType="decimal-pad" inputMode="decimal" placeholder="—"
                   placeholderTextColor={c.textSecondary} style={[tipo.body, s.inputImporte, { color: c.textPrimary, borderColor: c.borderStandard }]} />
                 {x.terceroId !== null ? (
                   <BotonTexto testID={`reparto-quitar-${x.terceroId}`} titulo="Quitar" onPress={() => editar((y) => ({ ...y, filas: y.filas.filter((q) => q.terceroId !== x.terceroId) }))} />

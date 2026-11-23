@@ -8,6 +8,7 @@
 // Versión: 0.3.0 (F05-D051 paso 9.1 · G1 v2): prop opcional `traza` (solo `__DEV__`, desde App.tsx): `form_montado`, `cuentas_ok`/`cuentas_error`, importe (primer y último cambio, sin valor), `cuenta_desde_elegida` / `cuenta_a_elegida`, `tipo:<TIPO>` y `registrar_pulsado`. Sin la prop no se llama a nada; sin cambios de comportamiento.
 // Versión: 0.3.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // Versión: 0.4.0 (F06 T1 UX-1 · M-07, DM-06: la fecha usa el componente único `CampoFecha` (chips, campo dd/mm/aaaa con máscara y calendario en JS); se conservan el estado, las reglas de cada campo, los testID y los textos de validación; regla ≤ hoy).
+// Versión: 0.5.0 (F06 T3 · cadena de noche 21->22-11, T-D MANT N3 cliente; D-C7-07): los campos de importe ponen los puntos de miles al teclear (`formatearImporteAlTeclear`).
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -21,7 +22,7 @@ import { AvisoFaltaCuenta, PanelCuentas, useSinConfigurar } from '../components/
 import { HojaTipos } from '../components/HojaTipos';
 import { TEXTO_FORMULARIO_SE_CONSERVA } from '../domain/capacidades';
 import { ayer, ddmmaaaaAIso, fechaCortaIso, isoADdmmaaaa, isoLocal } from '../domain/fechas';
-import { formatearEur, parsearImporte } from '../domain/importe';
+import { formatearEur, formatearImporteAlTeclear, parsearImporte } from '../domain/importe';
 import { esFechaIso } from '../domain/intencion';
 import { avisoCambioDeTipo, notaCanonica, TEXTO_ENTRE_CUENTAS, TipoRegistro, tituloExito, tituloRegistro } from '../domain/registro';
 import { useTema } from '../theme/tema';
@@ -236,7 +237,7 @@ export function TransferenciaScreen(p: {
               value={importeTexto}
               onChangeText={(t) => editar(() => {
                 p.traza?.('cambio:importe');
-                setImporte(t);
+                setImporte(formatearImporteAlTeclear(t, importeTexto));
               })}
               editable={!bloqueado}
               keyboardType="decimal-pad"

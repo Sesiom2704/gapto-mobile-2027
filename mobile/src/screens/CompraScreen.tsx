@@ -7,6 +7,7 @@
 // Versión: 0.2.0 (F06 T2-F06 A3-0352 (L-05); contrato A3-0352 v1.1 §6): UX-1 el chip «No faltan gastos» de B4 solo con la fecha de adquisición conocida (`puedeDeclararCompleto`), y «Completo» como PROPUESTA del resumen; UX-2 sin fecha, nota y la compra se guarda sin declaración; UX-4 COMPLETITUD_SIN_FECHA_DE_ADQUISICION muestra el texto del servidor, no guarda nada y recupera B4 sin el chip (intención nueva) para guardar sin declaración. GastoCompraScreen no cambia.
 // Versión: 0.3.0 (F06 T3-F06 bloque 2 F06-01H, paso 10; contrato v0.4 §3.2 y §8; mandato v1.1 §15): bloque «Hipoteca» dentro de la compra, en B2 «¿Cómo se pagó el precio?», opcional («+ Añadir la hipoteca de esta compra»; sin ella la compra y su petición no cambian): banco, importe del préstamo, cuenta en la que el banco lo deja (texto sin «ingreso»; cuentas que pueden recibir dinero en la escritura), fijo o variable (sin valor por defecto), tipo anual, plazo en años o meses → n.º de cuotas, primera cuota (posterior a la escritura), cuenta de cargo, titularidad del préstamo propuesta (la de la propiedad en la escritura) y modificable, aviso «Cálculo mensual: tipo anual entre 12» y «Ver el cuadro» (W-HIP-00, sin escritura; CuadroPrevioScreen). B4 añade la hipoteca al resumen; B6 muestra el aviso `aviso_reparto_distinto` (O-H30) si el servidor lo devuelve. Rechazos de la hipoteca con texto propio, sin «ingreso» ni «cobro». La regla «los pagos suman el precio» no cambia.
 // Versión: 0.4.0 (F06 T3-F06 · MANT N1 R-B2-06 (AJ-01), firma b88a3662…): guardar la compra usa `enviarCompraComprobando`: ante un timeout no dice que ha fallado, muestra «Comprobando…» y reenvía el MISMO cuerpo (misma intención; replay idempotente sin duplicar); si sigue sin confirmarse, `TEXTO_COMPRA_SIN_CONFIRMAR` (nunca «fallo» ni «repítela»). El gasto posterior (C-COMPRA-03) no cambia.
+// Versión: 0.5.0 (F06 T3 · cadena de noche 21->22-11, T-D MANT N3 cliente; D-C7-07): los campos de importe ponen los puntos de miles al teclear (`formatearImporteAlTeclear`). D-C7-08 (OBS-02): el banco de la hipoteca se elige con un buscador de terceros (`bancosVisibles`): sin escribir no se lista ninguno; el elegido se ve siempre.
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -28,6 +29,7 @@ import {
 } from '../domain/compra';
 import { ddmmaaaaAIso, diaMesAnioIso, isoADdmmaaaa, isoLocal } from '../domain/fechas';
 import { formatearEur, parsearImporte } from '../domain/importe';
+import { filtrar } from '../domain/maestros';
 import {
   BorradorHipoteca, borradorHipoteca, conHipoteca, eleccionPropuesta, faltasHipoteca, NOMBRE_TIPO, numeroCuotas, payloadCuadroPrevio, puedeVerCuadro,
   ROTULO_CUENTA_DESEMBOLSO, TEXTO_AVISO_REPARTO, TEXTO_CONVENCION, TEXTO_CUENTA_DESEMBOLSO, TEXTO_PRESTAMO, TEXTO_SIN_CUENTAS_CARGO, TEXTO_SIN_CUENTAS_DESEMBOLSO,
@@ -250,14 +252,14 @@ export function CompraScreen(p: {
           <>
             <Text style={[tipo.footnote, { color: c.textSecondary }]}>1 de 3 · Precio</Text>
             <Campo etiqueta="Precio de compra (escritura)">
-              <CampoTexto testID="compra-precio" etiqueta="Precio de compra" marcador="Ej.: 200.000,00" valor={b.precio} onCambiar={(t) => setB({ ...b, precio: t })} />
+              <CampoTexto importe testID="compra-precio" etiqueta="Precio de compra" marcador="Ej.: 200.000,00" valor={b.precio} onCambiar={(t) => setB({ ...b, precio: t })} />
             </Campo>
             <Campo etiqueta="Fecha de la escritura">
               <Fecha testID="compra-escritura" etiqueta="Fecha de la escritura, día barra mes barra año" iso={b.fechaEscritura} hoyIso={hoyIso}
                 onCambiar={(iso) => setB({ ...b, fechaEscritura: iso, pagos: b.pagos.map((x) => (x.rol === 'FIRMA' ? { ...x, fecha: iso } : x)) })} />
             </Campo>
             <Campo etiqueta="Valor de referencia del Catastro" opcional>
-              <CampoTexto testID="compra-referencia" etiqueta="Valor de referencia" marcador="Ej.: 210.000,00" valor={b.valorReferencia} onCambiar={(t) => setB({ ...b, valorReferencia: t })} />
+              <CampoTexto importe testID="compra-referencia" etiqueta="Valor de referencia" marcador="Ej.: 210.000,00" valor={b.valorReferencia} onCambiar={(t) => setB({ ...b, valorReferencia: t })} />
             </Campo>
             <Text style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_VALOR_REFERENCIA}</Text>
           </>
@@ -274,7 +276,7 @@ export function CompraScreen(p: {
                   </View>
                   <Cuentas testID={`compra-pago-${i}-cuenta`} cuentas={cuentas} valor={x.cuentaId} onCambiar={(id) => setPago(i, { cuentaId: id })} />
                   <Fecha testID={`compra-pago-${i}-fecha`} etiqueta="Fecha del pago" iso={x.fecha} hoyIso={hoyIso} onCambiar={(iso) => setPago(i, { fecha: iso })} />
-                  <CampoTexto testID={`compra-pago-${i}-importe`} etiqueta="Importe del pago" marcador="0,00" valor={x.importe} onCambiar={(t) => setPago(i, { importe: t })} />
+                  <CampoTexto importe testID={`compra-pago-${i}-importe`} etiqueta="Importe del pago" marcador="0,00" valor={x.importe} onCambiar={(t) => setPago(i, { importe: t })} />
                   {b.pagos.length > 1 ? <BotonTexto testID={`compra-pago-${i}-quitar`} titulo="Quitar este pago" critico onPress={() => setB({ ...b, pagos: b.pagos.filter((_, j) => j !== i) })} /> : null}
                 </View>
               </Tarjeta>
@@ -362,7 +364,7 @@ function EditorGasto(p: { prefijo: string; g: GastoBorrador; cuentas: CuentaEleg
       <View style={ef.chips}>
         {CONCEPTOS.map((k) => <Chip key={k} testID={`${p.prefijo}-concepto-${k}`} etiqueta={NOMBRE_CONCEPTO[k]} seleccionado={p.g.concepto === k} onPress={() => p.onCambiar({ concepto: k })} />)}
       </View>
-      <CampoTexto testID={`${p.prefijo}-importe`} etiqueta="Importe del gasto" marcador="0,00" valor={p.g.importe} onCambiar={(t) => p.onCambiar({ importe: t })} />
+      <CampoTexto importe testID={`${p.prefijo}-importe`} etiqueta="Importe del gasto" marcador="0,00" valor={p.g.importe} onCambiar={(t) => p.onCambiar({ importe: t })} />
       <Cuentas testID={`${p.prefijo}-cuenta`} cuentas={p.cuentas} valor={p.g.cuentaId} onCambiar={(id) => p.onCambiar({ cuentaId: id })} />
       <Campo etiqueta="Fecha del gasto">
         <Fecha testID={`${p.prefijo}-fecha`} etiqueta="Fecha del gasto" iso={p.g.fechaEconomica} hoyIso={p.hoyIso} onCambiar={(iso) => p.onCambiar({ fechaEconomica: iso })} />
@@ -389,6 +391,14 @@ function CuentasHip(p: { testID: string; cuentas: CuentaElegible[] | null; valor
   );
 }
 
+/** D-C7-08: bancos que se ofrecen: los que casan con lo escrito (sin escribir, ninguno) y siempre el ya elegido. */
+export function bancosVisibles(bancos: Tercero[], busca: string, elegidoId: string | null): Tercero[] {
+  const casan = busca.trim() ? filtrar(bancos, busca) : [];
+  const elegido = bancos.find((t) => t.id === elegidoId);
+  const lista = elegido && !casan.some((t) => t.id === elegido.id) ? [elegido, ...casan] : casan;
+  return [...lista].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+}
+
 /** F06-01H · bloque «Hipoteca» de la compra (contrato v0.4 §3.2.1 y §8). El cliente no calcula importes: «Ver el cuadro» lo pide al servidor (W-HIP-00). */
 function BloqueHipoteca(p: {
   cliente: ClienteApi;
@@ -404,6 +414,7 @@ function BloqueHipoteca(p: {
   const { c } = useTema();
   const h = p.hip;
   const [bancos, setBancos] = useState<Tercero[] | null>(null);
+  const [buscaBanco, setBuscaBanco] = useState('');
   const [cuentasDesembolso, setCuentasDesembolso] = useState<CuentaElegible[] | null>(null);
   const [cuentasCargo, setCuentasCargo] = useState<CuentaElegible[] | null>(null);
   const [pidiendo, setPidiendo] = useState(false);
@@ -440,13 +451,20 @@ function BloqueHipoteca(p: {
         {bancos === null ? <EstadoDato testID="compra-hip-banco-cargando" estado="CARGANDO" /> : bancos.length === 0 ? (
           <EstadoDato testID="compra-hip-banco-sin" estado="NO_DISPONIBLE" detalle="Da de alta el banco en Ajustes › Terceros" />
         ) : (
-          <View style={ef.chips}>
-            {bancos.map((t) => <Chip key={t.id} testID={`compra-hip-banco-${t.id}`} etiqueta={t.nombre} seleccionado={h.financiadorId === t.id} onPress={() => p.onCambiar({ financiadorId: t.id })} />)}
+          <View style={{ gap: espacio.s }}>
+            {/* D-C7-08 (OBS-02): buscador de terceros, no la lista completa; el elegido se ve siempre */}
+            <CampoTexto testID="compra-hip-banco-buscar" etiqueta="Buscar el banco" marcador="Escribe el nombre del banco" valor={buscaBanco} onCambiar={setBuscaBanco} />
+            <View style={ef.chips}>
+              {bancosVisibles(bancos, buscaBanco, h.financiadorId).map((t) => <Chip key={t.id} testID={`compra-hip-banco-${t.id}`} etiqueta={t.nombre} seleccionado={h.financiadorId === t.id} onPress={() => p.onCambiar({ financiadorId: t.id })} />)}
+            </View>
+            {buscaBanco.trim() && filtrar(bancos, buscaBanco).length === 0 ? (
+              <Text testID="compra-hip-banco-ninguno" style={[tipo.footnote, { color: c.textSecondary }]}>Ningún tercero se llama así. Da de alta el banco en Ajustes › Terceros.</Text>
+            ) : null}
           </View>
         )}
       </Campo>
       <Campo etiqueta="Importe del préstamo">
-        <CampoTexto testID="compra-hip-importe" etiqueta="Importe del préstamo" marcador="Ej.: 160.000,00" valor={h.importe} onCambiar={(t) => p.onCambiar({ importe: t })} />
+        <CampoTexto importe testID="compra-hip-importe" etiqueta="Importe del préstamo" marcador="Ej.: 160.000,00" valor={h.importe} onCambiar={(t) => p.onCambiar({ importe: t })} />
       </Campo>
       <Campo etiqueta={ROTULO_CUENTA_DESEMBOLSO}>
         <CuentasHip testID="compra-hip-desembolso" cuentas={cuentasDesembolso} valor={h.cuentaDesembolsoId} vacio={TEXTO_SIN_CUENTAS_DESEMBOLSO}

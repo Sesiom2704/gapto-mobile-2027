@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-06 M5 §B1)
 // Versión: 0.2.0 (F06 T1 UX-1 · M-07, DM-06: la fecha usa el componente único `CampoFecha` (chips, campo dd/mm/aaaa con máscara y calendario en JS); se conservan el estado, las reglas de cada campo, los testID y los textos de validación; ≤ hoy; una fecha imposible (31/02) no se toma y sigue «Hoy», como cualquier texto que no es fecha; el servidor ya la rechaza, dt.date).
 // Versión: 0.3.0 (F06 T2-F06 CAT-VIV N1 (L-04, lámina SET-CAT/REG-CAT v1.0) R06; OBL-VIV-01.4): registrar el pago de una previsión de GASTO cuya categoría está «Asociada a vivienda» (según el árbol GET /v1/categorias) crea el gasto real y exige la propiedad igual que un registro directo, aunque la previsión fuera anterior a la marca: bloque «Propiedad» (BloquePropiedad: reparto por titularidad, clase y «¿Quién pagó?») con el texto de R06, «Pagado con» solo con cuentas solo tuyas y, sin propiedad, «Para revisar falta: la propiedad.». El envío lleva el bloque `propiedad` de VS-01 (atribución SIN_INDICAR, financiación NO_DETERMINADA). «Sin categoría» o una categoría sin marca: nada cambia.
+// Versión: 0.4.0 (F06 T3 · cadena de noche 21->22-11, T-D MANT N3 cliente; D-C7-07): los campos de importe ponen los puntos de miles al teclear (`formatearImporteAlTeclear`).
 // ============================================================
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -32,7 +33,7 @@ import { CabeceraTarea, Campo, estilosFormulario } from '../components/Formulari
 import { QuedaCubierta, usarIntencion } from '../components/Prevision';
 import { ddmmaaaaAIso, diaMesIso, isoLocal } from '../domain/fechas';
 import { esFechaIso } from '../domain/intencion';
-import { formatearEur, parsearImporte } from '../domain/importe';
+import { formatearEur, formatearImporteAlTeclear, parsearImporte } from '../domain/importe';
 import {
   componerRegistro,
   faltaRegistro,
@@ -216,7 +217,7 @@ export function PrevisionRegistroScreen(p: {
               </Text>
             </View>
             <Campo etiqueta="Importe real">
-              <TextInput testID="prevision-importe" accessibilityLabel="Importe real" value={importeTexto} onChangeText={setImporteTexto}
+              <TextInput testID="prevision-importe" accessibilityLabel="Importe real" value={importeTexto} onChangeText={(t) => setImporteTexto(formatearImporteAlTeclear(t, importeTexto))}
                 keyboardType="decimal-pad" style={[estiloImporte.secondary, s.input, { color: c.textPrimary, borderColor: c.borderStandard, backgroundColor: c.surfacePrimary }]} />
               {distinto ? <Text testID="prevision-distinto" style={[tipo.caption, { color: c.textSecondary }]}>Distinto de lo previsto</Text> : null}
             </Campo>

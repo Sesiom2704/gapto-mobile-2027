@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-06 M1)
 // Versión: 0.1.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // Versión: 0.2.0 (F06 T1 UX-1 · M-07, DM-06: la fecha usa el componente único `CampoFecha` (chips, campo dd/mm/aaaa con máscara y calendario en JS); se conservan el estado, las reglas de cada campo, los testID y los textos de validación; chips de la fecha original y ≤ hoy como antes; 31/02 ya no se toma: el servidor ya la rechaza, dt.date).
+// Versión: 0.3.0 (F06 T3 · cadena de noche 21->22-11, T-D MANT N3 cliente; D-C7-07): los campos de importe ponen los puntos de miles al teclear (`formatearImporteAlTeclear`).
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -31,7 +32,7 @@ import {
   type FormularioEdicion,
 } from '../domain/edicion';
 import { ayer, ddmmaaaaAIso, diaMesAnioIso, isoLocal } from '../domain/fechas';
-import { formatearEur } from '../domain/importe';
+import { formatearEur, formatearImporteAlTeclear } from '../domain/importe';
 import { esFechaIso } from '../domain/intencion';
 import { useTema } from '../theme/tema';
 import { espacio, tipo } from '../theme/tokens';
@@ -261,7 +262,7 @@ export function CorregirHechoScreen(p: {
         <Text testID="corregir-hecho-solo-errores" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_SOLO_ERRORES}</Text>
         <Text style={[tipo.bodyEmphasis, { color: c.textPrimary }]}>{p.titulo}</Text>
         <Campo etiqueta="Importe">
-          <TextInput testID="corregir-hecho-importe" accessibilityLabel="Importe en euros" value={form.importe} onChangeText={(t) => setForm({ ...form, importe: t })}
+          <TextInput testID="corregir-hecho-importe" accessibilityLabel="Importe en euros" value={form.importe} onChangeText={(t) => setForm({ ...form, importe: formatearImporteAlTeclear(t, form.importe) })}
             keyboardType="decimal-pad" inputMode="decimal" style={[tipo.body, s.input, { color: c.textPrimary, borderColor: c.borderStandard, backgroundColor: c.surfacePrimary }]} />
           <Editado campo="importe" />
         </Campo>

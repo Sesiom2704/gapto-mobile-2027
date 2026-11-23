@@ -25,6 +25,7 @@
 // Versión: 0.17.0 (F06 T2-F06 PAG, §1.5 del mandato; lista cerrada de F05 autorizada por el párrafo 3 del literal de PAG (decisión 3 del lote 35, bfbba1e6…); Q-VP-03): la fila de una reforma pinta, bajo la secundaria, las líneas de `lineasReforma` («Salió de tu cuenta: −N €» si difiere de tu parte y la posición en su sentido). Nada más cambia.
 // Versión: 0.18.0 (F06 T2-F06 CAT-VIV N1 (L-04, lámina SET-CAT/REG-CAT v1.0) R07; OBL-VIV-01.6, D-CV-01): el detalle de un gasto con `aviso_vivienda_sin_propiedad` muestra el aviso «Categoría asociada a vivienda, sin propiedad» con su explicación, SIN acción (no ofrece asociar una propiedad). Nada más cambia.
 // Versión: 0.19.0 (F06 T3-F06 bloque 2 F06-01H; literal F05 Q3-Hd v1.1): HD-C4: el detalle rápido dice «Recibido en» para el rol `PRESTAMO_RECIBIDO`.
+// Versión: 0.20.0 (F06 T3 · cadena de noche 21->22-11, T-D MANT N3 cliente; D-C7-09 / OBS-03): la «Nota» del detalle presenta el concepto del desembolso como «Préstamo recibido» (`conceptoPresentado`).
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -63,7 +64,7 @@ import {
   tituloTransferencia,
 } from '../domain/actividad';
 import { textosAbono, textosRepetir } from '../domain/textosCola';
-import { nombreTipoFila, tituloFilaDia } from '../domain/titulos_dia';
+import { conceptoPresentado, nombreTipoFila, tituloFilaDia } from '../domain/titulos_dia';
 
 /** Sin `nuevoId` la pantalla no ofrece acciones rápidas: nunca se compone una intención sin identidad. */
 const sinIdentidad = (): string => {
@@ -855,7 +856,7 @@ function DetalleVista({ d, onAbrir }: { d: DetalleActividad; onAbrir: (id: strin
     for (const m of d.magnitudes) kv.push([m.nombre, `${m.valor}${m.unidad ? ` ${m.unidad}` : ''}`]);
     kv.push(['Presupuesto', d.presupuestable ? 'Sí' : 'No']);
   }
-  kv.push(['Nota', (d.nota ?? '').trim() || '—']);
+  kv.push(['Nota', (conceptoPresentado(d.nota, d.cuentas[0]?.rol ?? null) ?? '').trim() || '—']); // D-C7-09
   const origen = d.devolucion_de;
   const devs = d.devoluciones;
   return (

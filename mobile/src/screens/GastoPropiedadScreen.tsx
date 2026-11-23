@@ -36,6 +36,7 @@
 //     (L-MOV-CUENTA, pantalla nueva `MovimientosCuentaScreen`).
 //   Código de partida: laboratorio lab-t2 (43a71c4, a0d1af4, 10b9596), copia revisada.
 // Versión: 0.3.1 (F06 T2-F06 ajuste N3 · KO-2 y KO-3 de la prueba en iPhone; decisión de Moisés del 2026-11-15,
+// Versión: 0.4.0 (F06 T3 · cadena de noche 21->22-11, T-D MANT N3 cliente; D-C7-07): los campos de importe ponen los puntos de miles al teclear (`formatearImporteAlTeclear`).
 //   F06-00_Decisiones_Moises_2026-11-15_KO1_reclasificacion_N3_v1.0.md, 022b115a…): la relectura de la propuesta al cambiar fecha o
 //   cuenta es silenciosa (sin «cargando», descarta respuestas atrasadas) y los importes de «Otra combinación» llevan su etiqueta visible.
 // ============================================================
@@ -304,7 +305,7 @@ export function GastoPropiedadScreen(p: {
         {paso === 'DATOS' ? (
           <>
             <Linea testID="gprop-propiedad" etiqueta="Propiedad" valor={p.vista.nombre} />
-            <CampoTexto testID="gprop-importe" etiqueta="Importe" marcador="0,00" valor={b.importe} onCambiar={(t) => setB({ ...b, importe: t })} />
+            <CampoTexto importe testID="gprop-importe" etiqueta="Importe" marcador="0,00" valor={b.importe} onCambiar={(t) => setB({ ...b, importe: t })} />
             <Campo etiqueta="Fecha del gasto y del pago">
               <Fecha testID="gprop-fecha" etiqueta="Fecha del gasto" iso={b.fecha} hoyIso={hoyIso} ayerIso={ayerIso} onCambiar={(iso) => setB({ ...b, fecha: iso })} />
             </Campo>
@@ -328,10 +329,10 @@ export function GastoPropiedadScreen(p: {
             {pago.modo === 'MIXTO' ? (
               <>
                 <Campo etiqueta="Lo que pusiste tú (desde tu cuenta)">
-                  <CampoTexto testID="gprop-pago-mio" etiqueta="Lo que pusiste tú (desde tu cuenta)" marcador="0,00" valor={pago.mio} onCambiar={(t) => setPago({ ...pago, mio: t })} />
+                  <CampoTexto importe testID="gprop-pago-mio" etiqueta="Lo que pusiste tú (desde tu cuenta)" marcador="0,00" valor={pago.mio} onCambiar={(t) => setPago({ ...pago, mio: t })} />
                 </Campo>
                 <Campo etiqueta={`Lo que puso ${cotitulares[0]?.nombre ?? 'el otro titular'} (por su cuenta)`}>
-                  <CampoTexto testID="gprop-pago-suyo" etiqueta={`Lo que puso ${cotitulares[0]?.nombre ?? 'el otro titular'} (por su cuenta)`} marcador="0,00" valor={pago.suyo}
+                  <CampoTexto importe testID="gprop-pago-suyo" etiqueta={`Lo que puso ${cotitulares[0]?.nombre ?? 'el otro titular'} (por su cuenta)`} marcador="0,00" valor={pago.suyo}
                     onCambiar={(t) => setPago({ ...pago, suyo: t })} />
                 </Campo>
               </>
@@ -364,7 +365,7 @@ export function GastoPropiedadScreen(p: {
                         <Chip testID={`gprop-deuda-${x.actor_id}-no`} etiqueta={TEXTO_NADA_PENDIENTE} seleccionado={deudas[x.actor_id]?.marcada === false} onPress={() => cambiarDeudaPag(x.actor_id, false)} />
                       </View>
                       {deudas[x.actor_id]?.marcada ? (
-                        <CampoTexto testID={`gprop-deuda-${x.actor_id}-importe`} etiqueta={`Importe (como mucho ${formatearEur(x.maximo)}; menos si le invitas a una parte)`} marcador={x.maximo}
+                        <CampoTexto importe testID={`gprop-deuda-${x.actor_id}-importe`} etiqueta={`Importe (como mucho ${formatearEur(x.maximo)}; menos si le invitas a una parte)`} marcador={x.maximo}
                           valor={deudas[x.actor_id]?.importe ?? ''} onCambiar={(t) => importeDeudaPag(x.actor_id, t)} />
                       ) : null}
                       <Text style={[tipo.caption, { color: c.textSecondary }]}>{x.sentido === 'ME_DEBE' ? TEXTO_DESMARCAR : TEXTO_DESMARCAR_LE}</Text>
@@ -393,7 +394,7 @@ export function GastoPropiedadScreen(p: {
                           <Chip testID={`gprop-debe-${x.actor_id}-no`} etiqueta={TEXTO_NADA_PENDIENTE} seleccionado={b.deuda[x.actor_id]?.me_debe === 'NO'} onPress={() => cambiarDeuda(x.actor_id, 'NO')} />
                         </View>
                         {b.deuda[x.actor_id]?.me_debe === 'SI' ? (
-                          <CampoTexto testID={`gprop-debe-${x.actor_id}-importe`} etiqueta={`¿Cuánto te debe ${x.nombre ?? 'esa persona'}?`} marcador="Indícalo tú"
+                          <CampoTexto importe testID={`gprop-debe-${x.actor_id}-importe`} etiqueta={`¿Cuánto te debe ${x.nombre ?? 'esa persona'}?`} marcador="Indícalo tú"
                             valor={b.deuda[x.actor_id]?.importe ?? ''} onCambiar={(t) => importeDeuda(x.actor_id, t)} />
                         ) : null}
                       </View>
@@ -530,7 +531,7 @@ export function MejoraHistoricaScreen(p: {
       <ScrollView contentContainerStyle={[ef.cuerpo, { paddingBottom: inset.bottom + espacio.xxl }]} keyboardShouldPersistTaps="handled">
         {aviso ? <Caja testID="mh-aviso" aviso={aviso} /> : null}
         <CampoTexto testID="mh-descripcion" etiqueta="Qué se hizo" marcador="Ej.: Reforma integral" valor={descripcion} onCambiar={setDescripcion} />
-        <CampoTexto testID="mh-importe" etiqueta="Importe" marcador="0,00" valor={importe} onCambiar={setImporte} />
+        <CampoTexto importe testID="mh-importe" etiqueta="Importe" marcador="0,00" valor={importe} onCambiar={setImporte} />
         <Campo etiqueta="Fecha">
           <Fecha testID="mh-fecha" etiqueta="Fecha de la mejora" iso={fecha} hoyIso={hoyIso} ayerIso={ayerIso} onCambiar={setFecha} />
         </Campo>

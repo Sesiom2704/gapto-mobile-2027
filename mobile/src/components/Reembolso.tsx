@@ -4,6 +4,7 @@
 // Ruta: mobile/src/components/Reembolso.tsx
 // Descripción: «Me lo reembolsan» (C-03; lámina F05-07 v0.3 C2 y D1; F05 §66.2, §66.A.2/§66.A.3; D-F0507L-05). Tarea encima del registro, que conserva lo escrito. «Quién te lo debe» abre el selector de personas y empresas (nunca el comercio del gasto; ORGANISMO, OTRO y sin naturaleza no aparecen). «Cuánto te deben» no tiene nada marcado: «Todo · <total>» u «Otra cantidad» (de 0,01 € al total). «Hecho» deshabilitado hasta elegir ambos, con lo que falta dicho en texto. Texto fijo «Cómo se registra» (el gasto cuenta entero en tu Resultado; el cobro no será un ingreso) y la exclusión visible de la previsión (DEU-C03-PREVISION). Consume solo tokens semánticos.
 // Versión: 0.1.0 (F05-D052 paso 2 · C-03 UI C2)
+// Versión: 0.2.0 (F06 T3 · cadena de noche 21->22-11, T-D MANT N3 cliente; D-C7-07): los campos de importe ponen los puntos de miles al teclear (`formatearImporteAlTeclear`).
 // ============================================================
 
 import React, { useState } from 'react';
@@ -29,6 +30,7 @@ import { useTema } from '../theme/tema';
 import { espacio, tipo } from '../theme/tokens';
 import { BotonPrimario, BotonTexto, Chip } from './Basicos';
 import { CabeceraTarea, Campo, Inicial, s, SelectorPersona } from './Reparto';
+import { formatearImporteAlTeclear } from '../domain/importe';
 
 export function ReembolsoHoja(p: {
   cliente: ClienteApi;
@@ -68,7 +70,7 @@ export function ReembolsoHoja(p: {
             <View style={[s.fila, { backgroundColor: c.surfacePrimary, borderColor: c.borderStandard, borderWidth: 1 }]}>
               <Text style={[tipo.body, { color: c.textSecondary }]}>€</Text>
               <TextInput testID="reembolso-importe" accessibilityLabel={`${TEXTO_CUANTO}, en euros`} value={r.importeTexto}
-                onChangeText={(t) => setR((x) => ({ ...x, importeTexto: t }))} keyboardType="decimal-pad" inputMode="decimal" placeholder="0,00"
+                onChangeText={(t) => setR((x) => ({ ...x, importeTexto: formatearImporteAlTeclear(t, x.importeTexto) }))} keyboardType="decimal-pad" inputMode="decimal" placeholder="0,00"
                 placeholderTextColor={c.textSecondary} style={[tipo.body, { flex: 1, minWidth: 0, color: c.textPrimary }]} />
             </View>
           ) : null}

@@ -21,6 +21,7 @@
 // Versión: 0.15.0
 // v0.16.0 (F06 T2-F06 CAT-VIV N1 (L-04, lámina SET-CAT/REG-CAT v1.0) R01–R05; OBL-VIV-01): con una categoría de GASTO «Asociada a vivienda» (la marca de ESA categoría) aparece el bloque obligatorio «Propiedad» (BloquePropiedad) y desaparece «¿De quién es este gasto?»: el reparto lo da la propiedad (titularidad en la fecha o «No lo sé»), con «¿Qué tipo de gasto es?» (Gasto corriente · Reparación; nunca Mejora) y «¿Quién pagó?» de PAG; no se ofrecen «Repartir», «Otra persona» ni «Me lo reembolsan» (si estaban, se quitan con aviso); «Pagado con» solo lista cuentas solo tuyas y no se pide si pagó todo un cotitular. Sin propiedad el registro se para con «Falta: la propiedad.». El envío lleva el bloque `propiedad` de VS-01. El éxito (R05) muestra la propiedad, el reparto, lo que cuenta en el mes y que no suma al coste de la vivienda. Sin marca, el formulario no cambia. Clientes de propiedades y de B3 por prop opcional (por defecto, los de `configApi`).
 // Versión: 0.16.0
+// Versión: 0.17.0 (F06 T3 · cadena de noche 21->22-11, T-D MANT N3 cliente; D-C7-07): los campos de importe ponen los puntos de miles al teclear (`formatearImporteAlTeclear`).
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -57,7 +58,7 @@ import {
   visibleEnRegistro,
 } from '../domain/categoria';
 import { ayer, ddmmaaaaAIso, fechaCortaIso, isoADdmmaaaa, isoLocal } from '../domain/fechas';
-import { formatearEur, parsearImporte } from '../domain/importe';
+import { formatearEur, formatearImporteAlTeclear, parsearImporte } from '../domain/importe';
 import { Borrador, borradorInicial, Errores, esDesconocida, esFechaIso, PayloadGastoPagado, SeleccionCategoria, validar } from '../domain/intencion';
 import {
   importeReembolso,
@@ -917,7 +918,7 @@ export function RegistroGastoScreen(p: {
               value={b.importeTexto}
               onChangeText={(t) => {
                 p.traza?.('cambio:importe');
-                cambiar({ importeTexto: t });
+                cambiar({ importeTexto: formatearImporteAlTeclear(t, b.importeTexto) });
               }}
               editable={!bloqueado}
               keyboardType="decimal-pad"

@@ -5,6 +5,7 @@
 // Descripción: «Corregir reparto» desde el detalle (F05-06 M3; lámina REP v0.2 E6, P-REP-04; F05 §57 F05-D043, que manda sobre la lámina). Solo cambia los importes de quien ya está en el reparto y, con ellos, la deuda que corresponde a esa parte (AJ-M3-DEC-01/09); el total del gasto no cambia y las partes suman lo mismo. Lo que esta versión no hace se ve atenuado con su motivo en lenguaje llano (§57.1.1): añadir o quitar a alguien, pasar de invitado a que te deba o al revés, y «Le debo esto» (E1, AJ-M3-DEC-04). Si el gasto no se puede corregir (otro tipo, viene de V3, sin reparto o no activo), se dice por qué y no se ofrece ninguna alternativa que el motor no admita (no se promete «anular y registrar de nuevo»). Revisión de impacto (patrón EDIT-HECHO A3): parte a parte antes → después, lo que cambia en las deudas y en tu gasto, y motivo obligatorio. Guardar es un cambio con `row_version`: un INDETERMINADO pide volver a cargar antes de repetir; un rechazo se explica sin texto técnico y, si el gasto cambió, se recarga.
 // Versión: 0.1.0 (F05-06 M3 §B1)
 // Versión: 0.2.0 (F05-D051 paso 8; lámina B D-F0507L-03): la posición de cada parte se lee con su estado. Pendiente: «Te debe · pendiente X» («Sin determinar» si no se conoce); CERRADA: «Te debe · 0,00 € · Saldado» y, si su importe inicial no se conoció, debajo «Importe inicial desconocido». Ninguna CERRADA dice «Sin determinar». Etiqueta accesible con el mismo texto.
+// Versión: 0.3.0 (F06 T3 · cadena de noche 21->22-11, T-D MANT N3 cliente; D-C7-07): los campos de importe ponen los puntos de miles al teclear (`formatearImporteAlTeclear`).
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -14,7 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ClienteApi } from '../api/cliente';
 import { BotonPrimario, BotonTexto, Chip, EstadoDato } from '../components/Basicos';
 import { Aviso, Bloque, CabeceraTarea, Campo, FilaRevision, Inicial, OpcionAtenuada, s } from '../components/Reparto';
-import { formatearEur } from '../domain/importe';
+import { formatearEur, formatearImporteAlTeclear } from '../domain/importe';
 import {
   cambiosCorreccion,
   componerCorreccion,
@@ -223,7 +224,7 @@ export function CorregirRepartoScreen(p: { cliente: ClienteApi; hechoId: string;
                 ) : null}
               </View>
               <TextInput testID={`corregir-importe-${x.atribucion_id}`} accessibilityLabel={`Parte de ${x.nombre} en euros`} value={textos[x.atribucion_id] ?? ''}
-                onChangeText={(t) => editar(() => setTextos((y) => ({ ...y, [x.atribucion_id]: t })))} editable={!bloqueado}
+                onChangeText={(t) => editar(() => setTextos((y) => ({ ...y, [x.atribucion_id]: formatearImporteAlTeclear(t, y[x.atribucion_id] ?? '') })))} editable={!bloqueado}
                 keyboardType="decimal-pad" inputMode="decimal" style={[tipo.body, s.inputImporte, { color: c.textPrimary, borderColor: c.borderStandard }]} />
             </View>
             {!x.es_yo ? (

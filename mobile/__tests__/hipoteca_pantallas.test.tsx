@@ -18,6 +18,7 @@
 // Versión: 0.3.0 (F06 T3-F06 bloque 2 F06-01H; N-30, firma 0f3e5633…): el pago propone con `titularidad_prestamo` de L-HIP en el vencimiento (no con la de la propiedad) y, con ella, ATRIBUCION_PROPUESTA_DESFASADA recarga la hipoteca.
 // Versión: 0.4.0 (F06 T3-F06 bloque 2 F06-01H; firma e446b4c3…, N-40): la constante real de exposición del pago vale true; el caso «no expuesto» se prueba con el valor simulado false.
 // Versión: 0.5.0 (F06 T3-F06 bloque 2 F06-01H, paso 12, relevo 6; MC-H-04): la compra con hipoteca envía `row_version_esperada` = versión de la propiedad mostrada (vista con row_version 7, distinta de 0 y del fixture).
+// Versión: 0.6.0 (F06 T3 · cadena de noche 21->22-11, T-D MANT N3 cliente; D-C7-08): el banco se busca escribiendo; sin escribir no se lista ninguno.
 // ============================================================
 
 import './tiempos_rn';
@@ -142,6 +143,9 @@ async function rellenarHipoteca(cli: ReturnType<typeof clienteCompra>) {
   expect(screen.queryByTestId('compra-hip')).toBeNull();
   expect(cli.listarTerceros).not.toHaveBeenCalled();                              // sin hipoteca no se pide nada más
   await pulsar('compra-hip-anadir');
+  await waitFor(() => screen.getByTestId('compra-hip-banco-buscar'));
+  expect(screen.queryByTestId(`compra-hip-banco-${BANCO}`)).toBeNull();          // D-C7-08: sin escribir, no se lista ningún tercero
+  await escribir('compra-hip-banco-buscar', 'banco');
   await waitFor(() => screen.getByTestId(`compra-hip-banco-${BANCO}`));
   expect(screen.queryByTestId('compra-hip-banco-b-off')).toBeNull();              // solo bancos activos
   await pulsar(`compra-hip-banco-${BANCO}`);
