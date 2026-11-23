@@ -1140,6 +1140,9 @@ def create_app(
     # ------------------------------------------------------------ T3-F06 Bloque 3 F06-02/03 contratos (modulo contratos)
     rutas_contratos.registrar(app, unidad=unidad, owner=lambda: cfg.owner_user_id, contexto=contexto,
                               autorizar=autorizar, reloj=reloj)
+    # LAB T5 (rama lab-t5, LAB_0357): rutas de laboratorio de F06-04 bajo /v1/lab, marca «LAB». No es T5.
+    from app.lab_rentas import rutas as rutas_lab_rentas
+    rutas_lab_rentas.registrar(app, unidad=unidad, contexto=contexto, autorizar=autorizar)
 
     # ------------------------------------------------------------ F05-03 J2 §1.6 plantillas y acciones
     def _comando_plantilla(nombre_op: str, operacion, clave: str) -> dict | JSONResponse:
