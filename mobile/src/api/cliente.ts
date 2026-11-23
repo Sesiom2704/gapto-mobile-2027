@@ -37,6 +37,7 @@
 // v0.28.0 (F06 T4 · D-C7-10, mandato 7041970a…; Q3-Hd v1.2 candidato): `FilaPrevision.cuota?` (bloque `BloqueCuota` del servidor, solo en la fila de cuota de Inicio y Pendientes): financiación, número, versión de la financiación, vencimiento, cuenta de cargo, propuesta de atribución, `swipe_disponible` y `sin_dudas`. Ninguna llamada cambia.
 // v0.27.0 (F06 T3 · MANT N1 de revisión del tipo, A3; dictamen MANT R-B2-06 punto 3 y AJ-03; decisión 14): `revisarTipoHipoteca` usa un timeout propio `TIMEOUT_REVISION_MS` (nunca menor que el general), dimensionado con la medición por fases de A2 (06_revision_latencia); el resto de llamadas conserva el timeout general de 10 s.
 // v0.29.0 (F06 T4 · AJ-05 ampliado + R-C7-07, mandato b4ff6b70…; diseño v0.2 §7): `crearLlamada` añade `X-Gapto-Intento-Id` (UUID nuevo por intento HTTP; solo traza) y, en escrituras, `X-Gapto-Intencion-Id` tomado del `intencion_id` del cuerpo, sin perder `Authorization` ni `Content-Type`. Mismo cuerpo y misma intención en los reenvíos (vigente). Sin cambios de clasificación: 5xx sigue siendo INDETERMINADO.
+// v0.30.0 (F06 T4 · token BETA_LOCAL, mandato 4f0e40af…; dictamen AJ-TOK-01/06, M-TOK-05/09): `ConfigApi` admite `credencial` (el token se lee en CADA petición, no al crear el cliente: las copias `{ ...cfg }` de revisión y compra lo heredan) y `alNoAutorizado`. Con `credencial`: sin credencial validada la petición NO se envía (INDETERMINADO con texto propio, nada salió); un 401 avisa al proveedor y se clasifica INDETERMINADO, nunca RECHAZADO, para que ninguna escritura pendiente se dé por rechazada ni se rehaga con otra intención (COLA-AR la conserva y la reconcilia con la MISMA intención al reconectar). Sin `credencial` (dobles de test con `token` fijo) nada cambia.
 // ============================================================
 
 import type { Ambito, CategoriaNodo } from '../domain/categoria';
@@ -59,9 +60,19 @@ import type { SenalesCategorias, SenalesTerceros } from '../domain/senales';
 
 export interface ConfigApi {
   baseUrl: string;
+  /** Token fijo (solo dobles de test); la app usa `credencial`. */
   token: string;
   timeoutMs: number;
+  /** Token de la credencial validada, leído en cada petición; null si no hay (la petición no sale). */
+  credencial?: () => string | null;
+  /** Aviso de un 401 recibido con ese token (credencial revocada en el PC). */
+  alNoAutorizado?: (token: string) => void;
 }
+
+/** Sin credencial validada: la petición no se ha enviado. */
+export const MSG_SIN_CREDENCIAL = 'No hay conexión con tu PC: no se ha enviado nada.';
+/** 401: el PC ya no acepta el código de este iPhone. */
+export const MSG_CREDENCIAL_RECHAZADA = 'Tu PC ya no acepta el código de este iPhone. Vuelve a conectar; lo pendiente se conserva.';
 
 export interface ResultadoRegistro {
   hecho_id: string;
@@ -1038,13 +1049,19 @@ export function crearLlamada(cfg: ConfigApi, fetchImpl: typeof fetch = fetch, nu
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), cfg.timeoutMs);
     const intencion = esEscritura ? intencionDelCuerpo(init.body) : null;
+    // Token: el de la credencial validada en este momento (AJ-TOK-01); sin ella no sale nada.
+    const token = cfg.credencial ? cfg.credencial() : cfg.token;
+    if (cfg.credencial && !token) {
+      clearTimeout(t);
+      return { tipo: 'INDETERMINADO', mensaje: MSG_SIN_CREDENCIAL };
+    }
     try {
       const r = await fetchImpl(`${cfg.baseUrl}${ruta}`, {
         ...init,
         signal: ctrl.signal,
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${cfg.token}`,
+          Authorization: `Bearer ${token}`,
           'X-Gapto-Intento-Id': nuevoIntento(),
           ...(intencion ? { 'X-Gapto-Intencion-Id': intencion } : {}),
         },
@@ -1056,6 +1073,11 @@ export function crearLlamada(cfg: ConfigApi, fetchImpl: typeof fetch = fetch, nu
         cuerpo = null;
       }
       if (r.ok) return { tipo: 'OK', datos: cuerpo as T };
+      if (r.status === 401 && cfg.alNoAutorizado) {
+        // AJ-TOK-06 / M-TOK-09: nunca RECHAZADO (no se descarta ni se rehace con otra intención).
+        cfg.alNoAutorizado(token ?? '');
+        return { tipo: 'INDETERMINADO', mensaje: MSG_CREDENCIAL_RECHAZADA };
+      }
       if (r.status >= 400 && r.status < 500 && cuerpo && typeof cuerpo.codigo === 'string') {
         const rechazo: Respuesta<T> = { tipo: 'RECHAZADO', codigo: cuerpo.codigo, mensaje: String(cuerpo.mensaje ?? '') };
         if (cuerpo.detalle && typeof cuerpo.detalle === 'object') return { ...rechazo, detalle: cuerpo.detalle } as Respuesta<T>;

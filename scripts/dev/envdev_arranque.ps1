@@ -16,6 +16,14 @@
 #   de ENV-DEV deducida de la ubicacion del script (<Base>\repo\scripts\dev).
 #   Si se ejecuta desde otro clon, el paso 1 falla cerrado (falta pgdata).
 #   -PgBin, o $env:GAPTO_PG_BIN, o por defecto PostgreSQL 17 en Program Files.
+# Version: 0.4.0
+#   0.4.0: F06 T4 token BETA_LOCAL (mandato 4f0e40af...; AJ-TOK-02/04):
+#          mobile/.env lleva SOLO la URL de la API; el token de desarrollo
+#          ya no se escribe en ninguna variable EXPO_PUBLIC_* (se incrustaba
+#          en el bundle). La app lo pide una vez («Conectar con tu PC») y lo
+#          guarda en el llavero del iPhone; esta en <Base>\local\dev_token.txt.
+#          Metro no arranca si queda alguna EXPO_PUBLIC_* con aspecto de
+#          secreto (mobile/guarda_entorno.js).
 # Version: 0.3.0
 #   0.3.0: F06 T4 AJ-05 (mandato b4ff6b70...): el backend exige GAPTO_LOG_DIR
 #          (registro de peticiones, fail-closed al arrancar); se fija a
@@ -102,8 +110,9 @@ if (-not $ok) { Stop-Envdev 'el backend no responde OK en /v1/salud (mira la ven
 Write-Host 'Backend OK (gapto2027_dev)'
 
 Paso 4 'mobile/.env'
-Set-Content -Encoding ASCII "$M\.env" ("EXPO_PUBLIC_GAPTO_API_URL=http://${ip}:8027`r`nEXPO_PUBLIC_GAPTO_DEV_TOKEN=$token")
+Set-Content -Encoding ASCII "$M\.env" ("EXPO_PUBLIC_GAPTO_API_URL=http://${ip}:8027")
 Remove-Variable token
+Write-Host "Codigo de conexion para la app: el de $L\dev_token.txt (no se muestra aqui)."
 if (-not (Test-Path "$M\node_modules")) {
     Write-Host 'Instalando dependencias moviles (npm ci, solo la primera vez)...'
     Push-Location $M

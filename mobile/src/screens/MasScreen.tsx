@@ -7,6 +7,7 @@
 // Versión: 0.2.0 (F05-02 B3, A1; D-B3-01 ratificada por Moisés): «Preferencias financieras» pasa de «No disponible» a navegable y abre Ajustes › Preferencias. La fila conserva la etiqueta del árbol F09 §12.91.1; el título de la pantalla es «Preferencias» (lámina SET-PREF). Las otras ocho secciones siguen «No disponible».
 // Versión: 0.3.0 (F05-03/F05-04 J2 §2.5; láminas REG-DYN / SET-TH / SET-CTX v0.1 S01/S03 y SET-PLT v0.2 S01): «Terceros» y «Contextos» pasan a navegables; «Plantillas» se añade JUNTO a «Preferencias financieras» (mandato §2.5) como fila propia, sin alterar el árbol cerrado de diez secciones. Las otras seis siguen «No disponible».
 // Versión: 0.4.0 (F05-06 M4 §3; F09 §12.105 CAP, P-CAP-01): «Cuentas» se añade JUNTO a «Preferencias financieras», tras «Plantillas», como entrada provisional de las capacidades de cuenta (destino final PAT-07-D › Más, §12.72; divergencia provisional de navegación registrada en F09). El árbol cerrado de diez secciones no cambia.
+// Versión: 0.5.0 (F06 T4 · token BETA_LOCAL, mandato 4f0e40af… §2.3; dictamen AJ-TOK-02): fila técnica «Desconectar este iPhone» DEBAJO del árbol cerrado (no es una de sus diez secciones), solo si llega `onDesconectar`; pide confirmación en la propia pantalla antes de borrar la credencial del llavero y de la memoria. El árbol y las demás filas no cambian.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -14,7 +15,7 @@ import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { CabeceraNavegacion, EstadoDato } from '../components/Basicos';
+import { BotonTexto, CabeceraNavegacion, EstadoDato } from '../components/Basicos';
 import { useTema } from '../theme/tema';
 import { espacio, TACTIL_MIN, tipo } from '../theme/tokens';
 
@@ -51,8 +52,11 @@ export function AjustesScreen(p: {
   onContextos?: () => void;
   onPlantillas?: () => void;
   onCuentas?: () => void;
+  /** Token BETA_LOCAL: borra la credencial de este iPhone (llavero y memoria). */
+  onDesconectar?: () => void;
 }) {
   const { c } = useTema();
+  const [confirmando, setConfirmando] = React.useState(false);
   return (
     <View testID="pantalla-ajustes" style={{ flex: 1, backgroundColor: c.background }}>
       <CabeceraNavegacion titulo="Ajustes" atras={{ etiqueta: 'Más', onPress: p.onAtras }} testIDAtras="ajustes-atras" />
@@ -83,6 +87,21 @@ export function AjustesScreen(p: {
             </View>
           ),
         )}
+        {p.onDesconectar ? (
+          confirmando ? (
+            <View testID="ajustes-desconectar-confirmacion" style={[s.confirmacion, { borderBottomColor: c.separator }]}>
+              <Text style={[tipo.body, { color: c.textPrimary }]}>
+                ¿Desconectar este iPhone de tu PC? Se borra el código de conexión de este iPhone y tendrás que volver a escribirlo.
+              </Text>
+              <View style={s.botones}>
+                <BotonTexto testID="ajustes-desconectar-cancelar" titulo="Cancelar" onPress={() => setConfirmando(false)} />
+                <BotonTexto testID="ajustes-desconectar-si" titulo="Desconectar" critico onPress={p.onDesconectar} />
+              </View>
+            </View>
+          ) : (
+            <FilaNavegable testID="ajustes-desconectar" titulo="Desconectar este iPhone" onPress={() => setConfirmando(true)} />
+          )
+        ) : null}
       </ScrollView>
     </View>
   );
@@ -108,4 +127,6 @@ function FilaNavegable(p: { testID: string; titulo: string; icono?: React.Compon
 const s = StyleSheet.create({
   titulo: { paddingHorizontal: espacio.l, paddingBottom: espacio.m },
   fila: { flexDirection: 'row', alignItems: 'center', gap: espacio.m, minHeight: TACTIL_MIN + 8, paddingHorizontal: espacio.l, borderBottomWidth: StyleSheet.hairlineWidth },
+  confirmacion: { gap: espacio.s, paddingHorizontal: espacio.l, paddingVertical: espacio.m, borderBottomWidth: StyleSheet.hairlineWidth },
+  botones: { flexDirection: 'row', justifyContent: 'flex-end', gap: espacio.l },
 });

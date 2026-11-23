@@ -20,18 +20,21 @@
 // v0.16.0 (F06 Lote 12 · B1 Propiedad, N1; láminas F06-01 v0.9 A1–A3, D1–D3 y v0.1 C1–C2, D3–D4): «Patrimonio» deja de ser territorio pendiente: monta Patrimonio › Propiedades (PropiedadesScreen) de forma PERSISTENTE desde la primera visita, como Más (conserva el nivel al cambiar de pestaña); sus tareas (alta, nuevo reparto, valoración, edición) son inmersivas y ocultan la barra inferior. El cliente de propiedades (`api/propiedades`) va aparte de `ClienteApi` y llega por prop opcional (por defecto, el de `configApi`). «Mes» sigue pendiente.
 // v0.17.0 (F06 T1 UX-1 · M-03 y M-09): la barra inferior pasa por `accionBarra`: «Más» estando en «Más» vuelve al menú, o pregunta «¿Descartar cambios?» (Descartar / Seguir editando) si un formulario de la pila de «Más» publica cambios sin guardar (Q-UX-06); cambiar de pestaña conserva la pila. El registro recibe `onPendienteCon`: «Pendiente con X» se abre ENCIMA del formulario, que sigue montado.
 // v0.18.0 (F06 LOTE30 punto 1 b, observación de Moisés en ENV-DEV e1d2386; N3 de cliente): Patrimonio › Propiedades avisa con `onCambios` cuando guarda hechos (compra, gasto de la compra, obras y gastos) y la raíz sube `refresco`: Día a día (Actividad, montada de forma persistente) e Inicio vuelven a leer y la reforma aparece sin cambiar de periodo. Nada más cambia.
-// Versión: 0.18.0
+// v0.19.0 (F06 T4 · token BETA_LOCAL, mandato 4f0e40af… §2.1–§2.3; dictamen AJ-TOK-01/02/06): la app por defecto lee primero la credencial del llavero (`proveedorCredencial.iniciar()`) y solo monta `Raiz` con la credencial CONECTADA; en cualquier otro estado muestra «Conectar con tu PC». Un 401 en uso o «Desconectar este iPhone» (Ajustes, `onDesconectar`, opcional en `Raiz`) vuelven a esa pantalla; el cliente y la cola de la app no cambian (misma instancia al reconectar: lo pendiente se conserva con su intención). `Raiz` y su uso en las pruebas no cambian.
+// Versión: 0.19.0
 // ============================================================
 
 import * as Crypto from 'expo-crypto';
 import { StatusBar } from 'expo-status-bar';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { AppState, Keyboard, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { ClienteApi, crearCliente } from './src/api/cliente';
 import { ClientePropiedades, crearClientePropiedades } from './src/api/propiedades';
-import { configApi } from './src/api/config';
+import { configApi, proveedorCredencial } from './src/api/config';
+import type { ProveedorCredencial } from './src/api/credencial';
+import { ConectarScreen } from './src/screens/ConectarScreen';
 import { g1Abrir, g1Fetch, g1Suscribir, g1Traza } from './src/dev/g1';
 import { BarraInferior, Destino } from './src/components/BarraInferior';
 import { accionBarra, HojaDescartarCambios } from './src/components/CambiosSinGuardar';
@@ -73,7 +76,7 @@ type TareaRegistro = {
   clave: number;
 };
 
-export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () => Date; propiedades?: ClientePropiedades }) {
+export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () => Date; propiedades?: ClientePropiedades; onDesconectar?: () => void }) {
   const { c, esquema } = useTema();
   /** B1: cliente de propiedades (por prop en tests; por defecto, el de `configApi`). */
   const propiedades = useMemo(() => p.propiedades ?? crearClientePropiedades(configApi, g1Fetch(fetch)), [p.propiedades]);
@@ -184,6 +187,7 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
               onContextos={() => setPantallaMas('CONTEXTOS')}
               onPlantillas={() => setPantallaMas('PLANTILLAS')}
               onCuentas={() => setPantallaMas('CUENTAS')}
+              onDesconectar={p.onDesconectar}
             />
           ) : null}
           {pantallaMas === 'CATEGORIAS' ? (
@@ -446,6 +450,42 @@ export function Raiz(p: { cliente: ClienteApi; nuevoId: () => string; ahora: () 
 const nuevoIdSeguro = () => Crypto.randomUUID();
 const ahoraDispositivo = () => new Date();
 
+/** Estado de la credencial como estado de React (token BETA_LOCAL). */
+export function useEstadoCredencial(proveedor: ProveedorCredencial) {
+  return useSyncExternalStore(
+    (f) => proveedor.suscribir(f),
+    () => proveedor.estado(),
+  );
+}
+
+/** Puerta de la credencial: «Conectar con tu PC» hasta CONECTADA; después, la app. */
+export function AppConCredencial(p: {
+  proveedor: ProveedorCredencial;
+  cliente: ClienteApi;
+  nuevoId: () => string;
+  ahora: () => Date;
+  /** Solo pruebas: contenido en lugar de `Raiz` con la credencial CONECTADA. */
+  contenido?: (onDesconectar: () => void) => React.ReactNode;
+}) {
+  const estado = useEstadoCredencial(p.proveedor);
+  useEffect(() => {
+    void p.proveedor.iniciar();
+  }, [p.proveedor]);
+  const desconectar = useCallback(() => void p.proveedor.desconectar(), [p.proveedor]);
+  if (estado.tipo !== 'CONECTADA') {
+    return (
+      <ConectarScreen
+        estado={estado}
+        onConectar={(codigo) => void p.proveedor.conectar(codigo)}
+        onReintentar={() => void p.proveedor.reintentar()}
+        onDesconectar={desconectar}
+      />
+    );
+  }
+  if (p.contenido) return <>{p.contenido(desconectar)}</>;
+  return <Raiz cliente={p.cliente} nuevoId={p.nuevoId} ahora={p.ahora} onDesconectar={desconectar} />;
+}
+
 export default function App() {
   const cliente = useMemo(() => crearCliente(configApi, g1Fetch(fetch)), []);
   // G1 v2: teclado y AppState como hitos del ensayo abierto; fuera de `__DEV__` no se suscribe a nada.
@@ -453,7 +493,7 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <ProveedorTema>
-        <Raiz cliente={cliente} nuevoId={nuevoIdSeguro} ahora={ahoraDispositivo} />
+        <AppConCredencial proveedor={proveedorCredencial} cliente={cliente} nuevoId={nuevoIdSeguro} ahora={ahoraDispositivo} />
       </ProveedorTema>
     </SafeAreaProvider>
   );
