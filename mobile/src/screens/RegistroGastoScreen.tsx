@@ -23,6 +23,7 @@
 // Versión: 0.16.0
 // Versión: 0.17.0 (F06 T3 · cadena de noche 21->22-11, T-D MANT N3 cliente; D-C7-07): los campos de importe ponen los puntos de miles al teclear (`formatearImporteAlTeclear`).
 // Versión: 0.18.0 (F06 T6 · S2 FORM-AGIL en Registrar gasto e ingreso; F09 0.55 §12.107.1 y lámina REG-AGIL v0.8 «Gasto», «Vivienda» e «Ingreso»): exprés con Importe, Tercero y Categoría (y Propiedad con vivienda); «Se registrará así» con líneas tocables (presupuesto, de quién, cuenta y fecha); lo obligatorio sin valor (presupuesto, cuenta) se abre en el exprés y no se cierra al elegirlo; «Más opciones» con «‹ Exprés», resumen tocable y bloques numerados con «Continuar»; «Registrar» siempre visible con «Falta: …» (A7). Vivienda: «Revisar» antes de registrar (dictamen 1 Q5/A6; RevisarVivienda) con la versión mostrada; si cambian fecha, titularidad, reparto, cuenta o aportaciones se invalida y se recalcula. Mismos bloques, testID, validación y envío: el payload no cambia (t6_s2_wire_registro). Presupuesto sin valor por defecto (S4), «Recordar» de uno (S5) y «¿Qué tipo de gasto es?» (S6) sin cambios.
+// Versión: 0.19.0 (F06 T6 · S4 N1, presupuesto «Sí» por defecto; dictamen 1 Q1/A2, DF-04/06/12, F09 0.55 §12.107.3; enmienda REG-01, FORM-VS01, E1 y D-F0507L-02): tras la propuesta de hoy, si el presupuesto sigue sin valor y no lo ha elegido el usuario, `completarPresupuesto` pide `GET /v1/registro/presupuesto-propuesto` y lo aplica como INFERIDO con su origen visible («Propuesta: lo indica la categoría …» o «Por defecto · puedes cambiarlo.»), editable. El wire y el sellado no cambian (presupuestable explícito en el payload).
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -335,7 +336,8 @@ export function RegistroGastoScreen(p: {
       });
       if (pendiente) setAvisos((a) => [...a, ...nuevos, ...avisosPlantilla(r2.datos.avisos)]);
       p.traza?.('propuesta_aplicada', { via: 'registro' });
-      return;
+      return void completarPresupuesto(n, { tipo: tipoRef.current, fecha, plantillaId: plantilla?.id ?? null,
+        ...(categoriaId ? { categoriaId } : { sinCategoria: true }), ...(actual.terceroId ? { terceroId: actual.terceroId } : { sinTercero: true }) });
     }
     const r = await p.cliente.propuestaPreferencias(fecha, categoriaId);
     if (caducada()) return;
@@ -355,6 +357,24 @@ export function RegistroGastoScreen(p: {
     }
     setB((x) => aplicarPropuesta(x, ap, lista));
     p.traza?.('propuesta_aplicada', { via: 'preferencias' });
+    void completarPresupuesto(n, { tipo: 'GASTO', fecha, ...(categoriaId ? { categoriaId } : { sinCategoria: true }), sinTercero: true });
+  };
+
+  /**
+   * F06 T6 · S4 (N1; dictamen 1 Q1/A2; DF-04/06/12): si tras la propuesta de hoy el presupuesto sigue sin valor y el usuario
+   * no lo ha elegido, se pide el presupuesto propuesto (preferencia > categoría, incluido No > «Sí» por defecto) y se aplica
+   * como INFERIDO con su origen visible y editable. Nunca pisa un valor del usuario ni una propuesta ya aplicada; no cuenta
+   * como modificación; tras sellar no toca nada (la intención sellada no se recalcula).
+   */
+  const completarPresupuesto = async (n: number, q: Parameters<NonNullable<ClienteApi['presupuestoPropuesto']>>[0]) => {
+    if (!p.cliente.presupuestoPropuesto) return;
+    const r = await p.cliente.presupuestoPropuesto(q);
+    if (n !== peticionPropuesta.current || !editable.current || r.tipo !== 'OK') return;
+    if (r.datos.origen !== 'CATEGORIA' && r.datos.origen !== 'POR_DEFECTO') return; // preferencia o plantilla: ya aplicadas arriba
+    const origen = r.datos.origen;
+    setB((x) => (x.presupuestableOrigen === 'USUARIO' || x.presupuestable !== null ? x
+      : { ...x, presupuestable: r.datos.valor, presupuestableOrigen: 'INFERIDO', presupuestablePropuesta: origen }));
+    p.traza?.('presupuesto_propuesto', { via: origen });
   };
 
   /**

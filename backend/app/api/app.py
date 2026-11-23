@@ -296,6 +296,10 @@
 #     cuando la peticion tiene un COMMIT confirmado o indeterminado; los rechazos 4xx no cambian.
 #   - Proveedor por defecto: `connect_timeout = min(5, restante)`. CORS: X-Gapto-Intento-Id y X-Gapto-Intencion-Id.
 #   - `_escritura_edicion`: la segunda lectura (`estado`) se declara solo_lectura. Nada mas cambia en esa ruta.
+# Version: 0.41.0 (F06 T6 · S4 N1, presupuesto «Si» por defecto; dictamen 1 Q1/A2, DF-04/06/12, F09 0.55 §12.107.3):
+#   ruta NUEVA y aditiva `GET /v1/registro/presupuesto-propuesto` (mismos parametros que `/v1/registro/propuesta`):
+#   {valor, origen EXPLICITO|PREFERENCIA|CATEGORIA|POR_DEFECTO} con la precedencia de
+#   `app.preferencias.presupuesto_defecto`. Las rutas de propuesta de hoy, el registro y el sellado no cambian.
 # ============================================================
 
 from __future__ import annotations
@@ -493,6 +497,8 @@ from app.inicio import lecturas as lect_ini
 from app.contextos import lecturas as lect_ctx
 from app.plantillas import lecturas as lect_plt
 from app.plantillas import propuesta as prop_plt
+from app.preferencias import presupuesto_defecto as pres_def
+from app.api.dto_t6 import PresupuestoPropuesto
 from app.plantillas import servicio as serv_plt
 from app.contextos import servicio as serv_ctx
 from app.propiedades import lecturas as lect_prop
@@ -1217,6 +1223,24 @@ def create_app(
             s, tipo=tipo, fecha=fecha, plantilla_id=plantilla_id, categoria_id=categoria_id,
             sin_categoria=sin_categoria, tercero_id=tercero_id, sin_tercero=sin_tercero),
             nombre="F05-03 propuesta_registro")
+        if isinstance(salida, str):
+            status, cuerpo = eh.rechazo_integracion(salida)
+            mensaje = MENSAJE_PROPUESTA_NO_ELEGIBLE if tipo == "GASTO" else MENSAJE_PROPUESTA_NO_ELEGIBLE_INGRESO
+            return JSONResponse({**cuerpo, "mensaje": mensaje}, status_code=status)
+        return salida
+
+    @app.get("/v1/registro/presupuesto-propuesto", response_model=PresupuestoPropuesto, dependencies=[Depends(autorizar)])
+    def presupuesto_propuesto(
+        tipo: Literal["GASTO", "INGRESO"] = Query(...), fecha: dt.date = Query(...),
+        plantilla_id: uuid.UUID | None = Query(None), categoria_id: uuid.UUID | None = Query(None),
+        sin_categoria: bool = Query(False), tercero_id: uuid.UUID | None = Query(None),
+        sin_tercero: bool = Query(False),
+    ):
+        # F06 T6 · S4: lectura aditiva; la precedencia vive en app.preferencias.presupuesto_defecto.
+        salida = unidad.ejecutar(contexto(), lambda s: pres_def.presupuesto_propuesto(
+            s, tipo=tipo, fecha=fecha, plantilla_id=plantilla_id, categoria_id=categoria_id,
+            sin_categoria=sin_categoria, tercero_id=tercero_id, sin_tercero=sin_tercero),
+            nombre="F06 T6 S4 presupuesto_propuesto")
         if isinstance(salida, str):
             status, cuerpo = eh.rechazo_integracion(salida)
             mensaje = MENSAJE_PROPUESTA_NO_ELEGIBLE if tipo == "GASTO" else MENSAJE_PROPUESTA_NO_ELEGIBLE_INGRESO

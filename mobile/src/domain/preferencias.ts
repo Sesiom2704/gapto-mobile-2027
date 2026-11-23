@@ -10,6 +10,7 @@
 // Versión: 0.4.0 (F05-03/F05-04 J2 §2.5; F05 §46.4 R6, §46.5 E2/E3; lámina REG-DYN / SET-TH / SET-CTX v0.1 S04): Ajustes › Preferencias con CUATRO ámbitos: «Todos los gastos», «Todos los ingresos», «Una categoría» y «Un tercero»; los dos últimos con tipo Gasto/Ingreso, siempre enviado. Categoría + tercero no se ofrece (PREFERENCIA_AMBITO_NO_ADMITIDO). Grupo nuevo «Por tercero». «Proponer cuenta» del tipo INGRESO usa las cuentas elegibles para cobrar (servidor).
 // Versión: 0.6.0 (F05-D053 §67.2 · O3, opción 1): `categoriaRechazadaEnPropuesta` y `TEXTO_CATEGORIA_NO_DISPONIBLE`. Si la propuesta de la categoría elegida se rechaza con CATEGORIA_NO_ELEGIBLE, la categoría queda no válida y se conservan la cuenta y el presupuesto mostrados (no es SIN_PROPUESTA). `aplicarPropuesta` no cambia.
 // Versión: 0.7.0 (F06 T1 UX-1 · M-04, TR1-05): `yaRecordado` (pura): está recordado si guardar sería una edición sin cambios según el MISMO `planificarGuardadoClave`. `casillasIniciales`, `planificarGuardadoClave` y los cuerpos de escritura no cambian.
+// Versión: 0.8.0 (F06 T6 · S4 N1; dictamen 1 Q1/A2): `textoOrigen` da el origen visible de CATEGORIA («Propuesta: lo indica la categoría …») y POR_DEFECTO (`TEXTO_POR_DEFECTO`).
 // ============================================================
 
 import type { ContenidoPreferencia, CuentaPago, OrigenPropuesta, Preferencia, PropuestaRegistro, PropuestaRegistroTipo, TiposRegistro } from '../api/cliente';
@@ -31,12 +32,18 @@ export const SIN_PROPUESTA: PropuestaAplicable = Object.freeze({ cuenta: null, p
 export const TEXTO_ELEGIDA = 'Elegida por ti.';
 
 /** Texto de origen visible bajo el campo (lámina R02; D-PREF-02; F05-04: plantilla, tercero e ingresos). */
+/** F06 T6 · S4: «Sí» como último recurso (sin preferencia, plantilla ni categoría que diga otra cosa). */
+export const TEXTO_POR_DEFECTO = 'Por defecto · puedes cambiarlo.';
+
 export function textoOrigen(
   o: OrigenPropuestaCampo,
   categoria: string | null,
   extra: { tercero?: string | null; plantilla?: string | null; tipo?: 'GASTO' | 'INGRESO' } = {},
 ): string {
   if (o === 'PLANTILLA') return `De tu plantilla ${extra.plantilla ?? ''}.`;
+  // F06 T6 · S4 (dictamen 1 Q1/A2): origen visible y editable del presupuesto sin preferencia.
+  if (o === 'CATEGORIA') return `Propuesta: lo indica la categoría ${categoria ?? ''}.`;
+  if (o === 'POR_DEFECTO') return TEXTO_POR_DEFECTO;
   if (o === 'PREFERENCIA_TERCERO') return `Propuesta: tu preferencia para ${extra.tercero ?? ''}.`;
   if (o === 'PREFERENCIA_CATEGORIA') return `Propuesta: tu preferencia para ${categoria ?? ''}.`;
   if (o === 'PREFERENCIA_GENERAL') return extra.tipo === 'INGRESO' ? 'Propuesta: tu preferencia para todos los ingresos.' : 'Propuesta: tu preferencia general.';

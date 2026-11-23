@@ -38,6 +38,7 @@
 // v0.27.0 (F06 T3 · MANT N1 de revisión del tipo, A3; dictamen MANT R-B2-06 punto 3 y AJ-03; decisión 14): `revisarTipoHipoteca` usa un timeout propio `TIMEOUT_REVISION_MS` (nunca menor que el general), dimensionado con la medición por fases de A2 (06_revision_latencia); el resto de llamadas conserva el timeout general de 10 s.
 // v0.29.0 (F06 T4 · AJ-05 ampliado + R-C7-07, mandato b4ff6b70…; diseño v0.2 §7): `crearLlamada` añade `X-Gapto-Intento-Id` (UUID nuevo por intento HTTP; solo traza) y, en escrituras, `X-Gapto-Intencion-Id` tomado del `intencion_id` del cuerpo, sin perder `Authorization` ni `Content-Type`. Mismo cuerpo y misma intención en los reenvíos (vigente). Sin cambios de clasificación: 5xx sigue siendo INDETERMINADO.
 // v0.30.0 (F06 T4 · token BETA_LOCAL, mandato 4f0e40af…; dictamen AJ-TOK-01/06, M-TOK-05/09): `ConfigApi` admite `credencial` (el token se lee en CADA petición, no al crear el cliente: las copias `{ ...cfg }` de revisión y compra lo heredan) y `alNoAutorizado`. Con `credencial`: sin credencial validada la petición NO se envía (INDETERMINADO con texto propio, nada salió); un 401 avisa al proveedor y se clasifica INDETERMINADO, nunca RECHAZADO, para que ninguna escritura pendiente se dé por rechazada ni se rehaga con otra intención (COLA-AR la conserva y la reconcilia con la MISMA intención al reconectar). Sin `credencial` (dobles de test con `token` fijo) nada cambia.
+// v0.31.0 (F06 T6 · S4 N1; dictamen 1 Q1/A2): `presupuestoPropuesto` (GET /v1/registro/presupuesto-propuesto), aditivo y opcional en la interfaz; el resto del cliente no cambia.
 // ============================================================
 
 import type { Ambito, CategoriaNodo } from '../domain/categoria';
@@ -353,6 +354,12 @@ export interface PropuestaRegistroTipo {
     presupuestable: { valor: boolean; origen: OrigenCampoRegistro } | null;
   };
   avisos: AvisoCampo[];
+}
+
+/** F06 T6 · S4: presupuesto propuesto por el servidor (precedencia preferencia > categoría > «Sí» por defecto). */
+export interface PresupuestoPropuesto {
+  valor: boolean;
+  origen: 'EXPLICITO' | 'PREFERENCIA' | 'CATEGORIA' | 'POR_DEFECTO';
 }
 
 export interface ConsultaPropuestaRegistro {
@@ -946,6 +953,8 @@ export interface ClienteApi {
   desactivarAccion(id: string, row_version: number): Promise<Respuesta<ResultadoComandoAccion>>;
   reordenarAcciones(acciones: { id: string; row_version: number }[]): Promise<Respuesta<{ acciones: AccionRapida[]; idempotente: boolean; modificadas: string[] }>>;
   propuestaRegistro(q: ConsultaPropuestaRegistro): Promise<Respuesta<PropuestaRegistroTipo>>;
+  /** F06 T6 · S4 (aditivo): presupuesto propuesto con su origen; las propuestas de hoy no cambian. Opcional en los dobles de prueba. */
+  presupuestoPropuesto?(q: ConsultaPropuestaRegistro): Promise<Respuesta<PresupuestoPropuesto>>;
   registrarIngresoCobrado(p: PayloadIngresoCobrado): Promise<Respuesta<ResultadoRegistroTipo>>;
   registrarTransferencia(p: PayloadTransferencia): Promise<Respuesta<ResultadoRegistroTipo>>;
   categoriasSugeridas(): Promise<Respuesta<{ version: number; nodos: NodoSugerido[] }>>;
@@ -1163,6 +1172,15 @@ export function crearCliente(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): C
       if (q.terceroId) ps.set('tercero_id', q.terceroId);
       if (q.sinTercero) ps.set('sin_tercero', 'true');
       return llamar(`/v1/registro/propuesta?${ps.toString()}`, { method: 'GET' }, false);
+    },
+    presupuestoPropuesto: (q) => {
+      const ps = new URLSearchParams({ tipo: q.tipo, fecha: q.fecha });
+      if (q.plantillaId) ps.set('plantilla_id', q.plantillaId);
+      if (q.categoriaId) ps.set('categoria_id', q.categoriaId);
+      if (q.sinCategoria) ps.set('sin_categoria', 'true');
+      if (q.terceroId) ps.set('tercero_id', q.terceroId);
+      if (q.sinTercero) ps.set('sin_tercero', 'true');
+      return llamar(`/v1/registro/presupuesto-propuesto?${ps.toString()}`, { method: 'GET' }, false);
     },
     registrarIngresoCobrado: (p) => llamar('/v1/intenciones/ingreso-cobrado', post(p), true),
     registrarTransferencia: (p) => llamar('/v1/intenciones/transferencia', post(p), true),

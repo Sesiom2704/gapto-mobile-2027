@@ -445,6 +445,11 @@
 #       reexporta, AJ-UX2-10) y './PantallaSelector' useCerrarTecladoAlAbrir (cierra el teclado al abrir, FA-04).
 #     La lista cerrada (igualdad exacta del conjunto de imports), las demas entradas y las demas guardas no cambian.
 #     Discriminante: mutante M-A01-154 (import ajeno en RegistroGastoScreen.tsx) MUERTO.
+# Version: 0.47.0 (F06 T6 · S4–S7-A, mandato MANDATO_F06-T6_S4S7_LAB_v1.2 45edfc8d…98e5 §1; ampliacion autorizada por
+#     Moises el 2026-11-23, precedente adenda 01 de MANT 21): I1 da de alta SOLO las funciones productivas NUEVAS de
+#     S4–S7-A que mencionan categoria_id (bloque «F06 T6 S4–S7-A» al final, cada alta con slice, funcion y motivo;
+#     tabla ALTAS_I1_T6.md en la evidencia). Ninguna entrada existente se quita, renombra ni relaja; la logica de la
+#     guarda no cambia. Discriminantes: M-I1-T6-A (consumidor nuevo sin registrar) y M-I1-T6-B (alta quitada), MUERTOS.
 # ============================================================
 
 from __future__ import annotations
@@ -2423,3 +2428,20 @@ IMPORTS_CAMINO[REG] = IMPORTS_CAMINO[REG] | {
     ("../components/RevisarVivienda", "TEXTO_REVISION_CAMBIADA"),
 }
 IMPORTS_CAMINO[SEL] = IMPORTS_CAMINO[SEL] | {("./Basicos", "BotonSecundario"), ("./PantallaSelector", "useCerrarTecladoAlAbrir")}
+
+# ------------------------------------------------------------------ F06 T6 S4–S7-A (ampliacion autorizada de I1, mandato 45edfc8d… §1)
+# Solo altas de funciones NUEVAS que consumen categoria_id; ninguna entrada previa cambia.
+REGISTRO.update({
+    # S4 · presupuesto «Si» por defecto (lectura): ruta aditiva GET /v1/registro/presupuesto-propuesto.
+    ("backend/app/api/app.py", "create_app.presupuesto_propuesto"): (
+        "PREFERENCIA", "F06 T6 S4 GET /v1/registro/presupuesto-propuesto",
+        "lectura: parametro de contexto de la propuesta por tipo; no escribe"),
+    # S4 · lee presupuestable_default de la categoria efectiva (owner por RLS + GUC).
+    ("backend/app/preferencias/presupuesto_defecto.py", "_categoria_default"): (
+        "PREFERENCIA", "F06 T6 S4 lectura de presupuestable_default",
+        "lectura: SELECT de una columna de la categoria; no escribe"),
+    # S4 · compone la precedencia preferencia > categoria > «Si» por defecto.
+    ("backend/app/preferencias/presupuesto_defecto.py", "presupuesto_propuesto"): (
+        "PREFERENCIA", "F06 T6 S4 presupuesto propuesto",
+        "lectura: reutiliza propuesta_registro y la categoria efectiva; no escribe"),
+})

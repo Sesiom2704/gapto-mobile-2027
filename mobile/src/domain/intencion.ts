@@ -12,7 +12,8 @@
 // v0.8.0 (F06 T1 UX-1 · M-07, D-M2-04): `esFechaIso` construye la fecha con `setFullYear` y ya no convierte los años 0–99 en 1900–1999: acepta 0001-01-01..0099-12-31 si el día existe (p. ej. 0050-06-15). El resto de la validación no cambia (sigue rechazando 2026-02-30).
 // Versión: 0.8.0
 // v0.9.0 (F06 T2-F06 CAT-VIV N1 (L-04, lámina SET-CAT/REG-CAT v1.0)): `Borrador.propiedad` (aditivo: el bloque `propiedad` de VS-01 ya compuesto). Con él, `sellar` envía `atribucion` SIN_INDICAR, financiación NO_DETERMINADA y `propiedad` (la atribución y las aportaciones las saca el bloque) y no exige la propuesta de financiación de la cuenta; sin él, el wire no cambia.
-// Versión: 0.9.0
+// v0.10.0 (F06 T6 · S4 N1; dictamen 1 Q1/A2): `OrigenPropuestaCampo` añade CATEGORIA y POR_DEFECTO (origen visible del presupuesto propuesto sin preferencia).
+// Versión: 0.10.0
 // ============================================================
 
 import type { MagnitudCategoria } from './categoria';
@@ -24,7 +25,9 @@ import { faltaReembolso, importeReembolso, type IntencionReembolsableSellada, ty
 export type Origen = 'USUARIO' | 'INFERIDO' | 'PENDIENTE';
 
 /** Origen visible de una propuesta (D-PREF-02): preferencia de la categoría, del tercero o general, única cuenta o plantilla (F05-04). */
-export type OrigenPropuestaCampo = 'PREFERENCIA_CATEGORIA' | 'PREFERENCIA_GENERAL' | 'UNICA' | 'PREFERENCIA_TERCERO' | 'PLANTILLA';
+export type OrigenPropuestaCampo = 'PREFERENCIA_CATEGORIA' | 'PREFERENCIA_GENERAL' | 'UNICA' | 'PREFERENCIA_TERCERO' | 'PLANTILLA'
+  // F06 T6 · S4: presupuesto sin preferencia ni plantilla (valor de la categoría o «Sí» por defecto).
+  | 'CATEGORIA' | 'POR_DEFECTO';
 
 /** Plantilla aplicada al borrador (chip «Plantilla: <nombre> ×»). */
 export interface PlantillaAplicada {
