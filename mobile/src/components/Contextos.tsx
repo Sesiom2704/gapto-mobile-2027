@@ -7,6 +7,7 @@
 // Versión: 0.1.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // Versión: 0.2.0 (F06 T1 UX-1 · M-07, DM-06: la fecha usa el componente único `CampoFecha` (chips, campo dd/mm/aaaa con máscara y calendario en JS); se conservan el estado, las reglas de cada campo, los testID y los textos de validación; Desde y Hasta uno bajo otro, opcionales y en par; una fecha imposible (31/02) da TEXTO_FECHA_MAL: el servidor ya la rechaza, dt.date) y M-03, Q-UX-06: publica la señal «hay cambios sin guardar» de su formulario (`usarCambiosSinGuardar`; prop opcional `onCambiosSinGuardar`); sin cambios de escritura.
 // Versión: 0.3.0 (F06 T1 UX-1 · DUD-UX1-01, decisión de Moisés del lote 26): salir del formulario con cambios por «Cancelar» pregunta «¿Descartar cambios?» (Descartar / Seguir editando, `salir` de `usarCambiosSinGuardar`); sin cambios sale sin preguntar.
+// Versión: 0.4.0 (F06 T6 · S1 piezas comunes; F09 0.55 §12.107.1 puntos 5 y 6): el selector de contexto se abre a pantalla completa con `PantallaSelector` («Cerrar» arriba a la derecha, mismo `testID` `contexto-cerrar`; cierra el teclado al abrirse). Props, callbacks, filtro y «Nuevo contexto» sin cambios.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -24,8 +25,7 @@ import { BotonPrimario, Chip, EstadoDato } from './Basicos';
 import { usarCambiosSinGuardar } from './CambiosSinGuardar';
 import { CampoFecha } from './CampoFecha';
 import { AvisoCaja, CabeceraTarea, Caja, Campo, CampoTexto, estilosFormulario as ef } from './Formulario';
-import { Hoja } from './HojasCategoria';
-import { BotonSecundario } from './SelectorCategorias';
+import { PantallaSelector } from './PantallaSelector';
 
 export const TEXTO_CONTEXTO = 'Un contexto agrupa gastos e ingresos de un viaje, una obra o un evento sin cambiar su categoría.';
 /** DERIVADO. */
@@ -168,7 +168,7 @@ export function SelectorContexto(p: {
   }, []);
   const visibles = Array.isArray(lista) ? filtrar(lista, filtro) : [];
   return (
-    <Hoja titulo="Contexto" testID="selector-contexto">
+    <PantallaSelector titulo="Contexto" testID="selector-contexto" onCerrar={p.onCerrar} testIDCerrar="contexto-cerrar">
       <CampoTexto testID="contexto-filtro" etiqueta="Filtrar por nombre" marcador="Filtrar por nombre" valor={filtro} onCambiar={setFiltro} />
       {lista === null ? <EstadoDato estado="CARGANDO" /> : null}
       {lista === 'ERROR' ? (
@@ -176,7 +176,7 @@ export function SelectorContexto(p: {
           <EstadoDato estado="ERROR_CARGA" detalle="Tocar para reintentar" />
         </Pressable>
       ) : null}
-      <ScrollView style={{ maxHeight: 320 }} keyboardShouldPersistTaps="handled">
+      <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
         <Pressable testID="contexto-ninguno" accessibilityRole="button" onPress={() => p.onElegir(null)} style={[s.fila, { borderColor: c.borderDefault }]}>
           <Text style={[tipo.body, { color: c.textPrimary, flex: 1 }]}>Sin contexto</Text>
           {p.seleccionadoId === null ? <Ionicons name="checkmark" size={18} color={c.accentText} /> : null}
@@ -196,8 +196,7 @@ export function SelectorContexto(p: {
           <Text style={[tipo.body, { color: c.accentText, flex: 1 }]}>Nuevo contexto</Text>
         </Pressable>
       </ScrollView>
-      <BotonSecundario testID="contexto-cerrar" titulo="Cerrar" onPress={p.onCerrar} />
-    </Hoja>
+    </PantallaSelector>
   );
 }
 

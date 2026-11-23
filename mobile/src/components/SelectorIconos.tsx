@@ -5,6 +5,7 @@
 // Descripción: Selector de icono de categoría (F09 §12.97.9 I02/I04; lámina SET-CAT v1.0). Hoja de altura completa «Icono de <nombre> · Cerrar» con vista previa de la categoría con el icono elegido, opción «Sin icono» (→ null: la app usa el icono de reserva, que nunca se persiste) y las claves ACTIVAS de la biblioteca v1 agrupadas con su etiqueta visible. La elegida se marca con check Y texto («Elegido»), nunca solo con color. La acción principal la decide el llamador («Guardar icono» en el detalle; «Usar este icono» en el alta). Solo claves publicadas: el cliente nunca inventa ni recorta claves.
 // Versión: 0.1.0 (F05-01 S6-WIRE+UI (este mandato))
 // Versión: 0.1.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
+// Versión: 0.2.0 (F06 T6 · S1 piezas comunes; F09 0.55 §12.107.1 punto 6, FA-04): el selector cierra el teclado al abrirse (`useCerrarTecladoAlAbrir`); sin otros cambios.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -17,6 +18,7 @@ import { useTema } from '../theme/tema';
 import { espacio, radio, TACTIL_MIN, tipo } from '../theme/tokens';
 import { BotonPrimario, BotonTexto } from './Basicos';
 import { IconoCategoriaVista } from './SelectorCategorias';
+import { useCerrarTecladoAlAbrir } from './PantallaSelector';
 
 export function SelectorIconos(p: {
   nombreCategoria: string;
@@ -28,6 +30,7 @@ export function SelectorIconos(p: {
   onCerrar: () => void;
 }) {
   const { c } = useTema();
+  useCerrarTecladoAlAbrir();
   const inset = useSafeAreaInsets();
   // Una clave inicial desconocida (legacy) se muestra como reserva y no se preselecciona.
   const [elegida, setElegida] = useState<string | null>(iconoDe(p.inicial) ? p.inicial : null);

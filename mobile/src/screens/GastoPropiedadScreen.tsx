@@ -39,6 +39,7 @@
 // Versión: 0.4.0 (F06 T3 · cadena de noche 21->22-11, T-D MANT N3 cliente; D-C7-07): los campos de importe ponen los puntos de miles al teclear (`formatearImporteAlTeclear`).
 //   F06-00_Decisiones_Moises_2026-11-15_KO1_reclasificacion_N3_v1.0.md, 022b115a…): la relectura de la propuesta al cambiar fecha o
 //   cuenta es silenciosa (sin «cargando», descarta respuestas atrasadas) y los importes de «Otra combinación» llevan su etiqueta visible.
+// Versión: 0.5.0 (F06 T6 · S1 piezas comunes; F09 0.55 §12.107.1 punto 9): los campos de porcentaje, plazo y tipo abren el teclado decimal (`CampoTexto decimal`); sin otros cambios.
 // ============================================================
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -162,7 +163,7 @@ function Reparto(p: {
       <Chip testID={`${p.testID}-manual`} etiqueta="Otro reparto · indica cuánto es de cada uno" seleccionado={p.eleccion?.modo === 'MANUAL'}
         onPress={() => p.onCambiar({ modo: 'MANUAL', partes: Object.fromEntries(p.actores.map((a) => [a.actor_id, ''])) })} />
       {manual ? p.actores.map((a) => (
-        <CampoTexto key={a.actor_id} testID={`${p.testID}-pct-${a.actor_id}`} etiqueta={`Porcentaje de ${a.yo ? 'ti' : a.nombre ?? 'otra persona'}`} marcador="%"
+        <CampoTexto key={a.actor_id} decimal testID={`${p.testID}-pct-${a.actor_id}`} etiqueta={`Porcentaje de ${a.yo ? 'ti' : a.nombre ?? 'otra persona'}`} marcador="%"
           valor={manual[a.actor_id] ?? ''} onCambiar={(t) => p.onCambiar({ modo: 'MANUAL', partes: { ...manual, [a.actor_id]: t } })} />
       )) : null}
       <Chip testID={`${p.testID}-no-lo-se`} etiqueta="No lo sé · tu parte quedará «sin indicar»" seleccionado={p.eleccion?.modo === 'NO_LO_SE'}

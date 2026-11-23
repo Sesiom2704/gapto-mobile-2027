@@ -7,6 +7,7 @@
 // Versión: 0.2.0 (F05-D052 paso 2 · C-03, F05 §66.A.3): `SelectorPersona` admite `naturalezas` (por defecto solo PERSONA: el reparto no cambia). Con PERSONA y EMPRESA («Quién te lo debe» de C-03) lista ambas con su tipo, busca «persona o empresa», ofrece crear persona o empresa y su nota es la de C-03; ORGANISMO, OTRO y sin naturaleza nunca aparecen (DEU-C03-NATURALEZAS). `excluir` sigue quitando, p. ej., el comercio del gasto.
 // Versión: 0.2.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // Versión: 0.3.0 (F06 T1 UX-1 · M-08): `FilaRevision` encoge dentro de su fila (flexGrow/flexShrink, minWidth 0; valor y etiqueta alineados a la derecha y con salto de línea): en «Quién debe a quién» el importe y la etiqueta ya no se salen de la tarjeta.
+// Versión: 0.4.0 (F06 T6 · S1 piezas comunes; F09 0.55 §12.107.1 punto 6, FA-04): el selector cierra el teclado al abrirse (`useCerrarTecladoAlAbrir`); sin otros cambios.
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -18,6 +19,7 @@ import { TEXTO_SOLO_PERSONAS } from '../domain/reparto';
 import { useTema } from '../theme/tema';
 import { espacio, radio, TACTIL_MIN, tipo } from '../theme/tokens';
 import { BotonTexto, EstadoDato } from './Basicos';
+import { useCerrarTecladoAlAbrir } from './PantallaSelector';
 
 export function Campo({ etiqueta, children, testID }: { etiqueta: string; children: React.ReactNode; testID?: string }) {
   const { c } = useTema();
@@ -118,6 +120,7 @@ export function SelectorPersona(p: {
   const naturalezas: NaturalezaAdmitida[] = p.naturalezas ?? ['PERSONA'];
   const conEmpresas = naturalezas.includes('EMPRESA');
   const { c } = useTema();
+  useCerrarTecladoAlAbrir();
   const inset = useSafeAreaInsets();
   const [lista, setLista] = useState<{ fase: 'CARGANDO' } | { fase: 'ERROR' } | { fase: 'OK'; terceros: Tercero[] }>({ fase: 'CARGANDO' });
   const [texto, setTexto] = useState('');

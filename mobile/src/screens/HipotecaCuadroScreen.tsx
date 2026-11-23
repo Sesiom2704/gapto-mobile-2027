@@ -5,6 +5,7 @@
 // Descripción: Cuadro de la hipoteca (F06-01H; contrato v0.4 §3.1, §3.3 y §8; mandato T3-F06 bloque 2 v1.1 §15). Dos vistas con la misma fila: (1) `CuadroPrevioScreen`, la vista previa de W-HIP-00 que abre «Ver el cuadro» del bloque «Hipoteca» de la compra (sin escritura), y (2) `HipotecaCuadroScreen`, la hipoteca registrada (L-HIP) desde la fila «Hipoteca» de la ficha: resumen (te queda por pagar —«No disponible» si el saldo es desconocido, nunca 0—, cuota actual, tipo vigente y desde cuándo, pagadas X de N, intereses pagados, prestado), aviso `aviso_reparto_distinto` (O-H30) si el servidor lo devuelve, ventana de cuotas alrededor de la próxima y la última, «Ver las N cuotas». Filas de DOS líneas con cifras tabulares (VP-3) y SIN swipe. Cabecera «Cerrar», no «Cancelar». «Pagar la cuota» es un BOTÓN (nunca swipe) y solo aparece con la constante de exposición `PAGO_CUOTA_EXPUESTO` (firma del 2026-11-17); «Revisar el tipo» abre W-HIP-03/04. `VERSION_DESFASADA` en el pago o la revisión vuelve a cargar la hipoteca. Tras cada escritura se pinta la hipoteca que devuelve el servidor. El cliente no calcula importes.
 // Versión: 0.1.0 (F06 T3-F06 bloque 2 F06-01H, paso 10)
 // Versión: 0.2.0 (F06 T3-F06 bloque 2 F06-01H; N-31, firma 0f3e5633…): «Revisar el tipo» solo con la constante propia `REVISION_TIPO_EXPUESTA` (`ofreceRevisionTipo`), mismo mecanismo que el pago.
+// Versión: 0.3.0 (F06 T6 · S1 piezas comunes; F09 0.55 §12.107.1 punto 9): los campos de porcentaje, plazo y tipo abren el teclado decimal (`CampoTexto decimal`); sin otros cambios.
 // ============================================================
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -93,7 +94,7 @@ export function EleccionRepartoVista(p: {
           onPress={() => p.onCambiar({ modo: 'MANUAL', partes: Object.fromEntries(actores.map((a) => [a.actor_id, ''])) })} />
       ) : null}
       {manual ? actores.map((a) => (
-        <CampoTexto key={a.actor_id} testID={`${p.testID}-pct-${a.actor_id}`} etiqueta={`Porcentaje de ${a.nombre}`} marcador="%"
+        <CampoTexto key={a.actor_id} decimal testID={`${p.testID}-pct-${a.actor_id}`} etiqueta={`Porcentaje de ${a.nombre}`} marcador="%"
           valor={manual[a.actor_id] ?? ''} onCambiar={(t) => p.onCambiar({ modo: 'MANUAL', partes: { ...manual, [a.actor_id]: t } })} />
       )) : null}
     </View>

@@ -7,6 +7,7 @@
 // Versión: 0.3.0 (F05-06 M5 SWIPE3; lámina SWIPE-01 v0.3): el lado de «Desactivar» se llama `alternativa` (se desliza a la derecha, lo decide el componente común).
 // Versión: 0.2.0 (F05-06 M5 SWIPE2; lámina SWIPE-01 v0.2 S9): `FilaLista` admite `enTarjeta` (la fila es una tarjeta, sin separador) e `izquierda` (lado izquierdo del swipe común, p. ej. «Desactivar», con su acción accesible).
 // Versión: 0.4.0 (F06 T3 · cadena de noche 21->22-11, T-D MANT N3 cliente; D-C7-07): `CampoTexto` admite `importe`: teclado decimal y puntos de miles al teclear.
+// Versión: 0.5.0 (F06 T6 · S1 piezas comunes; F09 0.55 §12.107.1 punto 9): `CampoTexto` acepta `decimal` (teclado decimal sin puntos de miles) para porcentaje, plazo y tipo.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -91,6 +92,8 @@ export function CampoTexto(p: {
   multilinea?: boolean;
   /** D-C7-07: campo de importe en euros: teclado decimal y puntos de miles al teclear. */
   importe?: boolean;
+  /** F06 T6 · S1 (F09 0.55 §12.107.1 punto 9): número no monetario (porcentaje, plazo, tipo): teclado decimal, sin puntos de miles. */
+  decimal?: boolean;
 }) {
   const { c } = useTema();
   return (
@@ -99,8 +102,8 @@ export function CampoTexto(p: {
       accessibilityLabel={p.etiqueta}
       value={p.valor}
       onChangeText={p.importe ? (t) => p.onCambiar(formatearImporteAlTeclear(t, p.valor)) : p.onCambiar}
-      keyboardType={p.importe ? 'decimal-pad' : undefined}
-      inputMode={p.importe ? 'decimal' : undefined}
+      keyboardType={p.importe || p.decimal ? 'decimal-pad' : undefined}
+      inputMode={p.importe || p.decimal ? 'decimal' : undefined}
       placeholder={p.marcador}
       placeholderTextColor={c.textSecondary}
       maxLength={p.maximo}

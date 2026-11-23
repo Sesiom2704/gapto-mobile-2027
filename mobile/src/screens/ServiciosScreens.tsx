@@ -4,6 +4,7 @@
 // Ruta: mobile/src/screens/ServiciosScreens.tsx
 // Descripción: Servicios de una propiedad (F06-02/03; lámina CON v0.8 D1, D2, D3 y D5; contrato N1 v1.1 C-SRV-01..04, L-SRV-01). D1 lista de servicios con anteriores; D2 alta («Importe esperado» sale: llega con la parte de cobros; categoría opcional «al registrar sus pagos»); D3 tratamiento en el contrato (M-9: incluida, repercutida con % fijo —mayor que 0—, se reparte en cada factura —el % se decide en cada gasto— o la pagas tú; solo anota, no crea cobros; `desde` obligatoria; «Sin indicar» cierra el tratamiento vigente, nunca borra); D5 vida del servicio (la compañía real vive en cada pago: sin botón «Cambiar de compañía», solo la explicación; «Dar de baja» pone fecha de fin y no borra pagos; si el servidor responde REGLA_SERVICIO_PENDIENTE_DE_F06_04 se muestra su texto propio, nunca el de la renta del contrato).
 // Versión: 0.1.0 (F06 T3-F06 Bloque 3 F06-02/03, paso 5 cliente)
+// Versión: 0.2.0 (F06 T6 · S1 piezas comunes; F09 0.55 §12.107.1 punto 9): los campos de porcentaje, plazo y tipo abren el teclado decimal (`CampoTexto decimal`); sin otros cambios.
 // ============================================================
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -259,7 +260,7 @@ export function ContratoServiciosScreen(p: {
           ))}
           <OpcionFila testID="tratamiento-SIN_INDICAR" titulo="Sin indicar" detalle="Cierra el tratamiento vigente; no se borra nada" seleccionada={modo === 'SIN_INDICAR'} onPress={() => setModo('SIN_INDICAR')} />
           {modo === 'REPERCUTIDO_FIJO' ? (
-            <Campo etiqueta="Porcentaje"><CampoTexto testID="tratamiento-porcentaje" etiqueta="Porcentaje" marcador="% (mayor que 0)" valor={porcentaje} onCambiar={setPorcentaje} /></Campo>
+            <Campo etiqueta="Porcentaje"><CampoTexto decimal testID="tratamiento-porcentaje" etiqueta="Porcentaje" marcador="% (mayor que 0)" valor={porcentaje} onCambiar={setPorcentaje} /></Campo>
           ) : null}
           {necesitaInq ? <FilaInfo testID="tratamiento-inquilino" etiqueta="Inquilino" valor={inq?.actor.nombre ?? 'Sin inquilino principal'} /> : null}
           <Campo etiqueta="Desde"><CampoFechaIso testID="tratamiento-desde" etiqueta="Desde, día barra mes barra año" iso={desde} hoyIso={hoyIso} onCambiar={setDesde} /></Campo>

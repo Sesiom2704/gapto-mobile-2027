@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-01 S6-WIRE+UI (este mandato))
 // Versión: 0.2.0 (F05-01 S7-MAG UI): `Hoja`, `Aviso` y `BotonCritico` se exportan para reutilizarlos en las hojas de magnitudes (HojasMagnitud.tsx); sin cambios de presentación.
 // Versión: 0.2.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
+// Versión: 0.3.0 (F06 T6 · S1 piezas comunes; F09 0.55 §12.107.1 punto 9, AJ-UX2-10): `BotonCritico` se mueve a `Basicos.tsx` y se reexporta desde aquí; sin cambio visual ni de comportamiento.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -16,7 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ambito, CategoriaNodo } from '../domain/categoria';
 import { useTema } from '../theme/tema';
 import { espacio, radio, tipo } from '../theme/tokens';
-import { BotonPrimario, Segmentado, Velo } from './Basicos';
+import { BotonCritico, BotonPrimario, Segmentado, Velo } from './Basicos';
 import { BotonSecundario } from './SelectorCategorias';
 
 export const MICROCOPY_RENOMBRAR =
@@ -61,24 +62,6 @@ export function Aviso(p: { texto: string; testID: string }) {
       <Ionicons name="alert-circle-outline" size={18} color={c.warningText} />
       <Text style={[tipo.subheadline, { color: c.textPrimary, flexShrink: 1 }]}>{p.texto}</Text>
     </View>
-  );
-}
-
-/** Acción destructiva de la hoja (lámina S05): superficie crítica con texto sobre acento. */
-export function BotonCritico(p: { titulo: string; onPress: () => void; testID: string; deshabilitado?: boolean }) {
-  const { c } = useTema();
-  return (
-    <Pressable
-      testID={p.testID}
-      accessibilityRole="button"
-      accessibilityLabel={p.titulo}
-      accessibilityState={{ disabled: !!p.deshabilitado }}
-      disabled={p.deshabilitado}
-      onPress={p.onPress}
-      style={({ pressed }) => [s.critico, { backgroundColor: c.critical, opacity: p.deshabilitado ? 0.5 : pressed ? 0.85 : 1 }]}
-    >
-      <Text style={[tipo.bodyEmphasis, { color: c.onAccent }]}>{p.titulo}</Text>
-    </Pressable>
   );
 }
 
@@ -248,5 +231,7 @@ const s = StyleSheet.create({
   input: { borderWidth: 1, borderRadius: radio.m, paddingHorizontal: espacio.m, minHeight: 48 },
   aviso: { flexDirection: 'row', alignItems: 'flex-start', gap: espacio.s, borderRadius: radio.m, padding: espacio.m },
   filaUso: { flexDirection: 'row', alignItems: 'center', minHeight: 40, borderBottomWidth: StyleSheet.hairlineWidth },
-  critico: { minHeight: 52, borderRadius: radio.m, alignItems: 'center', justifyContent: 'center', paddingHorizontal: espacio.l },
 });
+
+// F06 T6 · S1: el botón crítico vive en Basicos.tsx; se reexporta para no cambiar los imports existentes.
+export { BotonCritico };

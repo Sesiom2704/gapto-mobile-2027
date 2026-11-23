@@ -8,19 +8,22 @@
 // Versión: 0.3.0 (F06 T3-F06 bloque 2 F06-01H, paso 10; contrato v0.4 §3.2 y §8; mandato v1.1 §15): bloque «Hipoteca» dentro de la compra, en B2 «¿Cómo se pagó el precio?», opcional («+ Añadir la hipoteca de esta compra»; sin ella la compra y su petición no cambian): banco, importe del préstamo, cuenta en la que el banco lo deja (texto sin «ingreso»; cuentas que pueden recibir dinero en la escritura), fijo o variable (sin valor por defecto), tipo anual, plazo en años o meses → n.º de cuotas, primera cuota (posterior a la escritura), cuenta de cargo, titularidad del préstamo propuesta (la de la propiedad en la escritura) y modificable, aviso «Cálculo mensual: tipo anual entre 12» y «Ver el cuadro» (W-HIP-00, sin escritura; CuadroPrevioScreen). B4 añade la hipoteca al resumen; B6 muestra el aviso `aviso_reparto_distinto` (O-H30) si el servidor lo devuelve. Rechazos de la hipoteca con texto propio, sin «ingreso» ni «cobro». La regla «los pagos suman el precio» no cambia.
 // Versión: 0.4.0 (F06 T3-F06 · MANT N1 R-B2-06 (AJ-01), firma b88a3662…): guardar la compra usa `enviarCompraComprobando`: ante un timeout no dice que ha fallado, muestra «Comprobando…» y reenvía el MISMO cuerpo (misma intención; replay idempotente sin duplicar); si sigue sin confirmarse, `TEXTO_COMPRA_SIN_CONFIRMAR` (nunca «fallo» ni «repítela»). El gasto posterior (C-COMPRA-03) no cambia.
 // Versión: 0.5.0 (F06 T3 · cadena de noche 21->22-11, T-D MANT N3 cliente; D-C7-07): los campos de importe ponen los puntos de miles al teclear (`formatearImporteAlTeclear`). D-C7-08 (OBS-02): el banco de la hipoteca se elige con un buscador de terceros (`bancosVisibles`): sin escribir no se lista ninguno; el elegido se ve siempre.
+// Versión: 0.6.0 (F06 T6 · S1 piezas comunes; F09 0.55 §12.107.1 puntos 5 y 9): «Banco» de la hipoteca usa el mismo selector común de terceros que Registrar gasto (`CampoSelector` + `SelectorTercero` a pantalla completa, título «Banco»; sustituye al buscador con chips de D-C7-08 y a `bancosVisibles`); se envía el identificador del tercero elegido como `financiador.tercero_id`, igual que antes. Los campos de porcentaje, plazo y tipo abren el teclado decimal (`CampoTexto decimal`).
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import type { ClienteApi, CuentaElegible, Tercero } from '../api/cliente';
+import type { ClienteApi, CuentaElegible } from '../api/cliente';
 import type { CuadroPrevio } from '../api/hipoteca';
 import type { ClientePatrimonio, ParteEnFecha } from '../api/patrimonio';
 import type { VistaPropiedad } from '../api/propiedades';
 import { BotonPrimario, BotonTexto, Chip, EstadoDato } from '../components/Basicos';
 import { CampoFecha } from '../components/CampoFecha';
 import { AvisoCaja, CabeceraTarea, Caja, Campo, CampoTexto, estilosFormulario as ef, RotuloGrupo, Tarjeta } from '../components/Formulario';
+import { CampoSelector } from '../components/PantallaSelector';
+import { SelectorTercero } from '../components/SelectorTercero';
 import {
   avisoGastosAnteriores, BorradorCompra, textoPagado, borradorInicial, CONCEPTOS, EleccionAtribucion, faltasAtribucion, faltasGasto,
   faltasGastos, faltasPagos, faltasPrecio, filasDiaADia, GastoBorrador, NOMBRE_CONCEPTO, NOMBRE_ROL, PagoBorrador, payloadCompra,
@@ -29,7 +32,6 @@ import {
 } from '../domain/compra';
 import { ddmmaaaaAIso, diaMesAnioIso, isoADdmmaaaa, isoLocal } from '../domain/fechas';
 import { formatearEur, parsearImporte } from '../domain/importe';
-import { filtrar } from '../domain/maestros';
 import {
   BorradorHipoteca, borradorHipoteca, conHipoteca, eleccionPropuesta, faltasHipoteca, NOMBRE_TIPO, numeroCuotas, payloadCuadroPrevio, puedeVerCuadro,
   ROTULO_CUENTA_DESEMBOLSO, TEXTO_AVISO_REPARTO, TEXTO_CONVENCION, TEXTO_CUENTA_DESEMBOLSO, TEXTO_PRESTAMO, TEXTO_SIN_CUENTAS_CARGO, TEXTO_SIN_CUENTAS_DESEMBOLSO,
@@ -88,7 +90,7 @@ export function EleccionCoste(p: {
       <Chip testID={`${p.testID}-manual`} etiqueta="Otro reparto · indica cuánto es de cada uno" seleccionado={p.eleccion?.modo === 'MANUAL'}
         onPress={() => p.onCambiar({ modo: 'MANUAL', partes: Object.fromEntries(p.actores.map((a) => [a.actor_id, ''])) })} />
       {manual ? p.actores.map((a) => (
-        <CampoTexto key={a.actor_id} testID={`${p.testID}-pct-${a.actor_id}`} etiqueta={`Porcentaje de ${a.nombre}`} marcador="%"
+        <CampoTexto key={a.actor_id} decimal testID={`${p.testID}-pct-${a.actor_id}`} etiqueta={`Porcentaje de ${a.nombre}`} marcador="%"
           valor={manual[a.actor_id] ?? ''} onCambiar={(t) => p.onCambiar({ modo: 'MANUAL', partes: { ...manual, [a.actor_id]: t } })} />
       )) : null}
       <Chip testID={`${p.testID}-no-lo-se`} etiqueta="No lo sé · tu parte quedará «sin indicar»" seleccionado={p.eleccion?.modo === 'NO_LO_SE'}
@@ -146,6 +148,8 @@ export function CompraScreen(p: {
   const [hip, setHip] = useState<BorradorHipoteca | null>(null);
   const [propuestaHip, setPropuestaHip] = useState<ParteEnFecha[] | null>(null);
   const [previo, setPrevio] = useState<CuadroPrevio | null>(null);
+  const [selectorBanco, setSelectorBanco] = useState(false);
+  const [bancoNombre, setBancoNombre] = useState<string | null>(null);
   const [avisoReparto, setAvisoReparto] = useState(false);
 
   useEffect(() => {
@@ -285,7 +289,8 @@ export function CompraScreen(p: {
             <Linea testID="compra-pagado" etiqueta="Pagado entre todo" valor={formatearEur(textoPagado(b))} fuerte />
             {hip ? (
               <BloqueHipoteca cliente={p.cliente} hip={hip} escrituraIso={b.fechaEscritura} hoyIso={hoyIso} propuesta={propuestaHip}
-                onCambiar={(x) => setHip({ ...hip, ...x })} onQuitar={() => setHip(null)} onAviso={setAviso} onCuadro={setPrevio} />
+                onCambiar={(x) => setHip({ ...hip, ...x })} onQuitar={() => setHip(null)} onAviso={setAviso} onCuadro={setPrevio}
+                bancoNombre={bancoNombre} onElegirBanco={() => setSelectorBanco(true)} />
             ) : (
               <>
                 <Text testID="compra-sin-hipoteca" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_SIN_HIPOTECA}</Text>
@@ -354,6 +359,20 @@ export function CompraScreen(p: {
         )}
         {indice > 0 ? <BotonTexto testID="compra-atras" titulo="‹ Atrás" onPress={atras} /> : null}
       </ScrollView>
+      {selectorBanco && hip ? (
+        <SelectorTercero
+          cliente={p.cliente}
+          nuevoId={p.nuevoId}
+          titulo="Banco"
+          seleccionadoId={hip.financiadorId}
+          onElegir={(t) => {
+            setSelectorBanco(false);
+            setBancoNombre(t ? t.nombre : null);
+            setHip({ ...hip, financiadorId: t ? t.id : null });
+          }}
+          onCerrar={() => setSelectorBanco(false)}
+        />
+      ) : null}
     </View>
   );
 }
@@ -391,14 +410,6 @@ function CuentasHip(p: { testID: string; cuentas: CuentaElegible[] | null; valor
   );
 }
 
-/** D-C7-08: bancos que se ofrecen: los que casan con lo escrito (sin escribir, ninguno) y siempre el ya elegido. */
-export function bancosVisibles(bancos: Tercero[], busca: string, elegidoId: string | null): Tercero[] {
-  const casan = busca.trim() ? filtrar(bancos, busca) : [];
-  const elegido = bancos.find((t) => t.id === elegidoId);
-  const lista = elegido && !casan.some((t) => t.id === elegido.id) ? [elegido, ...casan] : casan;
-  return [...lista].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
-}
-
 /** F06-01H · bloque «Hipoteca» de la compra (contrato v0.4 §3.2.1 y §8). El cliente no calcula importes: «Ver el cuadro» lo pide al servidor (W-HIP-00). */
 function BloqueHipoteca(p: {
   cliente: ClienteApi;
@@ -410,18 +421,16 @@ function BloqueHipoteca(p: {
   onQuitar: () => void;
   onAviso: (a: AvisoCaja) => void;
   onCuadro: (c: CuadroPrevio) => void;
+  /** F06 T6 · S1: nombre del banco elegido y apertura del selector común de terceros (lo pinta la pantalla, a pantalla completa). */
+  bancoNombre: string | null;
+  onElegirBanco: () => void;
 }) {
   const { c } = useTema();
   const h = p.hip;
-  const [bancos, setBancos] = useState<Tercero[] | null>(null);
-  const [buscaBanco, setBuscaBanco] = useState('');
   const [cuentasDesembolso, setCuentasDesembolso] = useState<CuentaElegible[] | null>(null);
   const [cuentasCargo, setCuentasCargo] = useState<CuentaElegible[] | null>(null);
   const [pidiendo, setPidiendo] = useState(false);
   const fechaCargo = esFechaIso(h.primeraCuota) ? h.primeraCuota : p.escrituraIso;
-  useEffect(() => {
-    void p.cliente.listarTerceros().then((r) => setBancos(r.tipo === 'OK' ? r.datos.terceros.filter((t) => t.enabled) : []));
-  }, []);
   useEffect(() => {
     // La cuenta en la que el banco deja el préstamo tiene que poder recibir dinero en la fecha de la escritura.
     setCuentasDesembolso(null);
@@ -448,20 +457,8 @@ function BloqueHipoteca(p: {
     <View testID="compra-hip" style={{ gap: espacio.m }}>
       <RotuloGrupo texto="Hipoteca" />
       <Campo etiqueta="Banco">
-        {bancos === null ? <EstadoDato testID="compra-hip-banco-cargando" estado="CARGANDO" /> : bancos.length === 0 ? (
-          <EstadoDato testID="compra-hip-banco-sin" estado="NO_DISPONIBLE" detalle="Da de alta el banco en Ajustes › Terceros" />
-        ) : (
-          <View style={{ gap: espacio.s }}>
-            {/* D-C7-08 (OBS-02): buscador de terceros, no la lista completa; el elegido se ve siempre */}
-            <CampoTexto testID="compra-hip-banco-buscar" etiqueta="Buscar el banco" marcador="Escribe el nombre del banco" valor={buscaBanco} onCambiar={setBuscaBanco} />
-            <View style={ef.chips}>
-              {bancosVisibles(bancos, buscaBanco, h.financiadorId).map((t) => <Chip key={t.id} testID={`compra-hip-banco-${t.id}`} etiqueta={t.nombre} seleccionado={h.financiadorId === t.id} onPress={() => p.onCambiar({ financiadorId: t.id })} />)}
-            </View>
-            {buscaBanco.trim() && filtrar(bancos, buscaBanco).length === 0 ? (
-              <Text testID="compra-hip-banco-ninguno" style={[tipo.footnote, { color: c.textSecondary }]}>Ningún tercero se llama así. Da de alta el banco en Ajustes › Terceros.</Text>
-            ) : null}
-          </View>
-        )}
+        {/* F06 T6 · S1 (F09 0.55 §12.107.1 punto 5): el mismo selector de terceros que Registrar gasto; se envía su identificador */}
+        <CampoSelector testID="compra-hip-banco" etiqueta="Banco" valor={h.financiadorId ? p.bancoNombre : null} marcador="Elige el banco" onAbrir={p.onElegirBanco} />
       </Campo>
       <Campo etiqueta="Importe del préstamo">
         <CampoTexto importe testID="compra-hip-importe" etiqueta="Importe del préstamo" marcador="Ej.: 160.000,00" valor={h.importe} onCambiar={(t) => p.onCambiar({ importe: t })} />
@@ -477,10 +474,10 @@ function BloqueHipoteca(p: {
         </View>
       </Campo>
       <Campo etiqueta="Tipo anual (%)">
-        <CampoTexto testID="compra-hip-tasa" etiqueta="Tipo anual (%)" marcador="Ej.: 2,5" valor={h.tasa} onCambiar={(t) => p.onCambiar({ tasa: t })} />
+        <CampoTexto decimal testID="compra-hip-tasa" etiqueta="Tipo anual (%)" marcador="Ej.: 2,5" valor={h.tasa} onCambiar={(t) => p.onCambiar({ tasa: t })} />
       </Campo>
       <Campo etiqueta="Plazo">
-        <CampoTexto testID="compra-hip-plazo" etiqueta="Plazo" marcador={h.unidadPlazo === 'ANIOS' ? 'Años' : 'Meses'} valor={h.plazo} onCambiar={(t) => p.onCambiar({ plazo: t })} />
+        <CampoTexto decimal testID="compra-hip-plazo" etiqueta="Plazo" marcador={h.unidadPlazo === 'ANIOS' ? 'Años' : 'Meses'} valor={h.plazo} onCambiar={(t) => p.onCambiar({ plazo: t })} />
         <View style={ef.chips}>
           <Chip testID="compra-hip-plazo-anios" etiqueta="En años" seleccionado={h.unidadPlazo === 'ANIOS'} onPress={() => p.onCambiar({ unidadPlazo: 'ANIOS' })} />
           <Chip testID="compra-hip-plazo-meses" etiqueta="En meses" seleccionado={h.unidadPlazo === 'MESES'} onPress={() => p.onCambiar({ unidadPlazo: 'MESES' })} />

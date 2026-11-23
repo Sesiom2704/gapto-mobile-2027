@@ -5,6 +5,7 @@
 // Descripción: Revisar el tipo de la hipoteca con fecha, hacia delante (F06-01H W-HIP-03/04; contrato v0.4 §3.5 y §8; Q-H-11). Condiciones vigentes; «Desde» y nuevo tipo anual (fijo/variable, índice y diferencial opcionales e informativos); alcance «Se recalculan N cuotas desde …; las M pagadas no cambian» (cuenta las cuotas, no calcula importes). Cubre la revisión del Euríbor y cada cambio de bonificación sin nombrarla: nunca «bonificación de X» (la versión solo dice el tipo). Rechazos: VERSION_DESFASADA vuelve a cargar la hipoteca; el resto con su texto, sin «ingreso» ni «cobro». Tras la revisión se pinta la hipoteca que devuelve el servidor.
 // Versión: 0.1.0 (F06 T3-F06 bloque 2 F06-01H, paso 10)
 // Versión: 0.2.0 (F06 T3 · MANT N1 de revisión del tipo, A3; dictamen MANT R-B2-06 punto 3 y AJ-03; decisión 14): revisar usa `enviarRevisionComprobando`: el cuerpo se construye UNA vez; ante un timeout no dice que ha fallado, muestra «Comprobando…» y reenvía el MISMO cuerpo (misma intención; replay idempotente sin duplicar); si sigue sin confirmarse, `TEXTO_REVISION_SIN_CONFIRMAR` (nunca «fallo» ni «repítela»). La hipoteca revisada solo se pinta con la confirmación del servidor.
+// Versión: 0.3.0 (F06 T6 · S1 piezas comunes; F09 0.55 §12.107.1 punto 9): los campos de porcentaje, plazo y tipo abren el teclado decimal (`CampoTexto decimal`); sin otros cambios.
 // ============================================================
 
 import React, { useRef, useState } from 'react';
@@ -78,7 +79,7 @@ export function RevisarTipoScreen(p: {
             onTexto={(t) => { setDesdeTexto(t); setR({ ...r, desde: ddmmaaaaAIso(t) ?? t }); }} />
         </Campo>
         <Campo etiqueta="Nuevo tipo anual (%)">
-          <CampoTexto testID="hip-rev-tasa" etiqueta="Nuevo tipo anual (%)" marcador="Por ejemplo, 2,95" valor={r.tasa} onCambiar={(t) => setR({ ...r, tasa: t })} />
+          <CampoTexto decimal testID="hip-rev-tasa" etiqueta="Nuevo tipo anual (%)" marcador="Por ejemplo, 2,95" valor={r.tasa} onCambiar={(t) => setR({ ...r, tasa: t })} />
         </Campo>
         <Campo etiqueta="Fijo o variable" opcional>
           <View style={ef.chips}>
@@ -91,7 +92,7 @@ export function RevisarTipoScreen(p: {
           <CampoTexto testID="hip-rev-indice" etiqueta="Índice de referencia" marcador="Por ejemplo, Euríbor 12 meses" valor={r.indice} onCambiar={(t) => setR({ ...r, indice: t })} />
         </Campo>
         <Campo etiqueta="Diferencial (%)" opcional>
-          <CampoTexto testID="hip-rev-diferencial" etiqueta="Diferencial (%)" marcador="Por ejemplo, 0,75" valor={r.diferencial} onCambiar={(t) => setR({ ...r, diferencial: t })} />
+          <CampoTexto decimal testID="hip-rev-diferencial" etiqueta="Diferencial (%)" marcador="Por ejemplo, 0,75" valor={r.diferencial} onCambiar={(t) => setR({ ...r, diferencial: t })} />
         </Campo>
         <Text style={[tipo.footnote, { color: c.textSecondary }]}>{`${TEXTO_REVISION} ${TEXTO_CONVENCION}`}</Text>
         {alcance ? <Text testID="hip-rev-alcance" style={[tipo.body, { color: c.textPrimary }]}>{alcance}</Text> : null}

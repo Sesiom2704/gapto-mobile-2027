@@ -19,6 +19,7 @@
 // Versión: 0.4.0 (F06 T3-F06 bloque 2 F06-01H; firma e446b4c3…, N-40): la constante real de exposición del pago vale true; el caso «no expuesto» se prueba con el valor simulado false.
 // Versión: 0.5.0 (F06 T3-F06 bloque 2 F06-01H, paso 12, relevo 6; MC-H-04): la compra con hipoteca envía `row_version_esperada` = versión de la propiedad mostrada (vista con row_version 7, distinta de 0 y del fixture).
 // Versión: 0.6.0 (F06 T3 · cadena de noche 21->22-11, T-D MANT N3 cliente; D-C7-08): el banco se busca escribiendo; sin escribir no se lista ninguno.
+// Versión: 0.7.0 (F06 T6 · S1 piezas comunes; F09 0.55 §12.107.1 punto 5): «Banco» de la hipoteca se elige con el selector común de terceros (el de Registrar gasto) a pantalla completa; el pago sigue enviando `financiador.tercero_id` = el identificador elegido.
 // ============================================================
 
 import './tiempos_rn';
@@ -143,12 +144,17 @@ async function rellenarHipoteca(cli: ReturnType<typeof clienteCompra>) {
   expect(screen.queryByTestId('compra-hip')).toBeNull();
   expect(cli.listarTerceros).not.toHaveBeenCalled();                              // sin hipoteca no se pide nada más
   await pulsar('compra-hip-anadir');
-  await waitFor(() => screen.getByTestId('compra-hip-banco-buscar'));
-  expect(screen.queryByTestId(`compra-hip-banco-${BANCO}`)).toBeNull();          // D-C7-08: sin escribir, no se lista ningún tercero
-  await escribir('compra-hip-banco-buscar', 'banco');
-  await waitFor(() => screen.getByTestId(`compra-hip-banco-${BANCO}`));
-  expect(screen.queryByTestId('compra-hip-banco-b-off')).toBeNull();              // solo bancos activos
-  await pulsar(`compra-hip-banco-${BANCO}`);
+  // F06 T6 · S1: «Banco» abre el selector común de terceros (el de Registrar gasto) a pantalla completa.
+  expect(screen.getByTestId('compra-hip-banco-valor').props.children).toBe('Elige el banco');
+  expect(cli.listarTerceros).not.toHaveBeenCalled();                              // la lista se pide al abrir el selector
+  await pulsar('compra-hip-banco');
+  await waitFor(() => screen.getByTestId(`tercero-${BANCO}`));
+  expect(screen.getByTestId('selector-tercero')).toBeTruthy();
+  expect(screen.getByTestId('tercero-cerrar')).toBeTruthy();                      // «Cerrar» arriba a la derecha
+  expect(screen.queryByTestId('tercero-b-off')).toBeNull();                       // solo terceros activos
+  await pulsar(`tercero-${BANCO}`);
+  expect(screen.queryByTestId('selector-tercero')).toBeNull();
+  expect(screen.getByTestId('compra-hip-banco-valor').props.children).toBe('Banco Ejemplo');
   await escribir('compra-hip-importe', '160.000,00');
   await waitFor(() => screen.getByTestId(`compra-hip-desembolso-${CTA}`));
   expect(screen.queryByTestId(`compra-hip-desembolso-${CTA2}`)).toBeNull();

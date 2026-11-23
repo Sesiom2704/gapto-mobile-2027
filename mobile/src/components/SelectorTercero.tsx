@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F05-03/F05-04 J2 §2.3)
 // Versión: 0.2.0 (F05-05 K3 §2.3; F05 §49.4 A4, D-SRCH-04; lámina SRCH-ACT-AFI A3, A4, A8): «Recientes» (GET /v1/senales/terceros con el tipo y la fecha del registro; motivo «Usado hace N días» o «Frecuente en tus gastos | ingresos»); campo «Buscar o crear tercero»: con 2 o más caracteres consulta al servidor (ILIKE sobre nombre y nombre legal, sensible a acentos en v1) tras una pausa, con los inactivos marcados y «Reactivar» en línea (lo reactiva y lo elige, M-D05); con menos, el filtro local de siempre sobre los activos y «Todos · N terceros». Homónimos con segunda línea de datos reales: naturaleza, registros y último uso. Alta y duplicados (P02) sin cambios.
 // Versión: 0.2.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
+// Versión: 0.3.0 (F06 T6 · S1 piezas comunes; F09 0.55 §12.107.1 puntos 5 y 6, FA-01/FA-04): el selector se abre a pantalla completa con el marco común `PantallaSelector` («Cerrar» arriba a la derecha, mismo `testID` `tercero-cerrar`; cierra el teclado al abrirse) y la lista ocupa el alto disponible. Props, callbacks, filtro, alta, duplicados (P02, sigue siendo hoja de diálogo) y «Reactivar» sin cambios.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -20,6 +21,7 @@ import { useTema } from '../theme/tema';
 import { espacio, radio, TACTIL_MIN, tipo } from '../theme/tokens';
 import { BotonPrimario, BotonTexto, EstadoDato } from './Basicos';
 import { Aviso, Hoja } from './HojasCategoria';
+import { PantallaSelector } from './PantallaSelector';
 import { BotonSecundario } from './SelectorCategorias';
 
 type Carga = { fase: 'CARGANDO' } | { fase: 'ERROR' } | { fase: 'OK'; lista: Tercero[] };
@@ -150,7 +152,7 @@ export function SelectorTercero(p: {
   }
 
   return (
-    <Hoja titulo={p.titulo ?? 'Tercero'} testID="selector-tercero">
+    <PantallaSelector titulo={p.titulo ?? 'Tercero'} testID="selector-tercero" onCerrar={p.onCerrar} testIDCerrar="tercero-cerrar">
       <TextInput
         testID="tercero-filtro"
         accessibilityLabel="Buscar o crear tercero"
@@ -167,7 +169,7 @@ export function SelectorTercero(p: {
           <EstadoDato estado="ERROR_CARGA" detalle="Tocar para reintentar" />
         </Pressable>
       ) : null}
-      <ScrollView style={{ maxHeight: 320 }} keyboardShouldPersistTaps="handled">
+      <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
         {nombre === '' && recientes.length > 0 ? (
           <View testID="terceros-recientes">
             <Text style={[tipo.footnote, s.seccion, { color: c.textSecondary }]}>Recientes</Text>
@@ -247,8 +249,7 @@ export function SelectorTercero(p: {
         ) : null}
       </ScrollView>
       {aviso ? <Aviso testID="tercero-aviso" texto={aviso} /> : null}
-      <BotonSecundario testID="tercero-cerrar" titulo="Cerrar" onPress={p.onCerrar} />
-    </Hoja>
+    </PantallaSelector>
   );
 }
 

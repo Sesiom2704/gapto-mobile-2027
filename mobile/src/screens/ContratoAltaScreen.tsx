@@ -4,6 +4,7 @@
 // Ruta: mobile/src/screens/ContratoAltaScreen.tsx
 // Descripción: Asistente «Nuevo contrato» de F06-02/03 (lámina CON v0.8 validada; contrato N1 v1.1 C-CON-01; SIN renta ni fianza: 5 pasos). B1 Qué se alquila (+ B1b selector de propiedad), B2 Fechas y estado, B2b «Ya está alquilada en esas fechas» (decisiones 3 y 6: si coincide con un contrato FIRMADO —en los dos sentidos habitación ↔ vivienda completa; el fin previsto no libera— solo se puede guardar como borrador; un borrador no cuenta), B3 Personas (arrendadores o gestores, inquilinos, avalistas, agencia o administrador; «Tú» no es inquilino, agencia ni administrador; principal solo en arrendadores, gestores e inquilinos), B3b agencia o administrador (sin propuesta de rol), B3c elegir persona con homónimos distinguidos (V-bis), B3d posible duplicado (V-ter, la hoja existente de F05), B4 Cláusula de revisión, B5 Servicios (M-9) y B6 Resumen. Se guarda TODO en una sola operación (POST /v1/intenciones/contrato-alquiler) con la misma intención en el reintento (replay). Después de guardar, E3: propuesta de rol de tercero como escritura INDEPENDIENTE y opcional (ninguna opción marcada; no hay propuesta para agencia ni administrador); si falla, el contrato ya está guardado. Ninguna pantalla pide ni muestra renta, fianza, cobro ni IPC aplicado.
 // Versión: 0.1.0 (F06 T3-F06 Bloque 3 F06-02/03, paso 5 cliente)
+// Versión: 0.2.0 (F06 T6 · S1 piezas comunes; F09 0.55 §12.107.1 punto 9): los campos de porcentaje, plazo y tipo abren el teclado decimal (`CampoTexto decimal`); sin otros cambios.
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -439,13 +440,13 @@ export function ContratoAltaScreen(p: {
             ))}
             {b.clausula.eleccion === 'PORCENTAJE_FIJO' ? (
               <Campo etiqueta="Porcentaje fijo">
-                <CampoTexto testID="contrato-clausula-porcentaje" etiqueta="Porcentaje fijo" marcador="Ej.: 2" valor={b.clausula.porcentaje} onCambiar={(t) => set({ clausula: { ...b.clausula, porcentaje: t } })} />
+                <CampoTexto decimal testID="contrato-clausula-porcentaje" etiqueta="Porcentaje fijo" marcador="Ej.: 2" valor={b.clausula.porcentaje} onCambiar={(t) => set({ clausula: { ...b.clausula, porcentaje: t } })} />
               </Campo>
             ) : null}
             {b.clausula.eleccion === 'IPC' || b.clausula.eleccion === 'MANUAL' ? (
               <>
                 <Campo etiqueta="Cada cuántos meses" opcional>
-                  <CampoTexto testID="contrato-clausula-periodicidad" etiqueta="Cada cuántos meses" marcador="Ej.: 12" valor={b.clausula.periodicidad} onCambiar={(t) => set({ clausula: { ...b.clausula, periodicidad: t } })} />
+                  <CampoTexto decimal testID="contrato-clausula-periodicidad" etiqueta="Cada cuántos meses" marcador="Ej.: 12" valor={b.clausula.periodicidad} onCambiar={(t) => set({ clausula: { ...b.clausula, periodicidad: t } })} />
                 </Campo>
                 <Campo etiqueta="Primera revisión" opcional>
                   <Fecha testID="contrato-clausula-primera" etiqueta="Primera revisión, día barra mes barra año" iso={b.clausula.primeraRevision} hoyIso={hoyIso} onCambiar={(iso) => set({ clausula: { ...b.clausula, primeraRevision: iso } })} />
@@ -475,7 +476,7 @@ export function ContratoAltaScreen(p: {
                             onPress={() => setTrat(s.servicio_id, { modo: o.modo })} />
                         ))}
                         {t.modo === 'REPERCUTIDO_FIJO' ? (
-                          <CampoTexto testID={`contrato-servicio-${s.servicio_id}-porcentaje`} etiqueta={`Porcentaje de ${s.nombre}`} marcador="% (mayor que 0)" valor={t.porcentaje}
+                          <CampoTexto decimal testID={`contrato-servicio-${s.servicio_id}-porcentaje`} etiqueta={`Porcentaje de ${s.nombre}`} marcador="% (mayor que 0)" valor={t.porcentaje}
                             onCambiar={(x) => setTrat(s.servicio_id, { porcentaje: x })} />
                         ) : null}
                       </>

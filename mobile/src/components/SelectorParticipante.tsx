@@ -5,6 +5,7 @@
 // Descripción: Selector de persona del asistente de contratos (F06-02/03 V-bis y V-ter; lámina CON v0.8 B3c y B3d; decisión 7 = A y decisión 5 = B de Moisés, 18-11). V-bis (n.º 132 parcial): lista SOLO terceros ACTIVOS; cuando hay dos o más con el mismo nombre normalizado cada fila muestra su naturaleza (persona o empresa) y su USO EN GAPTO (contrato más reciente con rol y etiqueta, o último movimiento, o «sin uso»), derivado al leer por el servidor, nunca almacenado. Si dos filas siguen idénticas, la fila NO se elige directamente: abre su ficha y se confirma desde ella («Es esta persona»). Nada viene elegido. V-ter: «+ Nuevo tercero» abre el `SelectorTercero` EXISTENTE de F05 tal como está (su hoja `tercero-duplicado` con Usar / Reactivar / Crear otro; reactivar es el circuito de F05); aquí no se crea ninguna hoja ni lectura de duplicados nueva, y un inactivo nunca se elige sin reactivarlo antes. No toca `SelectorTercero`.
 // Versión: 0.1.0 (F06 T3-F06 Bloque 3 F06-02/03, paso 5 cliente)
 // Versión: 0.1.1 (Bloque 3, paso 9): la ficha del homónimo usa TerceroDelSelector (activo, con `enabled` fijado al filtrar).
+// Versión: 0.2.0 (F06 T6 · S1 piezas comunes; F09 0.55 §12.107.1 puntos 5 y 6): el selector se abre a pantalla completa con `PantallaSelector` («Cerrar» arriba a la derecha, mismo `testID` `participante-cerrar`; cierra el teclado al abrirse). La ficha del homónimo sigue siendo hoja de diálogo. Props, callbacks y filtro sin cambios.
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -17,6 +18,7 @@ import { useTema } from '../theme/tema';
 import { espacio, radio, TACTIL_MIN, tipo } from '../theme/tokens';
 import { BotonPrimario, BotonTexto, EstadoDato } from './Basicos';
 import { Aviso, Hoja } from './HojasCategoria';
+import { PantallaSelector } from './PantallaSelector';
 import { SelectorTercero } from './SelectorTercero';
 import { BotonSecundario } from './SelectorCategorias';
 
@@ -83,7 +85,7 @@ export function SelectorParticipante(p: {
 
   const filas = carga.fase === 'OK' ? filasSelector(carga.lista) : [];
   return (
-    <Hoja titulo={p.titulo} testID="selector-participante">
+    <PantallaSelector titulo={p.titulo} testID="selector-participante" onCerrar={p.onCerrar} testIDCerrar="participante-cerrar">
       <TextInput testID="participante-filtro" accessibilityLabel="Buscar en tus terceros" value={filtro} onChangeText={setFiltro}
         placeholder="Buscar en tus terceros" placeholderTextColor={c.textSecondary} autoCorrect={false}
         style={[tipo.body, s.input, { color: c.textPrimary, backgroundColor: c.surfacePrimary, borderColor: c.borderStandard }]} />
@@ -93,7 +95,7 @@ export function SelectorParticipante(p: {
           <EstadoDato estado="ERROR_CARGA" detalle="Tocar para reintentar" />
         </Pressable>
       ) : null}
-      <ScrollView style={{ maxHeight: 320 }} keyboardShouldPersistTaps="handled">
+      <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
         {filas.map(({ tercero: t, homonimo, identica }) => (
           <Pressable key={t.id} testID={`participante-${t.id}`} accessibilityRole="button"
             accessibilityLabel={homonimo ? `${t.nombre}. ${detalleHomonimo(t)}${identica ? '. Ver ficha' : ''}` : t.nombre}
@@ -108,8 +110,7 @@ export function SelectorParticipante(p: {
       </ScrollView>
       <Text testID="participante-ayuda" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_HOMONIMOS_AYUDA}</Text>
       <BotonTexto testID="participante-nuevo" titulo="+ Nuevo tercero" onPress={() => setNuevo(true)} />
-      <BotonSecundario testID="participante-cerrar" titulo="Cerrar" onPress={p.onCerrar} />
-    </Hoja>
+    </PantallaSelector>
   );
 }
 

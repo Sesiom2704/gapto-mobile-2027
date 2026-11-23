@@ -5,6 +5,7 @@
 // Descripción: Selector del catálogo de magnitudes del owner para añadir una a la categoría (F09 §12.97.10; lámina SET-MAG v0.1 M06; GET /v1/magnitudes). Tarea inmersiva «Cancelar · Añadir magnitud a <categoría>» con búsqueda por nombre y tres secciones: «Disponibles», «Deshabilitadas» (marcadas en texto) y «Ya en <categoría>» (atenuadas, con check y su obligatoriedad, no elegibles). Subtítulo «unidad · decimales · usada en …» / «sin categorías». Error de carga distinto de «sin resultados». Al pie, «Nueva magnitud» cuando el llamador la ofrece (alta rápida, M07). Solo presentación: elegir entrega la magnitud al controlador. Consume solo tokens semánticos.
 // Versión: 0.1.0 (F05-01 S7-MAG UI, hito 1)
 // Versión: 0.1.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
+// Versión: 0.2.0 (F06 T6 · S1 piezas comunes; F09 0.55 §12.107.1 punto 6, FA-04): el selector cierra el teclado al abrirse (`useCerrarTecladoAlAbrir`); sin otros cambios.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -19,6 +20,7 @@ import { espacio, radio, TACTIL_MIN, tipo } from '../theme/tokens';
 import { BotonTexto } from './Basicos';
 import type { FaseCatalogo } from './SeccionMagnitudes';
 import { BotonSecundario } from './SelectorCategorias';
+import { useCerrarTecladoAlAbrir } from './PantallaSelector';
 
 export function SelectorMagnitudes(p: {
   categoria: string;
@@ -31,6 +33,7 @@ export function SelectorMagnitudes(p: {
   onReintentar: () => void;
 }) {
   const { c } = useTema();
+  useCerrarTecladoAlAbrir();
   const inset = useSafeAreaInsets();
   const [busqueda, setBusqueda] = useState('');
   const sec = seccionesSelector(p.catalogo, p.asociadas, busqueda);

@@ -7,7 +7,8 @@
 // v0.3.0 (F05-01 S6-WIRE+UI (este mandato)): «Velo» de las hojas modales (láminas REG-CAT R07 y SET-CAT S04/S05) como TRATAMIENTO de tokens existentes (tono oscuro del tema con opacidad), sin color físico ni token nuevo (DS-RULE-12, ds_conformidad). «CabeceraNavegacion» de pantallas de lista (‹ Atrás · título · acción), con «Atrás» al nivel anterior real (lámina SET-CAT S01/S03).
 // v0.4.0 (F05-05 K3 §2.2; F05 §49.4 A2 bis, D-SRCH-11): `ChipAccion`, chip de ACCIÓN (rol botón, sin estado ni «✓»): un toque ejecuta la acción; nunca representa una selección vigente. Lo usan los chips de sugerencias bajo «Categoría».
 // v0.4.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
-// Versión: 0.4.1
+// v0.5.0 (F06 T6 · S1 piezas comunes; F09 0.55 §12.107.1 punto 9, AJ-UX2-10): `BotonCritico` (antes en HojasCategoria.tsx, que lo reexporta) vive aquí con Principal y Texto; misma forma (alto 52, radio 12), sin cambio visual ni de comportamiento. `BotonSecundario` sigue en SelectorCategorias.tsx hasta S2: moverlo cambia los imports del camino categorial (test_154 I13-A), que solo se pueden ampliar en S2 (ver DESVIACIONES T6-D-03).
+// Versión: 0.5.0
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -74,6 +75,24 @@ export function BotonTexto(p: { titulo: string; onPress: () => void; testID?: st
   return (
     <Pressable testID={p.testID} accessibilityRole="button" onPress={p.onPress} hitSlop={8} style={s.texto}>
       <Text style={[tipo.body, { color: p.critico ? c.criticalText : c.accentText, fontWeight: '600' }]}>{p.titulo}</Text>
+    </Pressable>
+  );
+}
+
+/** Acción destructiva de la hoja (lámina S05): superficie crítica con texto sobre acento. */
+export function BotonCritico(p: { titulo: string; onPress: () => void; testID: string; deshabilitado?: boolean }) {
+  const { c } = useTema();
+  return (
+    <Pressable
+      testID={p.testID}
+      accessibilityRole="button"
+      accessibilityLabel={p.titulo}
+      accessibilityState={{ disabled: !!p.deshabilitado }}
+      disabled={p.deshabilitado}
+      onPress={p.onPress}
+      style={({ pressed }) => [s.critico, { backgroundColor: c.critical, opacity: p.deshabilitado ? 0.5 : pressed ? 0.85 : 1 }]}
+    >
+      <Text style={[tipo.bodyEmphasis, { color: c.onAccent }]}>{p.titulo}</Text>
     </Pressable>
   );
 }
@@ -184,6 +203,7 @@ const s = StyleSheet.create({
   cabNav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: espacio.l, paddingBottom: espacio.s, borderBottomWidth: StyleSheet.hairlineWidth, gap: espacio.s },
   cabLado: { flex: 1, minHeight: TACTIL_MIN, justifyContent: 'center' },
   atras: { flexDirection: 'row', alignItems: 'center', gap: 2, minHeight: TACTIL_MIN },
+  critico: { minHeight: 52, borderRadius: radio.m, alignItems: 'center', justifyContent: 'center', paddingHorizontal: espacio.l },
   primario: { minHeight: 52, borderRadius: radio.m, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', paddingHorizontal: espacio.l },
   texto: { minHeight: TACTIL_MIN, justifyContent: 'center', paddingHorizontal: espacio.xs },
   seccion: { gap: espacio.m },
