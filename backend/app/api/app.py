@@ -300,6 +300,9 @@
 #   ruta NUEVA y aditiva `GET /v1/registro/presupuesto-propuesto` (mismos parametros que `/v1/registro/propuesta`):
 #   {valor, origen EXPLICITO|PREFERENCIA|CATEGORIA|POR_DEFECTO} con la precedencia de
 #   `app.preferencias.presupuesto_defecto`. Las rutas de propuesta de hoy, el registro y el sellado no cambian.
+# Version: 0.42.0 (F06 T6 · S5 N1, «Ambos» al recordar; dictamen 1 Q2/A3, DF-10/13): ruta NUEVA
+#   `POST /v1/preferencias/ambos` (app.preferencias.ambos): preflight de todas las operaciones y escritura atomica de
+#   las dos preferencias; un fallo tras el preflight revierte la transaccion entera. Las rutas de una preferencia no cambian.
 # ============================================================
 
 from __future__ import annotations
@@ -498,7 +501,8 @@ from app.contextos import lecturas as lect_ctx
 from app.plantillas import lecturas as lect_plt
 from app.plantillas import propuesta as prop_plt
 from app.preferencias import presupuesto_defecto as pres_def
-from app.api.dto_t6 import PresupuestoPropuesto
+from app.api.dto_t6 import PeticionAmbos, PresupuestoPropuesto, ResultadoAmbos
+from app.preferencias import ambos as pref_ambos
 from app.plantillas import servicio as serv_plt
 from app.contextos import servicio as serv_ctx
 from app.propiedades import lecturas as lect_prop
@@ -904,6 +908,34 @@ def create_app(
             s, preferencia_id=c.id, tipo_hecho_id=c.tipo_hecho_id, categoria_id=c.categoria_id,
             tercero_id=c.tercero_id, entidad_id=c.entidad_id, cuenta_default_id=c.cuenta_default_id,
             presupuestable_default=c.presupuestable_default, prioridad=c.prioridad, reloj=reloj))
+
+    @app.post("/v1/preferencias/ambos", response_model=ResultadoAmbos, dependencies=[Depends(autorizar)])
+    def preferencias_ambos(c: PeticionAmbos):
+        # F06 T6 · S5: dos preferencias independientes (tercero y categoria) en UNA transaccion; todas o ninguna.
+        operaciones = [{"ambito": o.ambito, "accion": o.accion, "id": o.id, "row_version": o.row_version,
+                        "contenido": o.contenido.model_dump()} for o in c.operaciones]
+
+        def _rechazo(codigo: str, conflictos: list[dict]) -> JSONResponse:
+            status, cuerpo = eh.rechazo_preferencia(codigo, None)
+            cuerpo["detalle"] = {"conflictos": [{k: (str(v) if isinstance(v, uuid.UUID) else v) for k, v in x.items()}
+                                                for x in conflictos]}
+            return JSONResponse(cuerpo, status_code=status)
+
+        try:
+            salida = unidad.ejecutar(contexto(), lambda s: pref_ambos.ambos(s, operaciones=operaciones, reloj=reloj),
+                                     nombre="F06 T6 S5 ambos")
+        except ErrorMotor as exc:
+            fallo = exc.__cause__
+            if not isinstance(fallo, pref_ambos.FalloAmbos):
+                raise
+            # La transaccion se revirtio entera: ninguna de las dos preferencias se ha guardado.
+            return _rechazo(fallo.rechazo.codigo, [{"ambito": fallo.ambito, "codigo": fallo.rechazo.codigo, "campos": []}])
+        if isinstance(salida, serv_pref.Rechazo):
+            return _rechazo(salida.codigo, (salida.detalle or {}).get("conflictos", []))
+        campos = PreferenciaNodo.model_fields
+        return {"resultados": [{"ambito": r["ambito"], "idempotente": r["idempotente"],
+                                "preferencia": {k: v for k, v in r["preferencia"].items() if k in campos}}
+                               for r in salida["resultados"]]}
 
     @app.post("/v1/preferencias/{preferencia_id}/editar", **_RP)
     def editar_preferencia(preferencia_id: uuid.UUID, c: EditarPreferencia):

@@ -2444,4 +2444,23 @@ REGISTRO.update({
     ("backend/app/preferencias/presupuesto_defecto.py", "presupuesto_propuesto"): (
         "PREFERENCIA", "F06 T6 S4 presupuesto propuesto",
         "lectura: reutiliza propuesta_registro y la categoria efectiva; no escribe"),
+    # S5 · «Ambos»: DTO de la ruta nueva POST /v1/preferencias/ambos (declaracion de campo).
+    ("backend/app/api/dto_t6.py", "ContenidoAmbos"): (
+        "R", "F06 T6 S5 DTO de «Ambos»", "declaracion de campo de preferencia; no lee ni escribe"),
+    # S5 · nivel de modulo: campo afectado por cada codigo de rechazo (constante, sin acceso a datos).
+    ("backend/app/preferencias/ambos.py", "<modulo>"): (
+        "PREFERENCIA", "F06 T6 S5 campos de los rechazos", "constante de presentacion del rechazo; no lee ni escribe"),
+    # S5 · coherencia del ambito declarado (TERCERO solo con tercero_id, CATEGORIA solo con categoria_id).
+    ("backend/app/preferencias/ambos.py", "_ambito_coherente"): (
+        "PREFERENCIA", "F06 T6 S5 ambito de la operacion", "validacion en memoria; no lee ni escribe"),
+    # S5 · traduce el contenido de la operacion a los valores del writer de siempre.
+    ("backend/app/preferencias/ambos.py", "_valores"): (
+        "PREFERENCIA", "F06 T6 S5 valores de la operacion", "copia en memoria; no lee ni escribe"),
+    # S5 · preflight: validaciones y empate del writer de siempre, sin escribir.
+    ("backend/app/preferencias/ambos.py", "preflight"): (
+        "PREFERENCIA", "F06 T6 S5 preflight de «Ambos»", "lectura bajo el advisory PREFERENCIAS; no escribe"),
+    # S5 · escritura atomica de las dos preferencias con servicio.alta/editar (unico escritor runtime de siempre).
+    ("backend/app/preferencias/ambos.py", "ambos"): (
+        "PREFERENCIA", "F06 T6 S5 POST /v1/preferencias/ambos",
+        "escritura: delega en servicio.alta/editar bajo el advisory, en una transaccion; todas o ninguna"),
 })

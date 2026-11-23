@@ -39,6 +39,7 @@
 // v0.29.0 (F06 T4 · AJ-05 ampliado + R-C7-07, mandato b4ff6b70…; diseño v0.2 §7): `crearLlamada` añade `X-Gapto-Intento-Id` (UUID nuevo por intento HTTP; solo traza) y, en escrituras, `X-Gapto-Intencion-Id` tomado del `intencion_id` del cuerpo, sin perder `Authorization` ni `Content-Type`. Mismo cuerpo y misma intención en los reenvíos (vigente). Sin cambios de clasificación: 5xx sigue siendo INDETERMINADO.
 // v0.30.0 (F06 T4 · token BETA_LOCAL, mandato 4f0e40af…; dictamen AJ-TOK-01/06, M-TOK-05/09): `ConfigApi` admite `credencial` (el token se lee en CADA petición, no al crear el cliente: las copias `{ ...cfg }` de revisión y compra lo heredan) y `alNoAutorizado`. Con `credencial`: sin credencial validada la petición NO se envía (INDETERMINADO con texto propio, nada salió); un 401 avisa al proveedor y se clasifica INDETERMINADO, nunca RECHAZADO, para que ninguna escritura pendiente se dé por rechazada ni se rehaga con otra intención (COLA-AR la conserva y la reconcilia con la MISMA intención al reconectar). Sin `credencial` (dobles de test con `token` fijo) nada cambia.
 // v0.31.0 (F06 T6 · S4 N1; dictamen 1 Q1/A2): `presupuestoPropuesto` (GET /v1/registro/presupuesto-propuesto), aditivo y opcional en la interfaz; el resto del cliente no cambia.
+// v0.32.0 (F06 T6 · S5 N1; dictamen 1 Q2/A3): `preferenciasAmbos` (POST /v1/preferencias/ambos), opcional en la interfaz; tipos `OperacionAmbos` y `ConflictoAmbos`.
 // ============================================================
 
 import type { Ambito, CategoriaNodo } from '../domain/categoria';
@@ -215,6 +216,21 @@ export interface PropuestaRegistro {
 }
 
 /** Contenido COMPLETO de una preferencia (alta y edición: E05, sin parches). */
+/** F06 T6 · S5: una operación de «Ambos» (alta o edición de la preferencia de un ámbito). */
+export interface OperacionAmbos {
+  ambito: 'TERCERO' | 'CATEGORIA';
+  accion: 'ALTA' | 'EDITAR';
+  id: string;
+  row_version?: number;
+  contenido: ContenidoPreferencia;
+}
+/** Conflicto que devuelve el rechazo de «Ambos»: ámbito, código y campos que chocan. */
+export interface ConflictoAmbos {
+  ambito: 'TERCERO' | 'CATEGORIA';
+  codigo: string;
+  campos: string[];
+}
+
 export interface ContenidoPreferencia {
   tipo_hecho_id: string | null;
   categoria_id: string | null;
@@ -930,6 +946,8 @@ export interface ClienteApi {
   editarPreferencia(id: string, c: { row_version: number } & ContenidoPreferencia): Promise<Respuesta<ResultadoComandoPreferencia>>;
   desactivarPreferencia(id: string, row_version: number): Promise<Respuesta<ResultadoComandoPreferencia>>;
   reactivarPreferencia(id: string, row_version: number): Promise<Respuesta<ResultadoComandoPreferencia>>;
+  /** F06 T6 · S5: «Ambos» (dos preferencias independientes en una transacción; todas o ninguna). Opcional en los dobles de prueba. */
+  preferenciasAmbos?(c: { operaciones: OperacionAmbos[] }): Promise<Respuesta<{ resultados: { ambito: string; idempotente: boolean }[] }>>;
   // F05-03/F05-04 J2
   cuentasElegibles(operacion: OperacionCuenta, fecha: string): Promise<Respuesta<{ operacion: OperacionCuenta; cuentas: CuentaElegible[] }>>;
   listarTerceros(): Promise<Respuesta<{ terceros: Tercero[] }>>;
@@ -1139,6 +1157,7 @@ export function crearCliente(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): C
       ),
     listarPreferencias: () => llamar(PREF, { method: 'GET' }, false),
     altaPreferencia: (c) => llamar(PREF, post(c), 'CAMBIO'),
+    preferenciasAmbos: (c) => llamar(`${PREF}/ambos`, post(c), 'CAMBIO'),
     editarPreferencia: (id, c) => llamar(`${PREF}/${encodeURIComponent(id)}/editar`, post(c), 'CAMBIO'),
     desactivarPreferencia: (id, row_version) => llamar(`${PREF}/${encodeURIComponent(id)}/desactivar`, post({ row_version }), 'CAMBIO'),
     reactivarPreferencia: (id, row_version) => llamar(`${PREF}/${encodeURIComponent(id)}/reactivar`, post({ row_version }), 'CAMBIO'),

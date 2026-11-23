@@ -8,13 +8,14 @@
 // Versión: 0.3.0 (F05-03/F05-04 J2 §2.4; lámina REG-DYN N01): con `ambitos` (registro por tipo) la tarjeta pregunta «¿Recordarlo para la próxima vez?» y ofrece «Para <tercero>» / «Para <categoría>» (uno solo: nunca ambos); la preferencia lleva el tipo del registro (GASTO o INGRESO) y la clave del ámbito elegido. En ingresos, «Cobrado en». Sin `ambitos`, el comportamiento de F05-02 no cambia.
 // Versión: 0.3.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // Versión: 0.4.0 (F06 T1 UX-1 · M-04, TR1-05): la tarjeta lee la lista de GET /v1/preferencias al abrirse (solo lectura) y, si la preferencia de la clave elegida ya tiene esos valores (`yaRecordado`), muestra «✓ Recordado» en vez de preguntar; sin lista se pregunta como siempre. La escritura (plan, cuerpos de alta y edición) no cambia.
+// Versión: 0.5.0 (F06 T6 · S5 N1, «Ambos» al recordar; dictamen 1 Q2/A3, DF-10/13; enmienda REG-DYN N01): con dos ámbitos y el cliente con `preferenciasAmbos`, el segmentado ofrece «Ambos». Se planifica cada ámbito con la regla de siempre; si alguno cambia una preferencia existente se pide confirmación (`pref-conflicto-ambos`); las operaciones viajan en UNA llamada atómica (POST /v1/preferencias/ambos). «Guardada para A y B» solo con OK; el rechazo dice qué ámbitos y campos chocan y que no se guardó ninguna (`pref-rechazo-ambos`). «Para uno» no cambia.
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import type { ClienteApi, CuentaPago, ListaPreferencias, Respuesta, ResultadoComandoPreferencia } from '../api/cliente';
+import type { ClienteApi, ConflictoAmbos, CuentaPago, ListaPreferencias, OperacionAmbos, Respuesta, ResultadoComandoPreferencia } from '../api/cliente';
 import { AmbitoRecordable, Casillas, PlanGuardado, planificarGuardadoClave, siNo, ValoresFinales, yaRecordado } from '../domain/preferencias';
 import { useTema } from '../theme/tema';
 import { espacio, radio, TACTIL_MIN, tipo } from '../theme/tokens';
@@ -23,7 +24,19 @@ import { BotonSecundario } from './SelectorCategorias';
 
 type Conflicto = Extract<PlanGuardado, { tipo: 'CONFLICTO' }>;
 
-type Fase = { f: 'EDITANDO' } | { f: 'GUARDANDO' } | { f: 'ERROR' } | { f: 'CONFLICTO'; plan: Conflicto } | { f: 'GUARDADA' };
+type Fase = { f: 'EDITANDO' } | { f: 'GUARDANDO' } | { f: 'ERROR' } | { f: 'CONFLICTO'; plan: Conflicto } | { f: 'GUARDADA' }
+  // F06 T6 · S5 («Ambos»): confirmar la sustitución en uno o los dos ámbitos, o el rechazo atómico (no se guardó ninguna).
+  | { f: 'CONFLICTO_AMBOS'; nombres: string[] } | { f: 'RECHAZO_AMBOS'; texto: string };
+
+/** «Ambos» se rechazó entero: qué ámbito choca y en qué campo (nunca dice que se guardó). */
+export function textoRechazoAmbos(conflictos: ConflictoAmbos[], ambitos: AmbitoRecordable[]): string {
+  const partes = conflictos.map((x) => {
+    const nombre = ambitos.find((a) => a.clave === x.ambito)?.nombre ?? (x.ambito === 'TERCERO' ? 'el tercero' : 'la categoría');
+    const campos = x.campos.map((k) => (k === 'cuenta_default_id' ? 'la cuenta' : k === 'presupuestable_default' ? 'el presupuesto' : 'los datos'));
+    return `para ${nombre}${campos.length ? ` (${[...new Set(campos)].join(' y ')})` : ''}`;
+  });
+  return `No se ha guardado ninguna de las dos. Hay otra preferencia que propone algo distinto ${partes.join(' y ')}. Revísalas en Ajustes › Preferencias.`;
+}
 
 export function GuardarPreferencia(p: {
   cliente: ClienteApi;
@@ -41,6 +54,10 @@ export function GuardarPreferencia(p: {
   const inset = useSafeAreaInsets();
   // UUID del alta generado al abrir la tarjeta: un reintento reutiliza el MISMO (R06).
   const [idAlta] = useState(() => p.nuevoId());
+  // F06 T6 · S5: UUID del alta del segundo ámbito de «Ambos» (el reintento reutiliza los MISMOS).
+  const [idAlta2] = useState(() => p.nuevoId());
+  const [ambos, setAmbos] = useState(false);
+  const ofreceAmbos = !!p.cliente.preferenciasAmbos && !!p.ambitos && p.ambitos.length > 1;
   const [casillas, setCasillas] = useState<Casillas>(p.casillas);
   const [fase, setFase] = useState<Fase>({ f: 'EDITANDO' });
   /** Casillas del intento en curso: «Reintentar» repite exactamente la misma escritura. */
@@ -50,7 +67,8 @@ export function GuardarPreferencia(p: {
   const clave = ambito
     ? { categoriaId: ambito.clave === 'CATEGORIA' ? ambito.id : null, terceroId: ambito.clave === 'TERCERO' ? ambito.id : null }
     : { categoriaId: p.categoriaId, terceroId: null };
-  const nombre = ambito ? ambito.nombre : p.nombre;
+  const nombre = ambos && p.ambitos ? p.ambitos.map((a) => a.nombre).join(' y ') : ambito ? ambito.nombre : p.nombre;
+  const claveDe = (a: AmbitoRecordable) => ({ categoriaId: a.clave === 'CATEGORIA' ? a.id : null, terceroId: a.clave === 'TERCERO' ? a.id : null });
   const verboCuenta = tipoReg === 'INGRESO' ? 'Cobrado en' : 'Pagar con';
   // M-04 (UX-1): la visibilidad se decide con la lista de GET /v1/preferencias (la que ya usa el guardado). Solo
   // lectura: al montar NUNCA se escribe. Sin lista (cargando o error de lectura) se pregunta como siempre.
@@ -69,7 +87,9 @@ export function GuardarPreferencia(p: {
       vivo = false;
     };
   }, []);
-  const recordado = fase.f === 'EDITANDO' && lista !== null && yaRecordado(lista.preferencias, clave, p.finales, p.casillas, lista.tipos[tipoReg]);
+  const recordado = fase.f === 'EDITANDO' && lista !== null && (ambos && p.ambitos
+    ? p.ambitos.every((a) => yaRecordado(lista.preferencias, claveDe(a), p.finales, p.casillas, lista.tipos[tipoReg]))
+    : yaRecordado(lista.preferencias, clave, p.finales, p.casillas, lista.tipos[tipoReg]));
 
   const nombreCuenta = (id: string | null) => (p.cuentas as { cuenta_id: string; nombre: string }[]).find((x) => x.cuenta_id === id)?.nombre ?? 'una cuenta no disponible';
 
@@ -90,7 +110,43 @@ export function GuardarPreferencia(p: {
     setFase({ f: 'ERROR' });
   };
 
+  /**
+   * F06 T6 · S5 («Ambos»; dictamen 1 Q2/A3): planifica cada ámbito con la misma regla que «uno», omite lo que ya está igual,
+   * pide confirmación si alguno cambia una preferencia existente y envía las operaciones en UNA llamada atómica. Solo con OK
+   * dice que se guardó; ante un rechazo dice qué ámbitos y campos chocan (no se guardó ninguna).
+   */
+  const guardarAmbos = async (sustituirExistentes = false) => {
+    const ambitos = p.ambitos!;
+    const elegidas = intento.current ?? casillas;
+    intento.current = elegidas;
+    setFase({ f: 'GUARDANDO' });
+    const l = await p.cliente.listarPreferencias();
+    if (l.tipo !== 'OK') return setFase({ f: 'ERROR' });
+    const planes = ambitos.map((a, i) => ({ a, id: i === 0 ? idAlta : idAlta2,
+      plan: planificarGuardadoClave(l.datos.preferencias, claveDe(a), p.finales, elegidas, l.datos.tipos[tipoReg]) }));
+    const enConflicto = planes.filter((x) => x.plan.tipo === 'CONFLICTO');
+    if (enConflicto.length > 0 && !sustituirExistentes) return setFase({ f: 'CONFLICTO_AMBOS', nombres: enConflicto.map((x) => x.a.nombre) });
+    const operaciones: OperacionAmbos[] = planes.flatMap((x): OperacionAmbos[] => {
+      if (x.plan.tipo === 'ALTA') return [{ ambito: x.a.clave, accion: 'ALTA', id: x.id, contenido: x.plan.contenido }];
+      // Ya recordado con esos valores (M-04): ese ámbito no se escribe.
+      if (x.plan.tipo === 'EDITAR' && yaRecordado(l.datos.preferencias, claveDe(x.a), p.finales, elegidas, l.datos.tipos[tipoReg])) return [];
+      if (x.plan.tipo === 'EDITAR' || x.plan.tipo === 'CONFLICTO') {
+        return [{ ambito: x.a.clave, accion: 'EDITAR', id: x.plan.existente.id, row_version: x.plan.existente.row_version, contenido: x.plan.contenido }];
+      }
+      return [];
+    });
+    if (operaciones.length === 0) return setFase({ f: 'GUARDADA' });
+    const r = await p.cliente.preferenciasAmbos!({ operaciones });
+    if (r.tipo === 'OK') return setFase({ f: 'GUARDADA' });
+    if (r.tipo === 'RECHAZADO') {
+      const conflictos = (r.detalle as { conflictos?: ConflictoAmbos[] } | undefined)?.conflictos ?? [];
+      return setFase({ f: 'RECHAZO_AMBOS', texto: textoRechazoAmbos(conflictos, ambitos) });
+    }
+    setFase({ f: 'ERROR' });
+  };
+
   const guardar = async () => {
+    if (ambos) return guardarAmbos();
     const elegidas = intento.current ?? casillas;
     intento.current = elegidas;
     setFase({ f: 'GUARDANDO' });
@@ -115,7 +171,7 @@ export function GuardarPreferencia(p: {
   if (fase.f === 'GUARDADA') {
     return (
       <View testID="pref-guardada" accessibilityLiveRegion="polite" style={[s.aviso, { backgroundColor: c.textPrimary }]}>
-        <Text style={[tipo.footnote, { color: c.background, textAlign: 'center' }]}>Preferencia guardada</Text>
+        <Text style={[tipo.footnote, { color: c.background, textAlign: 'center' }]}>{ambos ? `Guardada para ${nombre}` : 'Preferencia guardada'}</Text>
       </View>
     );
   }
@@ -134,6 +190,28 @@ export function GuardarPreferencia(p: {
     );
   }
 
+  if (fase.f === 'RECHAZO_AMBOS') {
+    return (
+      <View style={{ gap: espacio.s }}>
+        <View testID="pref-rechazo-ambos" accessibilityRole="alert" style={[s.caja, { backgroundColor: c.partialSurface, borderColor: c.warning }]}>
+          <Text style={[tipo.footnote, { color: c.textPrimary }]}>{fase.texto}</Text>
+        </View>
+        <BotonSecundario testID="pref-rechazo-volver" titulo="Volver" onPress={mantener} />
+      </View>
+    );
+  }
+
+  if (fase.f === 'CONFLICTO_AMBOS') {
+    return (
+      <View testID="pref-conflicto-ambos" style={[s.tarjeta, { backgroundColor: c.surfacePrimary, borderColor: c.borderDefault }]}>
+        <Text accessibilityRole="header" style={[tipo.subheadline, { color: c.textPrimary, fontWeight: '600' }]}>{`Ya tienes una preferencia distinta para ${fase.nombres.join(' y ')}`}</Text>
+        <Text style={[tipo.caption, { color: c.textSecondary }]}>Si la sustituyes, se guardan las dos a la vez; si algo falla, no se guarda ninguna.</Text>
+        <BotonPrimario testID="pref-sustituir-ambos" titulo="Sustituir y guardar ambas" onPress={() => void guardarAmbos(true)} />
+        <BotonSecundario testID="pref-mantener-ambos" titulo="Mantener la actual" onPress={mantener} />
+      </View>
+    );
+  }
+
   const guardando = fase.f === 'GUARDANDO';
   const actual = fase.f === 'CONFLICTO' ? fase.plan.existente : null;
   const selectorAmbito =
@@ -141,12 +219,13 @@ export function GuardarPreferencia(p: {
       <Segmentado<string>
         testIDBase="pref-ambito"
         etiquetaGrupo="Recordar para"
-        opciones={p.ambitos.map((a) => ({ valor: a.clave, etiqueta: `Para ${a.nombre}` }))}
-        valor={ambito?.clave ?? null}
+        opciones={[...p.ambitos.map((a) => ({ valor: a.clave, etiqueta: `Para ${a.nombre}` })), ...(ofreceAmbos ? [{ valor: 'AMBOS', etiqueta: 'Ambos' }] : [])]}
+        valor={ambos ? 'AMBOS' : ambito?.clave ?? null}
         onCambiar={(v) => {
           if (guardando) return;
           intento.current = null;
-          setAmbito(p.ambitos!.find((a) => a.clave === v) ?? null);
+          setAmbos(v === 'AMBOS');
+          if (v !== 'AMBOS') setAmbito(p.ambitos!.find((a) => a.clave === v) ?? null);
         }}
       />
     ) : null;
