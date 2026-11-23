@@ -303,6 +303,8 @@
 # Version: 0.42.0 (F06 T6 · S5 N1, «Ambos» al recordar; dictamen 1 Q2/A3, DF-10/13): ruta NUEVA
 #   `POST /v1/preferencias/ambos` (app.preferencias.ambos): preflight de todas las operaciones y escritura atomica de
 #   las dos preferencias; un fallo tras el preflight revierte la transaccion entera. Las rutas de una preferencia no cambian.
+# Version: 0.43.0 (F06 T6 · S7-A N2, bancos; DP-09, DT-04): `GET /v1/terceros` acepta `rol=ENTIDAD_FINANCIERA` (aditivo,
+#   opcional): solo los terceros con ese rol (`lecturas.bancos`). Sin el parametro, la ruta no cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -1033,7 +1035,11 @@ def create_app(
     _RC = {"response_model": ResultadoComandoContexto, "dependencies": [Depends(autorizar)]}
 
     @app.get("/v1/terceros", response_model=ListaTerceros, dependencies=[Depends(autorizar)])
-    def terceros(q: str | None = Query(None, max_length=160), incluir_inactivos: bool = Query(False)) -> dict:
+    def terceros(q: str | None = Query(None, max_length=160), incluir_inactivos: bool = Query(False),
+                 rol: Literal["ENTIDAD_FINANCIERA"] | None = Query(None)) -> dict:
+        if rol is not None:
+            # F06 T6 · S7-A: solo los terceros marcados como banco o entidad financiera (selector de Banco).
+            return {"terceros": unidad.ejecutar(contexto(), lect_ter.bancos, nombre="F06 T6 S7-A bancos")}
         if q is None:
             return {"terceros": unidad.ejecutar(contexto(), lect_ter.listar, nombre="F05-04 terceros")}
         return {"terceros": unidad.ejecutar(contexto(), lambda s: lect_ter.buscar(s, q, incluir_inactivos),

@@ -40,6 +40,7 @@
 // v0.30.0 (F06 T4 · token BETA_LOCAL, mandato 4f0e40af…; dictamen AJ-TOK-01/06, M-TOK-05/09): `ConfigApi` admite `credencial` (el token se lee en CADA petición, no al crear el cliente: las copias `{ ...cfg }` de revisión y compra lo heredan) y `alNoAutorizado`. Con `credencial`: sin credencial validada la petición NO se envía (INDETERMINADO con texto propio, nada salió); un 401 avisa al proveedor y se clasifica INDETERMINADO, nunca RECHAZADO, para que ninguna escritura pendiente se dé por rechazada ni se rehaga con otra intención (COLA-AR la conserva y la reconcilia con la MISMA intención al reconectar). Sin `credencial` (dobles de test con `token` fijo) nada cambia.
 // v0.31.0 (F06 T6 · S4 N1; dictamen 1 Q1/A2): `presupuestoPropuesto` (GET /v1/registro/presupuesto-propuesto), aditivo y opcional en la interfaz; el resto del cliente no cambia.
 // v0.32.0 (F06 T6 · S5 N1; dictamen 1 Q2/A3): `preferenciasAmbos` (POST /v1/preferencias/ambos), opcional en la interfaz; tipos `OperacionAmbos` y `ConflictoAmbos`.
+// v0.33.0 (F06 T6 · S7-A N2; DP-09, DT-04): `listarTerceros({ rol: 'ENTIDAD_FINANCIERA' })` lista solo los bancos (GET /v1/terceros?rol=…); sin opciones, igual que antes.
 // ============================================================
 
 import type { Ambito, CategoriaNodo } from '../domain/categoria';
@@ -950,7 +951,8 @@ export interface ClienteApi {
   preferenciasAmbos?(c: { operaciones: OperacionAmbos[] }): Promise<Respuesta<{ resultados: { ambito: string; idempotente: boolean }[] }>>;
   // F05-03/F05-04 J2
   cuentasElegibles(operacion: OperacionCuenta, fecha: string): Promise<Respuesta<{ operacion: OperacionCuenta; cuentas: CuentaElegible[] }>>;
-  listarTerceros(): Promise<Respuesta<{ terceros: Tercero[] }>>;
+  /** F06 T6 · S7-A: con `{ rol: 'ENTIDAD_FINANCIERA' }`, solo los terceros marcados como banco. */
+  listarTerceros(opciones?: { rol?: 'ENTIDAD_FINANCIERA' }): Promise<Respuesta<{ terceros: Tercero[] }>>;
   candidatosTercero(nombre: string): Promise<Respuesta<{ terceros: Tercero[] }>>;
   altaTercero(c: { id: string; nombre: string; naturaleza: NaturalezaTercero | null }): Promise<Respuesta<ResultadoComandoTercero>>;
   editarTercero(id: string, c: { row_version: number; nombre: string; naturaleza: NaturalezaTercero | null }): Promise<Respuesta<ResultadoComandoTercero>>;
@@ -1163,7 +1165,7 @@ export function crearCliente(cfg: ConfigApi, fetchImpl: typeof fetch = fetch): C
     reactivarPreferencia: (id, row_version) => llamar(`${PREF}/${encodeURIComponent(id)}/reactivar`, post({ row_version }), 'CAMBIO'),
     cuentasElegibles: (operacion, fecha) =>
       llamar(`/v1/cuentas/elegibles?operacion=${encodeURIComponent(operacion)}&fecha=${encodeURIComponent(fecha)}`, { method: 'GET' }, false),
-    listarTerceros: () => llamar(TER, { method: 'GET' }, false),
+    listarTerceros: (opciones) => llamar(opciones?.rol ? `${TER}?rol=${opciones.rol}` : TER, { method: 'GET' }, false),
     candidatosTercero: (nombre) => llamar(`${TER}/candidatos?nombre=${encodeURIComponent(nombre)}`, { method: 'GET' }, false),
     altaTercero: (c) => llamar(TER, post(c), 'CAMBIO'),
     editarTercero: (id, c) => llamar(`${TER}/${encodeURIComponent(id)}/editar`, post(c), 'CAMBIO'),

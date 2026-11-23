@@ -21,6 +21,9 @@
 #   los usa gapto_runtime bajo RLS: DEU-F03-TRGM-RLS); SENSIBLE a acentos en v1
 #   («garcía» encuentra «García»; «garcia» no); inactivos solo con
 #   `incluir_inactivos`; hasta 50 en orden (nombre normalizado, id).
+# Version: 0.3.0 (F06 T6 · S7-A N2; DP-09, DT-04, F09 0.55 §12.107.3): `bancos` = terceros con el rol
+#   ENTIDAD_FINANCIERA (gapto.tercero_roles, 0010; sin DDL). Solo lectura bajo RLS; la lista y su forma son las de
+#   `listar`. Lo usa `GET /v1/terceros?rol=ENTIDAD_FINANCIERA` (selector de Banco de la hipoteca).
 # ============================================================
 
 from __future__ import annotations
@@ -54,6 +57,17 @@ def _todos(sesion: SesionMotor) -> list[dict[str, Any]]:
 
 def listar(sesion: SesionMotor) -> list[dict[str, Any]]:
     return _todos(sesion)
+
+
+ROL_BANCO = "ENTIDAD_FINANCIERA"
+
+
+def bancos(sesion: SesionMotor) -> list[dict[str, Any]]:
+    """F06 T6 · S7-A: los terceros que tienen el rol ENTIDAD_FINANCIERA (marcados por el usuario; nunca derivado)."""
+    with sesion.conexion.cursor() as cur:
+        cur.execute("SELECT DISTINCT r.tercero_id FROM gapto.tercero_roles r WHERE r.rol_codigo = %s", (ROL_BANCO,))
+        ids = {f[0] for f in cur.fetchall()}
+    return [x for x in _todos(sesion) if x["id"] in ids]
 
 
 def candidatos(sesion: SesionMotor, nombre: str) -> list[dict[str, Any]]:

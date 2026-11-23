@@ -10,13 +10,16 @@
 // Versión: 0.5.0 (F06 T3 · cadena de noche 21->22-11, T-D MANT N3 cliente; D-C7-07): los campos de importe ponen los puntos de miles al teclear (`formatearImporteAlTeclear`). D-C7-08 (OBS-02): el banco de la hipoteca se elige con un buscador de terceros (`bancosVisibles`): sin escribir no se lista ninguno; el elegido se ve siempre.
 // Versión: 0.6.0 (F06 T6 · S1 piezas comunes; F09 0.55 §12.107.1 puntos 5 y 9): «Banco» de la hipoteca usa el mismo selector común de terceros que Registrar gasto (`CampoSelector` + `SelectorTercero` a pantalla completa, título «Banco»; sustituye al buscador con chips de D-C7-08 y a `bancosVisibles`); se envía el identificador del tercero elegido como `financiador.tercero_id`, igual que antes. Los campos de porcentaje, plazo y tipo abren el teclado decimal (`CampoTexto decimal`).
 // Versión: 0.7.0 (F06 T6 · S3 compra; F09 0.55 §12.107.2 y lámina REG-AGIL v0.8 C1–C4): en «¿Cómo se pagó?», primero la hipoteca y después los pagos desde tus cuentas: cada pago se edita en su tarjeta («Confirmar pago» / «Cancelar») y queda en una línea con Editar y Eliminar; totales de presentación (Precio, Pagado desde tus cuentas, · de la hipoteca, · resto, sin hipoteca, Falta por cuadrar; DT-02, no se persisten); importe del préstamo con 80 % · 90 % · Otro % · Otro importe (DP-14, AJ-UX2-07: céntimos enteros con round_half_up; el importe se ve y se edita; el % no viaja) y ayuda «préstamo ≤ precio» (DT-03, solo pantalla). `faltasPagos`, «Lo deja en» y el payload no cambian.
+// Versión: 0.8.0 (F06 T6 · S7-A N2; DP-09, DT-04): «Banco» de la hipoteca usa el selector común en modo `soloBancos`: lista solo los terceros marcados como banco o entidad financiera y «+ Crear banco» crea el tercero ya marcado (rol ENTIDAD_FINANCIERA con `anadirRoles`). El payload no cambia (`financiador.tercero_id`).
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import type { ClienteApi, CuentaElegible } from '../api/cliente';
+import type { ClienteApi, CuentaElegible, Tercero } from '../api/cliente';
+import { configApi } from '../api/config';
+import { type ClienteContratos, crearClienteContratos } from '../api/contratos';
 import type { CuadroPrevio } from '../api/hipoteca';
 import type { ClientePatrimonio, ParteEnFecha } from '../api/patrimonio';
 import type { VistaPropiedad } from '../api/propiedades';
@@ -126,11 +129,19 @@ export function CompraScreen(p: {
   ahora: () => Date;
   onCerrar: (actualizada: VistaPropiedad | null) => void;
   onRecargar: () => void;
+  /** F06 T6 · S7-A: cliente de roles de tercero para «+ Crear banco» (por defecto, el de `configApi`). */
+  contratos?: ClienteContratos;
 }) {
   const { c } = useTema();
   const inset = useSafeAreaInsets();
   const hoyIso = isoLocal(p.ahora());
   const [paso, setPaso] = useState<Paso>('PRECIO');
+  const contratosApi = useRef(p.contratos ?? crearClienteContratos(configApi)).current;
+  /** S7-A: marca el banco recién creado con el rol ENTIDAD_FINANCIERA (ruta de roles de siempre). */
+  const marcarBanco = async (t: Tercero): Promise<boolean> => {
+    const r = await contratosApi.anadirRoles(t.id, { intencion_id: p.nuevoId(), row_version_esperada: t.row_version, anadir: ['ENTIDAD_FINANCIERA'] });
+    return r.tipo === 'OK';
+  };
   const [b, setB] = useState<BorradorCompra>(() => ({
     ...borradorInicial(hoyIso),
     pagos: [{ id: p.nuevoId(), rol: 'FIRMA', cuentaId: null, fecha: hoyIso, importe: '' }],
@@ -422,6 +433,7 @@ export function CompraScreen(p: {
           cliente={p.cliente}
           nuevoId={p.nuevoId}
           titulo="Banco"
+          soloBancos={{ marcar: marcarBanco }}
           seleccionadoId={hip.financiadorId}
           onElegir={(t) => {
             setSelectorBanco(false);

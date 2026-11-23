@@ -11,6 +11,7 @@
 // Versión: 0.5.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // Versión: 0.6.0 (F06 T1 UX-1 · M-03, Q-UX-06: publica la señal «hay cambios sin guardar» de su formulario (`usarCambiosSinGuardar`; prop opcional `onCambiosSinGuardar`); sin cambios de escritura).
 // Versión: 0.7.0 (F06 T1 UX-1 · DUD-UX1-01, decisión de Moisés del lote 26): salir del formulario con cambios por «Cancelar» pregunta «¿Descartar cambios?» (Descartar / Seguir editando, `salir` de `usarCambiosSinGuardar`); sin cambios sale sin preguntar.
+// Versión: 0.8.0 (F06 T6 · S7-A N2; DP-09, DT-04): casilla «Es banco o entidad financiera» en el alta y la edición; al guardar añade el rol ENTIDAD_FINANCIERA (`anadirRoles`, solo añade: el contrato C-TER-01 no admite quitar roles). Si el rol no se escribe, se avisa.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -25,6 +26,8 @@ import { BotonPrimario, CabeceraNavegacion, Chip, EstadoDato, Segmentado } from 
 import { AvisoCaja, CabeceraTarea, Caja, Campo, CampoTexto, estilosFormulario as ef, FilaLista, Tarjeta } from '../components/Formulario';
 import { usarCambiosSinGuardar } from '../components/CambiosSinGuardar';
 import { BotonCritico, Hoja } from '../components/HojasCategoria';
+import { configApi } from '../api/config';
+import { type ClienteContratos, crearClienteContratos } from '../api/contratos';
 import { TEXTO_DUPLICADO, TEXTO_INACTIVO } from '../components/SelectorTercero';
 import { BotonSecundario, CargaArbol, SelectorCategorias } from '../components/SelectorCategorias';
 import { construirArbol } from '../domain/categoria';
@@ -50,12 +53,20 @@ type Vista = { v: 'LISTA' } | { v: 'NUEVO' } | { v: 'EDITAR'; id: string };
 interface Form {
   nombre: string;
   naturaleza: NaturalezaTercero | null;
+  /** F06 T6 · S7-A: marcar como banco o entidad financiera al guardar (solo añade: el rol no se quita). */
+  banco?: boolean;
 }
 
 export const TEXTO_HABITUALES = (t: string) => `Las categorías habituales se sugieren primero al registrar con ${t}. Nunca se eligen solas.`;
 export const TEXTO_QUITAR = (t: string) => `Dejará de sugerirse como guardada. Puede seguir apareciendo si la usas a menudo con ${t}. Tus registros no cambian.`;
 
+/** F06 T6 · S7-A: ayuda de la casilla de banco (el rol solo se añade; la ruta de roles no admite quitarlo). */
+export const TEXTO_BANCO_AYUDA = 'Aparecerá al elegir el banco de una hipoteca. Una vez marcado no se puede desmarcar.';
+export const TEXTO_BANCO_NO_MARCADO = 'Se ha guardado, pero no se ha podido marcar como banco. Vuelve a intentarlo.';
+
 export function TercerosAjustesScreen(p: {
+  /** F06 T6 · S7-A: cliente de roles de tercero (por defecto, el de `configApi`). */
+  contratos?: ClienteContratos;
   cliente: ClienteApi;
   nuevoId: () => string;
   onAtras: () => void;
@@ -220,6 +231,16 @@ export function TercerosAjustesScreen(p: {
     const r = actual
       ? await p.cliente.editarTercero(actual.id, { row_version: actual.row_version, nombre, naturaleza: form.naturaleza })
       : await p.cliente.altaTercero({ id: idAlta!, nombre, naturaleza: form.naturaleza });
+    // F06 T6 · S7-A (DP-09): «Es banco o entidad financiera» añade el rol ENTIDAD_FINANCIERA con la ruta de roles de siempre.
+    if (r.tipo === 'OK' && form.banco) {
+      const api = p.contratos ?? crearClienteContratos(configApi);
+      const m = await api.anadirRoles(r.datos.tercero.id, { intencion_id: p.nuevoId(), row_version_esperada: r.datos.tercero.row_version, anadir: ['ENTIDAD_FINANCIERA'] });
+      if (m.tipo !== 'OK') {
+        await cargar(true);
+        setOcupado(false);
+        return setAviso({ tipo: 'AVISO', texto: TEXTO_BANCO_NO_MARCADO });
+      }
+    }
     await tratar(r, actual, null);
     setOcupado(false);
   };
@@ -261,6 +282,8 @@ export function TercerosAjustesScreen(p: {
               ))}
             </View>
           </Campo>
+          <Chip testID="ajter-banco" etiqueta="Es banco o entidad financiera" seleccionado={!!form.banco} onPress={() => setForm({ ...form, banco: !form.banco })} />
+          <Text testID="ajter-banco-ayuda" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_BANCO_AYUDA}</Text>
           {actual ? <Text style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_S02}</Text> : null}
           {candidatos ? (
             <View testID="ajter-duplicado" style={{ gap: espacio.s }}>
