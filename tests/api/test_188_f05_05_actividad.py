@@ -65,7 +65,7 @@ def test_caso12_tres_tipos_orden_y_transferencia_neutra(e):
     i = x.ingreso(cli, cta, fecha="2026-10-09", importe="2100.00", categoria_id=nomina)
     t = x.transferencia(cli, cta, ahorro, fecha="2026-10-10", importe="500.00")
     p = pagina(cli, desde="2026-10-01", hasta="2026-11-01")
-    hoy = sorted([str(g), str(t)])
+    hoy = [str(t), str(g)]  # LAB T5 · L3 (ORD-FH P22/P26): mismo dia, lo guardado mas tarde arriba (antes: por id)
     assert ids(p) == hoy + [str(i)] and p["total"] == 3 and p["siguiente"] is None
     filas = {f["id"]: f for f in p["filas"]}
     fg, fi, ft = filas[str(g)], filas[str(i)], filas[str(t)]
@@ -80,7 +80,7 @@ def test_oraculo_a_caso33_paginacion_sin_duplicados_ni_omisiones(e):
     owner, actor, cli, cta, _ = e
     misma = [x.gasto(cli, cta, fecha="2026-10-05") for _ in range(5)]
     otros = [x.gasto(cli, cta, fecha=f) for f in ("2026-10-08", "2026-10-01")]
-    esperados = [str(otros[0])] + sorted(str(i) for i in misma) + [str(otros[1])]
+    esperados = [str(otros[0])] + [str(i) for i in reversed(misma)] + [str(otros[1])]  # LAB T5 · L3: por hora de guardado
     vistos, cursor, insertados = [], None, False
     while True:
         params = {"limite": 2}
@@ -384,3 +384,14 @@ def test_k7_icon_key_de_la_categoria_en_lista_y_detalle(e):
     assert {f["id"] for f in pagina(cli_b)["filas"]} == {str(ajena)}
     assert pagina(cli_b)["filas"][0]["categoria"]["icon_key"] == "hogar.casa"
     assert cli.get(f"{URL}/{ajena}", headers=h.AUTH).status_code == 404
+
+
+def test_lab_t5_l3_ord_fh_hora_de_guardado_y_desempate(e):
+    """LAB T5 · L3 (P21–P24): cada fila expone `guardado_at`; en el mismo dia manda la hora de guardado (desc)."""
+    owner, actor, cli, cta, _ = e
+    primero = x.gasto(cli, cta, fecha="2026-10-05")
+    segundo = x.gasto(cli, cta, fecha="2026-10-05")
+    p = pagina(cli, desde="2026-10-01", hasta="2026-11-01")
+    filas = {f["id"]: f for f in p["filas"]}
+    assert ids(p) == [str(segundo), str(primero)]
+    assert filas[str(segundo)]["guardado_at"] > filas[str(primero)]["guardado_at"]

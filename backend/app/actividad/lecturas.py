@@ -61,6 +61,9 @@
 #   (true si el hecho tiene un efecto GASTO con categoria «Asociada a vivienda» y ningun vinculo AFECTA_A a una
 #   PROPIEDAD). Solo lectura: no crea ni propone vinculos.
 # Version: 0.6.0 (F06 T3-F06 bloque 2 F06-01H; literal F05 Q3-Hd v1.1): HD-S1: rol PRESTAMO_RECIBIDO del movimiento + de un desembolso Hd (predicado fisico del literal, lectura en lote).
+# LAB T5 · L3 (ORD-FH, P21–P26; rama lab-t5, no es T5): orden por fecha_hecho DESC, instante de guardado (created_at)
+#   DESC y desempate por id ASC; cursor keyset de tres campos; cada fila expone `guardado_at` (P23). test_188 y AC03
+#   adaptados SOLO en el laboratorio (LAB_GUARDAS.md). Empate de created_at en una misma transaccion o en la carga V3: id.
 # ============================================================
 
 from __future__ import annotations
@@ -101,15 +104,16 @@ class Filtros:
     importe: decimal.Decimal | None = None
 
 
-def codificar_cursor(fecha: dt.date, hecho_id: uuid.UUID) -> str:
-    return base64.urlsafe_b64encode(f"{fecha.isoformat()}|{hecho_id}".encode()).decode().rstrip("=")
+def codificar_cursor(fecha: dt.date, guardado: dt.datetime, hecho_id: uuid.UUID) -> str:
+    # LAB T5 · L3 (ORD-FH, P22/P24): el cursor lleva tambien el instante de guardado.
+    return base64.urlsafe_b64encode(f"{fecha.isoformat()}|{guardado.isoformat()}|{hecho_id}".encode()).decode().rstrip("=")
 
 
-def decodificar_cursor(cursor: str) -> tuple[dt.date, uuid.UUID]:
+def decodificar_cursor(cursor: str) -> tuple[dt.date, dt.datetime, uuid.UUID]:
     try:
         texto = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)).decode()
-        fecha, hid = texto.split("|")
-        return dt.date.fromisoformat(fecha), uuid.UUID(hid)
+        fecha, guardado, hid = texto.split("|")
+        return dt.date.fromisoformat(fecha), dt.datetime.fromisoformat(guardado), uuid.UUID(hid)
     except (ValueError, binascii.Error, UnicodeDecodeError) as exc:
         raise CursorInvalido(str(exc)) from exc
 
@@ -201,36 +205,39 @@ def listar(sesion: SesionMotor, f: Filtros, cursor: str | None, limite: int) -> 
     total = sesion.uno("SELECT count(*) " + _FROM + "WHERE " + " AND ".join(cond), params)[0]
     pagina = list(cond)
     if cursor:
-        fecha_c, id_c = decodificar_cursor(cursor)
-        pagina.append("(h.fecha_hecho < %(c_fecha)s OR (h.fecha_hecho = %(c_fecha)s AND h.id > %(c_id)s))")
-        params.update(c_fecha=fecha_c, c_id=id_c)
+        fecha_c, guardado_c, id_c = decodificar_cursor(cursor)
+        pagina.append("(h.fecha_hecho < %(c_fecha)s OR (h.fecha_hecho = %(c_fecha)s AND (h.created_at < %(c_guardado)s "
+                      "OR (h.created_at = %(c_guardado)s AND h.id > %(c_id)s))))")
+        params.update(c_fecha=fecha_c, c_guardado=guardado_c, c_id=id_c)
     coincide = []
     if f.q:
         coincide += [f"{_COINCIDE_TERCERO} AS m_ter", f"{_COINCIDE_CATEGORIA} AS m_cat",
                      f"{_COINCIDE_CONTEXTO} AS m_ctx", f"{_COINCIDE_NOTA} AS m_nota"]
     if f.importe is not None:
         coincide.append(f"{_COINCIDE_IMPORTE} AS m_imp")
-    columnas = ", ".join(["h.id", "h.fecha_hecho"] + coincide)
+    columnas = ", ".join(["h.id", "h.fecha_hecho", "h.created_at"] + coincide)
     params["limite"] = limite + 1
     with sesion.conexion.cursor() as cur:
         cur.execute(f"SELECT {columnas} {_FROM}WHERE {' AND '.join(pagina)} "
-                    "ORDER BY h.fecha_hecho DESC, h.id ASC LIMIT %(limite)s", params)
+                    "ORDER BY h.fecha_hecho DESC, h.created_at DESC, h.id ASC LIMIT %(limite)s", params)
         filas = cur.fetchall()
     hay_mas = len(filas) > limite
     filas = filas[:limite]
     motivos: dict[uuid.UUID, list[str]] = {}
     nombres = (["TERCERO", "CATEGORIA", "CONTEXTO", "NOTA"] if f.q else []) + (["IMPORTE"] if f.importe is not None else [])
     for fila in filas:
-        motivos[fila[0]] = [m for m, v in zip(nombres, fila[2:]) if v]
+        motivos[fila[0]] = [m for m, v in zip(nombres, fila[3:]) if v]
     ids = [fila[0] for fila in filas]
     compuestas = _componer(sesion, ids)
     items = []
+    guardados = {fila[0]: fila[2] for fila in filas}
     for hid in ids:
         item = compuestas[hid]
+        item["guardado_at"] = guardados[hid].isoformat()     # LAB T5 · L3 (P23): hora en el detalle
         if nombres:
             item["coincide_en"] = motivos[hid]
         items.append(item)
-    siguiente = codificar_cursor(filas[-1][1], filas[-1][0]) if hay_mas and filas else None
+    siguiente = codificar_cursor(filas[-1][1], filas[-1][2], filas[-1][0]) if hay_mas and filas else None
     return {"filas": items, "siguiente": siguiente, "total": int(total)}
 
 

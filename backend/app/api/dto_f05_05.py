@@ -172,6 +172,7 @@ class FilaActividad(_Estricto):
     propiedad: ReferenciaPropiedad | None = None
     salida_cuentas: str | None = None
     posiciones: list[PosicionFila] | None = None
+    guardado_at: dt.datetime | None = None   # LAB T5 · L3 (ORD-FH P23): instante de guardado
 
 
 class PaginaActividad(_Estricto):
