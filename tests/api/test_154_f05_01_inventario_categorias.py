@@ -430,6 +430,11 @@
 #     backend/app/api/middleware_peticion.py::<modulo>, clase R (no consumidor): solo nombra el parametro
 #     {categoria_id} en plantillas de ruta de la lista cerrada RECHAZOS_TRAS_COMMIT_PREVISTOS; no lee ni escribe
 #     categorias. El discriminante (toda aparicion registrada) se conserva. Ninguna regla ni entrada previa cambia.
+# Version: 0.45.0 (F06 T4 · integracion MANT 21, adenda 01 97ddee92…; adaptacion declarada, patron L-06): I13a da
+#     de alta en IMPORTS_CAMINO de RegistroGastoScreen.tsx SOLO ('../domain/importe', 'formatearImporteAlTeclear'),
+#     que trajo mant-n3-cliente (fc809be, D-C7-07, puntos de miles al teclear): funcion pura de formato del campo de
+#     importe, sin efecto en el camino categorial. La lista cerrada (igualdad exacta del conjunto de imports), el
+#     resto de entradas y las demas guardas no cambian.
 # ============================================================
 
 from __future__ import annotations
@@ -2392,3 +2397,8 @@ REGISTRO.update({
         "R", "AJ-05 lista cerrada de rechazos tras COMMIT", "no consumidor: solo nombra el parametro {categoria_id} "
         "en plantillas de ruta; no lee ni escribe categorias"),
 })
+
+# ------------------------------------------------------------------ F06 T4 integracion MANT 21 (adenda 01, adaptacion declarada)
+# D-C7-07, puntos de miles al teclear; presentacion pura, sin efecto en el camino categorial (origen: fc809be,
+# mant-n3-cliente). Una sola alta; la igualdad exacta del conjunto de imports de I13a se conserva.
+IMPORTS_CAMINO[REG] = IMPORTS_CAMINO[REG] | {("../domain/importe", "formatearImporteAlTeclear")}
