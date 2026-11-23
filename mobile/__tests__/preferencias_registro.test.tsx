@@ -11,6 +11,7 @@
 // Versión: 0.6.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // Versión: 0.7.0 (F05-D053 §67.2 · O3, opción 1): alta aditiva de los casos O3 (propuesta retenida y rechazada con CATEGORIA_NO_ELEGIBLE: categoría no válida en el acto, cuenta y presupuesto conservados, sin registro, recuperación con otra categoría; cuenta elegida por el usuario; respuesta obsoleta; dominio). Ningún oráculo anterior cambia.
 // Versión: 0.8.0 (F06 T1 UX-1 · M-04): en AJ-B2-04 el número de lecturas de GET /v1/preferencias pasa de 2 a 3 porque la tarjeta lee la lista al abrirse para decidir si ya está recordado (solo lectura; ninguna aserción de escritura cambia).
+// Versión: 0.9.0 (F06 T6 · S2 FORM-AGIL; F09 0.55 §12.107.1 puntos 1 y 2): los controles se buscan con `ver`/`verPronto` (form_agil.ts), que tocan antes la línea de «Se registrará así», «Más opciones» o «‹ Exprés» como haría el usuario. Mismas aserciones; las de ausencia siguen con queryByTestId.
 // ============================================================
 
 import './tiempos_rn';
@@ -35,11 +36,12 @@ import { aplicarPropuesta, categoriaRechazadaEnPropuesta, indexar, propuestaApli
 import { ProveedorTema } from '../src/theme/tema';
 
 import { clienteCategoriasStub, nodo } from './fixtures_categorias';
+import { actVer, ver, verPronto } from './form_agil';
 
 /** F05-04 §2.7 (corte de Concepto): la nota opcional se escribe en «Más detalles». */
 function escribirNota(t: string) {
-  if (!screen.queryByTestId('campo-nota')) fireEvent.press(screen.getByTestId('abrir-mas-detalles'));
-  fireEvent.changeText(screen.getByTestId('campo-nota'), t);
+  if (!screen.queryByTestId('campo-nota')) fireEvent.press(ver('abrir-mas-detalles'));
+  fireEvent.changeText(ver('campo-nota'), t);
 }
 
 const TARJETA = 'c0000000-0000-4000-8000-00000000000a';
@@ -128,29 +130,29 @@ async function abrir(cliente: ClienteApi) {
       </ProveedorTema>
     </SafeAreaProvider>,
   );
-  fireEvent.press(await screen.findByTestId('accion-registrar'));
-  fireEvent.press(screen.getByTestId('tipo-GASTO')); // F05-04 §2.2: «Registrar» → hoja de tipos
-  await screen.findByTestId('registro-form');
+  fireEvent.press(await verPronto('accion-registrar'));
+  fireEvent.press(ver('tipo-GASTO')); // F05-04 §2.2: «Registrar» → hoja de tipos
+  await verPronto('registro-form');
   await waitFor(() => expect(cliente.propuestaPreferencias).toHaveBeenCalled());
 }
 
 function elegirCategoria(id: string) {
-  fireEvent.press(screen.getByTestId('campo-categoria'));
-  fireEvent.press(screen.getByTestId(`cat-${id}`));
+  fireEvent.press(ver('campo-categoria'));
+  fireEvent.press(ver(`cat-${id}`));
 }
 
 function sinCategoria() {
-  fireEvent.press(screen.getByTestId('campo-categoria'));
-  fireEvent.press(screen.getByTestId('selector-sin-categoria'));
+  fireEvent.press(ver('campo-categoria'));
+  fireEvent.press(ver('selector-sin-categoria'));
 }
 
 function basicos() {
-  fireEvent.changeText(screen.getByTestId('campo-importe'), '42,18');
+  fireEvent.changeText(ver('campo-importe'), '42,18');
   escribirNota('Compra');
 }
 
-const seleccionada = (id: string) => screen.getByTestId(id).props.accessibilityState.checked;
-const textoDe = (id: string) => screen.getByTestId(id).props.children;
+const seleccionada = (id: string) => ver(id).props.accessibilityState.checked;
+const textoDe = (id: string) => ver(id).props.children;
 
 /** Texto plano de un nodo con Text anidados. */
 function plano(id: string): string {
@@ -160,22 +162,22 @@ function plano(id: string): string {
     else if (Array.isArray(x)) x.forEach(visitar);
     else if (x && typeof x === 'object' && 'props' in (x as object)) visitar((x as { props: { children: unknown } }).props.children);
   };
-  visitar(screen.getByTestId(id).props.children);
+  visitar(ver(id).props.children);
   return partes.join('');
 }
 
 async function registrar() {
-  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
-  await screen.findByTestId('registro-exito');
+  await actVer('registrar', async () => fireEvent.press(ver('registrar')));
+  await verPronto('registro-exito');
 }
 
 // ------------------------------------------------------------------ R01–R04: propuesta
 test('R01: sin preferencia aplicable no hay preselección de cuenta ni de presupuesto (varias cuentas)', async () => {
   const f = fake();
   await abrir(f.cliente);
-  await waitFor(() => expect(screen.getByTestId(`cuenta-${TARJETA}`)).toBeTruthy());
+  await waitFor(() => expect(ver(`cuenta-${TARJETA}`)).toBeTruthy());
   for (const c of [TARJETA, EFECTIVO, COMUN]) expect(seleccionada(`cuenta-${c}`)).toBe(false);
-  expect(screen.getByTestId('presupuestable-true').props.accessibilityState.selected).toBe(false);
+  expect(ver('presupuestable-true').props.accessibilityState.selected).toBe(false);
   expect(screen.queryByTestId('origen-cuenta')).toBeNull();
   expect(screen.queryByTestId('origen-presupuestable')).toBeNull();
   // Con categoría pendiente se pide el contexto «Sin categoría» para la fecha del formulario.
@@ -193,11 +195,11 @@ test('R02: propuesta por campo con su origen visible; financiación sobre la cue
   await waitFor(() => expect(seleccionada(`cuenta-${TARJETA}`)).toBe(true));
   expect(f.consultas.at(-1)).toEqual([HOY, 'super']);
   expect(textoDe('origen-cuenta')).toBe('Propuesta: tu preferencia para Supermercado.');
-  expect(screen.getByTestId('presupuestable-true').props.accessibilityState.selected).toBe(true);
+  expect(ver('presupuestable-true').props.accessibilityState.selected).toBe(true);
   expect(textoDe('origen-presupuestable')).toBe('Propuesta: tu preferencia general.');
   expect(textoDe('financiacion-texto')).toBe('Financiado por ti · cuenta 100 % tuya');
   // La propuesta no cuenta como modificación: «Cancelar» con solo la propuesta no la cuenta.
-  expect(screen.getByTestId('registrar')).toBeEnabled();
+  expect(ver('registrar')).toBeEnabled();
   await registrar();
   expect(f.enviados[0]).toMatchObject({ cuenta_id: TARJETA, presupuestable: true, financiacion: { estado: 'PROPUESTA_ACEPTADA' } });
 });
@@ -212,22 +214,22 @@ test('R03 lo explícito gana: la cuenta tocada no se recalcula al cambiar de cat
   basicos();
   elegirCategoria('super');
   await waitFor(() => expect(seleccionada(`cuenta-${TARJETA}`)).toBe(true));
-  fireEvent.press(screen.getByTestId(`cuenta-${EFECTIVO}`));
+  fireEvent.press(ver(`cuenta-${EFECTIVO}`));
   expect(textoDe('origen-cuenta')).toBe('Elegida por ti.');
   elegirCategoria('limpieza');
   await waitFor(() => expect(f.consultas.at(-1)).toEqual([HOY, 'limpieza']));
   await waitFor(() => expect(textoDe('origen-presupuestable')).toBe('Propuesta: tu preferencia para Limpieza.'));
-  expect(screen.getByTestId('presupuestable-false').props.accessibilityState.selected).toBe(true);
+  expect(ver('presupuestable-false').props.accessibilityState.selected).toBe(true);
   expect(seleccionada(`cuenta-${EFECTIVO}`)).toBe(true); // no se pisa
   expect(seleccionada(`cuenta-${COMUN}`)).toBe(false);
   expect(textoDe('origen-cuenta')).toBe('Elegida por ti.');
   // El presupuesto tocado tampoco se recalcula.
-  fireEvent.press(screen.getByTestId('presupuestable-true'));
+  fireEvent.press(ver('presupuestable-true'));
   expect(textoDe('origen-presupuestable')).toBe('Elegida por ti.');
   elegirCategoria('super');
   await waitFor(() => expect(f.consultas.at(-1)).toEqual([HOY, 'super']));
   await act(async () => {});
-  expect(screen.getByTestId('presupuestable-true').props.accessibilityState.selected).toBe(true);
+  expect(ver('presupuestable-true').props.accessibilityState.selected).toBe(true);
   expect(textoDe('origen-presupuestable')).toBe('Elegida por ti.');
   expect(seleccionada(`cuenta-${EFECTIVO}`)).toBe(true);
   await registrar();
@@ -244,7 +246,7 @@ test('R04 / sin propuesta tras una propuesta previa: los campos no tocados vuelv
   await waitFor(() => expect(seleccionada(`cuenta-${TARJETA}`)).toBe(true));
   elegirCategoria('limpieza'); // su preferencia apunta a una cuenta no elegible: el resolver no propone nada
   await waitFor(() => expect(seleccionada(`cuenta-${TARJETA}`)).toBe(false));
-  expect(screen.getByTestId('presupuestable-true').props.accessibilityState.selected).toBe(false);
+  expect(ver('presupuestable-true').props.accessibilityState.selected).toBe(false);
   expect(screen.queryByTestId('origen-cuenta')).toBeNull();
   expect(screen.queryByTestId('origen-presupuestable')).toBeNull();
 });
@@ -261,25 +263,25 @@ test.each(PROPUESTA_SIN_EXITO)('E1: propuesta %s → presupuestable sin preselec
   const f = fake();
   f.cliente.propuestaPreferencias = jest.fn(respuesta);
   await abrir(f.cliente);
-  await waitFor(() => expect(screen.getByTestId(`cuenta-${TARJETA}`)).toBeTruthy());
+  await waitFor(() => expect(ver(`cuenta-${TARJETA}`)).toBeTruthy());
   await act(async () => {});
-  const marcado = (v: boolean) => screen.getByTestId(`presupuestable-${v}`).props.accessibilityState.selected;
+  const marcado = (v: boolean) => ver(`presupuestable-${v}`).props.accessibilityState.selected;
   expect(marcado(true)).toBe(false);
   expect(marcado(false)).toBe(false);
   expect(screen.queryByTestId('origen-presupuestable')).toBeNull();
   basicos();
   sinCategoria(); // vuelve a pedir la propuesta, con el mismo resultado
-  fireEvent.press(screen.getByTestId(`cuenta-${EFECTIVO}`));
+  fireEvent.press(ver(`cuenta-${EFECTIVO}`));
   await act(async () => {});
   expect(marcado(true)).toBe(false);
   expect(marcado(false)).toBe(false);
   expect(textoDe('faltan')).toBe('Para registrar falta: si cuenta para el presupuesto.');
-  expect(screen.getByTestId('registrar')).toBeDisabled();
-  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
+  expect(ver('registrar')).toBeDisabled();
+  await actVer('registrar', async () => fireEvent.press(ver('registrar')));
   expect(f.cliente.registrarGastoPagado).not.toHaveBeenCalled();
   // Con la decisión explícita ya se puede registrar, y se sella lo elegido.
-  fireEvent.press(screen.getByTestId('presupuestable-false'));
-  expect(screen.getByTestId('registrar')).toBeEnabled();
+  fireEvent.press(ver('presupuestable-false'));
+  expect(ver('registrar')).toBeEnabled();
   await registrar();
   expect(f.enviados[0]).toMatchObject({ cuenta_id: EFECTIVO, presupuestable: false });
 });
@@ -287,13 +289,13 @@ test.each(PROPUESTA_SIN_EXITO)('E1: propuesta %s → presupuestable sin preselec
 test('sin fallback laxo (AJ-B1-09): una única cuenta en otra moneda y sin propuesta del resolver no se preselecciona', async () => {
   const f = fake({ cuentas: [cuenta(USD, 'Cuenta USD', 'USD')] });
   await abrir(f.cliente);
-  await waitFor(() => expect(screen.getByTestId(`cuenta-${USD}`)).toBeTruthy());
+  await waitFor(() => expect(ver(`cuenta-${USD}`)).toBeTruthy());
   await act(async () => {});
   expect(seleccionada(`cuenta-${USD}`)).toBe(false);
   expect(screen.queryByTestId('origen-cuenta')).toBeNull();
   basicos();
   sinCategoria();
-  fireEvent.press(screen.getByTestId('presupuestable-true'));
+  fireEvent.press(ver('presupuestable-true'));
   expect(textoDe('faltan')).toBe('Para registrar falta: cuenta de pago.');
 });
 
@@ -314,7 +316,7 @@ test('AJ-B1-11: nunca se preselecciona una cuenta que no esté en la lista de el
   expect(screen.queryByTestId('origen-cuenta')).toBeNull();
   basicos();
   sinCategoria();
-  fireEvent.press(screen.getByTestId('presupuestable-true'));
+  fireEvent.press(ver('presupuestable-true'));
   expect(textoDe('faltan')).toBe('Para registrar falta: cuenta de pago.');
 });
 
@@ -342,7 +344,7 @@ test('origen no explicable (la preferencia no está en la lista): el campo no se
 test('la fecha nueva vuelve a pedir la propuesta para esa fecha', async () => {
   const f = fake();
   await abrir(f.cliente);
-  fireEvent.press(screen.getByTestId('fecha-ayer'));
+  fireEvent.press(ver('fecha-ayer'));
   await waitFor(() => expect(f.consultas.at(-1)).toEqual(['2026-09-23', null]));
 });
 
@@ -358,13 +360,13 @@ test('reintento del registro (INDETERMINADO): misma intención y sin volver a pe
   basicos();
   elegirCategoria('super');
   await waitFor(() => expect(seleccionada(`cuenta-${TARJETA}`)).toBe(true));
-  fireEvent.press(screen.getByTestId('presupuestable-true'));
-  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
-  await screen.findByTestId('estado-indeterminado');
+  fireEvent.press(ver('presupuestable-true'));
+  await actVer('registrar', async () => fireEvent.press(ver('registrar')));
+  await verPronto('estado-indeterminado');
   cambiada = true; // la preferencia cambia en el servidor entre envío y reintento
   const antes = (f.cliente.propuestaPreferencias as jest.Mock).mock.calls.length;
-  await act(async () => fireEvent.press(screen.getByTestId('reintentar')));
-  await screen.findByTestId('registro-exito');
+  await actVer('reintentar', async () => fireEvent.press(ver('reintentar')));
+  await verPronto('registro-exito');
   expect((f.cliente.propuestaPreferencias as jest.Mock).mock.calls.length).toBe(antes);
   expect(f.enviados).toHaveLength(2);
   expect(f.enviados[1]).toEqual(f.enviados[0]);
@@ -379,9 +381,9 @@ async function registrarCon(f: ReturnType<typeof fake>, o: { categoria: string |
   else sinCategoria();
   await waitFor(() => expect(f.consultas.at(-1)?.[1]).toBe(o.categoria));
   await act(async () => {});
-  if (!seleccionada(`cuenta-${o.cuenta}`)) fireEvent.press(screen.getByTestId(`cuenta-${o.cuenta}`));
-  if (!screen.getByTestId(`presupuestable-${o.presupuestable}`).props.accessibilityState.selected) {
-    fireEvent.press(screen.getByTestId(`presupuestable-${o.presupuestable}`));
+  if (!seleccionada(`cuenta-${o.cuenta}`)) fireEvent.press(ver(`cuenta-${o.cuenta}`));
+  if (!ver(`presupuestable-${o.presupuestable}`).props.accessibilityState.selected) {
+    fireEvent.press(ver(`presupuestable-${o.presupuestable}`));
   }
   await registrar();
 }
@@ -402,13 +404,13 @@ test('tarjeta oculta cuando no hay nada que recordar (valores finales = propuest
 test('R05: casillas iniciales por diferencia; alta con ámbito «Una categoría» y el UUID de la tarjeta; aviso «Preferencia guardada»', async () => {
   const f = fake({ propuesta: () => prop(null, [true, 'p-general']), prefs: () => [GENERAL] });
   await registrarCon(f, { categoria: 'super', cuenta: TARJETA, presupuestable: true });
-  const tarjeta = within(screen.getByTestId('pref-tarjeta'));
+  const tarjeta = within(ver('pref-tarjeta'));
   expect(tarjeta.getByText('¿Recordarlo para Supermercado?')).toBeTruthy();
   expect(seleccionada('pref-casilla-cuenta')).toBe(true); // difiere: no había propuesta de cuenta
   expect(seleccionada('pref-casilla-presupuestable')).toBe(false); // coincide con la general
   expect(tarjeta.getByText('Se propondrá en tus próximos gastos de Supermercado. Podrás cambiarlo siempre.')).toBeTruthy();
   const idTarjeta = '00000000-0000-4000-8000-000000000002'; // 1 = intención; 2 = generado al abrir la tarjeta
-  await act(async () => fireEvent.press(screen.getByTestId('pref-guardar')));
+  await actVer('pref-guardar', async () => fireEvent.press(ver('pref-guardar')));
   expect(f.cliente.altaPreferencia).toHaveBeenCalledWith({
     id: idTarjeta, tipo_hecho_id: TIPOS.GASTO, categoria_id: 'super', tercero_id: null, entidad_id: null,
     cuenta_default_id: TARJETA, presupuestable_default: null, prioridad: 100,
@@ -423,26 +425,26 @@ test('editar envía el ESTADO COMPLETO (E05): el campo no recordado conserva su 
   await registrarCon(f, { categoria: 'super', cuenta: EFECTIVO, presupuestable: true });
   expect(seleccionada('pref-casilla-cuenta')).toBe(true);
   expect(seleccionada('pref-casilla-presupuestable')).toBe(false);
-  await act(async () => fireEvent.press(screen.getByTestId('pref-guardar')));
+  await actVer('pref-guardar', async () => fireEvent.press(ver('pref-guardar')));
   expect(f.cliente.altaPreferencia).not.toHaveBeenCalled();
   expect(f.cliente.editarPreferencia).toHaveBeenCalledWith('p-super', {
     row_version: 3, tipo_hecho_id: TIPOS.GASTO, categoria_id: 'super', tercero_id: null, entidad_id: null,
     cuenta_default_id: EFECTIVO, presupuestable_default: true, prioridad: 100,
   });
-  expect(await screen.findByTestId('pref-guardada')).toBeTruthy();
+  expect(await verPronto('pref-guardada')).toBeTruthy();
 });
 
 test('R06: fallo → aviso y «Reintentar» con el MISMO UUID; el gasto sigue registrado', async () => {
   let intentos = 0;
   const f = fake({ alta: async (c) => (++intentos === 1 ? { tipo: 'INDETERMINADO', mensaje: 'x' } : okPref(c)) });
   await registrarCon(f, { categoria: 'super', cuenta: EFECTIVO, presupuestable: false });
-  await act(async () => fireEvent.press(screen.getByTestId('pref-guardar')));
+  await actVer('pref-guardar', async () => fireEvent.press(ver('pref-guardar')));
   expect(plano('pref-error')).toBe(
     'No se pudo guardar la preferencia. El gasto sí está registrado. Puedes reintentarlo o crearla luego en Ajustes › Preferencias.',
   );
-  expect(screen.getByTestId('registro-exito')).toBeTruthy();
-  await act(async () => fireEvent.press(screen.getByTestId('pref-reintentar')));
-  expect(await screen.findByTestId('pref-guardada')).toBeTruthy();
+  expect(ver('registro-exito')).toBeTruthy();
+  await actVer('pref-reintentar', async () => fireEvent.press(ver('pref-reintentar')));
+  expect(await verPronto('pref-guardada')).toBeTruthy();
   const llamadas = (f.cliente.altaPreferencia as jest.Mock).mock.calls.map((c) => c[0]);
   expect(llamadas).toHaveLength(2);
   expect(llamadas[1]).toEqual(llamadas[0]); // mismo UUID y mismo contenido
@@ -467,16 +469,16 @@ test('R07: conflicto → «Mantener» no escribe; «Sustituir» edita con row_ve
     },
   });
   await registrarCon(f, { categoria: 'super', cuenta: TARJETA, presupuestable: true });
-  await act(async () => fireEvent.press(screen.getByTestId('pref-guardar')));
+  await actVer('pref-guardar', async () => fireEvent.press(ver('pref-guardar')));
   expect(screen.getByText('Ya tienes una preferencia para Supermercado')).toBeTruthy();
   expect(plano('pref-conflicto-texto')).toBe('Ahora propone pagar con Efectivo. ¿Quieres que proponga Tarjeta BBVA a partir de ahora?');
-  expect(within(screen.getByTestId('pref-mantener')).getByText('Mantener Efectivo')).toBeTruthy();
-  fireEvent.press(screen.getByTestId('pref-mantener'));
+  expect(within(ver('pref-mantener')).getByText('Mantener Efectivo')).toBeTruthy();
+  fireEvent.press(ver('pref-mantener'));
   expect(screen.queryByTestId('pref-conflicto')).toBeNull();
   expect(f.cliente.editarPreferencia).not.toHaveBeenCalled();
   expect(f.cliente.altaPreferencia).not.toHaveBeenCalled(); // nunca se crea otra que la contradiga
-  await act(async () => fireEvent.press(screen.getByTestId('pref-guardar')));
-  await act(async () => fireEvent.press(screen.getByTestId('pref-sustituir')));
+  await actVer('pref-guardar', async () => fireEvent.press(ver('pref-guardar')));
+  await actVer('pref-sustituir', async () => fireEvent.press(ver('pref-sustituir')));
   expect((f.cliente.editarPreferencia as jest.Mock).mock.calls[0]).toEqual([
     'p-super',
     // Sin propuesta de presupuesto la casilla venía marcada: se recuerda también (sin conflicto: la existente no lo propone).
@@ -484,9 +486,9 @@ test('R07: conflicto → «Mantener» no escribe; «Sustituir» edita con row_ve
   ]);
   // Recargada: vuelve a preguntar con el valor ACTUAL.
   await waitFor(() => expect(plano('pref-conflicto-texto')).toBe('Ahora propone pagar con Cuenta común. ¿Quieres que proponga Tarjeta BBVA a partir de ahora?'));
-  await act(async () => fireEvent.press(screen.getByTestId('pref-sustituir')));
+  await actVer('pref-sustituir', async () => fireEvent.press(ver('pref-sustituir')));
   expect((f.cliente.editarPreferencia as jest.Mock).mock.calls[1][1].row_version).toBe(2);
-  expect(await screen.findByTestId('pref-guardada')).toBeTruthy();
+  expect(await verPronto('pref-guardada')).toBeTruthy();
   expect(f.cliente.altaPreferencia).not.toHaveBeenCalled();
 });
 
@@ -500,8 +502,8 @@ test('R07 por carrera: el alta responde PREFERENCIA_EMPATE_CONTRADICTORIO → se
     },
   });
   await registrarCon(f, { categoria: 'super', cuenta: TARJETA, presupuestable: true });
-  await act(async () => fireEvent.press(screen.getByTestId('pref-guardar')));
-  expect(await screen.findByTestId('pref-conflicto')).toBeTruthy();
+  await actVer('pref-guardar', async () => fireEvent.press(ver('pref-guardar')));
+  expect(await verPronto('pref-conflicto')).toBeTruthy();
   expect(plano('pref-conflicto-texto')).toBe('Ahora propone pagar con Efectivo. ¿Quieres que proponga Tarjeta BBVA a partir de ahora?');
   expect(f.cliente.altaPreferencia).toHaveBeenCalledTimes(1);
 });
@@ -509,12 +511,12 @@ test('R07 por carrera: el alta responde PREFERENCIA_EMPATE_CONTRADICTORIO → se
 test('R07 con presupuesto: texto y «Mantener la actual»', async () => {
   const f = fake({ prefs: () => [pref({ id: 'p-super', categoria_id: 'super', presupuestable_default: false })], propuesta: () => prop(null, null) });
   await registrarCon(f, { categoria: 'super', cuenta: TARJETA, presupuestable: true });
-  fireEvent.press(screen.getByTestId('pref-casilla-cuenta')); // solo el presupuesto
-  await act(async () => fireEvent.press(screen.getByTestId('pref-guardar')));
+  fireEvent.press(ver('pref-casilla-cuenta')); // solo el presupuesto
+  await actVer('pref-guardar', async () => fireEvent.press(ver('pref-guardar')));
   expect(plano('pref-conflicto-texto')).toBe(
     'Ahora propone que cuenta para el presupuesto: No. ¿Quieres que proponga que cuenta para el presupuesto: Sí a partir de ahora?',
   );
-  expect(within(screen.getByTestId('pref-mantener')).getByText('Mantener la actual')).toBeTruthy();
+  expect(within(ver('pref-mantener')).getByText('Mantener la actual')).toBeTruthy();
 });
 
 // ------------------------------------------------------------------ AJ-B2-04 (rama de D6 sin conflicto tras recargar)
@@ -540,13 +542,13 @@ test.each([
     },
   });
   await registrarCon(f, { categoria: 'super', cuenta: TARJETA, presupuestable: true });
-  fireEvent.press(screen.getByTestId('pref-casilla-presupuestable')); // solo la cuenta
+  fireEvent.press(ver('pref-casilla-presupuestable')); // solo la cuenta
   expect(seleccionada('pref-casilla-cuenta')).toBe(true);
   expect(seleccionada('pref-casilla-presupuestable')).toBe(false);
-  await act(async () => fireEvent.press(screen.getByTestId('pref-guardar')));
+  await actVer('pref-guardar', async () => fireEvent.press(ver('pref-guardar')));
   // UX-1 M-04: +1 lectura de GET /v1/preferencias al abrir la tarjeta, para decidir su visibilidad (solo lectura; antes 2).
   await waitFor(() => expect(f.cliente.listarPreferencias).toHaveBeenCalledTimes(3)); // visibilidad + lectura previa + recarga tras el rechazo
-  expect(screen.getByTestId('pref-tarjeta')).toBeTruthy(); // vuelve a la tarjeta
+  expect(ver('pref-tarjeta')).toBeTruthy(); // vuelve a la tarjeta
   expect(screen.queryByTestId('pref-conflicto')).toBeNull(); // sin R07
   expect(screen.queryByTestId('pref-error')).toBeNull();
   expect(screen.queryByTestId('pref-guardada')).toBeNull();
@@ -590,11 +592,11 @@ test('O3: la propuesta de la categoría elegida llega rechazada (CATEGORIA_NO_EL
   expect(textoDe('categoria-valor')).toBe('Elige otra categoría');
   expect(seleccionada(`cuenta-${TARJETA}`)).toBe(true);
   expect(textoDe('origen-cuenta')).toBe('Propuesta: tu preferencia general.');
-  expect(screen.getByTestId('presupuestable-true').props.accessibilityState.selected).toBe(true);
+  expect(ver('presupuestable-true').props.accessibilityState.selected).toBe(true);
   expect(textoDe('faltan')).toBe('Para registrar falta: categoría.');
   expect(screen.queryByTestId('error-dominio')).toBeNull();
-  expect(screen.getByTestId('registrar')).toBeDisabled();
-  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
+  expect(ver('registrar')).toBeDisabled();
+  await actVer('registrar', async () => fireEvent.press(ver('registrar')));
   expect(f.cliente.registrarGastoPagado).not.toHaveBeenCalled();
   // Recuperación: otra categoría → se pide su propuesta y se aplica con las reglas normales.
   elegirCategoria('limpieza');
@@ -603,7 +605,7 @@ test('O3: la propuesta de la categoría elegida llega rechazada (CATEGORIA_NO_EL
   expect(screen.queryByTestId('categoria-invalida')).toBeNull();
   expect(textoDe('categoria-valor')).toBe('Limpieza');
   expect(seleccionada(`cuenta-${TARJETA}`)).toBe(true);
-  expect(screen.getByTestId('registrar')).toBeEnabled();
+  expect(ver('registrar')).toBeEnabled();
   await registrar();
   expect(f.enviados[0]).toMatchObject({ cuenta_id: TARJETA, presupuestable: true, categoria: { estado: 'CATEGORIA', categoria_id: 'limpieza' } });
 });
@@ -614,15 +616,15 @@ test('O3: la cuenta elegida por el usuario tampoco se toca al invalidarse la cat
   retener(f, { super: r.promesa });
   await abrir(f.cliente);
   basicos();
-  fireEvent.press(await screen.findByTestId(`cuenta-${EFECTIVO}`));
-  fireEvent.press(screen.getByTestId('presupuestable-false'));
+  fireEvent.press(await verPronto(`cuenta-${EFECTIVO}`));
+  fireEvent.press(ver('presupuestable-false'));
   elegirCategoria('super');
   await r.soltar(NO_ELEGIBLE);
   expect(textoDe('categoria-invalida')).toBe('Esta categoría ya no está disponible. Elige otra categoría.');
   expect(seleccionada(`cuenta-${EFECTIVO}`)).toBe(true);
   expect(textoDe('origen-cuenta')).toBe('Elegida por ti.');
-  expect(screen.getByTestId('presupuestable-false').props.accessibilityState.selected).toBe(true);
-  expect(screen.getByTestId('registrar')).toBeDisabled();
+  expect(ver('presupuestable-false').props.accessibilityState.selected).toBe(true);
+  expect(ver('registrar')).toBeDisabled();
 });
 
 test('O3 respuesta obsoleta: el rechazo de una categoría que ya no es la elegida no sobrescribe la selección posterior', async () => {
@@ -641,8 +643,8 @@ test('O3 respuesta obsoleta: el rechazo de una categoría que ya no es la elegid
   expect(screen.queryByTestId('categoria-invalida')).toBeNull();
   expect(textoDe('categoria-valor')).toBe('Limpieza');
   expect(seleccionada(`cuenta-${COMUN}`)).toBe(true);
-  expect(screen.getByTestId('presupuestable-false').props.accessibilityState.selected).toBe(true);
-  expect(screen.getByTestId('registrar')).toBeEnabled();
+  expect(ver('presupuestable-false').props.accessibilityState.selected).toBe(true);
+  expect(ver('registrar')).toBeEnabled();
 });
 
 test('O3 (dominio): solo invalida la categoría que sigue elegida y nunca toca cuenta ni presupuesto', () => {

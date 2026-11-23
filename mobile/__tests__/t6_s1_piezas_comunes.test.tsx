@@ -3,14 +3,15 @@
 // Fichero: t6_s1_piezas_comunes.test.tsx
 // Ruta: mobile/__tests__/t6_s1_piezas_comunes.test.tsx
 // Descripción: F06 T6 «UX ágil» · S1 piezas comunes (F09 0.55 §12.107.1 puntos 5, 6 y 9):
-//   - botones: Principal, Crítico y Texto viven en Basicos.tsx; HojasCategoria reexporta el Crítico (mismo objeto). El Secundario
-//     sigue en SelectorCategorias hasta S2 (test_154 I13-A; DESVIACIONES T6-D-03);
+//   - botones: Principal, Secundario, Crítico y Texto viven en Basicos.tsx; HojasCategoria y SelectorCategorias reexportan
+//     (mismo objeto). El Secundario se movió en S2 (test_154 I13-A; DESVIACIONES T6-D-03);
 //   - selectores (Tercero, Participante, Contexto) a pantalla completa con «Cerrar» arriba a la derecha y teclado cerrado al abrirse;
-//     los que ya eran pantalla completa (Magnitudes, Iconos, Persona del reparto) también cierran el teclado (Categoría, en S2);
+//     los que ya eran pantalla completa (Categoría desde S2, Magnitudes, Iconos, Persona del reparto) también cierran el teclado;
 //   - teclado decimal en porcentaje, plazo y tipo (`CampoTexto decimal`), sin puntos de miles;
 //   - «Banco» de la compra y «Tercero» de Registrar gasto usan el mismo selector común (`SelectorTercero`) y el valor
 //     que se envía es el identificador del tercero elegido.
 // Versión: 0.1.0 (F06 T6 · S1 piezas comunes)
+// Versión: 0.2.0 (F06 T6 · S2): BotonSecundario en Basicos (reexportado por SelectorCategorias) y cierre de teclado del selector de Categoría (T6-D-03).
 // ============================================================
 
 import './tiempos_rn';
@@ -48,20 +49,21 @@ const montar = (el: React.ReactElement) =>
 
 afterEach(() => jest.restoreAllMocks());
 
-test('punto 9 · el botón crítico vive en Basicos y HojasCategoria reexporta el mismo componente', () => {
-  expect(typeof Basicos.BotonPrimario).toBe('function');
-  expect(typeof Basicos.BotonCritico).toBe('function');
-  expect(typeof Basicos.BotonTexto).toBe('function');
+test('punto 9 · los cuatro botones viven en Basicos y los módulos antiguos reexportan el mismo componente', () => {
+  for (const b of [Basicos.BotonPrimario, Basicos.BotonSecundario, Basicos.BotonCritico, Basicos.BotonTexto]) expect(typeof b).toBe('function');
   expect(SelectorCategorias.BotonPrimario).toBe(Basicos.BotonPrimario);
+  expect(SelectorCategorias.BotonSecundario).toBe(Basicos.BotonSecundario); // S2 (T6-D-03)
   expect(HojasCategoria.BotonCritico).toBe(Basicos.BotonCritico);
-  expect(fuente('src/components/HojasCategoria.tsx')).not.toMatch(/export function Boton(Secundario|Critico|Primario|Texto)/);
+  for (const f of ['src/components/SelectorCategorias.tsx', 'src/components/HojasCategoria.tsx']) {
+    expect(fuente(f)).not.toMatch(/export function Boton(Secundario|Critico|Primario|Texto)/);
+  }
 });
 
 test('punto 9 · Secundario y Crítico: alto 52 y radio 12, como el Principal', () => {
   montar(
     <>
       <Basicos.BotonPrimario testID="b-pri" titulo="Guardar" onPress={jest.fn()} />
-      <SelectorCategorias.BotonSecundario testID="b-sec" titulo="Volver" onPress={jest.fn()} />
+      <Basicos.BotonSecundario testID="b-sec" titulo="Volver" onPress={jest.fn()} />
       <Basicos.BotonCritico testID="b-cri" titulo="Borrar" onPress={jest.fn()} />
     </>,
   );
@@ -94,7 +96,7 @@ test('puntos 5 y 6 · los selectores de Tercero, Participante y Contexto usan el
     expect(t).not.toMatch(/<Hoja titulo=[^>]*testID="selector-(tercero|participante|contexto)"/);
     expect(t).not.toMatch(/<ScrollView style=\{\{ maxHeight: 320 \}\}/);
   }
-  for (const f of ['src/components/SelectorMagnitudes.tsx', 'src/components/SelectorIconos.tsx', 'src/components/Reparto.tsx']) {
+  for (const f of ['src/components/SelectorCategorias.tsx', 'src/components/SelectorMagnitudes.tsx', 'src/components/SelectorIconos.tsx', 'src/components/Reparto.tsx']) {
     expect(fuente(f)).toMatch(/useCerrarTecladoAlAbrir\(\);/);
   }
 });

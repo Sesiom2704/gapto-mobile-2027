@@ -5,6 +5,7 @@
 // Descripción: C-03 «gasto propio reembolsable» en la UI (F05 §66.2 y anexo §66.A, §66.A.11.9; lámina F05-07 v0.3 C1–C4 y D1; D-F0507L-04..06; CONTRATO_API_C03). Dominio: importe recuperable de 0,01 € al total sin valor por defecto, lo que falta, sellado (payload del gasto pagado sin `atribucion` y con `reembolso`), texto tras el cobro (nunca «Saldado» con saldo indeterminado) y reconocimiento del derecho. C1: respuesta «Mío, pero me lo reembolsan» solo en gastos. C2: nada marcado, «Hecho» deshabilitado hasta elegir quién y cuánto, personas y empresas (nunca el comercio, ni ORGANISMO/OTRO/sin naturaleza, ni deshabilitadas), alta de empresa, «Otra cantidad» acotada, textos fijos y exclusión visible de la previsión; claro y oscuro. Formulario: resumen, «Quitar», sin «Repartir» ni «Otra persona», comercio igual a quien lo debe bloquea. Envío a POST /v1/intenciones/gasto-reembolsable y éxito C3 con el gasto y lo que te deben por separado; rechazos en lenguaje llano. C4: «Pendiente con…» abre el derecho elegido (dos derechos con la misma empresa), «Registrar cobro» deshabilitado hasta elegir cuenta, textos del derecho y del cobro parcial y total. Detalle: `posiciones_vinculadas` con su `entidad_id`. Devolución bloqueada con motivo.
 // Versión: 0.3.0 (MANT D18, lote 40): se elimina el jest.setTimeout(30000) propio; el límite (90 s) lo fija solo tiempos_rn (R-TEST-TIMEOUT); sin cambios de aserciones.
 //   previa: 0.1.0 (F05-D052 paso 2 · C-03 UI)
+// Versión: 0.4.0 (F06 T6 · S2 FORM-AGIL; F09 0.55 §12.107.1 puntos 1 y 2): los controles se buscan con `ver`/`verPronto` (form_agil.ts), que tocan antes la línea de «Se registrará así», «Más opciones» o «‹ Exprés» como haría el usuario. Mismas aserciones; las de ausencia siguen con queryByTestId.
 // ============================================================
 
 import './tiempos_rn';
@@ -35,6 +36,7 @@ import { ProveedorTema } from '../src/theme/tema';
 import { colores } from '../src/theme/tokens';
 
 import { clienteCategoriasStub, nodo } from './fixtures_categorias';
+import { actVer, ver, verPronto } from './form_agil';
 
 jest.mock('expo-font', () => ({ ...jest.requireActual('expo-font'), isLoaded: () => true }));
 
@@ -96,8 +98,8 @@ function envolver(ui: React.ReactElement, forzar?: 'dark' | 'light') {
   );
 }
 const plano = () => JSON.stringify(screen.toJSON());
-const marcado = (id: string) => screen.getByTestId(id).props.accessibilityState?.checked;
-const deshabilitado = (id: string) => screen.getByTestId(id).props.accessibilityState?.disabled;
+const marcado = (id: string) => ver(id).props.accessibilityState?.checked;
+const deshabilitado = (id: string) => ver(id).props.accessibilityState?.disabled;
 
 // ================================================================== dominio
 describe('C-03 · dominio', () => {
@@ -164,68 +166,68 @@ describe('C-03 · dominio', () => {
 // ================================================================== C1–C3
 async function formulario(c: ClienteApi, tipo?: 'INGRESO', forzar?: 'dark') {
   envolver(<RegistroGastoScreen cliente={c} nuevoId={nuevoId} ahora={AHORA} onCerrar={jest.fn()} tipo={tipo} onGastoCompartido={jest.fn()} />, forzar);
-  await screen.findByTestId(tipo ? 'cuenta-efectivo' : `cuenta-${TARJETA}`);
-  fireEvent.changeText(screen.getByTestId('campo-importe'), '60');
-  fireEvent.press(screen.getByTestId('campo-categoria'));
-  fireEvent.press(screen.getByTestId('cat-mov'));
-  await act(async () => fireEvent.press(screen.getByTestId('cat-comb')));
-  fireEvent.press(screen.getByTestId('presupuestable-false'));
-  fireEvent.press(screen.getByTestId(tipo ? 'cuenta-efectivo' : `cuenta-${TARJETA}`));
+  await verPronto(tipo ? 'cuenta-efectivo' : `cuenta-${TARJETA}`);
+  fireEvent.changeText(ver('campo-importe'), '60');
+  fireEvent.press(ver('campo-categoria'));
+  fireEvent.press(ver('cat-mov'));
+  await actVer('cat-comb', async () => fireEvent.press(ver('cat-comb')));
+  fireEvent.press(ver('presupuestable-false'));
+  fireEvent.press(ver(tipo ? 'cuenta-efectivo' : `cuenta-${TARJETA}`));
 }
 
 async function elegirQuien(nombre: string) {
-  fireEvent.press(screen.getByTestId('reembolso-quien'));
-  await screen.findByTestId('selector-persona');
+  fireEvent.press(ver('reembolso-quien'));
+  await verPronto('selector-persona');
   await act(async () => fireEvent.press(await screen.findByLabelText(nombre)));
 }
 
 async function completarReembolso(nombre = 'Empresa SL', otra?: string) {
-  fireEvent.press(screen.getByTestId('reembolsable'));
-  await screen.findByTestId('reembolso');
+  fireEvent.press(ver('reembolsable'));
+  await verPronto('reembolso');
   await elegirQuien(nombre);
   if (otra) {
-    fireEvent.press(screen.getByTestId('reembolso-otra'));
-    fireEvent.changeText(screen.getByTestId('reembolso-importe'), otra);
-  } else fireEvent.press(screen.getByTestId('reembolso-todo'));
-  fireEvent.press(screen.getByTestId('reembolso-hecho'));
+    fireEvent.press(ver('reembolso-otra'));
+    fireEvent.changeText(ver('reembolso-importe'), otra);
+  } else fireEvent.press(ver('reembolso-todo'));
+  fireEvent.press(ver('reembolso-hecho'));
 }
 
 describe('C-03 · C1–C3 en el registro', () => {
   test('C1: «Mío, pero me lo reembolsan» es una respuesta más de «¿De quién?» en gastos; no en ingresos', async () => {
     await formulario(cliente());
-    expect(screen.getByTestId('reembolsable')).toBeTruthy();
+    expect(ver('reembolsable')).toBeTruthy();
     expect(screen.getByText('Mío, pero me lo reembolsan')).toBeTruthy();
     expect(marcado('reembolsable')).toBe(false);
-    expect(screen.getByTestId('solo-mio')).toBeTruthy();
-    expect(screen.getByTestId('repartir')).toBeTruthy();
-    expect(screen.getByTestId('origen-atribucion').props.children).toMatch(/^Sin indicar/);
+    expect(ver('solo-mio')).toBeTruthy();
+    expect(ver('repartir')).toBeTruthy();
+    expect(ver('origen-atribucion').props.children).toMatch(/^Sin indicar/);
     screen.unmount();
     envolver(<RegistroGastoScreen cliente={cliente()} nuevoId={nuevoId} ahora={AHORA} onCerrar={jest.fn()} tipo="INGRESO" onGastoCompartido={jest.fn()} />);
-    await screen.findByTestId('cuenta-efectivo');
+    await verPronto('cuenta-efectivo');
     expect(screen.queryByTestId('reembolsable')).toBeNull();
   });
 
   test('C2: nada marcado; «Hecho» deshabilitado hasta elegir quién y cuánto; textos fijos y sin previsión', async () => {
     await formulario(cliente());
-    fireEvent.press(screen.getByTestId('reembolsable'));
-    await screen.findByTestId('reembolso');
+    fireEvent.press(ver('reembolsable'));
+    await verPronto('reembolso');
     expect(screen.getByText('Quién te lo debe')).toBeTruthy();
     expect(screen.getByText('Cuánto te deben')).toBeTruthy();
-    expect(screen.getByTestId('reembolso-quien-valor').props.children).toBe('Elige persona o empresa');
+    expect(ver('reembolso-quien-valor').props.children).toBe('Elige persona o empresa');
     expect(marcado('reembolso-todo')).toBe(false);
     expect(marcado('reembolso-otra')).toBe(false);
     expect(screen.getByText('Todo · 60,00 €')).toBeTruthy();
     expect(screen.getByText(TEXTO_COMO_SE_REGISTRA('60.00'))).toBeTruthy();
-    expect(screen.getByTestId('reembolso-sin-prevision').props.children).toBe(TEXTO_SIN_PREVISION);
+    expect(ver('reembolso-sin-prevision').props.children).toBe(TEXTO_SIN_PREVISION);
     expect(deshabilitado('reembolso-hecho')).toBe(true);
-    expect(screen.getByTestId('reembolso-faltan').props.children).toBe('Falta: quién te lo debe y cuánto te deben.');
+    expect(ver('reembolso-faltan').props.children).toBe('Falta: quién te lo debe y cuánto te deben.');
     await elegirQuien('Empresa SL');
     expect(deshabilitado('reembolso-hecho')).toBe(true);
-    fireEvent.press(screen.getByTestId('reembolso-otra'));
-    fireEvent.changeText(screen.getByTestId('reembolso-importe'), '70');
+    fireEvent.press(ver('reembolso-otra'));
+    fireEvent.changeText(ver('reembolso-importe'), '70');
     expect(deshabilitado('reembolso-hecho')).toBe(true);
-    expect(screen.getByTestId('reembolso-faltan').props.children).toBe('Falta: una cantidad entre 0,01 € y 60,00 €.');
-    fireEvent.changeText(screen.getByTestId('reembolso-importe'), '40');
+    expect(ver('reembolso-faltan').props.children).toBe('Falta: una cantidad entre 0,01 € y 60,00 €.');
+    fireEvent.changeText(ver('reembolso-importe'), '40');
     expect(deshabilitado('reembolso-hecho')).toBeFalsy();
     expect(screen.queryByTestId('reembolso-faltan')).toBeNull();
   });
@@ -234,30 +236,30 @@ describe('C-03 · C1–C3 en el registro', () => {
     const c = cliente();
     await formulario(c);
     // Comercio del gasto: Repsol.
-    await act(async () => fireEvent.press(screen.getByTestId('campo-tercero')));
-    await act(async () => fireEvent.press(await screen.findByTestId('tercero-repsol')));
-    fireEvent.press(screen.getByTestId('reembolsable'));
-    fireEvent.press(await screen.findByTestId('reembolso-quien'));
-    await screen.findByTestId('selector-persona');
+    await actVer('campo-tercero', async () => fireEvent.press(ver('campo-tercero')));
+    await act(async () => fireEvent.press(await verPronto('tercero-repsol')));
+    fireEvent.press(ver('reembolsable'));
+    fireEvent.press(await verPronto('reembolso-quien'));
+    await verPronto('selector-persona');
     expect(await screen.findByLabelText('Empresa SL')).toBeTruthy();
     expect(screen.getByLabelText('Tania')).toBeTruthy();
     for (const x of ['Repsol', 'Ayuntamiento', 'Asociación X', 'Sin tipo', 'Empresa Vieja']) expect(screen.queryByLabelText(x)).toBeNull();
     expect(screen.getByText('Solo personas y empresas. Nunca el comercio de este gasto.')).toBeTruthy();
-    expect(within(screen.getByTestId('persona-empresa')).getByText('Empresa · 5 registros')).toBeTruthy();
-    expect(within(screen.getByTestId('persona-tania')).getByText('Persona · 9 registros')).toBeTruthy();
+    expect(within(ver('persona-empresa')).getByText('Empresa · 5 registros')).toBeTruthy();
+    expect(within(ver('persona-tania')).getByText('Persona · 9 registros')).toBeTruthy();
   });
 
   test('C2: alta de una empresa nueva desde «Quién te lo debe»', async () => {
     const c = cliente();
     await formulario(c);
-    fireEvent.press(screen.getByTestId('reembolsable'));
-    fireEvent.press(await screen.findByTestId('reembolso-quien'));
-    await screen.findByTestId('selector-persona');
-    fireEvent.changeText(screen.getByTestId('selector-persona-buscar'), 'Mi Empresa Nueva');
-    expect(screen.getByTestId('selector-persona-crear')).toBeTruthy();
-    await act(async () => fireEvent.press(screen.getByTestId('selector-persona-crear-empresa')));
+    fireEvent.press(ver('reembolsable'));
+    fireEvent.press(await verPronto('reembolso-quien'));
+    await verPronto('selector-persona');
+    fireEvent.changeText(ver('selector-persona-buscar'), 'Mi Empresa Nueva');
+    expect(ver('selector-persona-crear')).toBeTruthy();
+    await actVer('selector-persona-crear-empresa', async () => fireEvent.press(ver('selector-persona-crear-empresa')));
     expect((c.altaTercero as jest.Mock).mock.calls[0][0]).toMatchObject({ nombre: 'Mi Empresa Nueva', naturaleza: 'EMPRESA' });
-    expect(screen.getByTestId('reembolso-quien-valor').props.children).toBe('Mi Empresa Nueva');
+    expect(ver('reembolso-quien-valor').props.children).toBe('Mi Empresa Nueva');
   });
 
   test('C2→C3: vuelve al formulario con el resumen y se registra por la ruta C-03; éxito con el gasto y lo que te deben por separado', async () => {
@@ -267,22 +269,22 @@ describe('C-03 · C1–C3 en el registro', () => {
     expect(screen.queryByTestId('reembolso')).toBeNull();
     expect(marcado('reembolsable')).toBe(true);
     expect(marcado('solo-mio')).toBe(false);
-    expect(screen.getByTestId('reembolso-resumen')).toBeTruthy();
+    expect(ver('reembolso-resumen')).toBeTruthy();
     expect(screen.getByText('Te debe Empresa SL · 40,00 €')).toBeTruthy();
-    expect(screen.getByTestId('origen-atribucion').props.children).toBe('Decisión tuya: el gasto es 100 % tuyo y Empresa SL te lo debe.');
+    expect(ver('origen-atribucion').props.children).toBe('Decisión tuya: el gasto es 100 % tuyo y Empresa SL te lo debe.');
     expect(screen.queryByTestId('repartir')).toBeNull();
     expect(screen.queryByTestId('otra-persona')).toBeNull();
-    await act(async () => fireEvent.press(screen.getByTestId('registrar')));
-    await screen.findByTestId('registro-exito');
+    await actVer('registrar', async () => fireEvent.press(ver('registrar')));
+    await verPronto('registro-exito');
     expect(c.registrarGastoPagado).not.toHaveBeenCalled();
     const pl = (c.registrarGastoReembolsable as jest.Mock).mock.calls[0][0];
     expect(pl).toMatchObject({ importe: '60.00', cuenta_id: TARJETA, presupuestable: false, categoria: { estado: 'CATEGORIA', categoria_id: 'comb', magnitudes: [] },
       reembolso: { tercero_id: 'empresa', importe: '40.00' } });
     expect('atribucion' in pl).toBe(false);
-    expect(within(screen.getByTestId('exito-resultado')).getByText('Cuenta en tu Resultado')).toBeTruthy();
-    expect(within(screen.getByTestId('exito-resultado')).getByText('60,00 €')).toBeTruthy();
-    expect(within(screen.getByTestId('exito-te-debe-der-1')).getByText('Te debe Empresa SL')).toBeTruthy();
-    expect(within(screen.getByTestId('exito-te-debe-der-1')).getByText('40,00 €')).toBeTruthy();
+    expect(within(ver('exito-resultado')).getByText('Cuenta en tu Resultado')).toBeTruthy();
+    expect(within(ver('exito-resultado')).getByText('60,00 €')).toBeTruthy();
+    expect(within(ver('exito-te-debe-der-1')).getByText('Te debe Empresa SL')).toBeTruthy();
+    expect(within(ver('exito-te-debe-der-1')).getByText('40,00 €')).toBeTruthy();
     expect(screen.queryByText('Atribuido: solo tuyo.')).toBeNull();
   });
 
@@ -290,20 +292,20 @@ describe('C-03 · C1–C3 en el registro', () => {
     const c = cliente();
     await formulario(c);
     await completarReembolso();
-    fireEvent.press(screen.getByTestId('reembolso-resumen'));
-    expect(await screen.findByTestId('reembolso')).toBeTruthy();
+    fireEvent.press(ver('reembolso-resumen'));
+    expect(await verPronto('reembolso')).toBeTruthy();
     expect(marcado('reembolso-todo')).toBe(true);
-    expect(screen.getByTestId('reembolso-quien-valor').props.children).toBe('Empresa SL');
-    fireEvent.press(screen.getByTestId('reembolso-atras'));
-    fireEvent.press(screen.getByTestId('reembolso-quitar'));
+    expect(ver('reembolso-quien-valor').props.children).toBe('Empresa SL');
+    fireEvent.press(ver('reembolso-atras'));
+    fireEvent.press(ver('reembolso-quitar'));
     expect(screen.queryByTestId('reembolso-resumen')).toBeNull();
     expect(marcado('reembolsable')).toBe(false);
     await completarReembolso();
-    fireEvent.press(screen.getByTestId('solo-mio'));
+    fireEvent.press(ver('solo-mio'));
     expect(marcado('solo-mio')).toBe(true);
     expect(screen.queryByTestId('reembolso-resumen')).toBeNull();
-    await act(async () => fireEvent.press(screen.getByTestId('registrar')));
-    await screen.findByTestId('registro-exito');
+    await actVer('registrar', async () => fireEvent.press(ver('registrar')));
+    await verPronto('registro-exito');
     expect(c.registrarGastoReembolsable).not.toHaveBeenCalled();
     expect((c.registrarGastoPagado as jest.Mock).mock.calls[0][0].atribucion).toBe('SOLO_MIO');
   });
@@ -312,11 +314,11 @@ describe('C-03 · C1–C3 en el registro', () => {
     const c = cliente();
     await formulario(c);
     await completarReembolso('Empresa SL');
-    await act(async () => fireEvent.press(screen.getByTestId('campo-tercero')));
-    await act(async () => fireEvent.press(await screen.findByTestId('tercero-empresa')));
-    expect(screen.getByTestId('reembolso-error').props.children).toMatch(/no puede ser el comercio del gasto/);
-    expect(screen.getByTestId('registrar')).toBeDisabled();
-    expect(screen.getByTestId('faltan').props.children).toMatch(/revisar lo que te deben/);
+    await actVer('campo-tercero', async () => fireEvent.press(ver('campo-tercero')));
+    await act(async () => fireEvent.press(await verPronto('tercero-empresa')));
+    expect(ver('reembolso-error').props.children).toMatch(/no puede ser el comercio del gasto/);
+    expect(ver('registrar')).toBeDisabled();
+    expect(ver('faltan').props.children).toMatch(/revisar lo que te deben/);
   });
 
   test.each([
@@ -328,16 +330,16 @@ describe('C-03 · C1–C3 en el registro', () => {
     const c = cliente({ registrarGastoReembolsable: jest.fn(async () => ({ tipo: 'RECHAZADO', codigo, mensaje: 'texto técnico' })) as any });
     await formulario(c);
     await completarReembolso();
-    await act(async () => fireEvent.press(screen.getByTestId('registrar')));
+    await actVer('registrar', async () => fireEvent.press(ver('registrar')));
     expect(await screen.findByText(`No se ha registrado. ${texto}`)).toBeTruthy();
-    expect(screen.getByTestId('reembolso-resumen')).toBeTruthy();
+    expect(ver('reembolso-resumen')).toBeTruthy();
   });
 
   test('D1: C2 en oscuro, ya completado', async () => {
     await formulario(cliente(), undefined, 'dark');
     await completarReembolso();
-    fireEvent.press(screen.getByTestId('reembolso-resumen'));
-    await screen.findByTestId('reembolso');
+    fireEvent.press(ver('reembolso-resumen'));
+    await verPronto('reembolso');
     expect(plano()).toContain(colores.dark.background);
     expect(deshabilitado('reembolso-hecho')).toBeFalsy();
   });
@@ -358,7 +360,7 @@ const resultadoCobro = (id: string, pl: any, saldo: string) =>
 describe('C-03 · C4 «Pendiente con…»', () => {
   async function abrir(c: ClienteApi, entidadId: string | null) {
     envolver(<PendienteConScreen cliente={c} nuevoId={nuevoId} ahora={AHORA} terceroId="empresa" nombre="Empresa SL" entidadId={entidadId} onCerrar={jest.fn()} />);
-    await screen.findByTestId(entidadId ? 'posicion-acciones' : 'pendiente-lista-te-debe');
+    await verPronto(entidadId ? 'posicion-acciones' : 'pendiente-lista-te-debe');
   }
 
   test('dos derechos con la misma empresa: se abre el elegido y el cobro va solo a ese; «Registrar cobro» espera a la cuenta', async () => {
@@ -366,21 +368,21 @@ describe('C-03 · C4 «Pendiente con…»', () => {
     const c = cliente({ pendienteCon: jest.fn(async () => ({ tipo: 'OK', datos: EMPRESA }) as any), cobrarPosicion: cobrar as any });
     await abrir(c, 'der-2');
     expect(screen.getByText('Empresa SL te debe 40,00 €')).toBeTruthy();
-    fireEvent.press(screen.getByTestId('posicion-cobrar'));
-    await screen.findByTestId('accion-cobro');
-    expect(screen.getByTestId('accion-origen').props.children).toBe('Empresa SL · Pendiente de cobro · Combustible · te debe 40,00 €');
-    expect(screen.getByTestId('accion-explicacion').props.children).toBe(TEXTO_COBRO_NO_INGRESO);
-    expect(screen.getByTestId('accion-importe').props.value).toBe('40,00');
-    await screen.findByTestId(`accion-cuenta-${NOMINA}`);
+    fireEvent.press(ver('posicion-cobrar'));
+    await verPronto('accion-cobro');
+    expect(ver('accion-origen').props.children).toBe('Empresa SL · Pendiente de cobro · Combustible · te debe 40,00 €');
+    expect(ver('accion-explicacion').props.children).toBe(TEXTO_COBRO_NO_INGRESO);
+    expect(ver('accion-importe').props.value).toBe('40,00');
+    await verPronto(`accion-cuenta-${NOMINA}`);
     expect(marcado(`accion-cuenta-${NOMINA}`)).toBe(false);
-    expect(screen.getByTestId('accion-enviar')).toBeDisabled();
-    fireEvent.press(screen.getByTestId(`accion-cuenta-${NOMINA}`));
-    expect(screen.getByTestId('accion-enviar')).toBeEnabled();
-    await act(async () => fireEvent.press(screen.getByTestId('accion-enviar')));
+    expect(ver('accion-enviar')).toBeDisabled();
+    fireEvent.press(ver(`accion-cuenta-${NOMINA}`));
+    expect(ver('accion-enviar')).toBeEnabled();
+    await actVer('accion-enviar', async () => fireEvent.press(ver('accion-enviar')));
     expect(cobrar).toHaveBeenCalledTimes(1);
     expect(cobrar.mock.calls[0][0]).toBe('der-2');
     expect(cobrar.mock.calls[0][1]).toMatchObject({ importe: '40.00', cuenta_id: NOMINA, fecha: HOY });
-    expect(screen.getByTestId('posicion-exito-titulo').props.children).toBe('Saldado · no cuenta como ingreso');
+    expect(ver('posicion-exito-titulo').props.children).toBe('Saldado · no cuenta como ingreso');
   });
 
   test('cobro parcial: «Cobro registrado · quedan X €», nunca «Saldado»', async () => {
@@ -388,22 +390,22 @@ describe('C-03 · C4 «Pendiente con…»', () => {
       cobrarPosicion: jest.fn(async (id: string, pl: any) => resultadoCobro(id, pl, '20.00')) as any });
     await abrir(c, 'der-1');
     expect(screen.getByText('Empresa SL te debe 60,00 €')).toBeTruthy();
-    fireEvent.press(screen.getByTestId('posicion-cobrar'));
-    fireEvent.changeText(await screen.findByTestId('accion-importe'), '40');
-    fireEvent.press(await screen.findByTestId('accion-cuenta-efectivo'));
-    await act(async () => fireEvent.press(screen.getByTestId('accion-enviar')));
-    expect(screen.getByTestId('posicion-exito-titulo').props.children).toBe('Cobro registrado · quedan 20,00 €');
+    fireEvent.press(ver('posicion-cobrar'));
+    fireEvent.changeText(await verPronto('accion-importe'), '40');
+    fireEvent.press(await verPronto('accion-cuenta-efectivo'));
+    await actVer('accion-enviar', async () => fireEvent.press(ver('accion-enviar')));
+    expect(ver('posicion-exito-titulo').props.children).toBe('Cobro registrado · quedan 20,00 €');
     expect(plano()).not.toMatch(/Saldado/);
   });
 
   test('sin `entidadId` se ve la lista (comportamiento previo); un id que ya no está activo no abre nada', async () => {
     const c = cliente({ pendienteCon: jest.fn(async () => ({ tipo: 'OK', datos: EMPRESA }) as any) });
     await abrir(c, null);
-    expect(screen.getByTestId('posicion-der-1')).toBeTruthy();
-    expect(screen.getByTestId('posicion-der-2')).toBeTruthy();
+    expect(ver('posicion-der-1')).toBeTruthy();
+    expect(ver('posicion-der-2')).toBeTruthy();
     screen.unmount();
     envolver(<PendienteConScreen cliente={c} nuevoId={nuevoId} ahora={AHORA} terceroId="empresa" nombre="Empresa SL" entidadId="der-9" onCerrar={jest.fn()} />);
-    expect(await screen.findByTestId('pendiente-lista-te-debe')).toBeTruthy();
+    expect(await verPronto('pendiente-lista-te-debe')).toBeTruthy();
     expect(screen.queryByTestId('posicion-acciones')).toBeNull();
   });
 });
@@ -432,11 +434,11 @@ describe('C-03 · detalle del gasto y devolución', () => {
       repartoDeHecho: jest.fn(async () => ({ tipo: 'OK', datos: REPARTO }) as any),
     });
     envolver(<ActividadScreen cliente={c} ahora={AHORA} nuevoId={nuevoId} onCorregirReparto={jest.fn()} onPendienteCon={onPendiente} />);
-    fireEvent.press(await screen.findByTestId('fila-gasto'));
-    fireEvent.press(await screen.findByTestId('detalle-vinculada-der-1'));
+    fireEvent.press(await verPronto('fila-gasto'));
+    fireEvent.press(await verPronto('detalle-vinculada-der-1'));
     expect(onPendiente).toHaveBeenCalledWith({ terceroId: 'empresa', nombre: 'Empresa SL', entidadId: 'der-1' });
-    fireEvent.press(await screen.findByTestId('fila-gasto'));
-    await screen.findByTestId('detalle-vinculada-der-1');
+    fireEvent.press(await verPronto('fila-gasto'));
+    await verPronto('detalle-vinculada-der-1');
     expect(screen.queryByTestId('detalle-vinculada-der-0')).toBeNull(); // la saldada no se ofrece
     expect(screen.queryByTestId('detalle-corregir-reparto')).toBeNull();
     expect(screen.getAllByText('Pendiente con Empresa SL')).toHaveLength(1); // no se duplica

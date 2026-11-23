@@ -8,6 +8,7 @@
 // Versión: 0.3.0 (F05-05 K3 §3, mutante SE19): con fecha futura no se piden sugerencias ni salen chips (R7).
 // Versión: 0.2.0 (F05-05 K3 §3; casos 6, 7 y 29 de §49.9): con la plantilla aplicada las sugerencias no alteran su propuesta ni salen chips; con la preferencia de cuenta del tercero, elegir por chip o por árbol da la MISMA consulta de propuesta y el MISMO payload; cambio de tercero y de tipo; categoría que deja de ser elegible entre carga y confirmación; reintento con el mismo UUID.
 // Versión: 0.5.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
+// Versión: 0.6.0 (F06 T6 · S2 FORM-AGIL; F09 0.55 §12.107.1 puntos 1 y 2): los controles se buscan con `ver`/`verPronto` (form_agil.ts), que tocan antes la línea de «Se registrará así», «Más opciones» o «‹ Exprés» como haría el usuario. Mismas aserciones; las de ausencia siguen con queryByTestId.
 // ============================================================
 
 import './tiempos_rn';
@@ -22,6 +23,7 @@ import { textoMotivo, textoReciente, vistaSugeridas } from '../src/domain/senale
 import { ProveedorTema } from '../src/theme/tema';
 
 import { clienteCategoriasStub, nodo } from './fixtures_categorias';
+import { actVer, ver, verPronto } from './form_agil';
 
 const TARJETA = 'c0000000-0000-4000-8000-00000000000a';
 const AHORA = () => new Date(2026, 9, 10, 10, 0, 0);
@@ -86,12 +88,12 @@ async function montar(cliente: ClienteApi) {
       </ProveedorTema>
     </SafeAreaProvider>,
   );
-  await screen.findByTestId('accion-registrar');
+  await verPronto('accion-registrar');
   await act(async () => undefined);
 }
 
 async function pulsar(id: string) {
-  await act(async () => fireEvent.press(screen.getByTestId(id)));
+  await actVer(id, async () => fireEvent.press(ver(id)));
 }
 
 async function abrirGasto(c: ClienteApi) {
@@ -103,16 +105,16 @@ async function abrirGasto(c: ClienteApi) {
 
 async function elegirAldi() {
   await pulsar('campo-tercero');
-  await waitFor(() => expect(screen.getByTestId('tercero-ter-aldi')).toBeTruthy());
+  await waitFor(() => expect(ver('tercero-ter-aldi')).toBeTruthy());
   await pulsar('tercero-ter-aldi');
-  await waitFor(() => expect(screen.getByTestId('chip-sugerida-super')).toBeTruthy());
+  await waitFor(() => expect(ver('chip-sugerida-super')).toBeTruthy());
 }
 
 async function completarYRegistrar(c: ClienteApi) {
-  fireEvent.changeText(screen.getByTestId('campo-importe'), '48,72');
-  fireEvent.press(screen.getByTestId('presupuestable-true'));
-  await waitFor(() => expect(screen.getByTestId(`cuenta-${TARJETA}`)).toBeTruthy());
-  fireEvent.press(screen.getByTestId(`cuenta-${TARJETA}`));
+  fireEvent.changeText(ver('campo-importe'), '48,72');
+  fireEvent.press(ver('presupuestable-true'));
+  await waitFor(() => expect(ver(`cuenta-${TARJETA}`)).toBeTruthy());
+  fireEvent.press(ver(`cuenta-${TARJETA}`));
   await pulsar('registrar');
   await waitFor(() => expect(c.registrarGastoPagado).toHaveBeenCalledTimes(1));
   return (c.registrarGastoPagado as jest.Mock).mock.calls[0][0] as PayloadGastoPagado;
@@ -139,9 +141,9 @@ test('caso 1 / A1: «Sugeridas» con ruta y motivo encima del árbol; nada queda
   await abrirGasto(c);
   await elegirAldi();
   await pulsar('campo-categoria');
-  const fila = screen.getByTestId('sugerida-super');
+  const fila = ver('sugerida-super');
   expect(fila.props.accessibilityLabel).toBe('Supermercado. Alimentación › Supermercado. La guardaste para ALDI');
-  expect(screen.getByTestId('sugerida-drogueria').props.accessibilityLabel).toContain('Sueles usarla con ALDI');
+  expect(ver('sugerida-drogueria').props.accessibilityLabel).toContain('Sueles usarla con ALDI');
   expect(fila.props.accessibilityState.selected).toBe(false);
   expect(screen.getByText('Todas')).toBeTruthy();
   expect(c.senalesCategorias).toHaveBeenLastCalledWith({ tipo: 'GASTO', fecha: HOY, terceroId: 'ter-aldi' });
@@ -152,14 +154,14 @@ test('caso 21: chip sin tocar → «Elige categoría», estado PENDIENTE y «Reg
   const c = fake();
   await abrirGasto(c);
   await elegirAldi();
-  fireEvent.changeText(screen.getByTestId('campo-importe'), '48,72');
-  fireEvent.press(screen.getByTestId('presupuestable-true'));
-  fireEvent.press(screen.getByTestId(`cuenta-${TARJETA}`));
-  expect(screen.getByTestId('categoria-valor').props.children).toBe('Elige categoría');
-  expect(screen.getByTestId('chip-sugerida-super').props.accessibilityRole).toBe('button');
-  expect(screen.getByTestId('chips-texto').props.children).toBe('Sugeridas: Supermercado, la guardaste para ALDI; Droguería, sueles usarla con ALDI. Toca una para elegirla.');
-  expect(screen.getByTestId('registrar').props.accessibilityState.disabled).toBe(true);
-  expect(screen.getByTestId('faltan').props.children).toBe('Para registrar falta: categoría.');
+  fireEvent.changeText(ver('campo-importe'), '48,72');
+  fireEvent.press(ver('presupuestable-true'));
+  fireEvent.press(ver(`cuenta-${TARJETA}`));
+  expect(ver('categoria-valor').props.children).toBe('Elige categoría');
+  expect(ver('chip-sugerida-super').props.accessibilityRole).toBe('button');
+  expect(ver('chips-texto').props.children).toBe('Sugeridas: Supermercado, la guardaste para ALDI; Droguería, sueles usarla con ALDI. Toca una para elegirla.');
+  expect(ver('registrar').props.accessibilityState.disabled).toBe(true);
+  expect(ver('faltan').props.children).toBe('Para registrar falta: categoría.');
   expect(screen.queryByTestId('origen-categoria-usuario')).toBeNull();
 });
 
@@ -183,8 +185,8 @@ test.each(['chip', 'sugerida', 'arbol'] as const)('caso 3 / R1: elegir por %s se
   await abrirGasto(c);
   await elegirAldi();
   await elegirPor(via);
-  expect(screen.getByTestId('categoria-valor').props.children).toBe('Supermercado');
-  expect(screen.getByTestId('origen-categoria-usuario').props.children).toBe('Elegida por ti.');
+  expect(ver('categoria-valor').props.children).toBe('Supermercado');
+  expect(ver('origen-categoria-usuario').props.children).toBe('Elegida por ti.');
   expect(screen.queryByTestId('chips-sugeridas')).toBeNull();
   const p = await completarYRegistrar(c);
   expect(p.categoria).toEqual(SELLADA);
@@ -196,18 +198,18 @@ test('caso 8 / A2: «super» y «súper» encuentran Supermercado con su ruta; l
   await abrirGasto(c);
   await pulsar('campo-categoria');
   for (const q of ['super', 'súper', 'SUPER']) {
-    fireEvent.changeText(screen.getByTestId('selector-busqueda'), q);
-    expect(screen.getByTestId('resultado-super').props.accessibilityLabel).toBe('Supermercado. Alimentación › Supermercado');
+    fireEvent.changeText(ver('selector-busqueda'), q);
+    expect(ver('resultado-super').props.accessibilityLabel).toBe('Supermercado. Alimentación › Supermercado');
   }
   const ingreso = screen.queryByTestId('resultado-superavit');
   if (ingreso) {
     expect(ingreso.props.accessibilityState.disabled).toBe(true);
     await act(async () => fireEvent.press(ingreso));
-    expect(screen.getByTestId('selector-categorias')).toBeTruthy(); // no se eligió
+    expect(ver('selector-categorias')).toBeTruthy(); // no se eligió
   }
-  expect(screen.getByTestId('selector-busqueda-nota').props.children).toBe('Sin distinguir mayúsculas ni acentos.');
+  expect(ver('selector-busqueda-nota').props.children).toBe('Sin distinguir mayúsculas ni acentos.');
   await pulsar('resultado-super');
-  expect(screen.getByTestId('categoria-valor').props.children).toBe('Supermercado');
+  expect(ver('categoria-valor').props.children).toBe('Supermercado');
 });
 
 // ------------------------------------------------------------------ A5 · «Recordar» (caso 10)
@@ -218,14 +220,14 @@ test('caso 10 / A5: «Recordar» con el par no guardado; doble toque = una sola 
   await elegirAldi();
   await pulsar('chip-sugerida-super');
   await completarYRegistrar(c);
-  await waitFor(() => expect(screen.getByTestId('recordar-afinidad')).toBeTruthy());
+  await waitFor(() => expect(ver('recordar-afinidad')).toBeTruthy());
   expect(screen.getByText('¿Recordar Supermercado para ALDI?')).toBeTruthy();
   expect(screen.getByText('Se sugerirá primero cuando elijas ALDI. Nunca se elegirá sola.')).toBeTruthy();
   await pulsar('recordar');
   await pulsar('recordar');
   expect(c.altaAfinidad).toHaveBeenCalledTimes(1);
   await act(async () => resolver(undefined));
-  await waitFor(() => expect(screen.getByTestId('recordar-hecho')).toBeTruthy());
+  await waitFor(() => expect(ver('recordar-hecho')).toBeTruthy());
   const llamada = (c.altaAfinidad as jest.Mock).mock.calls[0][0];
   expect(llamada).toEqual({ id: expect.any(String), tercero_id: 'ter-aldi', categoria_id: 'super' });
 });
@@ -236,14 +238,14 @@ test('caso 10: un fallo de «Recordar» no afecta al hecho; el reintento usa el 
   await elegirAldi();
   await pulsar('chip-sugerida-super');
   await completarYRegistrar(c);
-  await waitFor(() => expect(screen.getByTestId('recordar')).toBeTruthy());
+  await waitFor(() => expect(ver('recordar')).toBeTruthy());
   await pulsar('recordar');
-  await waitFor(() => expect(screen.getByTestId('recordar-error')).toBeTruthy());
+  await waitFor(() => expect(ver('recordar-error')).toBeTruthy());
   await pulsar('recordar');
   const ids = (c.altaAfinidad as jest.Mock).mock.calls.map((x) => x[0].id);
   expect(ids).toHaveLength(2);
   expect(ids[0]).toBe(ids[1]);
-  expect(screen.getByTestId('registro-exito')).toBeTruthy();
+  expect(ver('registro-exito')).toBeTruthy();
   expect(c.registrarGastoPagado).toHaveBeenCalledTimes(1);
 });
 
@@ -263,11 +265,11 @@ test('A3: «Recientes» con su motivo y «Todos · N terceros»', async () => {
   const c = fake();
   await abrirGasto(c);
   await pulsar('campo-tercero');
-  await waitFor(() => expect(screen.getByTestId('terceros-recientes')).toBeTruthy());
+  await waitFor(() => expect(ver('terceros-recientes')).toBeTruthy());
   expect(c.senalesTerceros).toHaveBeenCalledWith('GASTO', HOY);
-  expect(screen.getByTestId('reciente-ter-aldi').props.accessibilityLabel).toBe('ALDI. Usado hace 2 días');
-  expect(screen.getByTestId('reciente-ter-iber').props.accessibilityLabel).toBe('Iberdrola. Frecuente en tus gastos');
-  expect(screen.getByTestId('terceros-todos').props.children).toBe('Todos · 1 tercero');
+  expect(ver('reciente-ter-aldi').props.accessibilityLabel).toBe('ALDI. Usado hace 2 días');
+  expect(ver('reciente-ter-iber').props.accessibilityLabel).toBe('Iberdrola. Frecuente en tus gastos');
+  expect(ver('terceros-todos').props.children).toBe('Todos · 1 tercero');
 });
 
 test('caso 34 / A4 / A8: búsqueda en el servidor desde 2 caracteres; homónimos por naturaleza y uso; inactivo con «Reactivar»', async () => {
@@ -285,20 +287,20 @@ test('caso 34 / A4 / A8: búsqueda en el servidor desde 2 caracteres; homónimos
     c.reactivarTercero = jest.fn(async (id: string, rv: number) => ({ tipo: 'OK', datos: { tercero: { id, nombre: 'Talleres García S.L.', naturaleza: 'EMPRESA', enabled: true, row_version: rv + 1 }, idempotente: false, modificadas: [id] } })) as any;
     await abrirGasto(c);
     await pulsar('campo-tercero');
-    fireEvent.changeText(screen.getByTestId('tercero-filtro'), 'g');
+    fireEvent.changeText(ver('tercero-filtro'), 'g');
     await esperar(400);
     expect(c.buscarTerceros).not.toHaveBeenCalled(); // menos de 2 caracteres: filtro local
-    fireEvent.changeText(screen.getByTestId('tercero-filtro'), 'garcía');
+    fireEvent.changeText(ver('tercero-filtro'), 'garcía');
     await esperar(400);
     await waitFor(() => expect(c.buscarTerceros).toHaveBeenCalledWith('garcía', true));
-    await waitFor(() => expect(screen.getByTestId('tercero-ana1')).toBeTruthy());
-    expect(screen.getByTestId('tercero-ana1').props.accessibilityLabel).toBe('Ana García. Persona · 466 registros · último 10 oct');
-    expect(screen.getByTestId('tercero-ana2').props.accessibilityLabel).toBe('Ana García. Persona · 280 registros · último 2 sep');
-    expect(screen.getByTestId('tercero-inactivo-tall')).toBeTruthy();
-    expect(screen.getByTestId('texto-inactivo-busqueda')).toBeTruthy();
+    await waitFor(() => expect(ver('tercero-ana1')).toBeTruthy());
+    expect(ver('tercero-ana1').props.accessibilityLabel).toBe('Ana García. Persona · 466 registros · último 10 oct');
+    expect(ver('tercero-ana2').props.accessibilityLabel).toBe('Ana García. Persona · 280 registros · último 2 sep');
+    expect(ver('tercero-inactivo-tall')).toBeTruthy();
+    expect(ver('texto-inactivo-busqueda')).toBeTruthy();
     await pulsar('reactivar-tall');
     expect(c.reactivarTercero).toHaveBeenCalledWith('tall', 3);
-    await waitFor(() => expect(screen.getByTestId('tercero-valor').props.children).toBe('Talleres García S.L.'));
+    await waitFor(() => expect(ver('tercero-valor').props.children).toBe('Talleres García S.L.'));
   }
 });
 
@@ -319,7 +321,7 @@ function conDosCuentas(c: ClienteApi) {
   return c;
 }
 
-const seleccionada = (id: string) => screen.getByTestId(id).props.accessibilityState?.checked === true;
+const seleccionada = (id: string) => ver(id).props.accessibilityState?.checked === true;
 const enviados = (c: ClienteApi) => (c.registrarGastoPagado as jest.Mock).mock.calls.map((x) => x[0] as PayloadGastoPagado);
 const sinId = (p: PayloadGastoPagado) => ({ ...p, intencion_id: '' });
 
@@ -332,18 +334,18 @@ test('caso 6 / 29: con la plantilla aplicada, las sugerencias no alteran su prop
     : SIN_CAMPOS } })) as any;
   await montar(c);
   await pulsar('acceso-a1');
-  await screen.findByTestId('chip-plantilla');
-  await waitFor(() => expect(screen.getByTestId('categoria-valor').props.children).toBe('Supermercado'));
+  await verPronto('chip-plantilla');
+  await waitFor(() => expect(ver('categoria-valor').props.children).toBe('Supermercado'));
   await waitFor(() => expect(c.senalesCategorias).toHaveBeenLastCalledWith({ tipo: 'GASTO', fecha: HOY, terceroId: 'ter-aldi' }));
   await act(async () => undefined);
-  expect(screen.getByTestId('origen-categoria').props.children).toBe('De tu plantilla Súper semanal.');
-  expect(screen.getByTestId('origen-cuenta').props.children).toBe('De tu plantilla Súper semanal.');
+  expect(ver('origen-categoria').props.children).toBe('De tu plantilla Súper semanal.');
+  expect(ver('origen-cuenta').props.children).toBe('De tu plantilla Súper semanal.');
   expect(screen.queryByTestId('chips-sugeridas')).toBeNull(); // la categoría no está pendiente
   for (const [q] of (c.propuestaRegistro as jest.Mock).mock.calls) {
     expect(Object.keys(q).some((k) => /senal|suger|candidat/i.test(k))).toBe(false); // las señales no viajan al resolver
   }
-  fireEvent.changeText(screen.getByTestId('campo-importe'), '48,72');
-  fireEvent.press(screen.getByTestId('presupuestable-true'));
+  fireEvent.changeText(ver('campo-importe'), '48,72');
+  fireEvent.press(ver('presupuestable-true'));
   await pulsar('registrar');
   await waitFor(() => expect(c.registrarGastoPagado).toHaveBeenCalledTimes(1));
   const p = enviados(c)[0];
@@ -368,8 +370,8 @@ test.each(['chip', 'arbol'] as const)('caso 7 / 29: preferencia de cuenta del te
   await elegirPor(via);
   await act(async () => undefined);
   expect(seleccionada(`cuenta-${EFECTIVO}`)).toBe(true); // la señal no toca la cuenta propuesta
-  fireEvent.changeText(screen.getByTestId('campo-importe'), '48,72');
-  fireEvent.press(screen.getByTestId('presupuestable-true'));
+  fireEvent.changeText(ver('campo-importe'), '48,72');
+  fireEvent.press(ver('presupuestable-true'));
   await pulsar('registrar');
   await waitFor(() => expect(c.registrarGastoPagado).toHaveBeenCalledTimes(1));
   const llamadas = (c.propuestaRegistro as jest.Mock).mock.calls;
@@ -392,12 +394,12 @@ test('caso 29: cambio de tercero → nuevas sugerencias, la categoría sigue PEN
   await abrirGasto(c);
   await elegirAldi();
   await pulsar('campo-tercero');
-  await waitFor(() => expect(screen.getByTestId('tercero-ter-otro')).toBeTruthy());
+  await waitFor(() => expect(ver('tercero-ter-otro')).toBeTruthy());
   await pulsar('tercero-ter-otro');
   await waitFor(() => expect(c.senalesCategorias).toHaveBeenLastCalledWith({ tipo: 'GASTO', fecha: HOY, terceroId: 'ter-otro' }));
   await waitFor(() => expect(screen.queryByTestId('chip-sugerida-super')).toBeNull());
-  expect(screen.getByTestId('chip-sugerida-drogueria')).toBeTruthy();
-  expect(screen.getByTestId('categoria-valor').props.children).toBe('Elige categoría');
+  expect(ver('chip-sugerida-drogueria')).toBeTruthy();
+  expect(ver('categoria-valor').props.children).toBe('Elige categoría');
   await pulsar('chip-sugerida-drogueria');
   const p = await completarYRegistrar(c);
   expect(p.categoria).toEqual({ estado: 'CATEGORIA', categoria_id: 'drogueria', magnitudes: [] });
@@ -407,7 +409,7 @@ test('caso 29: cambio de tercero → nuevas sugerencias, la categoría sigue PEN
 test('caso 29: cambio de tipo antes del envío → las sugerencias se piden para el nuevo tipo y ninguna incompatible sale como chip', async () => {
   const c = fake();
   await abrirGasto(c);
-  await waitFor(() => expect(screen.getByTestId('chip-sugerida-drogueria')).toBeTruthy());
+  await waitFor(() => expect(ver('chip-sugerida-drogueria')).toBeTruthy());
   await pulsar('cambiar-tipo');
   await pulsar('tipo-INGRESO');
   await waitFor(() => expect(c.senalesCategorias).toHaveBeenLastCalledWith(expect.objectContaining({ tipo: 'INGRESO' })));
@@ -423,10 +425,10 @@ test('caso 29: la categoría deja de ser elegible entre la carga y la confirmaci
   await pulsar('chip-sugerida-super');
   const p = await completarYRegistrar(c);
   expect(p.categoria).toEqual(SELLADA);
-  expect(await screen.findByTestId('categoria-invalida')).toBeTruthy();
+  expect(await verPronto('categoria-invalida')).toBeTruthy();
   await act(async () => undefined);
   expect(c.registrarGastoPagado).toHaveBeenCalledTimes(1);
-  expect(screen.getByTestId('categoria-valor').props.children).toBe('Elige otra categoría');
+  expect(ver('categoria-valor').props.children).toBe('Elige otra categoría');
 });
 
 test('caso 29: reintento tras un resultado indeterminado → el MISMO UUID y la MISMA categoría elegida por chip', async () => {
@@ -437,9 +439,9 @@ test('caso 29: reintento tras un resultado indeterminado → el MISMO UUID y la 
   await elegirAldi();
   await pulsar('chip-sugerida-super');
   await completarYRegistrar(c);
-  await screen.findByTestId('estado-indeterminado');
+  await verPronto('estado-indeterminado');
   await pulsar('reintentar');
-  await screen.findByTestId('registro-exito');
+  await verPronto('registro-exito');
   const [a, b] = enviados(c);
   expect(b).toEqual(a);
   expect(b.categoria).toEqual(SELLADA);
@@ -448,10 +450,10 @@ test('caso 29: reintento tras un resultado indeterminado → el MISMO UUID y la 
 test('R7: con una fecha futura no se piden sugerencias ni salen chips', async () => {
   const c = fake();
   await abrirGasto(c);
-  await waitFor(() => expect(screen.getByTestId('chip-sugerida-drogueria')).toBeTruthy());
+  await waitFor(() => expect(ver('chip-sugerida-drogueria')).toBeTruthy());
   const antes = (c.senalesCategorias as jest.Mock).mock.calls.length;
   await pulsar('fecha-otra');
-  await act(async () => fireEvent.changeText(screen.getByTestId('campo-fecha'), '12/10/2026'));
+  await actVer('campo-fecha', async () => fireEvent.changeText(ver('campo-fecha'), '12/10/2026'));
   await act(async () => undefined);
   expect((c.senalesCategorias as jest.Mock).mock.calls.slice(antes).some(([q]) => q.fecha > HOY)).toBe(false);
   expect(screen.queryByTestId('chips-sugeridas')).toBeNull();
@@ -470,12 +472,12 @@ test('D-A6-1 (5): con tercero elegido, una candidata general nunca se atribuye a
   })) as any;
   await abrirGasto(c);
   await elegirAldi();
-  const texto: string = screen.getByTestId('chips-texto').props.children;
+  const texto: string = ver('chips-texto').props.children;
   expect(texto).toBe('Sugeridas: Supermercado, frecuente en tus gastos; Droguería, usada recientemente. Toca una para elegirla.');
   expect(texto).not.toMatch(/ALDI|guardaste|sueles/i);
   await pulsar('campo-categoria');
   for (const id of ['sugerida-super', 'sugerida-drogueria']) {
-    expect(screen.getByTestId(id).props.accessibilityLabel).not.toMatch(/ALDI|guardaste|sueles/i);
+    expect(ver(id).props.accessibilityLabel).not.toMatch(/ALDI|guardaste|sueles/i);
   }
   // Dominio: el mismo motivo general con o sin tercero.
   const v = vistaSugeridas({ tipo: 'GASTO', fecha: HOY, tercero_id: 'ter-aldi', candidatas: [cand('x', 'X', 'R', 'FRECUENTE_TIPO'), cand('y', 'Y', 'R', 'RECIENTE')] as any }, 'ALDI');

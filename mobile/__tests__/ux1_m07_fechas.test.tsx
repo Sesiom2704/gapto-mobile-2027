@@ -10,6 +10,7 @@
 //   En el registro de gasto (Raiz): cifras → barras; calendario; cambiar Hoy/Ayer/Otra y abrir/cerrar el calendario no
 //   borra el resto del formulario; medianoche civil (el «hoy» del calendario es el del dispositivo, `enZona`).
 // Versión: 0.1.0 (F06 T1 UX-1 · M-07)
+// Versión: 0.2.0 (F06 T6 · S2 FORM-AGIL; F09 0.55 §12.107.1 puntos 1 y 2): los controles se buscan con `ver`/`verPronto` (form_agil.ts), que tocan antes la línea de «Se registrará así», «Más opciones» o «‹ Exprés» como haría el usuario. Mismas aserciones; las de ausencia siguen con queryByTestId.
 // ============================================================
 
 import './tiempos_rn';
@@ -25,6 +26,7 @@ import { esFechaIso } from '../src/domain/intencion';
 import { ProveedorTema } from '../src/theme/tema';
 
 import { clienteCategoriasStub, nodo } from './fixtures_categorias';
+import { actVer, ver, verPronto } from './form_agil';
 
 const METRICAS = { frame: { x: 0, y: 0, width: 393, height: 852 }, insets: { top: 59, left: 0, right: 0, bottom: 34 } };
 
@@ -123,51 +125,51 @@ function Prueba(p: { max?: string; inicial?: string | null }) {
     </SafeAreaProvider>
   );
 }
-const pulsar = async (id: string) => act(async () => fireEvent.press(screen.getByTestId(id)));
+const pulsar = async (id: string) => actVer(id, async () => fireEvent.press(ver(id)));
 
 test('CampoFecha: escribir cifras pone las barras; un texto con barras se respeta', async () => {
   render(<Prueba />);
-  await act(async () => fireEvent.changeText(screen.getByTestId('f'), '25092026'));
-  expect(screen.getByTestId('f').props.value).toBe('25/09/2026');
-  await act(async () => fireEvent.changeText(screen.getByTestId('f'), '1/1/26'));
-  expect(screen.getByTestId('f').props.value).toBe('1/1/26');
-  expect(screen.getByTestId('f').props.inputMode).toBe('numeric');
+  await actVer('f', async () => fireEvent.changeText(ver('f'), '25092026'));
+  expect(ver('f').props.value).toBe('25/09/2026');
+  await actVer('f', async () => fireEvent.changeText(ver('f'), '1/1/26'));
+  expect(ver('f').props.value).toBe('1/1/26');
+  expect(ver('f').props.inputMode).toBe('numeric');
 });
 
 test('CampoFecha: calendario mensual: mes anterior/siguiente, elegir escribe dd/mm/aaaa y se cierra', async () => {
   render(<Prueba inicial="15/03/2025" />);
   await pulsar('f-calendario');
-  expect(screen.getByTestId('f-cal-mes').props.children).toBe('Marzo 2025');
+  expect(ver('f-cal-mes').props.children).toBe('Marzo 2025');
   await pulsar('f-cal-siguiente');
-  expect(screen.getByTestId('f-cal-mes').props.children).toBe('Abril 2025');
+  expect(ver('f-cal-mes').props.children).toBe('Abril 2025');
   await pulsar('f-cal-anterior');
   await pulsar('f-cal-anterior');
-  expect(screen.getByTestId('f-cal-mes').props.children).toBe('Febrero 2025');
+  expect(ver('f-cal-mes').props.children).toBe('Febrero 2025');
   expect(screen.queryByTestId('f-cal-2025-02-29')).toBeNull(); // 2025 no es bisiesto
   await pulsar('f-cal-2025-02-28');
-  expect(screen.getByTestId('f').props.value).toBe('28/02/2025');
+  expect(ver('f').props.value).toBe('28/02/2025');
   expect(screen.queryByTestId('f-cal')).toBeNull();
 });
 
 test('CampoFecha: con `max`, los días posteriores están deshabilitados y no se pueden elegir', async () => {
   render(<Prueba max="2026-11-12" inicial="" />);
   await pulsar('f-calendario');
-  expect(screen.getByTestId('f-cal-mes').props.children).toBe('Noviembre 2026');
-  expect(screen.getByTestId('f-cal-2026-11-13').props.accessibilityState.disabled).toBe(true);
-  expect(screen.getByTestId('f-cal-2026-11-12').props.accessibilityState.disabled).toBe(false);
+  expect(ver('f-cal-mes').props.children).toBe('Noviembre 2026');
+  expect(ver('f-cal-2026-11-13').props.accessibilityState.disabled).toBe(true);
+  expect(ver('f-cal-2026-11-12').props.accessibilityState.disabled).toBe(false);
   await pulsar('f-cal-2026-11-13');
-  expect(screen.getByTestId('f').props.value).toBe('');
+  expect(ver('f').props.value).toBe('');
   await pulsar('f-cal-2026-11-12');
-  expect(screen.getByTestId('f').props.value).toBe('12/11/2026');
+  expect(ver('f').props.value).toBe('12/11/2026');
 });
 
 test('CampoFecha: sin `max` (valoración, C-PROP-04) cualquier día del futuro se puede elegir', async () => {
   render(<Prueba inicial="" />);
   await pulsar('f-calendario');
   await pulsar('f-cal-siguiente');
-  expect(screen.getByTestId('f-cal-2026-12-31').props.accessibilityState.disabled).toBe(false);
+  expect(ver('f-cal-2026-12-31').props.accessibilityState.disabled).toBe(false);
   await pulsar('f-cal-2026-12-31');
-  expect(screen.getByTestId('f').props.value).toBe('31/12/2026');
+  expect(ver('f').props.value).toBe('31/12/2026');
 });
 
 test('CampoFecha: con «Hoy» (texto null) no hay campo ni calendario', async () => {
@@ -195,37 +197,37 @@ async function abrirRegistro(ahora: () => Date) {
       </ProveedorTema>
     </SafeAreaProvider>,
   );
-  await screen.findByTestId('accion-registrar');
+  await verPronto('accion-registrar');
   await pulsar('accion-registrar');
   await pulsar('tipo-GASTO');
 }
 
 test('registro: cifras → barras; Hoy/Ayer/Otra y abrir/cerrar el calendario no borran el resto del formulario', async () => {
   await abrirRegistro(() => new Date(2026, 10, 12, 10));
-  fireEvent.changeText(screen.getByTestId('campo-importe'), '12,50');
+  fireEvent.changeText(ver('campo-importe'), '12,50');
   await pulsar('fecha-otra');
-  await act(async () => fireEvent.changeText(screen.getByTestId('campo-fecha'), '03112026'));
-  expect(screen.getByTestId('campo-fecha').props.value).toBe('03/11/2026');
-  expect(screen.getByTestId('fecha').props.children).toBe('Mar, 3 nov 2026 · fecha del gasto y del pago');
+  await actVer('campo-fecha', async () => fireEvent.changeText(ver('campo-fecha'), '03112026'));
+  expect(ver('campo-fecha').props.value).toBe('03/11/2026');
+  expect(ver('fecha').props.children).toBe('Mar, 3 nov 2026 · fecha del gasto y del pago');
   await pulsar('campo-fecha-calendario');
-  expect(screen.getByTestId('campo-fecha-cal-mes').props.children).toBe('Noviembre 2026');
-  expect(screen.getByTestId('campo-fecha-cal-2026-11-13').props.accessibilityState.disabled).toBe(true); // ≤ hoy
+  expect(ver('campo-fecha-cal-mes').props.children).toBe('Noviembre 2026');
+  expect(ver('campo-fecha-cal-2026-11-13').props.accessibilityState.disabled).toBe(true); // ≤ hoy
   await pulsar('campo-fecha-calendario'); // cerrar
   expect(screen.queryByTestId('campo-fecha-cal')).toBeNull();
   await pulsar('campo-fecha-calendario');
   await pulsar('campo-fecha-cal-2026-11-05');
-  expect(screen.getByTestId('fecha').props.children).toBe('Jue, 5 nov 2026 · fecha del gasto y del pago');
+  expect(ver('fecha').props.children).toBe('Jue, 5 nov 2026 · fecha del gasto y del pago');
   await pulsar('fecha-ayer');
   await pulsar('fecha-hoy');
   await pulsar('fecha-otra');
-  expect(screen.getByTestId('campo-importe').props.value).toBe('12,50'); // nada se ha perdido
+  expect(ver('campo-importe').props.value).toBe('12,50'); // nada se ha perdido
 });
 
 test('registro: 31/02 sigue rechazándose con el mismo texto', async () => {
   await abrirRegistro(() => new Date(2026, 10, 12, 10));
   await pulsar('fecha-otra');
-  await act(async () => fireEvent.changeText(screen.getByTestId('campo-fecha'), '31022026'));
-  expect(screen.getByTestId('fecha').props.children).toBe('Escribe la fecha como dd/mm/aaaa.');
+  await actVer('campo-fecha', async () => fireEvent.changeText(ver('campo-fecha'), '31022026'));
+  expect(ver('fecha').props.children).toBe('Escribe la fecha como dd/mm/aaaa.');
 });
 
 test('medianoche civil: Europe/Madrid a las 00:30 (en UTC aún es ayer): el calendario deja elegir el día civil y no el siguiente', async () => {
@@ -233,6 +235,6 @@ test('medianoche civil: Europe/Madrid a las 00:30 (en UTC aún es ayer): el cale
   await abrirRegistro(ahora);
   await pulsar('fecha-otra');
   await pulsar('campo-fecha-calendario');
-  expect(screen.getByTestId('campo-fecha-cal-2026-11-06').props.accessibilityState.disabled).toBe(false);
-  expect(screen.getByTestId('campo-fecha-cal-2026-11-07').props.accessibilityState.disabled).toBe(true);
+  expect(ver('campo-fecha-cal-2026-11-06').props.accessibilityState.disabled).toBe(false);
+  expect(ver('campo-fecha-cal-2026-11-07').props.accessibilityState.disabled).toBe(true);
 });

@@ -10,6 +10,7 @@
 // Versión: 0.5.0 (F05-05 K3 §2.1; F05 §49.4 A1/A2/A3, D-SRCH-01..03; lámina SRCH-ACT-AFI A1, A2, A6, C2): sección «Sugeridas» (prop opcional `sugeridas`, hasta 3, con ruta y motivo) encima del árbol en la raíz; tocar una sugerida invoca el MISMO `onElegir` que el árbol (R1: misma intención) y solo se muestra si el nodo existe y es seleccionable (nada preseleccionado, C01). Búsqueda opcional (`buscar`) sobre todo el árbol con la normalización C06 (`normalizarNombre`: sin mayúsculas ni acentos): resultados con ruta en el orden del árbol (sin reordenar, I13c); lo no seleccionable se ve atenuado con su motivo y no se puede elegir. Imports nuevos declarados en I13a: TextInput, normalizarNombre y el tipo SugeridaCategoria.
 // Versión: 0.6.0 (F05-D051 paso 9.1 · G1 v2): prop opcional `traza` (solo la pasa el registro, y solo en `__DEV__`): `selector_nivel` {n: profundidad} al entrar en un nivel, `selector_miga` al volver por las migas, `selector_busqueda` al empezar a escribir, `selector_cerrado` y `categoria_elegida` {via: arbol | sugerida | busqueda | sin_categoria, n: niveles}. Sin la prop no se llama a nada; ningún import nuevo y la navegación, la elegibilidad y el orden no cambian.
 // Versión: 0.6.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
+// Versión: 0.7.0 (F06 T6 · S2, piezas comunes de S1 aplazadas por test_154 I13-A (DESVIACIONES T6-D-03); F09 0.55 §12.107.1 puntos 6 y 9): `BotonSecundario` se mueve a `Basicos.tsx` y se reexporta desde aquí, sin cambio visual ni de comportamiento; el selector cierra el teclado al abrirse (`useCerrarTecladoAlAbrir`, FA-04).
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -23,7 +24,8 @@ import type { SugeridaCategoria } from '../domain/senales';
 import { glifoDe } from '../theme/iconosCategoria';
 import { useTema } from '../theme/tema';
 import { espacio, radio, TACTIL_MIN, tipo } from '../theme/tokens';
-import { BotonPrimario, BotonTexto } from './Basicos';
+import { BotonPrimario, BotonSecundario, BotonTexto } from './Basicos';
+import { useCerrarTecladoAlAbrir } from './PantallaSelector';
 
 export type CargaArbol = { fase: 'CARGANDO' } | { fase: 'OK'; arbol: Arbol } | { fase: 'ERROR' };
 
@@ -73,6 +75,7 @@ export function SelectorCategorias(p: {
   traza?: (evento: string, extra?: { via?: string; n?: number }) => void;
 }) {
   const { c } = useTema();
+  useCerrarTecladoAlAbrir();
   const inset = useSafeAreaInsets();
   const [nivel, setNivel] = useState<string | null>(null);
   const [texto, setTexto] = useState('');
@@ -360,22 +363,8 @@ function FilaSelector(p: {
 }
 
 /** Botón de contorno (lámina R09): superficie primaria con borde, texto de acento. */
-export function BotonSecundario(p: { titulo: string; onPress: () => void; testID?: string; critico?: boolean }) {
-  const { c } = useTema();
-  return (
-    <Pressable
-      testID={p.testID}
-      accessibilityRole="button"
-      accessibilityLabel={p.titulo}
-      onPress={p.onPress}
-      style={({ pressed }) => [s.secundario, { borderColor: c.borderStandard, backgroundColor: c.surfacePrimary, opacity: pressed ? 0.85 : 1 }]}
-    >
-      <Text style={[tipo.bodyEmphasis, { color: p.critico ? c.criticalText : c.accentText }]}>{p.titulo}</Text>
-    </Pressable>
-  );
-}
-
-export { BotonPrimario };
+// F06 T6 · S2 (pieza común de S1): el botón secundario vive en Basicos.tsx; se reexporta para no cambiar los imports existentes.
+export { BotonPrimario, BotonSecundario };
 
 const s = StyleSheet.create({
   cab: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: espacio.l, paddingBottom: espacio.s, borderBottomWidth: StyleSheet.hairlineWidth },
@@ -390,5 +379,4 @@ const s = StyleSheet.create({
   elegida: { flexDirection: 'row', alignItems: 'center', gap: 2 },
   buscador: { flexDirection: 'row', alignItems: 'center', gap: espacio.s, paddingHorizontal: espacio.l, paddingTop: espacio.m },
   campoBusqueda: { flex: 1, minHeight: TACTIL_MIN, borderRadius: radio.m, paddingHorizontal: espacio.m },
-  secundario: { minHeight: 52, borderRadius: radio.m, borderWidth: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: espacio.l },
 });

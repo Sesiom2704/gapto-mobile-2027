@@ -2,8 +2,9 @@
 // GAPTO MOBILE 2027
 // Fichero: PantallaSelector.tsx
 // Ruta: mobile/src/components/PantallaSelector.tsx
-// Descripción: Marco común de los selectores (F06 T6 «UX ágil» S1; F09 0.55 §12.107.1 puntos 5 y 6, FA-01/DF-05, FA-04): pantalla completa sobre el fondo, título centrado y «Cerrar» arriba a la derecha, igual que el selector de Categoría (SelectorCategorias). Al abrirse cierra el teclado (`useCerrarTecladoAlAbrir`, que también usan los selectores a pantalla completa que ya existían: Magnitudes, Iconos y Persona del reparto; el de Categoría lo adopta en S2, ver DESVIACIONES T6-D-03), para que no quede abierto el del campo anterior. `CampoSelector` es el campo que lo abre (aspecto de «Tercero» en Registrar gasto). Solo presentación: el contenido, sus `testID`, filtros, altas y «Reactivar» son los de cada selector.
+// Descripción: Marco común de los selectores (F06 T6 «UX ágil» S1; F09 0.55 §12.107.1 puntos 5 y 6, FA-01/DF-05, FA-04): pantalla completa sobre el fondo, título centrado y «Cerrar» arriba a la derecha, igual que el selector de Categoría (SelectorCategorias). Al abrirse cierra el teclado (`useCerrarTecladoAlAbrir`, que también usan los selectores a pantalla completa que ya existían: Categoría (desde S2, T6-D-03), Magnitudes, Iconos y Persona del reparto), para que no quede abierto el del campo anterior. `CampoSelector` es el campo que lo abre (aspecto de «Tercero» en Registrar gasto). Solo presentación: el contenido, sus `testID`, filtros, altas y «Reactivar» son los de cada selector.
 // Versión: 0.1.0 (F06 T6 · S1 piezas comunes)
+// Versión: 0.1.1 (F06 T6 · S2): el selector de Categoría usa también `useCerrarTecladoAlAbrir`; solo cambia la descripción.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';

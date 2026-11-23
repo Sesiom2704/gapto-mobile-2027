@@ -12,6 +12,7 @@
 // Versión: 0.5.0 (F05-D052 paso 3 · lámina B, F05 §66.2, AJ-F0507G3-06): el texto es «Saldo inicial desconocido» (saldo con el que empezó el seguimiento, solo con `apertura_indeterminada`); C4: una pendiente con saldo desconocido ya no dice «Saldo inicial desconocido» (se derivaba de `saldo === null`).
 // Versión: 0.6.0 (F05-D052 paso 2 · R6, F05 §66.A.10): bloque «R6»: igualdad con alguna parte sin indicar (aviso propio y «Revisar» bloqueado), exceso (su error) y suma incompleta (admitida) distinguidos; rechazo del servidor con el código estable explicado con el texto propio.
 // Versión: 0.7.0 (F06 T1 UX-1 · M-08, Q-UX-04): en «Revisar» del gasto compartido, «Nueva obligación» → «Se lo tienes que devolver» y «Nuevo derecho de cobro» → «Te lo tiene que devolver»; aserción del título «Reparto» del bloque `revision-tu-parte` y de la maquetación de la fila de deuda (encoge: flexShrink 1, minWidth 0).
+// Versión: 0.8.0 (F06 T6 · S2 FORM-AGIL; F09 0.55 §12.107.1 puntos 1 y 2): los controles se buscan con `ver`/`verPronto` (form_agil.ts), que tocan antes la línea de «Se registrará así», «Más opciones» o «‹ Exprés» como haría el usuario. Mismas aserciones; las de ausencia siguen con queryByTestId.
 // ============================================================
 
 import './tiempos_rn';
@@ -55,6 +56,7 @@ import { ProveedorTema } from '../src/theme/tema';
 import { colores } from '../src/theme/tokens';
 
 import { clienteCategoriasStub } from './fixtures_categorias';
+import { ver, verPronto } from './form_agil';
 
 jest.mock('expo-font', () => ({ ...jest.requireActual('expo-font'), isLoaded: () => true }));
 
@@ -199,7 +201,7 @@ describe('dominio', () => {
 
 // ================================================================== A · peluquería
 async function elegirPersona(nombre: string) {
-  await screen.findByTestId('selector-persona');
+  await verPronto('selector-persona');
   fireEvent.press(await screen.findByLabelText(nombre));
 }
 
@@ -208,8 +210,8 @@ describe('A · pagado por otra persona', () => {
     const c = cliente();
     envolver(<GastoCompartidoScreen cliente={c} nuevoId={nuevoId} base={BASE_PELU} inicial={{ repartir: false, otraPersona: true }} onVolver={jest.fn()} onCerrar={jest.fn()} />);
     expect(await screen.findByText('Peluquería Lola')).toBeTruthy();
-    fireEvent.press(screen.getByTestId('pagador-persona'));
-    await screen.findByTestId('selector-persona');
+    fireEvent.press(ver('pagador-persona'));
+    await verPronto('selector-persona');
     expect(screen.getByText(TEXTO_SOLO_PERSONAS)).toBeTruthy();
     expect(screen.getByLabelText('Tania')).toBeTruthy();
     expect(screen.queryByTestId('persona-lola')).toBeNull(); // empresa
@@ -217,38 +219,38 @@ describe('A · pagado por otra persona', () => {
     fireEvent.press(screen.getByLabelText('Tania'));
     expect(await screen.findByText('¿Le debes este dinero a Tania?')).toBeTruthy();
     expect(screen.getByText('Sí, le debo 15,00 €')).toBeTruthy();
-    expect(screen.getByTestId('pagador-no-sale-dinero')).toBeTruthy();
-    expect(screen.getByTestId('compartido-revisar').props.accessibilityState?.disabled).toBe(true);
-    fireEvent.press(screen.getByTestId('le-debo-no-lo-se'));
-    expect(screen.getByTestId('le-debo-no-lo-se-texto')).toBeTruthy();
-    fireEvent.press(screen.getByTestId('compartido-revisar'));
-    expect(await screen.findByTestId('compartido-revision')).toBeTruthy();
+    expect(ver('pagador-no-sale-dinero')).toBeTruthy();
+    expect(ver('compartido-revisar').props.accessibilityState?.disabled).toBe(true);
+    fireEvent.press(ver('le-debo-no-lo-se'));
+    expect(ver('le-debo-no-lo-se-texto')).toBeTruthy();
+    fireEvent.press(ver('compartido-revisar'));
+    expect(await verPronto('compartido-revision')).toBeTruthy();
     expect(screen.getByText('Pagó Tania')).toBeTruthy();
-    expect(screen.getByTestId('revision-sin-deudas')).toBeTruthy();
+    expect(ver('revision-sin-deudas')).toBeTruthy();
   });
 
   test('A2: con «Sí», revisión en cuatro bloques y una sola llamada OP-22 con la obligación', async () => {
     const c = cliente();
     const onCerrar = jest.fn();
     envolver(<GastoCompartidoScreen cliente={c} nuevoId={nuevoId} base={BASE_PELU} inicial={{ repartir: false, otraPersona: true }} onVolver={jest.fn()} onCerrar={onCerrar} />);
-    fireEvent.press(await screen.findByTestId('pagador-persona'));
+    fireEvent.press(await verPronto('pagador-persona'));
     await elegirPersona('Tania');
-    fireEvent.press(await screen.findByTestId('le-debo-si'));
-    fireEvent.press(screen.getByTestId('compartido-revisar'));
-    for (const b of ['revision-gasto', 'revision-tu-parte', 'revision-dinero', 'revision-deudas']) expect(await screen.findByTestId(b)).toBeTruthy();
+    fireEvent.press(await verPronto('le-debo-si'));
+    fireEvent.press(ver('compartido-revisar'));
+    for (const b of ['revision-gasto', 'revision-tu-parte', 'revision-dinero', 'revision-deudas']) expect(await verPronto(b)).toBeTruthy();
     expect(screen.getByText('Le debes a Tania')).toBeTruthy();
     expect(screen.getByText('Se lo tienes que devolver')).toBeTruthy(); // UX-1 M-08 (Q-UX-04); antes «Nueva obligación»
     // UX-1 M-08: el bloque se titula «Reparto» (mismo testID) y la fila de la deuda encoge dentro de su fila (no se sale de la tarjeta).
-    expect(within(screen.getByTestId('revision-tu-parte')).getByText('Reparto')).toBeTruthy();
-    expect(within(screen.getByTestId('revision-tu-parte')).queryByText('Tu parte')).toBeNull();
-    expect(StyleSheet.flatten(screen.getByTestId('revision-deuda-LE_DEBES').props.style)).toMatchObject({ flexShrink: 1, minWidth: 0 });
-    expect(within(screen.getByTestId('revision-dinero')).getByText('No sale dinero de tus cuentas')).toBeTruthy();
-    fireEvent.press(screen.getByTestId('registrar-compartido'));
-    await screen.findByTestId('compartido-exito');
+    expect(within(ver('revision-tu-parte')).getByText('Reparto')).toBeTruthy();
+    expect(within(ver('revision-tu-parte')).queryByText('Tu parte')).toBeNull();
+    expect(StyleSheet.flatten(ver('revision-deuda-LE_DEBES').props.style)).toMatchObject({ flexShrink: 1, minWidth: 0 });
+    expect(within(ver('revision-dinero')).getByText('No sale dinero de tus cuentas')).toBeTruthy();
+    fireEvent.press(ver('registrar-compartido'));
+    await verPronto('compartido-exito');
     expect(c.registrarGastoCompartido).toHaveBeenCalledTimes(1);
     expect((c.registrarGastoCompartido as jest.Mock).mock.calls[0][0]).toMatchObject({ pagado_por: { tipo: 'PERSONA', tercero_id: 'tania', le_debo: 'SI' }, reparto: { modo: 'SOLO_MIO' } });
     expect(screen.getByText('No sale dinero de tus cuentas')).toBeTruthy();
-    fireEvent.press(screen.getByTestId('compartido-ver-pendiente-tania'));
+    fireEvent.press(ver('compartido-ver-pendiente-tania'));
     expect(onCerrar).toHaveBeenCalledWith(true, { terceroId: 'tania', nombre: 'Tania' });
   });
 
@@ -256,10 +258,10 @@ describe('A · pagado por otra persona', () => {
     const altaTercero = jest.fn(async (x: any) => ({ tipo: 'OK', datos: { tercero: { ...x, enabled: true, row_version: 1 }, idempotente: false, modificadas: [] } }) as any);
     const c = cliente({ altaTercero });
     envolver(<GastoCompartidoScreen cliente={c} nuevoId={nuevoId} base={BASE_PELU} inicial={{ repartir: false, otraPersona: true }} onVolver={jest.fn()} onCerrar={jest.fn()} />);
-    fireEvent.press(await screen.findByTestId('pagador-persona'));
-    await screen.findByTestId('selector-persona');
-    fireEvent.changeText(screen.getByTestId('selector-persona-buscar'), 'Marta');
-    fireEvent.press(screen.getByTestId('selector-persona-crear'));
+    fireEvent.press(await verPronto('pagador-persona'));
+    await verPronto('selector-persona');
+    fireEvent.changeText(ver('selector-persona-buscar'), 'Marta');
+    fireEvent.press(ver('selector-persona-crear'));
     expect(await screen.findByText('¿Le debes este dinero a Marta?')).toBeTruthy();
     expect(altaTercero).toHaveBeenCalledWith(expect.objectContaining({ nombre: 'Marta', naturaleza: 'PERSONA' }));
   });
@@ -268,9 +270,9 @@ describe('A · pagado por otra persona', () => {
     const onVolver = jest.fn();
     const onCerrar = jest.fn();
     envolver(<GastoCompartidoScreen cliente={cliente()} nuevoId={nuevoId} base={BASE_PELU} inicial={{ repartir: false, otraPersona: true }} onVolver={onVolver} onCerrar={onCerrar} />);
-    fireEvent.press(await screen.findByTestId('compartido-cambiar'));
+    fireEvent.press(await verPronto('compartido-cambiar'));
     expect(onVolver).toHaveBeenCalled();
-    fireEvent.press(screen.getByTestId('compartido-cancelar'));
+    fireEvent.press(ver('compartido-cancelar'));
     expect(onCerrar).toHaveBeenCalledWith(false);
   });
 });
@@ -278,11 +280,11 @@ describe('A · pagado por otra persona', () => {
 // ================================================================== B · cena
 async function cenaHastaReparto(c: ClienteApi, forzar?: 'dark', onCerrar: jest.Mock = jest.fn()) {
   envolver(<GastoCompartidoScreen cliente={c} nuevoId={nuevoId} base={BASE_CENA} inicial={{ repartir: true, otraPersona: false }} onVolver={jest.fn()} onCerrar={onCerrar} />, forzar);
-  await screen.findByTestId('compartido-reparto');
+  await verPronto('compartido-reparto');
   for (const nombre of ['Tania', 'Carlos']) {
-    fireEvent.press(screen.getByTestId('reparto-anadir'));
+    fireEvent.press(ver('reparto-anadir'));
     await elegirPersona(nombre);
-    await screen.findByTestId(`reparto-fila-${nombre.toLowerCase()}`);
+    await verPronto(`reparto-fila-${nombre.toLowerCase()}`);
   }
 }
 
@@ -320,36 +322,36 @@ describe('R6 · sin margen para una parte sin indicar', () => {
 
   test('pantalla: igualdad → aviso propio y «Revisar» bloqueado; exceso → «Supera el total» sin aviso R6; incompleta → sin aviso', async () => {
     await cenaHastaReparto(cliente());
-    fireEvent.changeText(screen.getByTestId('reparto-importe-yo'), '14,50');
-    fireEvent.changeText(screen.getByTestId('reparto-importe-tania'), '30');
-    expect(screen.getByTestId('reparto-sin-margen')).toBeTruthy();
+    fireEvent.changeText(ver('reparto-importe-yo'), '14,50');
+    fireEvent.changeText(ver('reparto-importe-tania'), '30');
+    expect(ver('reparto-sin-margen')).toBeTruthy();
     expect(screen.getByText(TEXTO_REPARTO_SIN_MARGEN)).toBeTruthy();
-    expect(screen.getByTestId('reparto-falta').props.children).toBe('0,00 €');
-    fireEvent.changeText(screen.getByTestId('reparto-importe-tania'), '31');
+    expect(ver('reparto-falta').props.children).toBe('0,00 €');
+    fireEvent.changeText(ver('reparto-importe-tania'), '31');
     expect(screen.queryByTestId('reparto-sin-margen')).toBeNull();
-    expect(screen.getByTestId('reparto-falta').props.children).toBe('Supera el total');
-    fireEvent.changeText(screen.getByTestId('reparto-importe-tania'), '15');
+    expect(ver('reparto-falta').props.children).toBe('Supera el total');
+    fireEvent.changeText(ver('reparto-importe-tania'), '15');
     expect(screen.queryByTestId('reparto-sin-margen')).toBeNull();
-    fireEvent.changeText(screen.getByTestId('reparto-importe-tania'), '30');
-    fireEvent.press(screen.getByTestId('reparto-listo'));
-    fireEvent.press(await screen.findByTestId('compartido-cuenta-bbva'));
-    expect(screen.getByTestId('compartido-revisar').props.accessibilityState?.disabled).toBe(true);
-    expect(screen.getByTestId('compartido-faltan').props.children).toBe(`Para revisar falta: ${FALTA_SIN_MARGEN}.`);
+    fireEvent.changeText(ver('reparto-importe-tania'), '30');
+    fireEvent.press(ver('reparto-listo'));
+    fireEvent.press(await verPronto('compartido-cuenta-bbva'));
+    expect(ver('compartido-revisar').props.accessibilityState?.disabled).toBe(true);
+    expect(ver('compartido-faltan').props.children).toBe(`Para revisar falta: ${FALTA_SIN_MARGEN}.`);
   });
 
   test('rechazo del servidor con el código estable: se explica con el texto propio, no con el mensaje libre', async () => {
     const c = cliente({ registrarGastoCompartido: jest.fn(async () => ({ tipo: 'RECHAZADO', codigo: CODIGO_SIN_MARGEN, mensaje: 'mensaje libre del servidor' })) as any });
     await cenaHastaReparto(c);
-    fireEvent.changeText(screen.getByTestId('reparto-importe-yo'), '14,50');
-    fireEvent.changeText(screen.getByTestId('reparto-importe-tania'), '15');
-    fireEvent.changeText(screen.getByTestId('reparto-importe-carlos'), '15');
-    fireEvent.press(screen.getByTestId('reparto-listo'));
-    fireEvent.press(await screen.findByTestId('compartido-cuenta-bbva'));
-    fireEvent.press(screen.getByTestId('compartido-revisar'));
-    fireEvent.press(await screen.findByTestId('te-debe-tania-si'));
-    fireEvent.press(screen.getByTestId('te-debe-carlos-no'));
-    fireEvent.press(screen.getByTestId('te-deben-revisar'));
-    await act(async () => fireEvent.press(await screen.findByTestId('registrar-compartido')));
+    fireEvent.changeText(ver('reparto-importe-yo'), '14,50');
+    fireEvent.changeText(ver('reparto-importe-tania'), '15');
+    fireEvent.changeText(ver('reparto-importe-carlos'), '15');
+    fireEvent.press(ver('reparto-listo'));
+    fireEvent.press(await verPronto('compartido-cuenta-bbva'));
+    fireEvent.press(ver('compartido-revisar'));
+    fireEvent.press(await verPronto('te-debe-tania-si'));
+    fireEvent.press(ver('te-debe-carlos-no'));
+    fireEvent.press(ver('te-deben-revisar'));
+    await act(async () => fireEvent.press(await verPronto('registrar-compartido')));
     expect(await screen.findByText(`No se ha registrado. ${TEXTO_REPARTO_SIN_MARGEN}`)).toBeTruthy();
     expect(screen.queryByText(/mensaje libre/)).toBeNull();
   });
@@ -358,59 +360,59 @@ describe('R6 · sin margen para una parte sin indicar', () => {
 describe('B · cena repartida', () => {
   test('B2: «A partes iguales» rellena a la vista con el céntimo en la última fila; el total no cambia', async () => {
     await cenaHastaReparto(cliente());
-    expect(screen.getByTestId('reparto-total').props.children).toBe('44,50 €');
-    expect(screen.getByTestId('reparto-falta').props.children).toBe('44,50 € · sin indicar');
-    fireEvent.press(screen.getByTestId('reparto-iguales'));
-    expect(screen.getByTestId('reparto-importe-yo').props.value).toBe('14,83');
-    expect(screen.getByTestId('reparto-importe-tania').props.value).toBe('14,83');
-    expect(screen.getByTestId('reparto-importe-carlos').props.value).toBe('14,84');
-    expect(screen.getByTestId('reparto-falta').props.children).toBe('0,00 €');
+    expect(ver('reparto-total').props.children).toBe('44,50 €');
+    expect(ver('reparto-falta').props.children).toBe('44,50 € · sin indicar');
+    fireEvent.press(ver('reparto-iguales'));
+    expect(ver('reparto-importe-yo').props.value).toBe('14,83');
+    expect(ver('reparto-importe-tania').props.value).toBe('14,83');
+    expect(ver('reparto-importe-carlos').props.value).toBe('14,84');
+    expect(ver('reparto-falta').props.children).toBe('0,00 €');
   });
 
   test('B1–B4: reparto, «¿Te deben su parte?» persona a persona, revisión y OP-22', async () => {
     const c = cliente();
     await cenaHastaReparto(c);
-    fireEvent.changeText(screen.getByTestId('reparto-importe-yo'), '14,50');
-    fireEvent.changeText(screen.getByTestId('reparto-importe-tania'), '15');
-    fireEvent.changeText(screen.getByTestId('reparto-importe-carlos'), '15');
-    fireEvent.press(screen.getByTestId('reparto-listo'));
+    fireEvent.changeText(ver('reparto-importe-yo'), '14,50');
+    fireEvent.changeText(ver('reparto-importe-tania'), '15');
+    fireEvent.changeText(ver('reparto-importe-carlos'), '15');
+    fireEvent.press(ver('reparto-listo'));
     expect(await screen.findByText('3 personas · tú 14,50 €')).toBeTruthy();
-    fireEvent.press(screen.getByTestId('compartido-cuenta-bbva'));
-    fireEvent.press(screen.getByTestId('compartido-revisar'));
-    expect(await screen.findByTestId('compartido-te-deben')).toBeTruthy();
-    expect(screen.getByTestId('te-deben-revisar').props.accessibilityState?.disabled).toBe(true);
-    fireEvent.press(screen.getByTestId('te-debe-tania-si'));
-    fireEvent.press(screen.getByTestId('te-debe-carlos-no'));
-    fireEvent.press(screen.getByTestId('te-deben-revisar'));
-    await screen.findByTestId('compartido-revision');
+    fireEvent.press(ver('compartido-cuenta-bbva'));
+    fireEvent.press(ver('compartido-revisar'));
+    expect(await verPronto('compartido-te-deben')).toBeTruthy();
+    expect(ver('te-deben-revisar').props.accessibilityState?.disabled).toBe(true);
+    fireEvent.press(ver('te-debe-tania-si'));
+    fireEvent.press(ver('te-debe-carlos-no'));
+    fireEvent.press(ver('te-deben-revisar'));
+    await verPronto('compartido-revision');
     expect(screen.getByText('−44,50 €')).toBeTruthy();
     expect(screen.getByText('Tania te debe')).toBeTruthy();
     expect(screen.getByText('Te lo tiene que devolver')).toBeTruthy(); // UX-1 M-08 (Q-UX-04); antes «Nuevo derecho de cobro»
     expect(screen.queryByText('Carlos te debe')).toBeNull();
-    fireEvent.press(screen.getByTestId('registrar-compartido'));
-    await screen.findByTestId('compartido-exito');
+    fireEvent.press(ver('registrar-compartido'));
+    await verPronto('compartido-exito');
     expect((c.registrarGastoCompartido as jest.Mock).mock.calls[0][0]).toMatchObject({
       pagado_por: { tipo: 'CUENTA', cuenta_id: 'bbva' },
       reparto: { modo: 'REPARTIR', mi_parte: '14.50', partes: [{ tercero_id: 'tania', importe: '15.00', me_debe: 'SI' }, { tercero_id: 'carlos', importe: '15.00', me_debe: 'NO' }] },
     });
-    expect(screen.getByTestId('compartido-exito-dinero').props.children).toBe('Movimiento real: −44,50 €');
+    expect(ver('compartido-exito-dinero').props.children).toBe('Movimiento real: −44,50 €');
   });
 
   // CORR-01 (R-M3-05): el éxito empareja cada posición por el tercero_id que fija el servidor, nunca por importe.
   async function cenaPartesIguales(c: ClienteApi, onCerrar: jest.Mock = jest.fn()) {
     await cenaHastaReparto(c, undefined, onCerrar);
-    fireEvent.changeText(screen.getByTestId('reparto-importe-yo'), '14,50');
-    fireEvent.changeText(screen.getByTestId('reparto-importe-tania'), '15');
-    fireEvent.changeText(screen.getByTestId('reparto-importe-carlos'), '15');
-    fireEvent.press(screen.getByTestId('reparto-listo'));
-    fireEvent.press(await screen.findByTestId('compartido-cuenta-bbva'));
-    fireEvent.press(screen.getByTestId('compartido-revisar'));
-    fireEvent.press(await screen.findByTestId('te-debe-tania-si'));
-    fireEvent.press(screen.getByTestId('te-debe-carlos-si'));
-    fireEvent.press(screen.getByTestId('te-deben-revisar'));
-    await screen.findByTestId('compartido-revision');
-    fireEvent.press(screen.getByTestId('registrar-compartido'));
-    await screen.findByTestId('compartido-exito');
+    fireEvent.changeText(ver('reparto-importe-yo'), '14,50');
+    fireEvent.changeText(ver('reparto-importe-tania'), '15');
+    fireEvent.changeText(ver('reparto-importe-carlos'), '15');
+    fireEvent.press(ver('reparto-listo'));
+    fireEvent.press(await verPronto('compartido-cuenta-bbva'));
+    fireEvent.press(ver('compartido-revisar'));
+    fireEvent.press(await verPronto('te-debe-tania-si'));
+    fireEvent.press(ver('te-debe-carlos-si'));
+    fireEvent.press(ver('te-deben-revisar'));
+    await verPronto('compartido-revision');
+    fireEvent.press(ver('registrar-compartido'));
+    await verPronto('compartido-exito');
   }
 
   test('CORR-01: dos personas con la misma parte; cada «Pendiente con» señala a su persona', async () => {
@@ -420,9 +422,9 @@ describe('B · cena repartida', () => {
     expect(screen.getAllByTestId('compartido-ver-pendiente-carlos')).toHaveLength(1);
     expect(screen.getByText('Pendiente con Tania')).toBeTruthy();
     expect(screen.getByText('Pendiente con Carlos')).toBeTruthy();
-    fireEvent.press(screen.getByTestId('compartido-ver-pendiente-carlos'));
+    fireEvent.press(ver('compartido-ver-pendiente-carlos'));
     expect(onCerrar).toHaveBeenLastCalledWith(true, { terceroId: 'carlos', nombre: 'Carlos' });
-    fireEvent.press(screen.getByTestId('compartido-ver-pendiente-tania'));
+    fireEvent.press(ver('compartido-ver-pendiente-tania'));
     expect(onCerrar).toHaveBeenLastCalledWith(true, { terceroId: 'tania', nombre: 'Tania' });
   });
 
@@ -435,19 +437,19 @@ describe('B · cena repartida', () => {
         { entidad_id: 'pos-t', tipo: 'DERECHO_COBRO', tercero_id: 'tania', importe: '15.00' }],
       aviso: '' } }) as any);
     await cenaPartesIguales(cliente({ registrarGastoCompartido }), onCerrar);
-    fireEvent.press(screen.getByTestId('compartido-ver-pendiente-carlos'));
+    fireEvent.press(ver('compartido-ver-pendiente-carlos'));
     expect(onCerrar).toHaveBeenLastCalledWith(true, { terceroId: 'carlos', nombre: 'Carlos' });
-    fireEvent.press(screen.getByTestId('compartido-ver-pendiente-tania'));
+    fireEvent.press(ver('compartido-ver-pendiente-tania'));
     expect(onCerrar).toHaveBeenLastCalledWith(true, { terceroId: 'tania', nombre: 'Tania' });
   });
 
   test('D1: en oscuro, reparto incompleto: la parte vacía queda sin indicar y no se completa sola', async () => {
     await cenaHastaReparto(cliente(), 'dark');
-    fireEvent.changeText(screen.getByTestId('reparto-importe-yo'), '14,50');
-    fireEvent.changeText(screen.getByTestId('reparto-importe-tania'), '15');
-    expect(screen.getByTestId('reparto-falta').props.children).toBe('15,00 € · sin indicar');
-    expect(screen.getByTestId('reparto-texto').props.children).toBe('La parte de Carlos queda sin indicar. No cuenta como tuya ni como suya.');
-    expect(screen.getByTestId('reparto-importe-carlos').props.value).toBe('');
+    fireEvent.changeText(ver('reparto-importe-yo'), '14,50');
+    fireEvent.changeText(ver('reparto-importe-tania'), '15');
+    expect(ver('reparto-falta').props.children).toBe('15,00 € · sin indicar');
+    expect(ver('reparto-texto').props.children).toBe('La parte de Carlos queda sin indicar. No cuenta como tuya ni como suya.');
+    expect(ver('reparto-importe-carlos').props.value).toBe('');
     expect(plano()).toContain(colores.dark.background);
   });
 
@@ -458,14 +460,14 @@ describe('B · cena repartida', () => {
       .mockImplementationOnce(async () => ({ tipo: 'RECHAZADO', codigo: 'CUENTA_SIN_CAPACIDAD', mensaje: 'Esa cuenta no permite pagar gastos.' }));
     const c = cliente({ registrarGastoCompartido: registrar as any });
     envolver(<GastoCompartidoScreen cliente={c} nuevoId={nuevoId} base={BASE_PELU} inicial={{ repartir: false, otraPersona: false }} onVolver={jest.fn()} onCerrar={jest.fn()} />);
-    fireEvent.press(await screen.findByTestId('compartido-cuenta-bbva'));
-    fireEvent.press(screen.getByTestId('compartido-revisar'));
-    fireEvent.press(await screen.findByTestId('registrar-compartido'));
-    fireEvent.press(screen.getByTestId('registrar-compartido'));
+    fireEvent.press(await verPronto('compartido-cuenta-bbva'));
+    fireEvent.press(ver('compartido-revisar'));
+    fireEvent.press(await verPronto('registrar-compartido'));
+    fireEvent.press(ver('registrar-compartido'));
     expect(registrar).toHaveBeenCalledTimes(1);
     await act(async () => resolver({ tipo: 'INDETERMINADO', mensaje: 'No se ha podido confirmar el registro. Puedes reintentar: no se duplicará.' }));
-    fireEvent.press(await screen.findByTestId('compartido-reintentar'));
-    await screen.findByTestId('compartido-error');
+    fireEvent.press(await verPronto('compartido-reintentar'));
+    await verPronto('compartido-error');
     expect(registrar.mock.calls[1][0].intencion_id).toBe(registrar.mock.calls[0][0].intencion_id);
     expect(screen.getByText(/Esa cuenta no permite pagar gastos\./)).toBeTruthy();
   });
@@ -489,11 +491,11 @@ function montarPendiente(c: ClienteApi, forzar?: 'dark') {
 describe('C · Pendiente con', () => {
   test('C1/D2: lo que te debe y lo que le debes por separado, con su origen; el neto no salda nada; sin «Compensar»', async () => {
     montarPendiente(cliente({ pendienteCon: jest.fn(async () => ({ tipo: 'OK', datos: PEND }) as any) }), 'dark');
-    expect(await screen.findByTestId('pendiente-lista-te-debe')).toBeTruthy();
-    expect(within(screen.getByTestId('pendiente-lista-te-debe')).getByText('Cena con amigos')).toBeTruthy();
-    expect(within(screen.getByTestId('pendiente-lista-le-debes')).getByText('Peluquería')).toBeTruthy();
-    expect(within(screen.getByTestId('pendiente-lista-le-debes')).getByText('Peluquería Lola · 3 oct')).toBeTruthy();
-    expect(screen.getByTestId('pendiente-neto').props.children).toMatch(/^Neto: 0,00 €\. Es un cálculo: no salda nada/);
+    expect(await verPronto('pendiente-lista-te-debe')).toBeTruthy();
+    expect(within(ver('pendiente-lista-te-debe')).getByText('Cena con amigos')).toBeTruthy();
+    expect(within(ver('pendiente-lista-le-debes')).getByText('Peluquería')).toBeTruthy();
+    expect(within(ver('pendiente-lista-le-debes')).getByText('Peluquería Lola · 3 oct')).toBeTruthy();
+    expect(ver('pendiente-neto').props.children).toMatch(/^Neto: 0,00 €\. Es un cálculo: no salda nada/);
     expect(plano()).not.toMatch(/Compensar/);
     expect(plano()).toContain(colores.dark.background);
   });
@@ -509,9 +511,9 @@ describe('C · Pendiente con', () => {
     const p: PendienteConPersona = { ...PEND, nombre: 'Carlos', te_debe: '40.00', le_debes: null, neto: null, neto_estado: 'INDETERMINADO',
       posiciones: [{ ...PEND.posiciones[1], saldo: null, origen_concepto: 'Préstamo viaje' }] };
     montarPendiente(cliente({ pendienteCon: jest.fn(async () => ({ tipo: 'OK', datos: p }) as any) }));
-    expect(await screen.findByTestId('pendiente-le-debes')).toBeTruthy();
-    expect(screen.getByTestId('pendiente-le-debes').props.children).toBe('Sin determinar');
-    expect(screen.getByTestId('pendiente-neto').props.children).toBe(TEXTO_NETO_SIN_DETERMINAR);
+    expect(await verPronto('pendiente-le-debes')).toBeTruthy();
+    expect(ver('pendiente-le-debes').props.children).toBe('Sin determinar');
+    expect(ver('pendiente-neto').props.children).toBe(TEXTO_NETO_SIN_DETERMINAR);
     // F05 §66.2: «Saldo inicial desconocido» solo con `apertura_indeterminada`; una pendiente con saldo desconocido
     // muestra su origen, no ese texto (antes se derivaba de `saldo === null`).
     expect(screen.queryByText('Saldo inicial desconocido')).toBeNull();
@@ -522,21 +524,21 @@ describe('C · Pendiente con', () => {
     const cobrar = jest.fn(async (_: string, pl: any) => resultadoPos(pl));
     const c = cliente({ pendienteCon: jest.fn(async () => ({ tipo: 'OK', datos: PEND }) as any), cobrarPosicion: cobrar as any });
     montarPendiente(c);
-    fireEvent.press(await screen.findByTestId('posicion-d1'));
-    expect(screen.getByTestId('posicion-perdonar')).toBeTruthy();
-    fireEvent.press(screen.getByTestId('posicion-cobrar'));
-    await screen.findByTestId('accion-cobro');
+    fireEvent.press(await verPronto('posicion-d1'));
+    expect(ver('posicion-perdonar')).toBeTruthy();
+    fireEvent.press(ver('posicion-cobrar'));
+    await verPronto('accion-cobro');
     expect(c.cuentasElegibles).toHaveBeenCalledWith('INGRESO', HOY);
-    expect(screen.getByTestId('accion-explicacion').props.children).toMatch(/^No es un ingreso/);
-    expect(screen.getByTestId('accion-enviar').props.accessibilityState?.disabled).toBe(true); // sin cuenta
-    fireEvent.changeText(screen.getByTestId('accion-importe'), '20');
-    fireEvent.press(await screen.findByTestId('accion-cuenta-efectivo'));
-    expect(screen.getByTestId('accion-faltan').props.children).toMatch(/no supere lo pendiente/);
-    fireEvent.changeText(screen.getByTestId('accion-importe'), '10');
-    fireEvent.press(screen.getByTestId('accion-enviar'));
-    await screen.findByTestId('posicion-exito');
+    expect(ver('accion-explicacion').props.children).toMatch(/^No es un ingreso/);
+    expect(ver('accion-enviar').props.accessibilityState?.disabled).toBe(true); // sin cuenta
+    fireEvent.changeText(ver('accion-importe'), '20');
+    fireEvent.press(await verPronto('accion-cuenta-efectivo'));
+    expect(ver('accion-faltan').props.children).toMatch(/no supere lo pendiente/);
+    fireEvent.changeText(ver('accion-importe'), '10');
+    fireEvent.press(ver('accion-enviar'));
+    await verPronto('posicion-exito');
     expect(cobrar).toHaveBeenCalledWith('d1', expect.objectContaining({ importe: '10.00', cuenta_id: 'efectivo', fecha: HOY }));
-    expect(screen.getByTestId('posicion-exito-saldo').props.children).toBe('Sigue pendiente: 5,00 €');
+    expect(ver('posicion-exito-saldo').props.children).toBe('Sigue pendiente: 5,00 €');
   });
 
   test('E8: pago de una obligación solo con tus cuentas, sin «Lo pagó otra persona»; INDETERMINADO reintenta la MISMA identidad', async () => {
@@ -544,39 +546,39 @@ describe('C · Pendiente con', () => {
       .mockImplementationOnce(async (_: string, pl: any) => resultadoPos(pl, '0.00'));
     const c = cliente({ pendienteCon: jest.fn(async () => ({ tipo: 'OK', datos: PEND }) as any), pagarPosicion: pagar as any });
     montarPendiente(c);
-    fireEvent.press(await screen.findByTestId('posicion-o1'));
-    fireEvent.press(screen.getByTestId('posicion-pagar'));
-    await screen.findByTestId('accion-pago');
+    fireEvent.press(await verPronto('posicion-o1'));
+    fireEvent.press(ver('posicion-pagar'));
+    await verPronto('accion-pago');
     expect(c.cuentasElegibles).toHaveBeenCalledWith('GASTO', HOY);
-    expect(screen.getByTestId('accion-sin-tercero').props.children).toBe(TEXTO_SIN_TERCERO_PAGA);
-    expect(screen.getByTestId('accion-explicacion').props.children).toMatch(/^No es un gasto nuevo/);
-    fireEvent.press(await screen.findByTestId('accion-cuenta-bbva'));
-    fireEvent.press(screen.getByTestId('accion-enviar'));
-    await screen.findByTestId('accion-indeterminado');
-    fireEvent.press(screen.getByTestId('accion-enviar'));
-    await screen.findByTestId('posicion-exito');
+    expect(ver('accion-sin-tercero').props.children).toBe(TEXTO_SIN_TERCERO_PAGA);
+    expect(ver('accion-explicacion').props.children).toMatch(/^No es un gasto nuevo/);
+    fireEvent.press(await verPronto('accion-cuenta-bbva'));
+    fireEvent.press(ver('accion-enviar'));
+    await verPronto('accion-indeterminado');
+    fireEvent.press(ver('accion-enviar'));
+    await verPronto('posicion-exito');
     expect(pagar.mock.calls[1][1].intencion_id).toBe(pagar.mock.calls[0][1].intencion_id);
-    expect(screen.getByTestId('posicion-exito-saldo').props.children).toBe('0,00 € · Saldado. Ya no queda nada pendiente.');
+    expect(ver('posicion-exito-saldo').props.children).toBe('0,00 € · Saldado. Ya no queda nada pendiente.');
   });
 
   test('perdonar no pide cuenta ni mueve dinero', async () => {
     const perdonar = jest.fn(async (_: string, pl: any) => resultadoPos(pl));
     const c = cliente({ pendienteCon: jest.fn(async () => ({ tipo: 'OK', datos: PEND }) as any), perdonarPosicion: perdonar as any });
     montarPendiente(c);
-    fireEvent.press(await screen.findByTestId('posicion-d1'));
-    fireEvent.press(screen.getByTestId('posicion-perdonar'));
-    await screen.findByTestId('accion-perdon');
+    fireEvent.press(await verPronto('posicion-d1'));
+    fireEvent.press(ver('posicion-perdonar'));
+    await verPronto('accion-perdon');
     expect(screen.queryByTestId('accion-cuenta-bbva')).toBeNull();
-    expect(screen.getByTestId('accion-explicacion').props.children).toMatch(/no mueve dinero/);
-    fireEvent.press(screen.getByTestId('accion-enviar'));
-    await screen.findByTestId('posicion-exito');
+    expect(ver('accion-explicacion').props.children).toMatch(/no mueve dinero/);
+    fireEvent.press(ver('accion-enviar'));
+    await verPronto('posicion-exito');
     expect(perdonar.mock.calls[0][1]).toEqual({ intencion_id: expect.any(String), importe: '15.00', fecha: HOY });
   });
 
   test('sin posiciones: «No tienes nada pendiente» y 0,00 €, no «Sin determinar»', async () => {
     montarPendiente(cliente());
-    expect(await screen.findByTestId('pendiente-nada')).toBeTruthy();
-    expect(screen.getByTestId('pendiente-le-debes').props.children).toBe('0,00 €');
+    expect(await verPronto('pendiente-nada')).toBeTruthy();
+    expect(ver('pendiente-le-debes').props.children).toBe('0,00 €');
   });
 });
 
@@ -597,35 +599,35 @@ function montarCorregir(c: ClienteApi, onCerrar = jest.fn()) {
 describe('E6 · Corregir reparto', () => {
   test('lo excluido por §57 se ve atenuado con su motivo; solo se editan importes', async () => {
     montarCorregir(cliente({ repartoDeHecho: jest.fn(async () => ({ tipo: 'OK', datos: REPARTO }) as any) }));
-    await screen.findByTestId('corregir-form');
+    await verPronto('corregir-form');
     for (const id of ['corregir-anadir', 'corregir-quitar-a-tania', 'corregir-quitar-a-carlos', 'corregir-deudor-a-invitado-a-tania', 'corregir-invitado-a-deudor-a-carlos', 'corregir-le-debo']) {
-      expect(screen.getByTestId(id).props.accessibilityState).toEqual({ disabled: true });
-      expect(screen.getByTestId(`${id}-motivo`).props.children).toMatch(/^(Todavía no|Si alguien|Para que)/);
+      expect(ver(id).props.accessibilityState).toEqual({ disabled: true });
+      expect(ver(`${id}-motivo`).props.children).toMatch(/^(Todavía no|Si alguien|Para que)/);
     }
     expect(screen.queryByTestId('corregir-quitar-a-yo')).toBeNull();
-    expect(screen.getByTestId('corregir-importe-a-yo').props.value).toBe('14,50');
+    expect(ver('corregir-importe-a-yo').props.value).toBe('14,50');
   });
 
   test('revisión de impacto: parte a parte, deuda que cambia y tu gasto; motivo obligatorio; envía solo lo cambiado', async () => {
     const corregir = jest.fn(async () => ({ tipo: 'OK', datos: { hecho_id: 'cena', row_version: 5, tu_parte: '9.50', posiciones: [], aviso: '' } }) as any);
     const c = cliente({ repartoDeHecho: jest.fn(async () => ({ tipo: 'OK', datos: REPARTO }) as any), corregirReparto: corregir });
     const onCerrar = montarCorregir(c);
-    await screen.findByTestId('corregir-form');
-    fireEvent.changeText(screen.getByTestId('corregir-importe-a-yo'), '9,50');
-    expect(screen.getByTestId('corregir-faltan').props.children).toMatch(/sumen lo mismo que antes \(44,50 €\)/);
-    fireEvent.changeText(screen.getByTestId('corregir-importe-a-tania'), '20');
-    fireEvent.press(screen.getByTestId('corregir-revisar'));
-    await screen.findByTestId('corregir-revision');
+    await verPronto('corregir-form');
+    fireEvent.changeText(ver('corregir-importe-a-yo'), '9,50');
+    expect(ver('corregir-faltan').props.children).toMatch(/sumen lo mismo que antes \(44,50 €\)/);
+    fireEvent.changeText(ver('corregir-importe-a-tania'), '20');
+    fireEvent.press(ver('corregir-revisar'));
+    await verPronto('corregir-revision');
     expect(screen.getByText('14,50 € → 9,50 €')).toBeTruthy();
     expect(screen.getByText('Lo que Tania te debe: 15,00 € → 20,00 €')).toBeTruthy();
-    expect(within(screen.getByTestId('corregir-impacto-tu-gasto')).getByText('−5,00 €')).toBeTruthy();
-    expect(screen.getByTestId('corregir-guardar').props.accessibilityState?.disabled).toBe(true);
-    fireEvent.press(screen.getByTestId('corregir-motivo-0'));
-    fireEvent.press(screen.getByTestId('corregir-guardar'));
-    await screen.findByTestId('corregir-exito');
+    expect(within(ver('corregir-impacto-tu-gasto')).getByText('−5,00 €')).toBeTruthy();
+    expect(ver('corregir-guardar').props.accessibilityState?.disabled).toBe(true);
+    fireEvent.press(ver('corregir-motivo-0'));
+    fireEvent.press(ver('corregir-guardar'));
+    await verPronto('corregir-exito');
     expect(corregir).toHaveBeenCalledWith('cena', { row_version: 4, motivo: 'Me equivoqué al repartir',
       partes: [{ atribucion_id: 'a-yo', importe: '9.50' }, { atribucion_id: 'a-tania', importe: '20.00' }] });
-    fireEvent.press(screen.getByTestId('corregir-hecho'));
+    fireEvent.press(ver('corregir-hecho'));
     expect(onCerrar).toHaveBeenCalledWith(true);
   });
 
@@ -636,33 +638,33 @@ describe('E6 · Corregir reparto', () => {
       .mockResolvedValueOnce({ tipo: 'RECHAZADO', codigo: 'VERSION_DESFASADA', mensaje: 'x' })
       .mockResolvedValueOnce({ tipo: 'INDETERMINADO', mensaje: 'No se ha podido confirmar el cambio. Vuelve a cargar antes de repetirlo.' });
     montarCorregir(cliente({ repartoDeHecho: leer, corregirReparto: corregir as any }));
-    await screen.findByTestId('corregir-form');
-    fireEvent.changeText(screen.getByTestId('corregir-importe-a-yo'), '9,50');
-    fireEvent.changeText(screen.getByTestId('corregir-importe-a-tania'), '20');
-    fireEvent.press(screen.getByTestId('corregir-revisar'));
-    fireEvent.press(await screen.findByTestId('corregir-motivo-1'));
-    fireEvent.press(screen.getByTestId('corregir-guardar'));
-    expect((await screen.findByTestId('corregir-error')).props.children).toBeTruthy();
+    await verPronto('corregir-form');
+    fireEvent.changeText(ver('corregir-importe-a-yo'), '9,50');
+    fireEvent.changeText(ver('corregir-importe-a-tania'), '20');
+    fireEvent.press(ver('corregir-revisar'));
+    fireEvent.press(await verPronto('corregir-motivo-1'));
+    fireEvent.press(ver('corregir-guardar'));
+    expect((await verPronto('corregir-error')).props.children).toBeTruthy();
     expect(plano()).toMatch(/todavía no se puede corregir aquí/);
     expect(plano()).not.toMatch(/CORRECCION_AGREGADA_REQUERIDA|REPARTO_CAMBIA_POSICIONES/);
-    fireEvent.press(screen.getByTestId('corregir-guardar'));
+    fireEvent.press(ver('corregir-guardar'));
     await waitFor(() => expect(leer).toHaveBeenCalledTimes(2));
     // tras recargar se vuelve a la edición con el aviso y se escribe de nuevo el cambio
-    await screen.findByTestId('corregir-form');
-    expect(await screen.findByTestId('corregir-recargado')).toBeTruthy();
-    fireEvent.changeText(screen.getByTestId('corregir-importe-a-yo'), '9,50');
-    fireEvent.changeText(screen.getByTestId('corregir-importe-a-tania'), '20');
-    fireEvent.press(screen.getByTestId('corregir-revisar'));
-    fireEvent.press(await screen.findByTestId('corregir-motivo-1'));
-    fireEvent.press(screen.getByTestId('corregir-guardar'));
-    expect(await screen.findByTestId('corregir-recargar')).toBeTruthy();
+    await verPronto('corregir-form');
+    expect(await verPronto('corregir-recargado')).toBeTruthy();
+    fireEvent.changeText(ver('corregir-importe-a-yo'), '9,50');
+    fireEvent.changeText(ver('corregir-importe-a-tania'), '20');
+    fireEvent.press(ver('corregir-revisar'));
+    fireEvent.press(await verPronto('corregir-motivo-1'));
+    fireEvent.press(ver('corregir-guardar'));
+    expect(await verPronto('corregir-recargar')).toBeTruthy();
     expect(screen.queryByTestId('corregir-guardar')).toBeNull();
     expect(corregir).toHaveBeenCalledTimes(3);
   });
 
   test('no corregible: se dice por qué y no se ofrece ninguna alternativa', async () => {
     montarCorregir(cliente({ repartoDeHecho: jest.fn(async () => ({ tipo: 'OK', datos: { ...REPARTO, corregible: false, motivo: 'ORIGEN_IMPORTADO' } }) as any) }));
-    expect(await screen.findByTestId('corregir-no-corregible')).toBeTruthy();
+    expect(await verPronto('corregir-no-corregible')).toBeTruthy();
     expect(plano()).toMatch(/versión anterior/);
     expect(screen.queryByTestId('corregir-form')).toBeNull();
     expect(plano()).not.toMatch(/[Aa]nular/);
@@ -691,19 +693,19 @@ describe('integración', () => {
     const onPendiente = jest.fn();
     envolver(<ActividadScreen cliente={actividad({ repartoDeHecho: jest.fn(async () => ({ tipo: 'OK', datos: REPARTO }) as any) })} ahora={AHORA} nuevoId={nuevoId}
       onCorregirReparto={onCorregir} onPendienteCon={onPendiente} />);
-    fireEvent.press(await screen.findByTestId('fila-cena'));
-    fireEvent.press(await screen.findByTestId('detalle-pendiente-tania'));
+    fireEvent.press(await verPronto('fila-cena'));
+    fireEvent.press(await verPronto('detalle-pendiente-tania'));
     expect(onPendiente).toHaveBeenCalledWith({ terceroId: 'tania', nombre: 'Tania' });
-    fireEvent.press(await screen.findByTestId('fila-cena'));
-    fireEvent.press(await screen.findByTestId('detalle-corregir-reparto'));
+    fireEvent.press(await verPronto('fila-cena'));
+    fireEvent.press(await verPronto('detalle-corregir-reparto'));
     expect(onCorregir).toHaveBeenCalledWith('cena');
   });
 
   test('detalle de un gasto no corregible: sin «Corregir reparto»', async () => {
     envolver(<ActividadScreen cliente={actividad({ repartoDeHecho: jest.fn(async () => ({ tipo: 'OK', datos: { ...REPARTO, corregible: false, motivo: 'SIN_REPARTO', partes: [] } }) as any) })}
       ahora={AHORA} nuevoId={nuevoId} onCorregirReparto={jest.fn()} onPendienteCon={jest.fn()} />);
-    fireEvent.press(await screen.findByTestId('fila-cena'));
-    await screen.findByTestId('detalle-contenido');
+    fireEvent.press(await verPronto('fila-cena'));
+    await verPronto('detalle-contenido');
     await waitFor(() => expect(screen.queryByTestId('detalle-corregir-reparto')).toBeNull());
   });
 
@@ -714,12 +716,12 @@ describe('integración', () => {
       cuentasPago: jest.fn(async () => ({ tipo: 'OK', datos: { cuentas: [] } }) as any),
     });
     const { unmount } = envolver(<RegistroGastoScreen cliente={c} nuevoId={nuevoId} ahora={AHORA} onCerrar={jest.fn()} onGastoCompartido={onCompartido} />);
-    fireEvent.press(await screen.findByTestId('repartir'));
+    fireEvent.press(await verPronto('repartir'));
     expect(onCompartido).not.toHaveBeenCalled(); // falta importe, categoría y presupuesto
-    expect(screen.getByTestId('otra-persona')).toBeTruthy();
+    expect(ver('otra-persona')).toBeTruthy();
     unmount();
     envolver(<RegistroGastoScreen cliente={c} nuevoId={nuevoId} ahora={AHORA} onCerrar={jest.fn()} tipo="INGRESO" onGastoCompartido={onCompartido} />);
-    await waitFor(() => expect(screen.queryByTestId('solo-mio')).toBeTruthy());
+    await verPronto('solo-mio'); // F06 T6 · S2: «¿De quién?» vive tras su línea; en «Más opciones» se comprueba la ausencia
     expect(screen.queryByTestId('repartir')).toBeNull();
     expect(screen.queryByTestId('otra-persona')).toBeNull();
   });
@@ -752,20 +754,20 @@ describe('Lámina B · saldada frente a desconocida (D-F0507L-03)', () => {
 
   test.each(['light', 'dark'] as const)('Corregir reparto (%s): pendiente «Sin determinar»; saldadas «0,00 € · Saldado»; Marta además «Saldo inicial desconocido»', async (modo) => {
     envolver(<CorregirRepartoScreen cliente={cliente({ repartoDeHecho: jest.fn(async () => ({ tipo: 'OK', datos: TRES }) as any) })} hechoId="cena" onCerrar={jest.fn()} />, modo);
-    await screen.findByTestId('corregir-form');
-    const linea = (id: string) => screen.getByTestId(`corregir-posicion-saldo-${id}`).props.children;
+    await verPronto('corregir-form');
+    const linea = (id: string) => ver(`corregir-posicion-saldo-${id}`).props.children;
     expect(linea('a-simon')).toBe('Te debe · pendiente Sin determinar');
     expect(linea('a-tania')).toBe('Te debe · 0,00 € · Saldado');
     expect(linea('a-marta')).toBe('Te debe · 0,00 € · Saldado');
     expect(screen.queryByTestId('corregir-posicion-inicial-a-simon')).toBeNull();
     expect(screen.queryByTestId('corregir-posicion-inicial-a-tania')).toBeNull();
-    expect(screen.getByTestId('corregir-posicion-inicial-a-marta').props.children).toBe('Saldo inicial desconocido');
+    expect(ver('corregir-posicion-inicial-a-marta').props.children).toBe('Saldo inicial desconocido');
     // Accesibilidad: la etiqueta dice lo mismo que se ve.
-    expect(screen.getByTestId('corregir-posicion-a-simon').props.accessibilityLabel).toBe('Te debe · pendiente Sin determinar');
-    expect(screen.getByTestId('corregir-posicion-a-tania').props.accessibilityLabel).toBe('Te debe · 0,00 € · Saldado');
-    expect(screen.getByTestId('corregir-posicion-a-marta').props.accessibilityLabel).toBe('Te debe · 0,00 € · Saldado. Saldo inicial desconocido');
+    expect(ver('corregir-posicion-a-simon').props.accessibilityLabel).toBe('Te debe · pendiente Sin determinar');
+    expect(ver('corregir-posicion-a-tania').props.accessibilityLabel).toBe('Te debe · 0,00 € · Saldado');
+    expect(ver('corregir-posicion-a-marta').props.accessibilityLabel).toBe('Te debe · 0,00 € · Saldado. Saldo inicial desconocido');
     // Ninguna CERRADA dice «Sin determinar».
-    for (const id of ['a-tania', 'a-marta']) expect(within(screen.getByTestId(`corregir-posicion-${id}`)).queryByText(/Sin determinar/)).toBeNull();
+    for (const id of ['a-tania', 'a-marta']) expect(within(ver(`corregir-posicion-${id}`)).queryByText(/Sin determinar/)).toBeNull();
     expect(plano()).toContain(colores[modo].background);
   });
 
@@ -775,50 +777,50 @@ describe('Lámina B · saldada frente a desconocida (D-F0507L-03)', () => {
       { atribucion_id: 'a-tania', es_yo: false, tercero_id: 'tania', nombre: 'Tania', importe: '0.00', posicion: null },
     ] };
     envolver(<CorregirRepartoScreen cliente={cliente({ repartoDeHecho: jest.fn(async () => ({ tipo: 'OK', datos: r }) as any) })} hechoId="cena" onCerrar={jest.fn()} />);
-    await screen.findByTestId('corregir-form');
-    expect(screen.getByTestId('corregir-posicion-saldo-a-yo').props.children).toBe('Le debes · 0,00 € · Saldado');
-    expect(screen.getByTestId('corregir-posicion-inicial-a-yo').props.children).toBe('Saldo inicial desconocido');
+    await verPronto('corregir-form');
+    expect(ver('corregir-posicion-saldo-a-yo').props.children).toBe('Le debes · 0,00 € · Saldado');
+    expect(ver('corregir-posicion-inicial-a-yo').props.children).toBe('Saldo inicial desconocido');
   });
 
   test('Pendiente con: la pendiente con saldo desconocido sigue en «Sin determinar»', async () => {
     const p: PendienteConPersona = { ...PEND, nombre: 'Simón', tercero_id: 'simon', te_debe: null, le_debes: null, neto: null, neto_estado: 'INDETERMINADO',
       posiciones: [{ ...PEND.posiciones[0], ...ACTIVA_DESCONOCIDA }] };
     montarPendiente(cliente({ pendienteCon: jest.fn(async () => ({ tipo: 'OK', datos: p }) as any) }));
-    expect((await screen.findByTestId('posicion-saldo-d1')).props.children).toBe('Sin determinar');
+    expect((await verPronto('posicion-saldo-d1')).props.children).toBe('Sin determinar');
     expect(screen.queryByText('Saldo inicial desconocido')).toBeNull();
   });
 
   const cobrarHasta = async (respuesta: object, modo?: 'dark') => {
     const cobrar = jest.fn(async (_: string, pl: any) => ({ tipo: 'OK', datos: { intencion_id: pl.intencion_id, hecho_id: 'hx', entidad_id: 'd1', idempotente: false, importe: pl.importe, aviso: '', ...respuesta } }) as any);
     montarPendiente(cliente({ pendienteCon: jest.fn(async () => ({ tipo: 'OK', datos: PEND }) as any), cobrarPosicion: cobrar as any }), modo);
-    fireEvent.press(await screen.findByTestId('posicion-d1'));
-    fireEvent.press(screen.getByTestId('posicion-cobrar'));
-    await screen.findByTestId('accion-cobro');
-    fireEvent.press(await screen.findByTestId('accion-cuenta-efectivo'));
-    fireEvent.press(screen.getByTestId('accion-enviar'));
-    await screen.findByTestId('posicion-exito');
+    fireEvent.press(await verPronto('posicion-d1'));
+    fireEvent.press(ver('posicion-cobrar'));
+    await verPronto('accion-cobro');
+    fireEvent.press(await verPronto('accion-cuenta-efectivo'));
+    fireEvent.press(ver('accion-enviar'));
+    await verPronto('posicion-exito');
   };
 
   test('Pendiente con · éxito: CERRADA con saldo inicial conocido → «0,00 € · Saldado», sin línea de saldo inicial', async () => {
     await cobrarHasta(CERRADA_CONOCIDA);
-    expect(screen.getByTestId('posicion-exito-saldo').props.children).toBe('0,00 € · Saldado. Ya no queda nada pendiente.');
+    expect(ver('posicion-exito-saldo').props.children).toBe('0,00 € · Saldado. Ya no queda nada pendiente.');
     expect(screen.queryByTestId('posicion-exito-inicial')).toBeNull();
-    expect(screen.getByTestId('posicion-exito-estado').props.accessibilityLabel).toBe('0,00 € · Saldado. Ya no queda nada pendiente.');
+    expect(ver('posicion-exito-estado').props.accessibilityLabel).toBe('0,00 € · Saldado. Ya no queda nada pendiente.');
     expect(plano()).not.toMatch(/Sin determinar/);
   });
 
   test('Pendiente con · éxito: CERRADA con saldo inicial desconocido → además «Saldo inicial desconocido» (oscuro)', async () => {
     await cobrarHasta(CERRADA_DESCONOCIDA, 'dark');
-    expect(screen.getByTestId('posicion-exito-saldo').props.children).toBe('0,00 € · Saldado. Ya no queda nada pendiente.');
-    expect(screen.getByTestId('posicion-exito-inicial').props.children).toBe('Saldo inicial desconocido');
-    expect(screen.getByTestId('posicion-exito-estado').props.accessibilityLabel).toBe('0,00 € · Saldado. Ya no queda nada pendiente. Saldo inicial desconocido');
+    expect(ver('posicion-exito-saldo').props.children).toBe('0,00 € · Saldado. Ya no queda nada pendiente.');
+    expect(ver('posicion-exito-inicial').props.children).toBe('Saldo inicial desconocido');
+    expect(ver('posicion-exito-estado').props.accessibilityLabel).toBe('0,00 € · Saldado. Ya no queda nada pendiente. Saldo inicial desconocido');
     expect(plano()).not.toMatch(/Sin determinar/);
     expect(plano()).toContain(colores.dark.background);
   });
 
   test('Pendiente con · éxito: ACTIVA que sigue sin saldo conocido → «Sigue pendiente: Sin determinar»', async () => {
     await cobrarHasta(ACTIVA_DESCONOCIDA);
-    expect(screen.getByTestId('posicion-exito-saldo').props.children).toBe('Sigue pendiente: Sin determinar');
+    expect(ver('posicion-exito-saldo').props.children).toBe('Sigue pendiente: Sin determinar');
     expect(screen.queryByTestId('posicion-exito-inicial')).toBeNull();
   });
 });

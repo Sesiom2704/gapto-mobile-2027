@@ -22,6 +22,7 @@
 // v0.16.0 (F06 T2-F06 CAT-VIV N1 (L-04, lámina SET-CAT/REG-CAT v1.0) R01–R05; OBL-VIV-01): con una categoría de GASTO «Asociada a vivienda» (la marca de ESA categoría) aparece el bloque obligatorio «Propiedad» (BloquePropiedad) y desaparece «¿De quién es este gasto?»: el reparto lo da la propiedad (titularidad en la fecha o «No lo sé»), con «¿Qué tipo de gasto es?» (Gasto corriente · Reparación; nunca Mejora) y «¿Quién pagó?» de PAG; no se ofrecen «Repartir», «Otra persona» ni «Me lo reembolsan» (si estaban, se quitan con aviso); «Pagado con» solo lista cuentas solo tuyas y no se pide si pagó todo un cotitular. Sin propiedad el registro se para con «Falta: la propiedad.». El envío lleva el bloque `propiedad` de VS-01. El éxito (R05) muestra la propiedad, el reparto, lo que cuenta en el mes y que no suma al coste de la vivienda. Sin marca, el formulario no cambia. Clientes de propiedades y de B3 por prop opcional (por defecto, los de `configApi`).
 // Versión: 0.16.0
 // Versión: 0.17.0 (F06 T3 · cadena de noche 21->22-11, T-D MANT N3 cliente; D-C7-07): los campos de importe ponen los puntos de miles al teclear (`formatearImporteAlTeclear`).
+// Versión: 0.18.0 (F06 T6 · S2 FORM-AGIL en Registrar gasto e ingreso; F09 0.55 §12.107.1 y lámina REG-AGIL v0.8 «Gasto», «Vivienda» e «Ingreso»): exprés con Importe, Tercero y Categoría (y Propiedad con vivienda); «Se registrará así» con líneas tocables (presupuesto, de quién, cuenta y fecha); lo obligatorio sin valor (presupuesto, cuenta) se abre en el exprés y no se cierra al elegirlo; «Más opciones» con «‹ Exprés», resumen tocable y bloques numerados con «Continuar»; «Registrar» siempre visible con «Falta: …» (A7). Vivienda: «Revisar» antes de registrar (dictamen 1 Q5/A6; RevisarVivienda) con la versión mostrada; si cambian fecha, titularidad, reparto, cuenta o aportaciones se invalida y se recalcula. Mismos bloques, testID, validación y envío: el payload no cambia (t6_s2_wire_registro). Presupuesto sin valor por defecto (S4), «Recordar» de uno (S5) y «¿Qué tipo de gasto es?» (S6) sin cambios.
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -36,12 +37,14 @@ import { ClientePropiedades, crearClientePropiedades } from '../api/propiedades'
 import { BloquePropiedad } from '../components/BloquePropiedad';
 import { BotonPrimario, BotonTexto, Chip, ChipAccion, EstadoDato, Segmentado, Velo } from '../components/Basicos';
 import { FormularioContexto, SelectorContexto } from '../components/Contextos';
+import { BloqueNumerado, LineaResumen, ResumenExpres, RotuloSeRegistrara } from '../components/FormAgil';
 import { AvisoFaltaCuenta, PanelCuentas, useSinConfigurar } from '../components/FaltaCuenta';
 import { GuardarPlantilla } from '../components/GuardarPlantilla';
 import { GuardarPreferencia } from '../components/GuardarPreferencia';
 import { HojaTipos } from '../components/HojaTipos';
 import { RecordarAfinidad } from '../components/RecordarAfinidad';
 import { ReembolsoHoja } from '../components/Reembolso';
+import { huellaRevision, RevisarVivienda, TEXTO_REVISION_CAMBIADA } from '../components/RevisarVivienda';
 import { SelectorTercero } from '../components/SelectorTercero';
 import { CampoFecha } from '../components/CampoFecha';
 import { PendienteCompacto } from '../components/PendienteCompacto';
@@ -229,6 +232,12 @@ export function RegistroGastoScreen(p: {
   const [focoMagnitud, setFocoMagnitud] = useState<string | null>(null);
   const formRef = useRef<ScrollViewInstance | null>(null);
   const yPresupuesto = useRef<number | null>(null);
+  // F06 T6 · S2 (FORM-AGIL): exprés o «Más opciones»; bloque al que ir; revisión de vivienda (A6).
+  const [pantalla, setPantalla] = useState<'EXPRES' | 'MAS'>('EXPRES');
+  const [revision, setRevision] = useState<{ huella: string; aviso: string | null } | null>(null);
+  const [fijadosExpres, setFijadosExpres] = useState<{ presupuesto: boolean; cuenta: boolean }>({ presupuesto: false, cuenta: false });
+  const yBloques = useRef<Partial<Record<BloqueMas, number>>>({});
+  const bloqueDestino = useRef<BloqueMas | null>(null);
 
   useEffect(() => {
     if (p.inicial) setB((x) => ({ ...x, importeTexto: p.inicial!.importeTexto, fechaHecho: p.inicial!.fechaHecho, fechaOrigen: p.inicial!.fechaHecho === hoyIso ? 'INFERIDO' : 'USUARIO' }));
@@ -493,6 +502,22 @@ export function RegistroGastoScreen(p: {
   const magnitudesVivas: Record<string, string> = {};
   for (const [id, msg] of Object.entries(pendientes.magnitudes ?? {})) if ((b.magnitudesTexto[id] ?? '').trim() !== '') magnitudesVivas[id] = msg;
   const visibles: Errores = { ...errores, ...vivos, magnitudes: { ...(errores.magnitudes ?? {}), ...magnitudesVivas } };
+
+  // F06 T6 · S2, FORM-AGIL punto 1: lo obligatorio sin valor se abre en el exprés. Si se elige ahí, el bloque se queda
+  // abierto (no desaparece bajo el dedo); si el valor llega de una propuesta, se ve como línea tocable.
+  const faltaPresupuesto = b.presupuestable === null || !!visibles.presupuestable;
+  const faltaCuenta = cuentas.fase !== 'OK' || !b.cuentaId || !!visibles.cuenta;
+  const abierto = (k: 'presupuesto' | 'cuenta') => (k === 'presupuesto' ? faltaPresupuesto : faltaCuenta) || fijadosExpres[k];
+  useEffect(() => {
+    if (pantalla === 'EXPRES' && b.presupuestableOrigen === 'USUARIO') setFijadosExpres((x) => (x.presupuesto ? x : { ...x, presupuesto: true }));
+  }, [b.presupuestable, b.presupuestableOrigen]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (pantalla === 'EXPRES' && b.cuentaOrigen === 'USUARIO') setFijadosExpres((x) => (x.cuenta ? x : { ...x, cuenta: true }));
+  }, [b.cuentaId, b.cuentaOrigen]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Un rechazo o un resultado indeterminado se ven en el formulario: la revisión se cierra.
+  useEffect(() => {
+    if (estado.fase === 'RECHAZADO' || estado.fase === 'INDETERMINADO') setRevision(null);
+  }, [estado]);
 
   const cambiar = (parche: Partial<Borrador>) => {
     if (bloqueado) return;
@@ -860,14 +885,266 @@ export function RegistroGastoScreen(p: {
           .filter((n): n is CategoriaNodo => !!n && selectorCategorias.props.esSeleccionable(n))
       : [];
 
+  // ------------------------------------------------------------ F06 T6 · S2: FORM-AGIL (exprés + «Más opciones»)
+  const valorFecha = !esFechaIso(b.fechaHecho) ? '—' : b.fechaHecho === hoyIso ? 'Hoy' : b.fechaHecho === ayerIso ? 'Ayer' : fechaCortaIso(b.fechaHecho);
+  const notaPresupuesto = b.presupuestableOrigen === 'USUARIO' ? TEXTO_ELEGIDA : b.presupuestablePropuesta ? origen(b.presupuestablePropuesta) : null;
+  const notaCuenta = b.cuentaOrigen === 'USUARIO' ? TEXTO_ELEGIDA : b.cuentaPropuesta ? origen(b.cuentaPropuesta) : null;
+  const valorQuien = !esIngreso && b.reembolso && b.reembolso.nombre ? `${TEXTO_OPCION_REEMBOLSO} · ${b.reembolso.nombre}` : b.soloMio ? 'Solo mío' : 'Sin indicar';
+  const etiquetaCuenta = esIngreso ? 'Cobrado en' : conVivienda && selProp?.pago.modo === 'CADA_UNO' ? 'Pagado con (tu parte)' : 'Pagado con';
+  const importeParseado = parsearImporte(b.importeTexto);
+  const importeResumen = importeParseado.ok ? formatearEur(importeParseado.valor) : b.importeTexto.trim() || 'Sin importe';
+  /** Abre «Más opciones» en el bloque de la línea tocada (el teclado se cierra: FA-04). */
+  const abrirMas = (k: BloqueMas) => {
+    if (bloqueado) return;
+    Keyboard.dismiss();
+    bloqueDestino.current = k;
+    setPantalla('MAS');
+  };
+  const irA = (k: BloqueMas) => {
+    Keyboard.dismiss();
+    const y = yBloques.current[k];
+    if (y !== undefined) formRef.current?.scrollTo({ y: Math.max(0, y - espacio.l), animated: true });
+  };
+  const alMedirBloque = (k: BloqueMas, y: number) => {
+    yBloques.current[k] = y;
+    if (bloqueDestino.current !== k) return;
+    bloqueDestino.current = null;
+    formRef.current?.scrollTo({ y: Math.max(0, y - espacio.l), animated: false });
+  };
+  // Vivienda (dictamen 1 Q5/A6): «Registrar» abre «Revisar» con la versión mostrada; si algo cambia, se recalcula.
+  const huellaActual = conVivienda && selProp ? huellaRevision(selProp, b.importeTexto, sinCuentaPropia ? null : b.cuentaId, b.fechaHecho, b.presupuestable) : '';
+  const pulsarRegistrar = () => {
+    if (conVivienda && selProp && listo) {
+      Keyboard.dismiss();
+      p.traza?.('revisar_abierto');
+      return setRevision({ huella: huellaActual, aviso: null });
+    }
+    void onRegistrar();
+  };
+  const confirmarRevision = () => {
+    if (!revision || estado.fase === 'ENVIANDO') return;
+    if (revision.huella !== huellaActual || !listo) return setRevision({ huella: huellaActual, aviso: TEXTO_REVISION_CAMBIADA });
+    void onRegistrar();
+  };
+  const volverDeRevisar = (k: 'importe' | 'propiedad' | 'presupuesto' | 'cuenta' | 'fecha') => {
+    setRevision(null);
+    if (k === 'importe' || k === 'propiedad') return setPantalla('EXPRES');
+    abrirMas(k);
+  };
+  // Los bloques son los de siempre (mismos testID, props y callbacks); solo cambia dónde se pintan.
+  const jsxPresupuesto = <>
+        <View testID="bloque-presupuestable" onLayout={(e) => (yPresupuesto.current = e.nativeEvent.layout.y)}>
+        <Campo etiqueta="¿Cuenta para el presupuesto?" error={visibles.presupuestable}>
+          <Segmentado<boolean>
+            testIDBase="presupuestable"
+            etiquetaGrupo="¿Cuenta para el presupuesto?"
+            opciones={[{ valor: true, etiqueta: 'Sí' }, { valor: false, etiqueta: 'No' }]}
+            valor={b.presupuestable}
+            onCambiar={(v) => {
+              p.traza?.('presupuesto_elegido');
+              cambiar({ presupuestable: v, presupuestableOrigen: 'USUARIO', presupuestablePropuesta: null });
+            }}
+          />
+          {b.presupuestable !== null && (b.presupuestableOrigen === 'USUARIO' || b.presupuestablePropuesta) ? (
+            <Text testID="origen-presupuestable" style={[tipo.footnote, { color: c.textSecondary }]}>
+              {b.presupuestableOrigen === 'USUARIO' ? TEXTO_ELEGIDA : origen(b.presupuestablePropuesta!)}
+            </Text>
+          ) : null}
+        </Campo>
+        </View>
+      </>;
+  const jsxPropiedad = <>
+        {conVivienda ? (
+          <Campo etiqueta="Propiedad">
+            <BloquePropiedad testID="vivienda" propiedades={propiedadesApi} patrimonio={patrimonioApi} fecha={b.fechaHecho}
+              cuentaId={cuentaPropia} importe={b.importeTexto} valor={selProp}
+              onCambiar={(x) => { if (!bloqueado && !enviado) { setSelProp(x ? conDeudas(x, b.importeTexto) : x); setErrorProp(null); } }}
+              onPropuesta={onPropuestaPropiedad}
+              error={errorProp ?? (selProp ? null : 'Falta: la propiedad.')} bloqueado={bloqueado || enviado} />
+          </Campo>
+        ) : null}
+      </>;
+  const jsxQuien = <>
+        {conVivienda ? null : <Campo etiqueta={esIngreso ? '¿De quién es este ingreso?' : '¿De quién es este gasto?'} opcional>
+          <View style={s.chips}>
+            <Chip
+              testID="solo-mio"
+              etiqueta="Solo mío"
+              seleccionado={b.soloMio && !b.reembolso}
+              onPress={() => cambiar(b.reembolso ? { soloMio: true, reembolso: null } : { soloMio: !b.soloMio })}
+            />
+            {!esIngreso && p.onGastoCompartido && !enviado && !b.reembolso ? (
+              <Chip testID="repartir" etiqueta="Repartir" seleccionado={false} onPress={() => irACompartido({ repartir: true, otraPersona: false })} />
+            ) : null}
+            {!esIngreso && (!enviado || b.reembolso) ? (
+              <Chip testID="reembolsable" etiqueta={TEXTO_OPCION_REEMBOLSO} accesibilidad={`${TEXTO_OPCION_REEMBOLSO}. ${TEXTO_OPCION_REEMBOLSO_SUB}`}
+                seleccionado={!!b.reembolso} onPress={abrirReembolso} />
+            ) : null}
+          </View>
+          {!esIngreso && b.reembolso && b.reembolso.nombre ? (
+            <View style={s.filaFinanciacion}>
+              <Pressable testID="reembolso-resumen" accessibilityRole="button" disabled={bloqueado || enviado} onPress={abrirReembolso} style={{ flexShrink: 1, minHeight: TACTIL_MIN, justifyContent: 'center' }}>
+                <Text style={[tipo.subheadline, { color: c.textPrimary }]}>
+                  {`${TEXTO_TE_DEBE(b.reembolso.nombre)} · ${formatearEur(importeReembolso(totalDe(b), b.reembolso) ?? '0.00')}`}
+                </Text>
+              </Pressable>
+              {!bloqueado && !enviado ? <BotonTexto testID="reembolso-quitar" titulo="Quitar" onPress={() => cambiar({ reembolso: null })} /> : null}
+            </View>
+          ) : null}
+          {visibles.reembolso ? <Text testID="reembolso-error" accessibilityRole="alert" style={[tipo.footnote, { color: c.criticalText }]}>{visibles.reembolso}</Text> : null}
+          <Text testID="origen-atribucion" style={[tipo.footnote, { color: c.textSecondary }]}>
+            {esIngreso
+              ? b.soloMio ? 'Decisión tuya: el ingreso es 100 % tuyo.' : 'Sin indicar: se guardará sin reparto.'
+              : b.reembolso && b.reembolso.nombre ? TEXTO_ATRIBUCION_REEMBOLSO(b.reembolso.nombre)
+                : b.soloMio ? 'Decisión tuya: el gasto es 100 % tuyo.' : 'Sin indicar: se guardará sin reparto y no contará en tu gasto atribuible.'}
+          </Text>
+        </Campo>}
+      </>;
+  const jsxCuenta = <>
+        {sinCuentaPropia ? null : <Campo etiqueta={esIngreso ? 'Cobrado en' : conVivienda && selProp?.pago.modo === 'CADA_UNO' ? 'Pagado con (tu parte)' : 'Pagado con'} error={visibles.cuenta}>
+          {cuentas.fase === 'CARGANDO' ? <EstadoDato estado="CARGANDO" /> : null}
+          {cuentas.fase === 'ERROR' ? (
+            <Pressable testID="cuentas-error" accessibilityRole="button" onPress={() => cargarCuentas(b.fechaHecho)} style={{ minHeight: TACTIL_MIN }}>
+              <EstadoDato estado="ERROR_CARGA" detalle="Tocar para reintentar" />
+            </Pressable>
+          ) : null}
+          {cuentas.fase === 'OK' && cuentas.lista.length === 0 ? (
+            <Text style={[tipo.subheadline, { color: c.textSecondary }]}>No tienes cuentas disponibles. Configura primero una cuenta.</Text>
+          ) : null}
+          {cuentas.fase === 'OK' ? (
+            <View style={s.chips}>
+              {cuentasVisibles.map((x) => (
+                <Chip
+                  key={x.cuenta_id}
+                  testID={`cuenta-${x.cuenta_id}`}
+                  etiqueta={x.nombre}
+                  seleccionado={b.cuentaId === x.cuenta_id}
+                  onPress={() => {
+                    p.traza?.('cuenta_elegida');
+                    cambiar({ cuentaId: x.cuenta_id, cuentaOrigen: 'USUARIO', cuentaPropuesta: null, propuesta: x.propuesta_financiacion, propuestaRechazada: false });
+                  }}
+                />
+              ))}
+              {!esIngreso && !conVivienda && p.onGastoCompartido && !enviado && !b.reembolso ? (
+                <Chip testID="otra-persona" etiqueta={TEXTO_OTRA_PERSONA} seleccionado={false} onPress={() => irACompartido({ repartir: false, otraPersona: true })} />
+              ) : null}
+            </View>
+          ) : null}
+          {!bloqueado ? <AvisoFaltaCuenta testID="falta-cuenta" n={sinConfigurar.n} onPress={() => setPanelCuentas(true)} /> : null}
+          {cuentaSel && (b.cuentaOrigen === 'USUARIO' || (b.cuentaOrigen === 'INFERIDO' && b.cuentaPropuesta)) ? (
+            <Text testID="origen-cuenta" style={[tipo.footnote, { color: c.textSecondary }]}>
+              {b.cuentaOrigen === 'USUARIO' ? TEXTO_ELEGIDA : origen(b.cuentaPropuesta!)}
+            </Text>
+          ) : null}
+          {conVivienda ? <Text testID="vivienda-solo-tus-cuentas" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_SOLO_TUS_CUENTAS}</Text> : null}
+          {cuentaSel && b.propuesta && !esIngreso && !conVivienda ? (
+            <View testID="financiacion" style={s.filaFinanciacion}>
+              <Text testID="financiacion-texto" style={[tipo.footnote, { color: c.textSecondary, flexShrink: 1 }]}>
+                {b.propuesta === 'SELF_100' && !b.propuestaRechazada
+                  ? 'Financiado por ti · cuenta 100 % tuya'
+                  : 'Financiación no determinada'}
+              </Text>
+              {b.propuesta === 'SELF_100' ? (
+                <BotonTexto
+                  testID={b.propuestaRechazada ? 'financiacion-usar-propuesta' : 'financiacion-no-es-asi'}
+                  titulo={b.propuestaRechazada ? 'Usar propuesta' : 'No es así'}
+                  onPress={() => cambiar({ propuestaRechazada: !b.propuestaRechazada })}
+                />
+              ) : null}
+            </View>
+          ) : null}
+        </Campo>}
+      </>;
+  const jsxFecha = <>
+        {/* Fecha común del gasto y del pago (REG-01): propuesta «Hoy», editable, nunca futura. */}
+        <Campo etiqueta="Fecha" error={visibles.fecha}>
+          <CampoFecha
+            testID="campo-fecha"
+            etiqueta="Fecha del gasto, día barra mes barra año"
+            hoyIso={hoyIso}
+            max={hoyIso}
+            editable={!bloqueado}
+            error={!!visibles.fecha}
+            texto={otraFecha}
+            onTexto={(texto) => {
+              setOtraFecha(texto);
+              cambiar({ fechaHecho: ddmmaaaaAIso(texto) ?? texto, fechaOrigen: 'USUARIO' });
+            }}
+            opciones={[
+              { testID: 'fecha-hoy', etiqueta: 'Hoy', seleccionado: otraFecha === null && b.fechaHecho === hoyIso,
+                onPress: () => { if (bloqueado) return; setOtraFecha(null); cambiar({ fechaHecho: hoyIso, fechaOrigen: 'INFERIDO' }); } },
+              { testID: 'fecha-ayer', etiqueta: 'Ayer', seleccionado: otraFecha === null && b.fechaHecho === ayerIso,
+                onPress: () => { if (bloqueado) return; setOtraFecha(null); cambiar({ fechaHecho: ayerIso, fechaOrigen: 'USUARIO' }); } },
+              { testID: 'fecha-otra', etiqueta: 'Otra fecha', seleccionado: otraFecha !== null,
+                onPress: () => { if (!bloqueado) setOtraFecha(isoADdmmaaaa(b.fechaHecho)); } },
+            ]}
+          />
+          <Text testID="fecha" style={[tipo.footnote, { color: c.textSecondary }]}>
+            {esFechaIso(b.fechaHecho)
+              ? `${b.fechaOrigen === 'INFERIDO' ? 'Propuesta: hoy · ' : ''}${fechaCortaIso(b.fechaHecho)} · fecha del gasto y del pago`
+              : 'Escribe la fecha como dd/mm/aaaa.'}
+          </Text>
+        </Campo>
+      </>;
+  const jsxDetalles = <>
+        {/* G03 «Más detalles»: contexto y (en ingresos) nota. */}
+        {masDetalles ? (
+          <View testID="mas-detalles" style={{ gap: espacio.l }}>
+            <Text accessibilityRole="header" style={[tipo.caption, { color: c.textSecondary, letterSpacing: 0.6 }]}>MÁS DETALLES</Text>
+            <Campo etiqueta="Contexto" opcional>
+              <Pressable
+                testID="campo-contexto"
+                accessibilityRole="button"
+                accessibilityLabel={`Contexto: ${b.contextoNombre ?? 'Sin contexto'}`}
+                disabled={bloqueado}
+                onPress={() => setSelectorContexto('LISTA')}
+                style={[s.campoCategoria, { backgroundColor: c.surfacePrimary, borderColor: c.borderStandard }]}
+              >
+                <Text testID="contexto-valor" style={[tipo.body, { flex: 1, color: b.contextoNombre ? c.textPrimary : c.textSecondary }]}>{b.contextoNombre ?? 'Sin contexto'}</Text>
+                <Ionicons name="chevron-forward" size={18} color={c.textSecondary} />
+              </Pressable>
+              {b.contextoNombre && b.contextoOrigen === 'INFERIDO' && b.plantilla ? (
+                <Text testID="origen-contexto" style={[tipo.footnote, { color: c.textSecondary }]}>{origen('PLANTILLA')}</Text>
+              ) : null}
+            </Campo>
+            {/* A8: «Nota (opcional)» en gasto e ingreso; vacía no viaja. */}
+            <Campo etiqueta="Nota" opcional error={visibles.concepto}>
+              <TextInput
+                testID="campo-nota"
+                accessibilityLabel="Nota (opcional)"
+                value={b.concepto}
+                onChangeText={(t) => cambiar({ concepto: t })}
+                editable={!bloqueado}
+                maxLength={200}
+                style={[tipo.body, s.input, { color: c.textPrimary, backgroundColor: c.surfacePrimary, borderColor: visibles.concepto ? c.critical : c.borderStandard }]}
+              />
+            </Campo>
+          </View>
+        ) : (
+          <BotonTexto testID="abrir-mas-detalles" titulo="+ Más detalles (contexto, nota)" onPress={() => setMasDetalles(true)} />
+        )}
+      </>;
+  const bloquesMas: { id: BloqueMas; numero: number; etiqueta: string; jsx: React.ReactNode }[] = [
+    { id: 'presupuesto', numero: 4, etiqueta: '¿Cuenta para el presupuesto?', jsx: jsxPresupuesto },
+    ...(conVivienda ? [{ id: 'propiedad' as const, numero: 9, etiqueta: 'Propiedad, reparto y quién pagó', jsx: jsxPropiedad }]
+      : [{ id: 'quien' as const, numero: 5, etiqueta: esIngreso ? '¿De quién es este ingreso?' : '¿De quién es este gasto?', jsx: jsxQuien }]),
+    ...(sinCuentaPropia ? [] : [{ id: 'cuenta' as const, numero: 6, etiqueta: etiquetaCuenta, jsx: jsxCuenta }]),
+    { id: 'fecha', numero: 7, etiqueta: 'Fecha', jsx: jsxFecha },
+    { id: 'detalles', numero: 8, etiqueta: 'Más detalles', jsx: jsxDetalles },
+  ];
+
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: c.background }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       {/* Cabecera de TAREA (F09): Cancelar · título. Sin barra inferior. */}
       <View style={[s.cabTarea, { paddingTop: inset.top + espacio.s, borderBottomColor: c.borderDefault, backgroundColor: c.background }]}>
-        <BotonTexto testID="cancelar" titulo="Cancelar" onPress={cancelar} />
-        <Text accessibilityRole="header" style={[tipo.titleSmall, { color: c.textPrimary }]}>{TITULO_TAREA[tipoReg]}</Text>
+        {pantalla === 'MAS' ? (
+          <BotonTexto testID="volver-expres" titulo="‹ Exprés" onPress={() => setPantalla('EXPRES')} />
+        ) : (
+          <BotonTexto testID="cancelar" titulo="Cancelar" onPress={cancelar} />
+        )}
+        <Text accessibilityRole="header" style={[tipo.titleSmall, { color: c.textPrimary }]}>{pantalla === 'MAS' ? 'Más opciones' : TITULO_TAREA[tipoReg]}</Text>
         <View style={{ width: 72, alignItems: 'flex-end' }}>
-          {!enviado && !bloqueado ? <BotonTexto testID="cambiar-tipo" titulo="Tipo" onPress={() => setHojaTipos(true)} /> : null}
+          {!enviado && !bloqueado && pantalla === 'EXPRES' ? <BotonTexto testID="cambiar-tipo" titulo="Tipo" onPress={() => setHojaTipos(true)} /> : null}
         </View>
       </View>
 
@@ -908,6 +1185,8 @@ export function RegistroGastoScreen(p: {
           </View>
         ) : null}
 
+        {pantalla === 'EXPRES' ? (
+          <>
         {/* Importe — DS-05 «Campo con icono €» */}
         <Campo etiqueta="Importe" error={visibles.importe}>
           <View style={[s.importeCaja, { backgroundColor: c.surfacePrimary, borderColor: visibles.importe ? c.critical : c.borderStandard }]}>
@@ -1077,189 +1356,34 @@ export function RegistroGastoScreen(p: {
           </View>
         ) : null}
 
-        <View testID="bloque-presupuestable" onLayout={(e) => (yPresupuesto.current = e.nativeEvent.layout.y)}>
-        <Campo etiqueta="¿Cuenta para el presupuesto?" error={visibles.presupuestable}>
-          <Segmentado<boolean>
-            testIDBase="presupuestable"
-            etiquetaGrupo="¿Cuenta para el presupuesto?"
-            opciones={[{ valor: true, etiqueta: 'Sí' }, { valor: false, etiqueta: 'No' }]}
-            valor={b.presupuestable}
-            onCambiar={(v) => {
-              p.traza?.('presupuesto_elegido');
-              cambiar({ presupuestable: v, presupuestableOrigen: 'USUARIO', presupuestablePropuesta: null });
-            }}
-          />
-          {b.presupuestable !== null && (b.presupuestableOrigen === 'USUARIO' || b.presupuestablePropuesta) ? (
-            <Text testID="origen-presupuestable" style={[tipo.footnote, { color: c.textSecondary }]}>
-              {b.presupuestableOrigen === 'USUARIO' ? TEXTO_ELEGIDA : origen(b.presupuestablePropuesta!)}
-            </Text>
-          ) : null}
-        </Campo>
-        </View>
-
-        {conVivienda ? (
-          <Campo etiqueta="Propiedad">
-            <BloquePropiedad testID="vivienda" propiedades={propiedadesApi} patrimonio={patrimonioApi} fecha={b.fechaHecho}
-              cuentaId={cuentaPropia} importe={b.importeTexto} valor={selProp}
-              onCambiar={(x) => { if (!bloqueado && !enviado) { setSelProp(x ? conDeudas(x, b.importeTexto) : x); setErrorProp(null); } }}
-              onPropuesta={onPropuestaPropiedad}
-              error={errorProp ?? (selProp ? null : 'Falta: la propiedad.')} bloqueado={bloqueado || enviado} />
-          </Campo>
-        ) : null}
-        {conVivienda ? null : <Campo etiqueta={esIngreso ? '¿De quién es este ingreso?' : '¿De quién es este gasto?'} opcional>
-          <View style={s.chips}>
-            <Chip
-              testID="solo-mio"
-              etiqueta="Solo mío"
-              seleccionado={b.soloMio && !b.reembolso}
-              onPress={() => cambiar(b.reembolso ? { soloMio: true, reembolso: null } : { soloMio: !b.soloMio })}
-            />
-            {!esIngreso && p.onGastoCompartido && !enviado && !b.reembolso ? (
-              <Chip testID="repartir" etiqueta="Repartir" seleccionado={false} onPress={() => irACompartido({ repartir: true, otraPersona: false })} />
-            ) : null}
-            {!esIngreso && (!enviado || b.reembolso) ? (
-              <Chip testID="reembolsable" etiqueta={TEXTO_OPCION_REEMBOLSO} accesibilidad={`${TEXTO_OPCION_REEMBOLSO}. ${TEXTO_OPCION_REEMBOLSO_SUB}`}
-                seleccionado={!!b.reembolso} onPress={abrirReembolso} />
-            ) : null}
-          </View>
-          {!esIngreso && b.reembolso && b.reembolso.nombre ? (
-            <View style={s.filaFinanciacion}>
-              <Pressable testID="reembolso-resumen" accessibilityRole="button" disabled={bloqueado || enviado} onPress={abrirReembolso} style={{ flexShrink: 1, minHeight: TACTIL_MIN, justifyContent: 'center' }}>
-                <Text style={[tipo.subheadline, { color: c.textPrimary }]}>
-                  {`${TEXTO_TE_DEBE(b.reembolso.nombre)} · ${formatearEur(importeReembolso(totalDe(b), b.reembolso) ?? '0.00')}`}
-                </Text>
-              </Pressable>
-              {!bloqueado && !enviado ? <BotonTexto testID="reembolso-quitar" titulo="Quitar" onPress={() => cambiar({ reembolso: null })} /> : null}
-            </View>
-          ) : null}
-          {visibles.reembolso ? <Text testID="reembolso-error" accessibilityRole="alert" style={[tipo.footnote, { color: c.criticalText }]}>{visibles.reembolso}</Text> : null}
-          <Text testID="origen-atribucion" style={[tipo.footnote, { color: c.textSecondary }]}>
-            {esIngreso
-              ? b.soloMio ? 'Decisión tuya: el ingreso es 100 % tuyo.' : 'Sin indicar: se guardará sin reparto.'
-              : b.reembolso && b.reembolso.nombre ? TEXTO_ATRIBUCION_REEMBOLSO(b.reembolso.nombre)
-                : b.soloMio ? 'Decisión tuya: el gasto es 100 % tuyo.' : 'Sin indicar: se guardará sin reparto y no contará en tu gasto atribuible.'}
-          </Text>
-        </Campo>}
-
-        {sinCuentaPropia ? null : <Campo etiqueta={esIngreso ? 'Cobrado en' : conVivienda && selProp?.pago.modo === 'CADA_UNO' ? 'Pagado con (tu parte)' : 'Pagado con'} error={visibles.cuenta}>
-          {cuentas.fase === 'CARGANDO' ? <EstadoDato estado="CARGANDO" /> : null}
-          {cuentas.fase === 'ERROR' ? (
-            <Pressable testID="cuentas-error" accessibilityRole="button" onPress={() => cargarCuentas(b.fechaHecho)} style={{ minHeight: TACTIL_MIN }}>
-              <EstadoDato estado="ERROR_CARGA" detalle="Tocar para reintentar" />
-            </Pressable>
-          ) : null}
-          {cuentas.fase === 'OK' && cuentas.lista.length === 0 ? (
-            <Text style={[tipo.subheadline, { color: c.textSecondary }]}>No tienes cuentas disponibles. Configura primero una cuenta.</Text>
-          ) : null}
-          {cuentas.fase === 'OK' ? (
-            <View style={s.chips}>
-              {cuentasVisibles.map((x) => (
-                <Chip
-                  key={x.cuenta_id}
-                  testID={`cuenta-${x.cuenta_id}`}
-                  etiqueta={x.nombre}
-                  seleccionado={b.cuentaId === x.cuenta_id}
-                  onPress={() => {
-                    p.traza?.('cuenta_elegida');
-                    cambiar({ cuentaId: x.cuenta_id, cuentaOrigen: 'USUARIO', cuentaPropuesta: null, propuesta: x.propuesta_financiacion, propuestaRechazada: false });
-                  }}
-                />
-              ))}
-              {!esIngreso && !conVivienda && p.onGastoCompartido && !enviado && !b.reembolso ? (
-                <Chip testID="otra-persona" etiqueta={TEXTO_OTRA_PERSONA} seleccionado={false} onPress={() => irACompartido({ repartir: false, otraPersona: true })} />
-              ) : null}
-            </View>
-          ) : null}
-          {!bloqueado ? <AvisoFaltaCuenta testID="falta-cuenta" n={sinConfigurar.n} onPress={() => setPanelCuentas(true)} /> : null}
-          {cuentaSel && (b.cuentaOrigen === 'USUARIO' || (b.cuentaOrigen === 'INFERIDO' && b.cuentaPropuesta)) ? (
-            <Text testID="origen-cuenta" style={[tipo.footnote, { color: c.textSecondary }]}>
-              {b.cuentaOrigen === 'USUARIO' ? TEXTO_ELEGIDA : origen(b.cuentaPropuesta!)}
-            </Text>
-          ) : null}
-          {conVivienda ? <Text testID="vivienda-solo-tus-cuentas" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_SOLO_TUS_CUENTAS}</Text> : null}
-          {cuentaSel && b.propuesta && !esIngreso && !conVivienda ? (
-            <View testID="financiacion" style={s.filaFinanciacion}>
-              <Text testID="financiacion-texto" style={[tipo.footnote, { color: c.textSecondary, flexShrink: 1 }]}>
-                {b.propuesta === 'SELF_100' && !b.propuestaRechazada
-                  ? 'Financiado por ti · cuenta 100 % tuya'
-                  : 'Financiación no determinada'}
-              </Text>
-              {b.propuesta === 'SELF_100' ? (
-                <BotonTexto
-                  testID={b.propuestaRechazada ? 'financiacion-usar-propuesta' : 'financiacion-no-es-asi'}
-                  titulo={b.propuestaRechazada ? 'Usar propuesta' : 'No es así'}
-                  onPress={() => cambiar({ propuestaRechazada: !b.propuestaRechazada })}
-                />
-              ) : null}
-            </View>
-          ) : null}
-        </Campo>}
-
-        {/* Fecha común del gasto y del pago (REG-01): propuesta «Hoy», editable, nunca futura. */}
-        <Campo etiqueta="Fecha" error={visibles.fecha}>
-          <CampoFecha
-            testID="campo-fecha"
-            etiqueta="Fecha del gasto, día barra mes barra año"
-            hoyIso={hoyIso}
-            max={hoyIso}
-            editable={!bloqueado}
-            error={!!visibles.fecha}
-            texto={otraFecha}
-            onTexto={(texto) => {
-              setOtraFecha(texto);
-              cambiar({ fechaHecho: ddmmaaaaAIso(texto) ?? texto, fechaOrigen: 'USUARIO' });
-            }}
-            opciones={[
-              { testID: 'fecha-hoy', etiqueta: 'Hoy', seleccionado: otraFecha === null && b.fechaHecho === hoyIso,
-                onPress: () => { if (bloqueado) return; setOtraFecha(null); cambiar({ fechaHecho: hoyIso, fechaOrigen: 'INFERIDO' }); } },
-              { testID: 'fecha-ayer', etiqueta: 'Ayer', seleccionado: otraFecha === null && b.fechaHecho === ayerIso,
-                onPress: () => { if (bloqueado) return; setOtraFecha(null); cambiar({ fechaHecho: ayerIso, fechaOrigen: 'USUARIO' }); } },
-              { testID: 'fecha-otra', etiqueta: 'Otra fecha', seleccionado: otraFecha !== null,
-                onPress: () => { if (!bloqueado) setOtraFecha(isoADdmmaaaa(b.fechaHecho)); } },
-            ]}
-          />
-          <Text testID="fecha" style={[tipo.footnote, { color: c.textSecondary }]}>
-            {esFechaIso(b.fechaHecho)
-              ? `${b.fechaOrigen === 'INFERIDO' ? 'Propuesta: hoy · ' : ''}${fechaCortaIso(b.fechaHecho)} · fecha del gasto y del pago`
-              : 'Escribe la fecha como dd/mm/aaaa.'}
-          </Text>
-        </Campo>
-
-        {/* G03 «Más detalles»: contexto y (en ingresos) nota. */}
-        {masDetalles ? (
-          <View testID="mas-detalles" style={{ gap: espacio.l }}>
-            <Text accessibilityRole="header" style={[tipo.caption, { color: c.textSecondary, letterSpacing: 0.6 }]}>MÁS DETALLES</Text>
-            <Campo etiqueta="Contexto" opcional>
-              <Pressable
-                testID="campo-contexto"
-                accessibilityRole="button"
-                accessibilityLabel={`Contexto: ${b.contextoNombre ?? 'Sin contexto'}`}
-                disabled={bloqueado}
-                onPress={() => setSelectorContexto('LISTA')}
-                style={[s.campoCategoria, { backgroundColor: c.surfacePrimary, borderColor: c.borderStandard }]}
-              >
-                <Text testID="contexto-valor" style={[tipo.body, { flex: 1, color: b.contextoNombre ? c.textPrimary : c.textSecondary }]}>{b.contextoNombre ?? 'Sin contexto'}</Text>
-                <Ionicons name="chevron-forward" size={18} color={c.textSecondary} />
-              </Pressable>
-              {b.contextoNombre && b.contextoOrigen === 'INFERIDO' && b.plantilla ? (
-                <Text testID="origen-contexto" style={[tipo.footnote, { color: c.textSecondary }]}>{origen('PLANTILLA')}</Text>
-              ) : null}
-            </Campo>
-            {/* A8: «Nota (opcional)» en gasto e ingreso; vacía no viaja. */}
-            <Campo etiqueta="Nota" opcional error={visibles.concepto}>
-              <TextInput
-                testID="campo-nota"
-                accessibilityLabel="Nota (opcional)"
-                value={b.concepto}
-                onChangeText={(t) => cambiar({ concepto: t })}
-                editable={!bloqueado}
-                maxLength={200}
-                style={[tipo.body, s.input, { color: c.textPrimary, backgroundColor: c.surfacePrimary, borderColor: visibles.concepto ? c.critical : c.borderStandard }]}
-              />
-            </Campo>
-          </View>
+        {conVivienda ? jsxPropiedad : null}
+        <RotuloSeRegistrara />
+        {abierto('presupuesto') ? jsxPresupuesto : (
+          <LineaResumen testID="linea-presupuesto" numero={4} etiqueta="¿Cuenta para el presupuesto?" valor={b.presupuestable ? 'Sí' : 'No'}
+            nota={notaPresupuesto} deshabilitada={bloqueado} onPress={() => abrirMas('presupuesto')}
+            onLayout={(e) => (yPresupuesto.current = e.nativeEvent.layout.y)} />
+        )}
+        {conVivienda ? null : (
+          <LineaResumen testID="linea-quien" numero={5} etiqueta={esIngreso ? '¿De quién es este ingreso?' : '¿De quién es este gasto?'}
+            valor={valorQuien} deshabilitada={bloqueado} onPress={() => abrirMas('quien')} />
+        )}
+        {sinCuentaPropia ? null : abierto('cuenta') ? jsxCuenta : (
+          <LineaResumen testID="linea-cuenta" numero={6} etiqueta={etiquetaCuenta} valor={cuentaSel?.nombre ?? '—'}
+            nota={notaCuenta} deshabilitada={bloqueado} onPress={() => abrirMas('cuenta')} />
+        )}
+        <LineaResumen testID="linea-fecha" numero={7} etiqueta="Fecha" valor={valorFecha} deshabilitada={bloqueado} onPress={() => abrirMas('fecha')} />
+          </>
         ) : (
-          <BotonTexto testID="abrir-mas-detalles" titulo="+ Más detalles (contexto, nota)" onPress={() => setMasDetalles(true)} />
+          <>
+        <ResumenExpres importe={importeResumen} tercero={b.terceroNombre ?? null} categoria={nombreCategoria} onPress={() => setPantalla('EXPRES')} />
+        {bloquesMas.map((x, i) => (
+          <BloqueNumerado key={x.id} testID={`bloque-${x.id}`} numero={x.numero} orden={i + 1} etiqueta={x.etiqueta}
+            onLayout={(e) => alMedirBloque(x.id, e.nativeEvent.layout.y)}
+            onContinuar={i < bloquesMas.length - 1 ? () => irA(bloquesMas[i + 1].id) : undefined}>
+            {x.jsx}
+          </BloqueNumerado>
+        ))}
+          </>
         )}
 
         {estado.fase === 'RECHAZADO' ? (
@@ -1299,9 +1423,12 @@ export function RegistroGastoScreen(p: {
             cargando={estado.fase === 'ENVIANDO'}
             deshabilitado={!listo}
             ayuda={listo ? undefined : faltan}
-            onPress={onRegistrar}
+            onPress={pulsarRegistrar}
           />
         )}
+        {pantalla === 'EXPRES' && estado.fase !== 'INDETERMINADO' ? (
+          <BotonSecundario testID="mas-opciones" titulo="Más opciones" onPress={() => { Keyboard.dismiss(); setPantalla('MAS'); }} />
+        ) : null}
       </ScrollView>
 
       {Platform.OS === 'ios' && b.categoria.estado === 'CATEGORIA' && b.categoria.magnitudes.length > 0 ? (
@@ -1350,6 +1477,12 @@ export function RegistroGastoScreen(p: {
       ) : null}
 
       {selectorAbierto ? selectorCategorias : null}
+
+      {revision && conVivienda && selProp ? (
+        <RevisarVivienda sel={selProp} importe={b.importeTexto} fecha={b.fechaHecho} categoria={nombreCategoria} tercero={b.terceroNombre ?? null}
+          cuenta={sinCuentaPropia ? null : cuentaSel?.nombre ?? null} presupuestable={b.presupuestable} aviso={revision.aviso}
+          enviando={estado.fase === 'ENVIANDO'} onVolver={() => setRevision(null)} onBloque={volverDeRevisar} onConfirmar={confirmarRevision} />
+      ) : null}
 
       {hojaReembolso && totalDe(b) !== null ? (
         <View style={[StyleSheet.absoluteFill, { backgroundColor: c.background }]}>
@@ -1470,6 +1603,9 @@ export function textoFaltan(e: Errores, b: Pick<Borrador, 'importeTexto' | 'cate
   const lista = partes.length === 1 ? partes[0] : `${partes.slice(0, -1).join(', ')} y ${partes[partes.length - 1]}`;
   return `Para registrar falta: ${lista}.`;
 }
+
+/** F06 T6 · S2: bloques de «Más opciones» (FORM-AGIL punto 2). */
+type BloqueMas = 'presupuesto' | 'propiedad' | 'quien' | 'cuenta' | 'fecha' | 'detalles';
 
 function Campo({ etiqueta, error, opcional, children }: { etiqueta: string; error?: string; opcional?: boolean; children: React.ReactNode }) {
   const { c } = useTema();

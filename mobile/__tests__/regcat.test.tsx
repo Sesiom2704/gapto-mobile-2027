@@ -9,6 +9,7 @@
 // Versión: 0.4.0 (F05-02 B2): el cliente simulado sirve la propuesta del resolver con la única cuenta (DEFAULT_GENERAL), que sustituye al fallback retirado del cliente (AJ-B1-09). Ningún caso REG-CAT cambia.
 // Versión: 0.5.0 (F05-03/F05-04 J2+J3 §2.2/§2.7): navegación «Registrar» + hoja de tipos y nota opcional en «Más detalles» (corte de Concepto). Ningún oráculo REG-CAT cambia.
 // Versión: 0.6.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
+// Versión: 0.7.0 (F06 T6 · S2 FORM-AGIL; F09 0.55 §12.107.1 puntos 1 y 2): los controles se buscan con `ver`/`verPronto` (form_agil.ts), que tocan antes la línea de «Se registrará así», «Más opciones» o «‹ Exprés» como haría el usuario. Mismas aserciones; las de ausencia siguen con queryByTestId.
 // ============================================================
 
 import './tiempos_rn';
@@ -24,11 +25,12 @@ import type { PayloadGastoPagado } from '../src/domain/intencion';
 import { ProveedorTema } from '../src/theme/tema';
 
 import { clienteCategoriasStub, LISTA, mag, nodo, propuestaUnica } from './fixtures_categorias';
+import { actVer, ver, verPronto } from './form_agil';
 
 /** F05-04 §2.7 (corte de Concepto): la nota opcional se escribe en «Más detalles». */
 function escribirNota(t: string) {
-  if (!screen.queryByTestId('campo-nota')) fireEvent.press(screen.getByTestId('abrir-mas-detalles'));
-  fireEvent.changeText(screen.getByTestId('campo-nota'), t);
+  if (!screen.queryByTestId('campo-nota')) fireEvent.press(ver('abrir-mas-detalles'));
+  fireEvent.changeText(ver('campo-nota'), t);
 }
 
 const CUENTA = 'c0000000-0000-4000-8000-000000000001';
@@ -67,19 +69,19 @@ async function abrir(cliente: ClienteApi) {
       </ProveedorTema>
     </SafeAreaProvider>,
   );
-  fireEvent.press(await screen.findByTestId('accion-registrar'));
-  fireEvent.press(screen.getByTestId('tipo-GASTO')); // F05-04 §2.2: «Registrar» → hoja de tipos
-  await screen.findByTestId('financiacion');
+  fireEvent.press(await verPronto('accion-registrar'));
+  fireEvent.press(ver('tipo-GASTO')); // F05-04 §2.2: «Registrar» → hoja de tipos
+  await verPronto('financiacion');
 }
 
 function basicos() {
-  fireEvent.changeText(screen.getByTestId('campo-importe'), '23,40');
+  fireEvent.changeText(ver('campo-importe'), '23,40');
   escribirNota('Factura');
-  fireEvent.press(screen.getByTestId('presupuestable-true'));
+  fireEvent.press(ver('presupuestable-true'));
 }
 
-const abrirSelector = () => fireEvent.press(screen.getByTestId('campo-categoria'));
-const texto = (id: string) => screen.getByTestId(id).props.children;
+const abrirSelector = () => fireEvent.press(ver('campo-categoria'));
+const texto = (id: string) => ver(id).props.children;
 
 beforeEach(() => {
   n = 0;
@@ -90,9 +92,9 @@ test('campo Pendiente sin preselección: bloquea, se nombra en faltan y no se en
   await abrir(f.cliente);
   basicos();
   expect(texto('categoria-valor')).toBe('Elige categoría');
-  expect(screen.getByTestId('registrar')).toBeDisabled();
+  expect(ver('registrar')).toBeDisabled();
   expect(texto('faltan')).toBe('Para registrar falta: categoría.');
-  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
+  await actVer('registrar', async () => fireEvent.press(ver('registrar')));
   expect(f.enviados).toHaveLength(0);
 });
 
@@ -100,11 +102,11 @@ test('selector: raíz con «Sin categoría», nodos visibles en el registro y mo
   const f = fake();
   await abrir(f.cliente);
   abrirSelector();
-  expect(screen.getByTestId('selector-sin-categoria')).toBeTruthy();
-  expect(screen.getByTestId('cat-hogar')).toBeTruthy();
-  expect(screen.getByTestId('cat-trabajo')).toBeTruthy(); // INGRESO con hijo GASTO: navegable
+  expect(ver('selector-sin-categoria')).toBeTruthy();
+  expect(ver('cat-hogar')).toBeTruthy();
+  expect(ver('cat-trabajo')).toBeTruthy(); // INGRESO con hijo GASTO: navegable
   expect(screen.getByText(/Solo ingresos · tiene subcategorías que sí puedes usar/)).toBeTruthy();
-  expect(screen.getByTestId('cat-ocio')).toBeTruthy(); // padre desactivado con hijo activo (fixture)
+  expect(ver('cat-ocio')).toBeTruthy(); // padre desactivado con hijo activo (fixture)
   expect(screen.getByText(/Desactivada · tiene subcategorías que sí puedes usar/)).toBeTruthy();
   expect(screen.queryByTestId('cat-viejo')).toBeNull(); // hoja desactivada: oculta en el registro
 });
@@ -113,21 +115,21 @@ test('«Usar…» solo en nodo elegible; nodo no elegible navegable sin «Usar�
   const f = fake();
   await abrir(f.cliente);
   abrirSelector();
-  fireEvent.press(screen.getByTestId('cat-hogar'));
-  expect(screen.getByTestId('selector-usar')).toBeTruthy();
+  fireEvent.press(ver('cat-hogar'));
+  expect(ver('selector-usar')).toBeTruthy();
   expect(screen.getByText('Usar «Hogar»')).toBeTruthy();
   // No capturable (magnitud obligatoria no disponible): visible, no seleccionable y con motivo (F09 §12.97.3, R05).
-  expect(screen.getByTestId('cat-gas').props.accessibilityState.disabled).toBe(true);
+  expect(ver('cat-gas').props.accessibilityState.disabled).toBe(true);
   expect(screen.getByText('Requiere un dato no disponible')).toBeTruthy();
-  fireEvent.press(screen.getByTestId('cat-gas'));
-  expect(screen.getByTestId('selector-categorias')).toBeTruthy(); // no se elige
-  fireEvent.press(screen.getByTestId('selector-miga-todas'));
-  fireEvent.press(screen.getByTestId('cat-trabajo'));
+  fireEvent.press(ver('cat-gas'));
+  expect(ver('selector-categorias')).toBeTruthy(); // no se elige
+  fireEvent.press(ver('selector-miga-todas'));
+  fireEvent.press(ver('cat-trabajo'));
   expect(screen.queryByTestId('selector-usar')).toBeNull();
-  expect(screen.getByTestId('selector-aviso-nivel')).toBeTruthy();
+  expect(ver('selector-aviso-nivel')).toBeTruthy();
   expect(screen.queryByTestId('cat-nomina')).toBeNull();
   // Hoja elegible: se selecciona al tocarla y vuelve al formulario con la ruta.
-  fireEvent.press(screen.getByTestId('cat-prof'));
+  fireEvent.press(ver('cat-prof'));
   expect(screen.queryByTestId('selector-categorias')).toBeNull();
   expect(texto('categoria-valor')).toBe('Gastos profesionales');
   expect(texto('categoria-ruta')).toBe('Trabajo');
@@ -146,7 +148,7 @@ const LISTA_SIN_USABLES: CategoriaNodo[] = [
 // Literales congelados por Moisés D-P7-05 (N3): idénticos carácter a carácter en el componente y en U17.
 const NEGATIVO = 'Sus subcategorías tampoco se pueden elegir ahora. Elige otra categoría o registra sin categoría.';
 const avisoNivel = (): string => {
-  const textos = screen.getByTestId('selector-aviso-nivel').findAllByType(Text).filter((t: { props: { children: unknown } }) => typeof t.props.children === 'string' && t.props.children.includes('se puede elegir'));
+  const textos = ver('selector-aviso-nivel').findAllByType(Text).filter((t: { props: { children: unknown } }) => typeof t.props.children === 'string' && t.props.children.includes('se puede elegir'));
   expect(textos).toHaveLength(1);
   return textos[0].props.children;
 };
@@ -171,7 +173,7 @@ test('AJ-09 N3: aviso de nivel sin descendiente elegible, motivo «Solo ingresos
   const f = fake({ arboles: [{ tipo: 'OK', datos: { categorias: LISTA_SIN_USABLES } }] });
   await abrir(f.cliente);
   abrirSelector();
-  fireEvent.press(screen.getByTestId('cat-sum'));
+  fireEvent.press(ver('cat-sum'));
   expect(avisoNivel()).toBe(`Suministros no se puede elegir (solo ingresos). ${NEGATIVO}`);
 });
 
@@ -179,7 +181,7 @@ test('AJ-09 N3: aviso de nivel sin descendiente elegible, motivo «Desactivada»
   const f = fake({ arboles: [{ tipo: 'OK', datos: { categorias: LISTA_SIN_USABLES } }] });
   await abrir(f.cliente);
   abrirSelector();
-  fireEvent.press(screen.getByTestId('cat-casa'));
+  fireEvent.press(ver('cat-casa'));
   expect(avisoNivel()).toBe(`Casa vieja está desactivada y no se puede elegir. ${NEGATIVO}`);
 });
 
@@ -187,7 +189,7 @@ test('AJ-09 N3: aviso de nivel con descendiente elegible, motivo «Solo ingresos
   const f = fake();
   await abrir(f.cliente);
   abrirSelector();
-  fireEvent.press(screen.getByTestId('cat-trabajo'));
+  fireEvent.press(ver('cat-trabajo'));
   expect(avisoNivel()).toBe('Trabajo no se puede elegir (solo ingresos). Sus subcategorías sí.');
 });
 
@@ -195,7 +197,7 @@ test('AJ-09 N3: aviso de nivel con descendiente elegible, motivo «Desactivada»
   const f = fake();
   await abrir(f.cliente);
   abrirSelector();
-  fireEvent.press(screen.getByTestId('cat-ocio'));
+  fireEvent.press(ver('cat-ocio'));
   expect(avisoNivel()).toBe('Ocio está desactivada y no se puede elegir. Sus subcategorías activas sí.');
 });
 
@@ -221,21 +223,21 @@ test('selección vigente con check Y texto («Elegida»)', async () => {
   const f = fake();
   await abrir(f.cliente);
   abrirSelector();
-  fireEvent.press(screen.getByTestId('cat-hogar'));
-  fireEvent.press(screen.getByTestId('selector-usar'));
+  fireEvent.press(ver('cat-hogar'));
+  fireEvent.press(ver('selector-usar'));
   abrirSelector();
-  fireEvent.press(screen.getByTestId('cat-hogar'));
+  fireEvent.press(ver('cat-hogar'));
   expect(screen.getByText('Elegida')).toBeTruthy();
-  expect(screen.getByTestId('selector-usar').props.accessibilityState.selected).toBe(true);
+  expect(ver('selector-usar').props.accessibilityState.selected).toBe(true);
 });
 
 test('estado vacío: «Aún no tienes categorías» con «Sin categoría» disponible', async () => {
   const f = fake({ arboles: [{ tipo: 'OK', datos: { categorias: [] } }] });
   await abrir(f.cliente);
   abrirSelector();
-  expect(screen.getByTestId('selector-vacio')).toBeTruthy();
+  expect(ver('selector-vacio')).toBeTruthy();
   expect(screen.getByText('Aún no tienes categorías')).toBeTruthy();
-  fireEvent.press(screen.getByTestId('selector-sin-categoria'));
+  fireEvent.press(ver('selector-sin-categoria'));
   expect(texto('categoria-valor')).toBe('Sin categoría');
 });
 
@@ -243,13 +245,13 @@ test('error de carga: Reintentar separado de «Continuar sin categoría»; el fa
   const f = fake({ arboles: [{ tipo: 'INDETERMINADO', mensaje: 'x' }, { tipo: 'OK', datos: { categorias: LISTA } }] });
   await abrir(f.cliente);
   abrirSelector();
-  expect(await screen.findByTestId('selector-error')).toBeTruthy();
+  expect(await verPronto('selector-error')).toBeTruthy();
   expect(screen.getByText('No hemos podido cargar tus categorías.')).toBeTruthy();
-  fireEvent.press(screen.getByTestId('selector-cerrar'));
+  fireEvent.press(ver('selector-cerrar'));
   expect(texto('categoria-valor')).toBe('Elige categoría'); // AJ-09: sin selección automática
   abrirSelector();
-  await act(async () => fireEvent.press(screen.getByTestId('selector-reintentar')));
-  expect(await screen.findByTestId('cat-hogar')).toBeTruthy();
+  await actVer('selector-reintentar', async () => fireEvent.press(ver('selector-reintentar')));
+  expect(await verPronto('cat-hogar')).toBeTruthy();
   expect(f.cliente.arbolCategorias).toHaveBeenCalledTimes(2);
   expect(f.enviados).toHaveLength(0); // reintentar la carga no crea intención
   expect(texto('categoria-valor')).toBe('Elige categoría');
@@ -259,7 +261,7 @@ test('«Continuar sin categoría» tras el error es una decisión deliberada', a
   const f = fake({ arboles: [{ tipo: 'INDETERMINADO', mensaje: 'x' }] });
   await abrir(f.cliente);
   abrirSelector();
-  fireEvent.press(await screen.findByTestId('selector-continuar-sin'));
+  fireEvent.press(await verPronto('selector-continuar-sin'));
   expect(texto('categoria-valor')).toBe('Sin categoría');
 });
 
@@ -268,18 +270,18 @@ test('magnitud obligatoria sin valor por defecto: bloquea y se nombra; al inform
   await abrir(f.cliente);
   basicos();
   abrirSelector();
-  fireEvent.press(screen.getByTestId('cat-hogar'));
-  fireEvent.press(screen.getByTestId('cat-luz'));
+  fireEvent.press(ver('cat-hogar'));
+  fireEvent.press(ver('cat-luz'));
   expect(texto('categoria-ruta')).toBe('Hogar');
-  expect(screen.getByTestId('datos-categoria')).toBeTruthy();
-  expect(screen.getByTestId('magnitud-kwh').props.value).toBe(''); // nunca «0»
-  expect(screen.getByTestId('microcopy-obligatoria')).toBeTruthy();
-  expect(screen.getByTestId('registrar')).toBeDisabled();
+  expect(ver('datos-categoria')).toBeTruthy();
+  expect(ver('magnitud-kwh').props.value).toBe(''); // nunca «0»
+  expect(ver('microcopy-obligatoria')).toBeTruthy();
+  expect(ver('registrar')).toBeDisabled();
   expect(texto('faltan')).toBe('Para registrar falta: consumo eléctrico (kWh).');
-  fireEvent.changeText(screen.getByTestId('magnitud-kwh'), '12,5');
-  expect(screen.getByTestId('registrar')).toBeEnabled();
-  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
-  await screen.findByTestId('registro-exito');
+  fireEvent.changeText(ver('magnitud-kwh'), '12,5');
+  expect(ver('registrar')).toBeEnabled();
+  await actVer('registrar', async () => fireEvent.press(ver('registrar')));
+  await verPronto('registro-exito');
   expect(f.enviados[0].categoria).toEqual({ estado: 'CATEGORIA', categoria_id: 'luz', magnitudes: [{ magnitud_id: 'kwh', valor: '12.5' }] });
   expect(JSON.stringify(f.enviados[0])).not.toContain('unidad');
 });
@@ -289,12 +291,12 @@ test('magnitud opcional marcada «(opcional)»: vacía no bloquea ni viaja', asy
   await abrir(f.cliente);
   basicos();
   abrirSelector();
-  fireEvent.press(screen.getByTestId('cat-hogar'));
-  fireEvent.press(screen.getByTestId('cat-agua'));
+  fireEvent.press(ver('cat-hogar'));
+  fireEvent.press(ver('cat-agua'));
   expect(screen.getByText(/\(opcional\)/)).toBeTruthy();
-  expect(screen.getByTestId('registrar')).toBeEnabled();
-  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
-  await screen.findByTestId('registro-exito');
+  expect(ver('registrar')).toBeEnabled();
+  await actVer('registrar', async () => fireEvent.press(ver('registrar')));
+  await verPronto('registro-exito');
   expect(f.enviados[0].categoria).toEqual({ estado: 'CATEGORIA', categoria_id: 'agua', magnitudes: [] });
 });
 
@@ -303,11 +305,11 @@ test('valor con más decimales de los admitidos: error visible al escribir y blo
   await abrir(f.cliente);
   basicos();
   abrirSelector();
-  fireEvent.press(screen.getByTestId('cat-hogar'));
-  fireEvent.press(screen.getByTestId('cat-luz'));
-  fireEvent.changeText(screen.getByTestId('magnitud-kwh'), '1,234');
+  fireEvent.press(ver('cat-hogar'));
+  fireEvent.press(ver('cat-luz'));
+  fireEvent.changeText(ver('magnitud-kwh'), '1,234');
   expect(screen.getByText('Máximo 2 decimales.')).toBeTruthy();
-  expect(screen.getByTestId('registrar')).toBeDisabled();
+  expect(ver('registrar')).toBeDisabled();
   expect(texto('faltan')).toBe('Para registrar falta: consumo eléctrico válido (kWh).');
 });
 
@@ -315,28 +317,28 @@ test('cambio de categoría sin valores: sin confirmación; con valores: confirma
   const f = fake();
   await abrir(f.cliente);
   abrirSelector();
-  fireEvent.press(screen.getByTestId('cat-hogar'));
-  fireEvent.press(screen.getByTestId('cat-agua'));
+  fireEvent.press(ver('cat-hogar'));
+  fireEvent.press(ver('cat-agua'));
   abrirSelector();
-  fireEvent.press(screen.getByTestId('cat-hogar'));
-  fireEvent.press(screen.getByTestId('cat-luz'));
+  fireEvent.press(ver('cat-hogar'));
+  fireEvent.press(ver('cat-luz'));
   expect(screen.queryByTestId('confirmar-descarte')).toBeNull();
   expect(texto('categoria-valor')).toBe('Luz');
-  fireEvent.changeText(screen.getByTestId('magnitud-kwh'), '245');
+  fireEvent.changeText(ver('magnitud-kwh'), '245');
   abrirSelector();
-  fireEvent.press(screen.getByTestId('cat-hogar'));
-  fireEvent.press(screen.getByTestId('cat-agua'));
-  expect(screen.getByTestId('confirmar-descarte')).toBeTruthy();
-  expect(screen.getByTestId('descarte-kwh')).toBeTruthy();
+  fireEvent.press(ver('cat-hogar'));
+  fireEvent.press(ver('cat-agua'));
+  expect(ver('confirmar-descarte')).toBeTruthy();
+  expect(ver('descarte-kwh')).toBeTruthy();
   expect(screen.getByText('245 kWh')).toBeTruthy();
-  fireEvent.press(screen.getByTestId('descarte-mantener'));
+  fireEvent.press(ver('descarte-mantener'));
   expect(texto('categoria-valor')).toBe('Luz');
-  expect(screen.getByTestId('magnitud-kwh').props.value).toBe('245');
+  expect(ver('magnitud-kwh').props.value).toBe('245');
   // «Sin categoría» descarta todas con la misma confirmación.
   abrirSelector();
-  fireEvent.press(screen.getByTestId('selector-sin-categoria'));
-  expect(screen.getByTestId('confirmar-descarte')).toBeTruthy();
-  fireEvent.press(screen.getByTestId('descarte-confirmar'));
+  fireEvent.press(ver('selector-sin-categoria'));
+  expect(ver('confirmar-descarte')).toBeTruthy();
+  fireEvent.press(ver('descarte-confirmar'));
   expect(texto('categoria-valor')).toBe('Sin categoría');
   expect(screen.queryByTestId('datos-categoria')).toBeNull();
 });
@@ -349,22 +351,22 @@ test('cambio entre categorías con una magnitud común: se conserva sin confirma
   const f = fake({ arboles: [{ tipo: 'OK', datos: { categorias: comun } }] });
   await abrir(f.cliente);
   abrirSelector();
-  fireEvent.press(screen.getByTestId('cat-a'));
-  fireEvent.changeText(screen.getByTestId('magnitud-m'), '40');
+  fireEvent.press(ver('cat-a'));
+  fireEvent.changeText(ver('magnitud-m'), '40');
   abrirSelector();
-  fireEvent.press(screen.getByTestId('cat-b'));
+  fireEvent.press(ver('cat-b'));
   expect(screen.queryByTestId('confirmar-descarte')).toBeNull();
-  expect(screen.getByTestId('magnitud-m').props.value).toBe('40');
+  expect(ver('magnitud-m').props.value).toBe('40');
 });
 
 test('presupuestable_default de la categoría no rellena «¿Cuenta para el presupuesto?»', async () => {
   const f = fake();
   await abrir(f.cliente);
   abrirSelector();
-  fireEvent.press(screen.getByTestId('cat-hogar'));
-  fireEvent.press(screen.getByTestId('selector-usar')); // Hogar: presupuestable_default = true
-  expect(screen.getByTestId('presupuestable-true').props.accessibilityState.selected).toBe(false);
-  expect(screen.getByTestId('presupuestable-false').props.accessibilityState.selected).toBe(false);
+  fireEvent.press(ver('cat-hogar'));
+  fireEvent.press(ver('selector-usar')); // Hogar: presupuestable_default = true
+  expect(ver('presupuestable-true').props.accessibilityState.selected).toBe(false);
+  expect(ver('presupuestable-false').props.accessibilityState.selected).toBe(false);
 });
 
 test.each(['CATEGORIA_NO_ELEGIBLE', 'MAGNITUD_VALOR_NO_VALIDO'])(
@@ -377,23 +379,23 @@ test.each(['CATEGORIA_NO_ELEGIBLE', 'MAGNITUD_VALOR_NO_VALIDO'])(
     await abrir(f.cliente);
     basicos();
     abrirSelector();
-    fireEvent.press(screen.getByTestId('cat-hogar'));
-    fireEvent.press(screen.getByTestId('cat-luz'));
-    fireEvent.changeText(screen.getByTestId('magnitud-kwh'), '12,5');
-    await act(async () => fireEvent.press(screen.getByTestId('registrar')));
-    expect(await screen.findByTestId('categoria-invalida')).toBeTruthy();
+    fireEvent.press(ver('cat-hogar'));
+    fireEvent.press(ver('cat-luz'));
+    fireEvent.changeText(ver('magnitud-kwh'), '12,5');
+    await actVer('registrar', async () => fireEvent.press(ver('registrar')));
+    expect(await verPronto('categoria-invalida')).toBeTruthy();
     expect(texto('categoria-valor')).toBe('Elige otra categoría');
-    expect(screen.getByTestId('error-dominio')).toBeTruthy();
+    expect(ver('error-dominio')).toBeTruthy();
     await waitFor(() => expect(f.cliente.arbolCategorias).toHaveBeenCalledTimes(2));
     expect(f.enviados).toHaveLength(1); // la intención sellada no se reenvía
-    expect(screen.getByTestId('registrar')).toBeDisabled();
+    expect(ver('registrar')).toBeDisabled();
     // Las demás decisiones se conservan.
-    expect(screen.getByTestId('campo-importe').props.value).toBe('23,40');
-    expect(screen.getByTestId('presupuestable-true').props.accessibilityState.selected).toBe(true);
+    expect(ver('campo-importe').props.value).toBe('23,40');
+    expect(ver('presupuestable-true').props.accessibilityState.selected).toBe(true);
     abrirSelector();
-    fireEvent.press(screen.getByTestId('selector-sin-categoria'));
-    await act(async () => fireEvent.press(screen.getByTestId('registrar')));
-    await screen.findByTestId('registro-exito');
+    fireEvent.press(ver('selector-sin-categoria'));
+    await actVer('registrar', async () => fireEvent.press(ver('registrar')));
+    await verPronto('registro-exito');
     expect(f.enviados[1].intencion_id).not.toBe(f.enviados[0].intencion_id);
     expect(f.enviados[1].categoria).toEqual({ estado: 'SIN_CATEGORIA' });
   },

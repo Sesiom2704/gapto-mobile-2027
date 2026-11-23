@@ -435,6 +435,16 @@
 #     que trajo mant-n3-cliente (fc809be, D-C7-07, puntos de miles al teclear): funcion pura de formato del campo de
 #     importe, sin efecto en el camino categorial. La lista cerrada (igualdad exacta del conjunto de imports), el
 #     resto de entradas y las demas guardas no cambian.
+# Version: 0.46.0 (F06 T6 · UX agil S2, mandato F06-T6 NOCHE v1.2 P3; adaptacion declarada con el precedente de la
+#     adenda 01 de MANT 21, patron L-06): I13a da de alta SOLO imports de presentacion que no participan en resolver la
+#     categoria (F09 0.55 §12.107.1, FORM-AGIL):
+#     - RegistroGastoScreen.tsx: '../components/FormAgil' (BloqueNumerado, LineaResumen, ResumenExpres,
+#       RotuloSeRegistrara: lineas del expres y bloques de 'Mas opciones') y '../components/RevisarVivienda'
+#       (RevisarVivienda, huellaRevision, TEXTO_REVISION_CAMBIADA: 'Revisar' del gasto de vivienda, A6);
+#     - SelectorCategorias.tsx: './Basicos' BotonSecundario (el boton se mueve a Basicos y SelectorCategorias lo
+#       reexporta, AJ-UX2-10) y './PantallaSelector' useCerrarTecladoAlAbrir (cierra el teclado al abrir, FA-04).
+#     La lista cerrada (igualdad exacta del conjunto de imports), las demas entradas y las demas guardas no cambian.
+#     Discriminante: mutante M-A01-154 (import ajeno en RegistroGastoScreen.tsx) MUERTO.
 # ============================================================
 
 from __future__ import annotations
@@ -2402,3 +2412,14 @@ REGISTRO.update({
 # D-C7-07, puntos de miles al teclear; presentacion pura, sin efecto en el camino categorial (origen: fc809be,
 # mant-n3-cliente). Una sola alta; la igualdad exacta del conjunto de imports de I13a se conserva.
 IMPORTS_CAMINO[REG] = IMPORTS_CAMINO[REG] | {("../domain/importe", "formatearImporteAlTeclear")}
+
+# ------------------------------------------------------------------ F06 T6 UX agil S2 (adaptacion declarada, precedente adenda 01 MANT 21)
+# FORM-AGIL (F09 0.55 §12.107.1): presentacion pura, sin efecto en el camino categorial. Solo altas; la igualdad exacta
+# del conjunto de imports de I13a se conserva.
+IMPORTS_CAMINO[REG] = IMPORTS_CAMINO[REG] | {
+    ("../components/FormAgil", "BloqueNumerado"), ("../components/FormAgil", "LineaResumen"),
+    ("../components/FormAgil", "ResumenExpres"), ("../components/FormAgil", "RotuloSeRegistrara"),
+    ("../components/RevisarVivienda", "RevisarVivienda"), ("../components/RevisarVivienda", "huellaRevision"),
+    ("../components/RevisarVivienda", "TEXTO_REVISION_CAMBIADA"),
+}
+IMPORTS_CAMINO[SEL] = IMPORTS_CAMINO[SEL] | {("./Basicos", "BotonSecundario"), ("./PantallaSelector", "useCerrarTecladoAlAbrir")}

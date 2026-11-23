@@ -5,6 +5,7 @@
 // Descripción: CAT-VIV (T2-F06, bloque 3) contra dobles en memoria, con los nombres de oráculo del mandato (§9.2) y de la lámina SET-CAT/REG-CAT v1.0: dominio (`exigePropiedad` solo GASTO y por la marca de ESA categoría; faltas; wire `propiedad` con `posiciones_confirmadas`; sellado), O-CV-12 (sin marca el formulario no cambia; con marca «Propiedad» obligatoria), «<cotitular>, todo» (sin «Pagado con»), O-CV-18 (VP-2b: mueble 250 € que cuenta en el mes y no suma al coste), O-CV-16 (una plantilla que deja una categoría marcada en el registro hace obligatoria la propiedad), R06/M5 (registrar desde una previsión con categoría marcada pide la propiedad y la envía), R07 (aviso de lectura en Actividad, sin acción) y O-CV-17 (VP-1: al tocar «Asociada a vivienda» solo cambia la fila; la relectura es silenciosa y el detalle no se desmonta).
 // Versión: 0.3.0 (MANT D18, lote 40): se elimina el jest.setTimeout(30000) propio; el límite (90 s) lo fija solo tiempos_rn (R-TEST-TIMEOUT); sin cambios de aserciones.
 //   previa: 0.1.0 (F06 T2-F06 CAT-VIV N1 (L-04, lámina SET-CAT/REG-CAT v1.0))
+// Versión: 0.4.0 (F06 T6 · S2 FORM-AGIL; F09 0.55 §12.107.1 puntos 1 y 2): los controles se buscan con `ver`/`verPronto` (form_agil.ts), que tocan antes la línea de «Se registrará así», «Más opciones» o «‹ Exprés» como haría el usuario. Mismas aserciones; las de ausencia siguen con queryByTestId.
 // ============================================================
 
 import './tiempos_rn';
@@ -36,6 +37,7 @@ import { RegistroGastoScreen } from '../src/screens/RegistroGastoScreen';
 import { ProveedorTema } from '../src/theme/tema';
 
 import { clienteCategoriasStub, nodo } from './fixtures_categorias';
+import { actVer, ver, verPronto } from './form_agil';
 
 jest.mock('expo-font', () => ({ ...jest.requireActual('expo-font'), isLoaded: () => true }));
 
@@ -154,15 +156,15 @@ function montarRegistro(c: ClienteApi, extra: Partial<React.ComponentProps<typeo
 }
 async function formulario(c: ClienteApi, categoria: 'comunidad' | 'muebles' | 'ocio', importe = '120') {
   montarRegistro(c);
-  await screen.findByTestId(`cuenta-${C1}`);
-  fireEvent.changeText(screen.getByTestId('campo-importe'), importe);
-  fireEvent.press(screen.getByTestId('campo-categoria'));
-  if (categoria !== 'ocio') fireEvent.press(screen.getByTestId('cat-hogar'));
-  await act(async () => fireEvent.press(screen.getByTestId(`cat-${categoria}`)));
-  fireEvent.press(screen.getByTestId('presupuestable-true'));
-  if (screen.queryByTestId(`cuenta-${C1}`)) fireEvent.press(screen.getByTestId(`cuenta-${C1}`));
+  await verPronto(`cuenta-${C1}`);
+  fireEvent.changeText(ver('campo-importe'), importe);
+  fireEvent.press(ver('campo-categoria'));
+  if (categoria !== 'ocio') fireEvent.press(ver('cat-hogar'));
+  await actVer(`cat-${categoria}`, async () => fireEvent.press(ver(`cat-${categoria}`)));
+  fireEvent.press(ver('presupuestable-true'));
+  if (screen.queryByTestId(`cuenta-${C1}`)) fireEvent.press(ver(`cuenta-${C1}`));
 }
-const marcado = (id: string) => !!screen.getByTestId(id).props.accessibilityState?.checked || !!screen.getByTestId(id).props.accessibilityState?.selected;
+const marcado = (id: string) => !!ver(id).props.accessibilityState?.checked || !!ver(id).props.accessibilityState?.selected;
 const ids = (raiz: any): string[] => {
   const out: string[] = [];
   const recorrer = (x: any) => {
@@ -183,7 +185,7 @@ test('O-CV-12: sin marca el formulario no cambia (mismos campos que una categor�
   await formulario(cliente(), 'ocio');
   const despues = ids(screen.toJSON());
   expect(despues).toEqual(antes);
-  for (const id of ['solo-mio', 'repartir', 'reembolsable', 'otra-persona', `cuenta-${CONJ}`, 'financiacion']) expect(screen.getByTestId(id)).toBeTruthy();
+  for (const id of ['solo-mio', 'repartir', 'reembolsable', 'otra-persona', `cuenta-${CONJ}`, 'financiacion']) expect(ver(id)).toBeTruthy();
   expect(screen.queryByTestId('vivienda')).toBeNull();
   expect(screen.queryByTestId('vivienda-solo-tus-cuentas')).toBeNull();
 });
@@ -191,26 +193,29 @@ test('O-CV-12: sin marca el formulario no cambia (mismos campos que una categor�
 test('O-CV-12: con marca, «Propiedad» obligatoria (R01); sin ella no se registra; con ella viaja el bloque con reparto, deuda y confirmación (R02, R03)', async () => {
   const c = cliente();
   await formulario(c, 'comunidad');
-  expect(screen.getByTestId('vivienda')).toBeTruthy();
+  expect(ver('vivienda')).toBeTruthy();
   for (const id of ['solo-mio', 'repartir', 'reembolsable', 'otra-persona', `cuenta-${CONJ}`, 'financiacion']) expect(screen.queryByTestId(id)).toBeNull();
-  expect(screen.getByTestId('vivienda-error').props.children).toBe('Falta: la propiedad.');
-  expect(screen.getByTestId('faltan').props.children).toBe('Para registrar falta: la propiedad.');
-  expect(screen.getByTestId('registrar').props.accessibilityState?.disabled).toBe(true);
-  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
+  expect(ver('vivienda-error').props.children).toBe('Falta: la propiedad.');
+  expect(ver('faltan').props.children).toBe('Para registrar falta: la propiedad.');
+  expect(ver('registrar').props.accessibilityState?.disabled).toBe(true);
+  await actVer('registrar', async () => fireEvent.press(ver('registrar')));
   expect(c.registrarGastoPagado).not.toHaveBeenCalled();
-  await act(async () => fireEvent.press(await screen.findByTestId(`vivienda-prop-${P1}`)));
-  await screen.findByTestId('vivienda-titularidad');
+  await act(async () => fireEvent.press(await verPronto(`vivienda-prop-${P1}`)));
+  await verPronto('vivienda-titularidad');
   expect(marcado('vivienda-titularidad')).toBe(true);
-  expect(screen.getByTestId('vivienda-partes').props.children).toBe('Tu parte: 60,00 € · Lucía: 60,00 €');
+  expect(ver('vivienda-partes').props.children).toBe('Tu parte: 60,00 € · Lucía: 60,00 €');
   expect(marcado('vivienda-clase-GASTO_CORRIENTE')).toBe(true);
   expect(screen.queryByTestId('vivienda-clase-MEJORA')).toBeNull();
   // «¿Quién pagó?» sin valor por defecto.
-  expect(screen.getByTestId('faltan').props.children).toBe('Para registrar falta: quién pagó.');
-  await act(async () => fireEvent.press(screen.getByTestId('vivienda-quien-yo')));
+  expect(ver('faltan').props.children).toBe('Para registrar falta: quién pagó.');
+  await actVer('vivienda-quien-yo', async () => fireEvent.press(ver('vivienda-quien-yo')));
   expect(marcado(`vivienda-deuda-${LUCIA}-si`)).toBe(true);
-  expect(screen.getByTestId('vivienda-resumen').props.children).toBe('Tu gasto del mes: 60,00 € · Lucía te debe 60,00 €');
-  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
-  await screen.findByTestId('registro-exito');
+  expect(ver('vivienda-resumen').props.children).toBe('Tu gasto del mes: 60,00 € · Lucía te debe 60,00 €');
+  await actVer('registrar', async () => fireEvent.press(ver('registrar')));
+  // F06 T6 · S2 (dictamen 1 Q5/A6): con vivienda, «Registrar» abre «Revisar»; se confirma desde ahí.
+  expect(ver('revisar-vivienda')).toBeTruthy();
+  await actVer('revisar-confirmar', async () => fireEvent.press(ver('revisar-confirmar')));
+  await verPronto('registro-exito');
   const pl = (c.registrarGastoPagado as jest.Mock).mock.calls[0][0];
   expect(pl.atribucion).toBe('SIN_INDICAR');
   expect(pl.financiacion).toEqual({ estado: 'NO_DETERMINADA' });
@@ -228,14 +233,17 @@ test('O-CV-12: con marca, «Propiedad» obligatoria (R01); sin ella no se regist
 test('con marca: «Lucía, todo» oculta «Pagado con» y propone LE_DEBO; desmarcarlo envía NADA', async () => {
   const c = cliente();
   await formulario(c, 'comunidad');
-  await act(async () => fireEvent.press(await screen.findByTestId(`vivienda-prop-${P1}`)));
-  await screen.findByTestId('vivienda-titularidad');
-  await act(async () => fireEvent.press(screen.getByTestId(`vivienda-quien-cotitular-${LUCIA}`)));
+  await act(async () => fireEvent.press(await verPronto(`vivienda-prop-${P1}`)));
+  await verPronto('vivienda-titularidad');
+  await actVer(`vivienda-quien-cotitular-${LUCIA}`, async () => fireEvent.press(ver(`vivienda-quien-cotitular-${LUCIA}`)));
   expect(screen.queryByTestId(`cuenta-${C1}`)).toBeNull();
-  expect(screen.getByTestId('vivienda-sin-cuenta')).toBeTruthy();
-  await act(async () => fireEvent.press(screen.getByTestId(`vivienda-deuda-${LUCIA}-no`)));
-  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
-  await screen.findByTestId('registro-exito');
+  expect(ver('vivienda-sin-cuenta')).toBeTruthy();
+  await actVer(`vivienda-deuda-${LUCIA}-no`, async () => fireEvent.press(ver(`vivienda-deuda-${LUCIA}-no`)));
+  await actVer('registrar', async () => fireEvent.press(ver('registrar')));
+  // F06 T6 · S2 (dictamen 1 Q5/A6): con vivienda, «Registrar» abre «Revisar»; se confirma desde ahí.
+  expect(ver('revisar-vivienda')).toBeTruthy();
+  await actVer('revisar-confirmar', async () => fireEvent.press(ver('revisar-confirmar')));
+  await verPronto('registro-exito');
   const pl = (c.registrarGastoPagado as jest.Mock).mock.calls[0][0];
   expect(pl.propiedad.pagos).toEqual([{ pagador: LUCIA, importe: '120.00' }]);
   expect(pl.propiedad.saldos).toEqual([{ actor_id: LUCIA, sentido: 'NADA' }]);
@@ -245,18 +253,21 @@ test('con marca: «Lucía, todo» oculta «Pagado con» y propone LE_DEBO; desma
 test('O-CV-18 (VP-2b, R05): un mueble de 250 € con categoría marcada es un gasto normal de vivienda que cuenta en el mes y no suma al coste', async () => {
   const c = cliente();
   await formulario(c, 'muebles', '250');
-  await act(async () => fireEvent.press(await screen.findByTestId(`vivienda-prop-${P2}`)));
-  await screen.findByTestId('vivienda-titularidad');
+  await act(async () => fireEvent.press(await verPronto(`vivienda-prop-${P2}`)));
+  await verPronto('vivienda-titularidad');
   expect(screen.queryByTestId('vivienda-quien-yo')).toBeNull(); // sin cotitulares no se pregunta
-  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
-  await screen.findByTestId('registro-exito');
+  await actVer('registrar', async () => fireEvent.press(ver('registrar')));
+  // F06 T6 · S2 (dictamen 1 Q5/A6): con vivienda, «Registrar» abre «Revisar»; se confirma desde ahí.
+  expect(ver('revisar-vivienda')).toBeTruthy();
+  await actVer('revisar-confirmar', async () => fireEvent.press(ver('revisar-confirmar')));
+  await verPronto('registro-exito');
   const pl = (c.registrarGastoPagado as jest.Mock).mock.calls[0][0];
   expect(pl.propiedad.clase).toBe('GASTO_CORRIENTE');
   expect(pl.propiedad.pagos).toEqual([{ pagador: 'YO', cuenta_id: C1, importe: '250.00' }]);
-  expect(screen.getByTestId('exito-vivienda-propiedad').props.children).toBe('Casa Playa');
-  expect(screen.getByTestId('exito-vivienda-reparto').props.children).toBe('Según titularidad: tú 100 %');
-  expect(screen.getByTestId('exito-vivienda-mes').props.children).toBe('Cuenta en el gasto de octubre: 250,00 €.');
-  expect(screen.getByTestId('exito-vivienda-no-coste').props.children).toBe(TEXTO_NO_SUMA_COSTE);
+  expect(ver('exito-vivienda-propiedad').props.children).toBe('Casa Playa');
+  expect(ver('exito-vivienda-reparto').props.children).toBe('Según titularidad: tú 100 %');
+  expect(ver('exito-vivienda-mes').props.children).toBe('Cuenta en el gasto de octubre: 250,00 €.');
+  expect(ver('exito-vivienda-no-coste').props.children).toBe(TEXTO_NO_SUMA_COSTE);
 });
 
 test('O-CV-16: una plantilla que deja una categoría marcada en el registro hace obligatoria la propiedad', async () => {
@@ -265,10 +276,10 @@ test('O-CV-16: una plantilla que deja una categoría marcada en el registro hace
     campos: { categoria: { valor: 'comunidad', origen }, tercero: null, contexto: null, cuenta: { valor: C1, origen }, presupuestable: { valor: true, origen } },
     avisos: [] }) });
   montarRegistro(c, { plantilla: { id: 'p1', nombre: 'Comunidad' } });
-  await waitFor(() => expect(screen.getByTestId('categoria-valor').props.children).toBe('Comunidad'));
-  fireEvent.changeText(screen.getByTestId('campo-importe'), '120');
-  await waitFor(() => expect(screen.getByTestId('vivienda')).toBeTruthy());
-  expect(screen.getByTestId('faltan').props.children).toBe('Para registrar falta: la propiedad.');
+  await waitFor(() => expect(ver('categoria-valor').props.children).toBe('Comunidad'));
+  fireEvent.changeText(ver('campo-importe'), '120');
+  await waitFor(() => expect(ver('vivienda')).toBeTruthy());
+  expect(ver('faltan').props.children).toBe('Para registrar falta: la propiedad.');
   expect(screen.queryByTestId('solo-mio')).toBeNull();
 });
 
@@ -290,16 +301,16 @@ test('R06 / M5 (OBL-VIV-01.4): registrar desde una previsión con categoría mar
       </ProveedorTema>
     </SafeAreaProvider>,
   );
-  await screen.findByTestId('prevision-vivienda');
-  expect(screen.getByTestId('prevision-vivienda-aviso').props.children).toBe(TEXTO_PREVISION_SIN_PROPIEDAD);
-  await act(async () => fireEvent.press(screen.getByTestId('cubierta-si')));
-  expect(screen.getByTestId('prevision-falta').props.children).toBe('Para revisar falta: la propiedad.');
-  expect(screen.getByTestId('prevision-revisar').props.accessibilityState?.disabled).toBe(true);
+  await verPronto('prevision-vivienda');
+  expect(ver('prevision-vivienda-aviso').props.children).toBe(TEXTO_PREVISION_SIN_PROPIEDAD);
+  await actVer('cubierta-si', async () => fireEvent.press(ver('cubierta-si')));
+  expect(ver('prevision-falta').props.children).toBe('Para revisar falta: la propiedad.');
+  expect(ver('prevision-revisar').props.accessibilityState?.disabled).toBe(true);
   expect(screen.queryByTestId(`prevision-cuenta-${CONJ}`)).toBeNull();
-  await act(async () => fireEvent.press(await screen.findByTestId(`prevision-vivienda-prop-${P2}`)));
-  await screen.findByTestId('prevision-vivienda-titularidad');
-  await act(async () => fireEvent.press(screen.getByTestId('prevision-revisar')));
-  await act(async () => fireEvent.press(screen.getByTestId('prevision-registrar')));
+  await act(async () => fireEvent.press(await verPronto(`prevision-vivienda-prop-${P2}`)));
+  await verPronto('prevision-vivienda-titularidad');
+  await actVer('prevision-revisar', async () => fireEvent.press(ver('prevision-revisar')));
+  await actVer('prevision-registrar', async () => fireEvent.press(ver('prevision-registrar')));
   const pl = (c.registrarGastoPagado as jest.Mock).mock.calls[0][0];
   expect(pl.prevision).toBeTruthy();
   expect(pl.atribucion).toBe('SIN_INDICAR');
@@ -318,7 +329,7 @@ test('R06: con «Sin categoría» o una categoría sin marca, la previsión se r
       </ProveedorTema>
     </SafeAreaProvider>,
   );
-  await screen.findByTestId(`prevision-cuenta-${CONJ}`);
+  await verPronto(`prevision-cuenta-${CONJ}`);
   expect(screen.queryByTestId('prevision-vivienda')).toBeNull();
 });
 
@@ -344,15 +355,15 @@ async function detalleActividad(aviso: boolean | undefined) {
     </SafeAreaProvider>,
   );
   for (let i = 0; i < 3; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
-  await act(async () => fireEvent.press(screen.getByTestId('tab-DIA')));
-  await waitFor(() => expect(screen.getByTestId('fila-g7')).toBeTruthy());
-  await act(async () => fireEvent.press(screen.getByTestId('fila-g7')));
-  await waitFor(() => expect(screen.getByTestId('detalle-contenido')).toBeTruthy());
+  await actVer('tab-DIA', async () => fireEvent.press(ver('tab-DIA')));
+  await waitFor(() => expect(ver('fila-g7')).toBeTruthy());
+  await actVer('fila-g7', async () => fireEvent.press(ver('fila-g7')));
+  await waitFor(() => expect(ver('detalle-contenido')).toBeTruthy());
 }
 
 test('R07 (OBL-VIV-01.6): un gasto corregido a una categoría marcada muestra el aviso de lectura, sin acción para asociar la propiedad', async () => {
   await detalleActividad(true);
-  const aviso = screen.getByTestId('detalle-aviso-vivienda');
+  const aviso = ver('detalle-aviso-vivienda');
   expect(within(aviso).getByText(TEXTO_AVISO_VIVIENDA)).toBeTruthy();
   expect(within(aviso).getByText(TEXTO_AVISO_VIVIENDA_DETALLE)).toBeTruthy();
   expect(screen.queryByText(/Asociar a una propiedad/)).toBeNull();
@@ -389,7 +400,7 @@ async function abrirDetalle(c: ClienteApi, id: string) {
     </SafeAreaProvider>,
   );
   await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
-  await act(async () => fireEvent.press(await screen.findByTestId(`fila-${id}`)));
+  await act(async () => fireEvent.press(await verPronto(`fila-${id}`)));
 }
 
 test('S01–S03/S05: fila «Asociada a vivienda» con sus notas; en ingresos no hay fila y se explica por qué', async () => {
@@ -397,44 +408,44 @@ test('S01–S03/S05: fila «Asociada a vivienda» con sus notas; en ingresos no 
     nodo({ id: 'seg', nombre: 'Seguros', ambito: 'AMBOS', orden: 2, asociada_vivienda: true }), nodo({ id: 'com', nombre: 'Comunidad', orden: 3, asociada_vivienda: true })];
   const { c } = clienteAjustes(lista);
   await abrirDetalle(c, 'super');
-  expect(screen.getByTestId('detalle-vivienda-valor').props.children).toBe('No');
-  expect(screen.getByTestId('detalle-vivienda-casa-no')).toBeTruthy();
-  expect(screen.getByTestId('detalle-vivienda-nota').props.children).toBe(NOTA_VIVIENDA_NO);
-  await act(async () => fireEvent.press(screen.getByTestId('detalle-atras')));
-  await act(async () => fireEvent.press(await screen.findByTestId('fila-com')));
-  expect(screen.getByTestId('detalle-vivienda-casa-si')).toBeTruthy();
-  expect(screen.getByTestId('detalle-vivienda-nota').props.children).toBe(NOTA_VIVIENDA_SI);
-  await act(async () => fireEvent.press(screen.getByTestId('detalle-atras')));
-  await act(async () => fireEvent.press(await screen.findByTestId('fila-seg')));
-  expect(screen.getByTestId('detalle-vivienda-nota').props.children).toBe(NOTA_VIVIENDA_SI_AMBOS);
-  await act(async () => fireEvent.press(screen.getByTestId('detalle-atras')));
-  await act(async () => fireEvent.press(await screen.findByTestId('fila-nomina')));
+  expect(ver('detalle-vivienda-valor').props.children).toBe('No');
+  expect(ver('detalle-vivienda-casa-no')).toBeTruthy();
+  expect(ver('detalle-vivienda-nota').props.children).toBe(NOTA_VIVIENDA_NO);
+  await actVer('detalle-atras', async () => fireEvent.press(ver('detalle-atras')));
+  await act(async () => fireEvent.press(await verPronto('fila-com')));
+  expect(ver('detalle-vivienda-casa-si')).toBeTruthy();
+  expect(ver('detalle-vivienda-nota').props.children).toBe(NOTA_VIVIENDA_SI);
+  await actVer('detalle-atras', async () => fireEvent.press(ver('detalle-atras')));
+  await act(async () => fireEvent.press(await verPronto('fila-seg')));
+  expect(ver('detalle-vivienda-nota').props.children).toBe(NOTA_VIVIENDA_SI_AMBOS);
+  await actVer('detalle-atras', async () => fireEvent.press(ver('detalle-atras')));
+  await act(async () => fireEvent.press(await verPronto('fila-nomina')));
   expect(screen.queryByTestId('detalle-vivienda')).toBeNull();
-  expect(screen.getByTestId('detalle-vivienda-nota').props.children).toBe(NOTA_VIVIENDA_INGRESO);
+  expect(ver('detalle-vivienda-nota').props.children).toBe(NOTA_VIVIENDA_INGRESO);
 });
 
 test('O-CV-17 (VP-1, S04): al tocar «Asociada a vivienda» solo cambia la fila; guarda con el row_version vigente y relee en silencio sin desmontar el detalle', async () => {
   const { c, arbol, vivienda, soltar } = clienteAjustes([nodo({ id: 'super', nombre: 'Supermercado', row_version: 4 })], { lento: true });
   await abrirDetalle(c, 'super');
-  const detalle = screen.getByTestId('detalle-categoria');
-  await act(async () => fireEvent.press(screen.getByTestId('detalle-vivienda')));
+  const detalle = ver('detalle-categoria');
+  await actVer('detalle-vivienda', async () => fireEvent.press(ver('detalle-vivienda')));
   expect(vivienda).toHaveBeenCalledWith('super', { row_version: 4, asociada_vivienda: true });
   // Relectura en curso: el MISMO detalle sigue montado, la fila ya dice «Sí» y no hay «Cargando».
   expect(soltar.length).toBe(1);
-  expect(screen.getByTestId('detalle-categoria')).toBe(detalle);
-  expect(screen.getByTestId('detalle-vivienda-valor').props.children).toBe('Sí');
-  expect(screen.getByTestId('detalle-vivienda-nota').props.children).toBe(NOTA_VIVIENDA_SI);
+  expect(ver('detalle-categoria')).toBe(detalle);
+  expect(ver('detalle-vivienda-valor').props.children).toBe('Sí');
+  expect(ver('detalle-vivienda-nota').props.children).toBe(NOTA_VIVIENDA_SI);
   expect(screen.queryByText(/Cargando/)).toBeNull();
   await act(async () => { soltar[0](); await new Promise((r) => setTimeout(r, 0)); });
-  expect(screen.getByTestId('detalle-categoria')).toBe(detalle);
-  expect(screen.getByTestId('detalle-vivienda-valor').props.children).toBe('Sí');
+  expect(ver('detalle-categoria')).toBe(detalle);
+  expect(ver('detalle-vivienda-valor').props.children).toBe('Sí');
   expect(arbol).toHaveBeenCalledTimes(2);
 });
 
 test('VP-1: si el guardado falla, la fila vuelve a su valor con un aviso', async () => {
   const { c } = clienteAjustes([nodo({ id: 'super', nombre: 'Supermercado', row_version: 4 })], { falla: true });
   await abrirDetalle(c, 'super');
-  await act(async () => fireEvent.press(screen.getByTestId('detalle-vivienda')));
-  await waitFor(() => expect(screen.getByTestId('detalle-vivienda-valor').props.children).toBe('No'));
-  expect(screen.getByTestId('detalle-aviso')).toBeTruthy();
+  await actVer('detalle-vivienda', async () => fireEvent.press(ver('detalle-vivienda')));
+  await waitFor(() => expect(ver('detalle-vivienda-valor').props.children).toBe('No'));
+  expect(ver('detalle-aviso')).toBeTruthy();
 });

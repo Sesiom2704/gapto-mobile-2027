@@ -7,6 +7,7 @@
 // Versión: 0.2.0 (F05-03/F05-04 J3 §2.7 y §3): corte de Concepto (CNC-18/20) y casos de cierre §45.7-6 (plantilla con magnitud obligatoria) y §46.7-11 (duplicado activo «Usar el existente»).
 // Versión: 0.3.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
 // Versión: 0.4.0 (F05-D053 §67.2 · O3, opción 1): alta aditiva del caso O3 en la propuesta del registro por tipo (ingreso): categoría rechazada con CATEGORIA_NO_ELEGIBLE → no válida y la cuenta propuesta se conserva. Ningún oráculo anterior cambia.
+// Versión: 0.5.0 (F06 T6 · S2 FORM-AGIL; F09 0.55 §12.107.1 puntos 1 y 2): los controles se buscan con `ver`/`verPronto` (form_agil.ts), que tocan antes la línea de «Se registrará así», «Más opciones» o «‹ Exprés» como haría el usuario. Mismas aserciones; las de ausencia siguen con queryByTestId.
 // ============================================================
 
 import './tiempos_rn';
@@ -25,11 +26,12 @@ import { TEXTO_MISMA_CUENTA } from '../src/screens/TransferenciaScreen';
 import { ProveedorTema } from '../src/theme/tema';
 
 import { clienteCategoriasStub, mag, nodo } from './fixtures_categorias';
+import { actVer, ver, verPronto } from './form_agil';
 
 /** F05-04 §2.7 (corte de Concepto): la nota opcional se escribe en «Más detalles». */
 function escribirNota(t: string) {
-  if (!screen.queryByTestId('campo-nota')) fireEvent.press(screen.getByTestId('abrir-mas-detalles'));
-  fireEvent.changeText(screen.getByTestId('campo-nota'), t);
+  if (!screen.queryByTestId('campo-nota')) fireEvent.press(ver('abrir-mas-detalles'));
+  fireEvent.changeText(ver('campo-nota'), t);
 }
 
 declare const __dirname: string;
@@ -97,12 +99,12 @@ async function montar(cliente: ClienteApi, esquema: 'light' | 'dark' = 'light') 
       </ProveedorTema>
     </SafeAreaProvider>,
   );
-  await screen.findByTestId('accion-registrar');
+  await verPronto('accion-registrar');
   await act(async () => undefined);
 }
 
 async function pulsar(id: string) {
-  await act(async () => fireEvent.press(screen.getByTestId(id)));
+  await actVer(id, async () => fireEvent.press(ver(id)));
 }
 
 async function abrirTipo(t: 'GASTO' | 'INGRESO' | 'TRANSFERENCIA') {
@@ -111,21 +113,21 @@ async function abrirTipo(t: 'GASTO' | 'INGRESO' | 'TRANSFERENCIA') {
 }
 
 function elegirCategoria(padre: string, hija: string) {
-  fireEvent.press(screen.getByTestId('campo-categoria'));
-  fireEvent.press(screen.getByTestId(`cat-${padre}`));
-  fireEvent.press(screen.getByTestId(`cat-${hija}`));
+  fireEvent.press(ver('campo-categoria'));
+  fireEvent.press(ver(`cat-${padre}`));
+  fireEvent.press(ver(`cat-${hija}`));
 }
 
 // ------------------------------------------------------------------ Inicio (A1, §2.1)
 test('A1: cabecera de marca como UN elemento «GaptoMobile» con rol de cabecera; sin «2027» ni lema; ilustración oculta', async () => {
   await montar(fake());
-  const marca = screen.getByTestId('marca-inicio');
+  const marca = ver('marca-inicio');
   expect(marca.props.accessibilityLabel).toBe('GaptoMobile');
   expect(marca.props.accessibilityRole).toBe('header');
   expect(marca.props.accessible).toBe(true);
-  expect(screen.getByTestId('marca-simbolo').props.style).toEqual({ width: 34, height: 34 });
-  expect(screen.getByTestId('marca-nombre').props.style).toEqual({ width: 132.25, height: 24 });
-  expect(screen.getByTestId('marca-nombre').props.resizeMode).toBe('contain');
+  expect(ver('marca-simbolo').props.style).toEqual({ width: 34, height: 34 });
+  expect(ver('marca-nombre').props.style).toEqual({ width: 132.25, height: 24 });
+  expect(ver('marca-nombre').props.resizeMode).toBe('contain');
   expect(screen.queryByText(/2027/)).toBeNull();
   expect(screen.queryByText('TUS FINANZAS, EN EQUILIBRIO')).toBeNull();
   expect(screen.queryByTestId('ilustracion-liquidez')).toBeNull(); // oculta a la accesibilidad
@@ -164,14 +166,14 @@ test('A1: los PNG de marca del repositorio tienen el SHA-256 de la entrega (§3.
 
 test('§2.1: «Registrar» abre la hoja de tipos SIN preselección; sin accesos, «Añadir acceso» y el texto H03', async () => {
   await montar(fake());
-  expect(screen.getByTestId('accesos-vacio').props.children).toBe(TEXTO_SIN_ACCESOS);
+  expect(ver('accesos-vacio').props.children).toBe(TEXTO_SIN_ACCESOS);
   await pulsar('accion-registrar');
-  for (const t of ['GASTO', 'INGRESO', 'TRANSFERENCIA']) expect(screen.getByTestId(`tipo-${t}`).props.accessibilityState.selected).toBe(false);
-  expect(screen.getByTestId('nota-devolucion')).toBeTruthy();
+  for (const t of ['GASTO', 'INGRESO', 'TRANSFERENCIA']) expect(ver(`tipo-${t}`).props.accessibilityState.selected).toBe(false);
+  expect(ver('nota-devolucion')).toBeTruthy();
   await pulsar('tipos-cancelar');
   expect(screen.queryByTestId('hoja-tipos')).toBeNull();
   await pulsar('acceso-anadir');
-  expect(await screen.findByTestId('pantalla-plantillas')).toBeTruthy();
+  expect(await verPronto('pantalla-plantillas')).toBeTruthy();
 });
 
 test('§2.1 (dominio): accesos máx. 3 en el orden de Inicio; Resultado con signo y tono', () => {
@@ -192,19 +194,19 @@ test('Ingreso: «Cobrado en» con cuentas para cobrar, solo categorías de ingre
   await abrirTipo('INGRESO');
   expect(screen.getByText('Nuevo ingreso')).toBeTruthy();
   expect(screen.queryByTestId('campo-concepto')).toBeNull();
-  await waitFor(() => expect(screen.getByTestId(`cuenta-${NOMINA}`)).toBeTruthy());
+  await waitFor(() => expect(ver(`cuenta-${NOMINA}`)).toBeTruthy());
   expect(c.cuentasElegibles).toHaveBeenCalledWith('INGRESO', HOY);
   expect(screen.queryByTestId(`cuenta-${TARJETA}`)).toBeNull();
-  fireEvent.changeText(screen.getByTestId('campo-importe'), '1500');
-  fireEvent.press(screen.getByTestId('campo-categoria'));
+  fireEvent.changeText(ver('campo-importe'), '1500');
+  fireEvent.press(ver('campo-categoria'));
   expect(screen.queryByTestId('cat-alim')).toBeNull(); // solo gastos: oculta en ingresos
-  fireEvent.press(screen.getByTestId('cat-trabajo'));
-  fireEvent.press(screen.getByTestId('cat-nomina'));
-  fireEvent.press(screen.getByTestId('presupuestable-false'));
-  fireEvent.press(screen.getByTestId(`cuenta-${NOMINA}`));
+  fireEvent.press(ver('cat-trabajo'));
+  fireEvent.press(ver('cat-nomina'));
+  fireEvent.press(ver('presupuestable-false'));
+  fireEvent.press(ver(`cuenta-${NOMINA}`));
   expect(screen.queryByTestId('financiacion')).toBeNull();
   await pulsar('abrir-mas-detalles');
-  fireEvent.changeText(screen.getByTestId('campo-nota'), '  Nómina octubre ');
+  fireEvent.changeText(ver('campo-nota'), '  Nómina octubre ');
   await pulsar('registrar');
   expect(c.registrarIngresoCobrado).toHaveBeenCalledWith({
     intencion_id: '00000000-0000-4000-8000-000000000001', importe: '1500.00', moneda: 'EUR', fecha_hecho: HOY, cuenta_id: NOMINA,
@@ -212,7 +214,7 @@ test('Ingreso: «Cobrado en» con cuentas para cobrar, solo categorías de ingre
   });
   expect(c.registrarGastoPagado).not.toHaveBeenCalled();
   expect(await screen.findByText('Ingreso registrado')).toBeTruthy();
-  expect(screen.getByTestId('exito-titulo').props.children).toBe('Nómina octubre');
+  expect(ver('exito-titulo').props.children).toBe('Nómina octubre');
 }, 30000);
 
 test('O3 (F05-D053 §67.2) en la propuesta por tipo: categoría rechazada con CATEGORIA_NO_ELEGIBLE → no válida; la cuenta propuesta se conserva', async () => {
@@ -224,15 +226,15 @@ test('O3 (F05-D053 §67.2) en la propuesta por tipo: categoría rechazada con CA
   ) as any;
   await montar(c);
   await abrirTipo('INGRESO');
-  await waitFor(() => expect(screen.getByTestId(`cuenta-${NOMINA}`).props.accessibilityState.checked).toBe(true));
-  fireEvent.changeText(screen.getByTestId('campo-importe'), '1500');
-  fireEvent.press(screen.getByTestId('presupuestable-false'));
-  fireEvent.press(screen.getByTestId('campo-categoria'));
-  fireEvent.press(screen.getByTestId('cat-trabajo'));
-  await act(async () => fireEvent.press(screen.getByTestId('cat-nomina')));
-  await waitFor(() => expect(screen.getByTestId('categoria-invalida').props.children).toBe('Esta categoría ya no está disponible. Elige otra categoría.'));
-  expect(screen.getByTestId(`cuenta-${NOMINA}`).props.accessibilityState.checked).toBe(true);
-  expect(screen.getByTestId('registrar')).toBeDisabled();
+  await waitFor(() => expect(ver(`cuenta-${NOMINA}`).props.accessibilityState.checked).toBe(true));
+  fireEvent.changeText(ver('campo-importe'), '1500');
+  fireEvent.press(ver('presupuestable-false'));
+  fireEvent.press(ver('campo-categoria'));
+  fireEvent.press(ver('cat-trabajo'));
+  await actVer('cat-nomina', async () => fireEvent.press(ver('cat-nomina')));
+  await waitFor(() => expect(ver('categoria-invalida').props.children).toBe('Esta categoría ya no está disponible. Elige otra categoría.'));
+  expect(ver(`cuenta-${NOMINA}`).props.accessibilityState.checked).toBe(true);
+  expect(ver('registrar')).toBeDisabled();
   expect(c.registrarIngresoCobrado).not.toHaveBeenCalled();
 }, 30000);
 
@@ -241,20 +243,20 @@ test('Gasto con tercero: el tercero viaja, la propuesta es la del registro por t
   const c = fake({ propuesta: (q) => ({ tipo: q.tipo, campos: { categoria: null, tercero: null, contexto: null, cuenta: { valor: TARJETA, origen: { capa: 'DEFAULT_GENERAL', plantilla_id: null, preferencia_id: null } }, presupuestable: null }, avisos: [] }) });
   await montar(c);
   await abrirTipo('GASTO');
-  fireEvent.changeText(screen.getByTestId('campo-importe'), '4');
+  fireEvent.changeText(ver('campo-importe'), '4');
   escribirNota('Compra');
   await pulsar('campo-tercero');
-  await act(async () => fireEvent.press(await screen.findByTestId('tercero-ter-aldi')));
-  expect(screen.getByTestId('tercero-valor').props.children).toBe('ALDI');
+  await act(async () => fireEvent.press(await verPronto('tercero-ter-aldi')));
+  expect(ver('tercero-valor').props.children).toBe('ALDI');
   await waitFor(() => expect(c.propuestaRegistro).toHaveBeenCalledWith(expect.objectContaining({ tipo: 'GASTO', terceroId: 'ter-aldi' })));
   elegirCategoria('alim', 'super');
-  fireEvent.press(screen.getByTestId('presupuestable-true'));
-  await waitFor(() => expect(screen.getByTestId(`cuenta-${TARJETA}`).props.accessibilityState.checked).toBe(true));
+  fireEvent.press(ver('presupuestable-true'));
+  await waitFor(() => expect(ver(`cuenta-${TARJETA}`).props.accessibilityState.checked).toBe(true));
   await pulsar('registrar');
   expect(c.registrarGastoPagado).toHaveBeenCalledWith(expect.objectContaining({ tercero_id: 'ter-aldi', categoria: { estado: 'CATEGORIA', categoria_id: 'super', magnitudes: [] } }));
   expect(await screen.findByText('Gasto registrado')).toBeTruthy();
-  expect(screen.getByTestId('pref-ambito-TERCERO')).toBeTruthy();
-  expect(screen.getByTestId('pref-ambito-CATEGORIA')).toBeTruthy();
+  expect(ver('pref-ambito-TERCERO')).toBeTruthy();
+  expect(ver('pref-ambito-CATEGORIA')).toBeTruthy();
   expect(screen.getByText('Para ALDI')).toBeTruthy();
 }, 30000);
 
@@ -263,25 +265,25 @@ test('T02: cambiar de Gasto a Ingreso conserva importe y fecha, quita la categor
   const c = fake();
   await montar(c);
   await abrirTipo('GASTO');
-  fireEvent.changeText(screen.getByTestId('campo-importe'), '12,50');
+  fireEvent.changeText(ver('campo-importe'), '12,50');
   elegirCategoria('alim', 'super');
-  await waitFor(() => expect(screen.getByTestId(`cuenta-${TARJETA}`)).toBeTruthy());
-  fireEvent.press(screen.getByTestId(`cuenta-${TARJETA}`));
+  await waitFor(() => expect(ver(`cuenta-${TARJETA}`)).toBeTruthy());
+  fireEvent.press(ver(`cuenta-${TARJETA}`));
   await pulsar('cambiar-tipo');
   await pulsar('tipo-INGRESO');
   expect(screen.getByText('Nuevo ingreso')).toBeTruthy();
-  expect(screen.getByTestId('campo-importe').props.value).toBe('12,50');
-  expect(screen.getByTestId('categoria-valor').props.children).toBe('Elige categoría');
-  expect(screen.getByTestId('aviso-registro-0').props.children).toBe(
+  expect(ver('campo-importe').props.value).toBe('12,50');
+  expect(ver('categoria-valor').props.children).toBe('Elige categoría');
+  expect(ver('aviso-registro-0').props.children).toBe(
     'Has cambiado de Gasto a Ingreso. Se mantienen el importe y la fecha. Se han quitado la categoría «Supermercado» (no admite ingresos) y la cuenta «Tarjeta BBVA» (no se puede usar para cobrar).',
   );
   elegirCategoria('trabajo', 'nomina');
-  fireEvent.press(screen.getByTestId('presupuestable-true'));
-  await waitFor(() => expect(screen.getByTestId(`cuenta-${NOMINA}`)).toBeTruthy());
-  fireEvent.press(screen.getByTestId(`cuenta-${NOMINA}`));
+  fireEvent.press(ver('presupuestable-true'));
+  await waitFor(() => expect(ver(`cuenta-${NOMINA}`)).toBeTruthy());
+  fireEvent.press(ver(`cuenta-${NOMINA}`));
   c.registrarIngresoCobrado = jest.fn(async () => ({ tipo: 'RECHAZADO', codigo: 'FECHA_FUTURA', mensaje: 'x' })) as any;
   await pulsar('registrar');
-  expect(screen.getByTestId('error-dominio')).toBeTruthy();
+  expect(ver('error-dominio')).toBeTruthy();
   expect(screen.getByText(`No se ha registrado. ${TEXTO_FECHA_FUTURA}`)).toBeTruthy();
   expect(screen.queryByTestId('cambiar-tipo')).toBeNull(); // tras el primer envío el tipo queda fijado
 }, 30000);
@@ -289,12 +291,12 @@ test('T02: cambiar de Gasto a Ingreso conserva importe y fecha, quita la categor
 test('T02 hacia «Entre cuentas»: cambia de pantalla conservando importe y fecha', async () => {
   await montar(fake());
   await abrirTipo('GASTO');
-  fireEvent.changeText(screen.getByTestId('campo-importe'), '30');
+  fireEvent.changeText(ver('campo-importe'), '30');
   await pulsar('cambiar-tipo');
   await pulsar('tipo-TRANSFERENCIA');
-  expect(await screen.findByTestId('transferencia-form')).toBeTruthy();
-  expect(screen.getByTestId('campo-importe').props.value).toBe('30');
-  expect(within(screen.getByTestId('avisos-registro')).getByText('Has cambiado de Gasto a Entre cuentas. Se mantienen el importe y la fecha.')).toBeTruthy();
+  expect(await verPronto('transferencia-form')).toBeTruthy();
+  expect(ver('campo-importe').props.value).toBe('30');
+  expect(within(ver('avisos-registro')).getByText('Has cambiado de Gasto a Entre cuentas. Se mantienen el importe y la fecha.')).toBeTruthy();
 }, 30000);
 
 // ------------------------------------------------------------------ «No lo sé»
@@ -302,14 +304,14 @@ test('A9: «No lo sé» en una obligatoria desbloquea el registro y la declara e
   const c = fake();
   await montar(c);
   await abrirTipo('GASTO');
-  fireEvent.changeText(screen.getByTestId('campo-importe'), '60');
+  fireEvent.changeText(ver('campo-importe'), '60');
   escribirNota('Gasolina');
   elegirCategoria('coche', 'gasolina');
-  fireEvent.press(screen.getByTestId('presupuestable-true'));
-  fireEvent.press(await screen.findByTestId(`cuenta-${TARJETA}`));
-  expect(screen.getByTestId('registrar')).toBeDisabled();
-  fireEvent.press(screen.getByTestId('no-lo-se-litros'));
-  expect(screen.getByTestId('no-lo-se-texto-litros').props.children).toBe('Se registrará sin litros. Podrás añadirlo después.');
+  fireEvent.press(ver('presupuestable-true'));
+  fireEvent.press(await verPronto(`cuenta-${TARJETA}`));
+  expect(ver('registrar')).toBeDisabled();
+  fireEvent.press(ver('no-lo-se-litros'));
+  expect(ver('no-lo-se-texto-litros').props.children).toBe('Se registrará sin litros. Podrás añadirlo después.');
   await pulsar('registrar');
   expect(c.registrarGastoPagado).toHaveBeenCalledWith(expect.objectContaining({ categoria: { estado: 'CATEGORIA', categoria_id: 'gasolina', magnitudes: [], desconocidas: ['litros'] } }));
 }, 30000);
@@ -331,16 +333,16 @@ test('Plantilla desde un acceso: chip, origen «De tu plantilla …» por campo 
   });
   await montar(c);
   await pulsar('acceso-a1');
-  expect(await screen.findByTestId('chip-plantilla')).toBeTruthy();
-  await waitFor(() => expect(screen.getByTestId('categoria-valor').props.children).toBe('Supermercado'));
-  expect(screen.getByTestId('origen-categoria').props.children).toBe('De tu plantilla Súper semanal.');
-  expect(screen.getByTestId('tercero-valor').props.children).toBe('ALDI');
-  expect(screen.getByTestId('origen-cuenta').props.children).toBe('De tu plantilla Súper semanal.');
+  expect(await verPronto('chip-plantilla')).toBeTruthy();
+  await waitFor(() => expect(ver('categoria-valor').props.children).toBe('Supermercado'));
+  expect(ver('origen-categoria').props.children).toBe('De tu plantilla Súper semanal.');
+  expect(ver('tercero-valor').props.children).toBe('ALDI');
+  expect(ver('origen-cuenta').props.children).toBe('De tu plantilla Súper semanal.');
   expect(c.propuestaRegistro).toHaveBeenCalledWith(expect.objectContaining({ plantillaId: 'p1', tipo: 'GASTO' }));
   await pulsar('quitar-plantilla');
   expect(screen.queryByTestId('chip-plantilla')).toBeNull();
-  expect(screen.getByTestId('categoria-valor').props.children).toBe('Elige categoría');
-  expect(screen.getByTestId('tercero-valor').props.children).toBe('Elige tercero');
+  expect(ver('categoria-valor').props.children).toBe('Elige categoría');
+  expect(ver('tercero-valor').props.children).toBe('Elige tercero');
 }, 30000);
 
 test('Plantilla (dominio): los campos tocados por el usuario nunca se pisan; «Quitar» conserva lo elegido', () => {
@@ -365,15 +367,15 @@ test('X01: misma cuenta bloquea con aviso; INDETERMINADO reintenta con la MISMA 
   });
   await montar(c);
   await abrirTipo('TRANSFERENCIA');
-  await waitFor(() => expect(screen.getByTestId(`desde-${NOMINA}`)).toBeTruthy());
-  fireEvent.press(screen.getByTestId(`desde-${NOMINA}`));
-  fireEvent.press(screen.getByTestId(`a-${NOMINA}`));
-  expect(screen.getByTestId('a-misma').props.children).toBe(TEXTO_MISMA_CUENTA);
-  fireEvent.changeText(screen.getByTestId('campo-importe'), '200');
-  expect(screen.getByTestId('registrar')).toBeDisabled();
-  fireEvent.press(screen.getByTestId(`a-${AHORRO}`));
+  await waitFor(() => expect(ver(`desde-${NOMINA}`)).toBeTruthy());
+  fireEvent.press(ver(`desde-${NOMINA}`));
+  fireEvent.press(ver(`a-${NOMINA}`));
+  expect(ver('a-misma').props.children).toBe(TEXTO_MISMA_CUENTA);
+  fireEvent.changeText(ver('campo-importe'), '200');
+  expect(ver('registrar')).toBeDisabled();
+  fireEvent.press(ver(`a-${AHORRO}`));
   await pulsar('registrar');
-  expect(screen.getByTestId('estado-indeterminado')).toBeTruthy();
+  expect(ver('estado-indeterminado')).toBeTruthy();
   await pulsar('reintentar');
   const ids = (c.registrarTransferencia as jest.Mock).mock.calls.map((x) => x[0].intencion_id);
   expect(ids).toEqual(['00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001']);
@@ -389,24 +391,24 @@ test('R06: «Guardar como plantilla…» exige nombre (nunca autocompletado) y g
   c.altaPlantilla = jest.fn(async (x: any) => ({ tipo: 'OK', datos: { plantilla: { ...x, enabled: true, row_version: 1 }, idempotente: false, modificadas: [x.id] } })) as any;
   await montar(c);
   await abrirTipo('GASTO');
-  fireEvent.changeText(screen.getByTestId('campo-importe'), '4');
+  fireEvent.changeText(ver('campo-importe'), '4');
   escribirNota('Compra');
   elegirCategoria('alim', 'super');
-  fireEvent.press(screen.getByTestId('presupuestable-true'));
-  fireEvent.press(await screen.findByTestId(`cuenta-${TARJETA}`));
+  fireEvent.press(ver('presupuestable-true'));
+  fireEvent.press(await verPronto(`cuenta-${TARJETA}`));
   await pulsar('registrar');
   await pulsar('guardar-como-plantilla');
-  expect(screen.getByTestId('plantilla-nombre').props.value).toBe('');
-  expect(screen.getByTestId('plantilla-falta').props.children).toBe('Falta: nombre');
-  fireEvent.press(screen.getByTestId('plantilla-casilla-presupuestable'));
-  fireEvent.changeText(screen.getByTestId('plantilla-nombre'), 'Súper');
-  await waitFor(() => expect(screen.getByTestId('plantilla-guardar')).not.toBeDisabled());
+  expect(ver('plantilla-nombre').props.value).toBe('');
+  expect(ver('plantilla-falta').props.children).toBe('Falta: nombre');
+  fireEvent.press(ver('plantilla-casilla-presupuestable'));
+  fireEvent.changeText(ver('plantilla-nombre'), 'Súper');
+  await waitFor(() => expect(ver('plantilla-guardar')).not.toBeDisabled());
   await pulsar('plantilla-guardar');
   expect(c.altaPlantilla).toHaveBeenCalledWith({
     id: expect.any(String), nombre: 'Súper', tipo_hecho_id: TIPOS.GASTO, tercero_id: null, categoria_id: 'super', entidad_id: null,
     cuenta_default_id: TARJETA, presupuestable_default: null,
   });
-  expect(screen.getByTestId('plantilla-aviso-ok')).toBeTruthy();
+  expect(ver('plantilla-aviso-ok')).toBeTruthy();
 }, 30000);
 
 // ------------------------------------------------------------------ Corte de Concepto (§2.7; CNC-18/CNC-20)
@@ -415,32 +417,32 @@ test('CNC-18/20: gasto sin nota no envía concepto y el éxito muestra el títul
   await montar(c);
   await abrirTipo('GASTO');
   expect(screen.queryByTestId('campo-concepto')).toBeNull(); // ya no hay «Concepto» obligatorio
-  fireEvent.changeText(screen.getByTestId('campo-importe'), '4');
+  fireEvent.changeText(ver('campo-importe'), '4');
   elegirCategoria('alim', 'super');
-  fireEvent.press(screen.getByTestId('presupuestable-true'));
-  fireEvent.press(await screen.findByTestId(`cuenta-${TARJETA}`));
+  fireEvent.press(ver('presupuestable-true'));
+  fireEvent.press(await verPronto(`cuenta-${TARJETA}`));
   expect(screen.queryByTestId('faltan')).toBeNull();
   await pulsar('abrir-mas-detalles');
-  fireEvent.changeText(screen.getByTestId('campo-nota'), '   '); // solo espacios = ausencia
+  fireEvent.changeText(ver('campo-nota'), '   '); // solo espacios = ausencia
   await pulsar('registrar');
   const enviado = (c.registrarGastoPagado as jest.Mock).mock.calls[0][0];
   expect('concepto' in enviado).toBe(false);
   expect(await screen.findByText('Gasto registrado')).toBeTruthy();
-  expect(screen.getByTestId('exito-titulo').props.children).toBe('Supermercado');
+  expect(ver('exito-titulo').props.children).toBe('Supermercado');
 }, 30000);
 
 test('CNC-20: sin nota, tercero ni categoría el título es «Gasto · importe»', async () => {
   const c = fake();
   await montar(c);
   await abrirTipo('GASTO');
-  fireEvent.changeText(screen.getByTestId('campo-importe'), '23,5');
-  fireEvent.press(screen.getByTestId('campo-categoria'));
-  fireEvent.press(screen.getByTestId('selector-sin-categoria'));
-  fireEvent.press(screen.getByTestId('presupuestable-false'));
-  fireEvent.press(await screen.findByTestId(`cuenta-${TARJETA}`));
+  fireEvent.changeText(ver('campo-importe'), '23,5');
+  fireEvent.press(ver('campo-categoria'));
+  fireEvent.press(ver('selector-sin-categoria'));
+  fireEvent.press(ver('presupuestable-false'));
+  fireEvent.press(await verPronto(`cuenta-${TARJETA}`));
   await pulsar('registrar');
   expect(await screen.findByText('Gasto registrado')).toBeTruthy();
-  expect(screen.getByTestId('exito-titulo').props.children).toBe('Gasto · 23,50 €');
+  expect(ver('exito-titulo').props.children).toBe('Gasto · 23,50 €');
 }, 30000);
 
 // ------------------------------------------------------------------ casos de cierre (§45.7-6, §46.7-11)
@@ -453,12 +455,12 @@ test('§45.7-6: plantilla cuya categoría exige magnitud obligatoria → se pide
   });
   await montar(c);
   await pulsar('acceso-a2');
-  await waitFor(() => expect(screen.getByTestId('categoria-valor').props.children).toBe('Gasolina'));
-  fireEvent.changeText(screen.getByTestId('campo-importe'), '50');
-  await waitFor(() => expect(screen.getByTestId(`cuenta-${TARJETA}`).props.accessibilityState.checked).toBe(true));
-  expect(screen.getByTestId('magnitud-litros')).toBeTruthy();
-  expect(screen.getByTestId('registrar')).toBeDisabled();
-  fireEvent.changeText(screen.getByTestId('magnitud-litros'), '35,5');
+  await waitFor(() => expect(ver('categoria-valor').props.children).toBe('Gasolina'));
+  fireEvent.changeText(ver('campo-importe'), '50');
+  await waitFor(() => expect(ver(`cuenta-${TARJETA}`).props.accessibilityState.checked).toBe(true));
+  expect(ver('magnitud-litros')).toBeTruthy();
+  expect(ver('registrar')).toBeDisabled();
+  fireEvent.changeText(ver('magnitud-litros'), '35,5');
   await pulsar('registrar');
   expect(c.registrarGastoPagado).toHaveBeenCalledWith(expect.objectContaining({ categoria: { estado: 'CATEGORIA', categoria_id: 'gasolina', magnitudes: [{ magnitud_id: 'litros', valor: '35.5' }] } }));
 }, 30000);
@@ -469,10 +471,10 @@ test('§46.7-11: alta de tercero con duplicado ACTIVO → «Usar el existente» 
   await montar(c);
   await abrirTipo('GASTO');
   await pulsar('campo-tercero');
-  fireEvent.changeText(await screen.findByTestId('tercero-filtro'), 'aldi');
+  fireEvent.changeText(await verPronto('tercero-filtro'), 'aldi');
   await pulsar('tercero-crear');
-  expect(await screen.findByTestId('tercero-duplicado-aviso')).toBeTruthy();
+  expect(await verPronto('tercero-duplicado-aviso')).toBeTruthy();
   await pulsar('tercero-usar-existente');
-  expect(screen.getByTestId('tercero-valor').props.children).toBe('ALDI');
+  expect(ver('tercero-valor').props.children).toBe('ALDI');
   expect(c.altaTercero).not.toHaveBeenCalled();
 }, 30000);

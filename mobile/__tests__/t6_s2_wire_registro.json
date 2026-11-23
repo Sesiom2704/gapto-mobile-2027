@@ -1,0 +1,97 @@
+{
+  "gasto": {
+    "intencion_id": "<uuid>",
+    "concepto": "Cine",
+    "importe": "23.40",
+    "moneda": "EUR",
+    "fecha_hecho": "2026-10-25",
+    "cuenta_id": "c0000000-0000-4000-8000-000000000001",
+    "presupuestable": true,
+    "atribucion": "SOLO_MIO",
+    "financiacion": {
+      "estado": "PROPUESTA_ACEPTADA",
+      "actor": "SELF",
+      "criterio": "PARTICIPACION_CUENTA",
+      "porcentaje": "100",
+      "importe": "23.40"
+    },
+    "categoria": {
+      "estado": "CATEGORIA",
+      "categoria_id": "ocio",
+      "magnitudes": []
+    }
+  },
+  "vivienda": {
+    "intencion_id": "<uuid>",
+    "importe": "180.00",
+    "moneda": "EUR",
+    "fecha_hecho": "2026-10-26",
+    "cuenta_id": "c0000000-0000-4000-8000-000000000001",
+    "presupuestable": true,
+    "atribucion": "SIN_INDICAR",
+    "financiacion": {
+      "estado": "NO_DETERMINADA"
+    },
+    "categoria": {
+      "estado": "CATEGORIA",
+      "categoria_id": "comunidad",
+      "magnitudes": []
+    },
+    "propiedad": {
+      "propiedad_id": "p0000000-0000-4000-8000-000000000001",
+      "clase": "GASTO_CORRIENTE",
+      "atribucion": {
+        "modo": "SEGUN_TITULARIDAD_ACEPTADA",
+        "propuesta_vista": {
+          "criterio": "TITULARIDAD_EN_FECHA_HECHO",
+          "fecha_referencia": "2026-10-26",
+          "partes": [
+            {
+              "actor_id": "a0000000-0000-4000-8000-0000000000a1",
+              "porcentaje": "50.0000"
+            },
+            {
+              "actor_id": "f0000000-0000-4000-8000-0000000000ff",
+              "porcentaje": "50.0000"
+            }
+          ]
+        }
+      },
+      "pagos": [
+        {
+          "pagador": "YO",
+          "cuenta_id": "c0000000-0000-4000-8000-000000000001",
+          "importe": "180.00"
+        }
+      ],
+      "saldos": [
+        {
+          "actor_id": "a0000000-0000-4000-8000-0000000000a1",
+          "sentido": "ME_DEBE",
+          "importe": "90.00"
+        }
+      ],
+      "posiciones_confirmadas": [
+        {
+          "actor_id": "a0000000-0000-4000-8000-0000000000a1",
+          "tipo": "DERECHO_COBRO",
+          "importe": "90.00"
+        }
+      ]
+    }
+  },
+  "ingreso": {
+    "intencion_id": "<uuid>",
+    "importe": "1250.00",
+    "moneda": "EUR",
+    "fecha_hecho": "2026-10-26",
+    "cuenta_id": "c0000000-0000-4000-8000-000000000001",
+    "presupuestable": false,
+    "atribucion": "SOLO_MIO",
+    "categoria": {
+      "estado": "CATEGORIA",
+      "categoria_id": "nomina",
+      "magnitudes": []
+    }
+  }
+}

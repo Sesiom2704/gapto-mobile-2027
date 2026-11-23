@@ -12,6 +12,7 @@
 // Versión: 0.8.0 (F05-06 M5 §B2; HOME-01 v0.4, D-HOME-07; tabla «tests adaptados»): la línea de presupuesto deja de pintarse hasta F08 y «Próximos movimientos» tiene read model (previsiones; vacío = «No hay movimientos previstos.», sin importes): «No disponible» queda en Liquidez y Patrimonio (≥ 2) y «Este mes» no lo muestra.
 // Versión: 0.6.0 (F05-03/F05-04 J2+J3 §2.2/§2.7; tabla «tests adaptados»): Inicio abre el gasto con «Registrar» + hoja de tipos; CORTE DE CONCEPTO (A8): la nota opcional se escribe en «Más detalles» (`escribirNota`) y «concepto» deja de figurar en «faltan» (dos oráculos de SPEC-08 actualizados). El payload con nota es el mismo (`concepto: 'Café'`).
 // Versión: 0.9.0 (MANT-M5-ARNESES, AJ-M5-CIERRE-06): importa `tiempos_rn` (30 s por test y 5 s de `waitFor`/`findBy`) contra la intermitencia en frío de las suites de pantalla; sin cambios de aserciones.
+// Versión: 0.10.0 (F06 T6 · S2 FORM-AGIL; F09 0.55 §12.107.1 puntos 1 y 2): los controles se buscan con `ver`/`verPronto` (form_agil.ts), que tocan antes la línea de «Se registrará así», «Más opciones» o «‹ Exprés» como haría el usuario. Mismas aserciones; las de ausencia siguen con queryByTestId.
 // ============================================================
 
 import './tiempos_rn';
@@ -27,11 +28,12 @@ import type { PayloadGastoPagado } from '../src/domain/intencion';
 import { ProveedorTema } from '../src/theme/tema';
 
 import { clienteCategoriasStub, propuestaUnica } from './fixtures_categorias';
+import { actVer, ver, verPronto } from './form_agil';
 
 /** F05-04 §2.7 (corte de Concepto): la nota opcional se escribe en «Más detalles». */
 function escribirNota(t: string) {
-  if (!screen.queryByTestId('campo-nota')) fireEvent.press(screen.getByTestId('abrir-mas-detalles'));
-  fireEvent.changeText(screen.getByTestId('campo-nota'), t);
+  if (!screen.queryByTestId('campo-nota')) fireEvent.press(ver('abrir-mas-detalles'));
+  fireEvent.changeText(ver('campo-nota'), t);
 }
 
 const CUENTA = 'c0000000-0000-4000-8000-000000000001';
@@ -87,8 +89,8 @@ function sinEscritura(f: ReturnType<typeof crearFake>) {
 
 /** Pulsa «Registrar gasto» estando desactivado y comprueba que no escribe nada. */
 async function pulsarBloqueado(f: ReturnType<typeof crearFake>) {
-  expect(screen.getByTestId('registrar')).toBeDisabled();
-  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
+  expect(ver('registrar')).toBeDisabled();
+  await actVer('registrar', async () => fireEvent.press(ver('registrar')));
   sinEscritura(f);
 }
 
@@ -106,25 +108,25 @@ function montar(cliente: ClienteApi) {
 }
 
 async function abrirFormulario() {
-  fireEvent.press(await screen.findByTestId('accion-registrar'));
-  fireEvent.press(screen.getByTestId('tipo-GASTO')); // F05-04 §2.2: «Registrar» → hoja de tipos
-  await screen.findByTestId('registro-form');
-  await screen.findByTestId('origen-cuenta'); // cuentas cargadas (única -> inferida visible)
-  await screen.findByTestId('financiacion'); // propuesta conocida para la fecha
+  fireEvent.press(await verPronto('accion-registrar'));
+  fireEvent.press(ver('tipo-GASTO')); // F05-04 §2.2: «Registrar» → hoja de tipos
+  await verPronto('registro-form');
+  await verPronto('origen-cuenta'); // cuentas cargadas (única -> inferida visible)
+  await verPronto('financiacion'); // propuesta conocida para la fecha
 }
 
 function rellenar({ importe = '3,50', concepto = 'Café', presupuestable = true as boolean | null, soloMio = true, sinCategoria = true } = {}) {
-  fireEvent.changeText(screen.getByTestId('campo-importe'), importe);
+  fireEvent.changeText(ver('campo-importe'), importe);
   escribirNota(concepto);
   if (sinCategoria) elegirSinCategoria();
-  if (presupuestable !== null) fireEvent.press(screen.getByTestId(`presupuestable-${presupuestable}`));
-  if (soloMio) fireEvent.press(screen.getByTestId('solo-mio'));
+  if (presupuestable !== null) fireEvent.press(ver(`presupuestable-${presupuestable}`));
+  if (soloMio) fireEvent.press(ver('solo-mio'));
 }
 
 /** Decisión explícita «Sin categoría» desde el selector (S6-WIRE: la categoría ya no es opcional). */
 function elegirSinCategoria() {
-  fireEvent.press(screen.getByTestId('campo-categoria'));
-  fireEvent.press(screen.getByTestId('selector-sin-categoria'));
+  fireEvent.press(ver('campo-categoria'));
+  fireEvent.press(ver('selector-sin-categoria'));
 }
 
 beforeEach(() => {
@@ -136,15 +138,15 @@ test('Home renderiza el esqueleto HOME-01 sin cifras inventadas', async () => {
   montar(f.cliente);
   expect(await screen.findByText('12,40 €')).toBeTruthy();
   for (const id of ['bloque-liquidez', 'accion-registrar', 'bloque-mes', 'bloque-gasto-parcial', 'bloque-proximos', 'bloque-patrimonio', 'tab-INICIO', 'tab-MAS']) {
-    expect(screen.getByTestId(id)).toBeTruthy();
+    expect(ver(id)).toBeTruthy();
   }
   // Ningún bloque sin read model muestra un importe (F05-05 A9: «Este mes» ya lo tiene)
   for (const id of ['bloque-liquidez', 'bloque-proximos', 'bloque-patrimonio']) {
-    expect(within(screen.getByTestId(id)).queryAllByText(/€/)).toHaveLength(0);
+    expect(within(ver(id)).queryAllByText(/€/)).toHaveLength(0);
   }
-  expect(within(screen.getByTestId('bloque-gasto-parcial')).queryAllByText(/€$/)).toHaveLength(1);
+  expect(within(ver('bloque-gasto-parcial')).queryAllByText(/€$/)).toHaveLength(1);
   expect(screen.getAllByText('No disponible').length).toBeGreaterThanOrEqual(2); // Liquidez y Patrimonio (M5: sin presupuesto ni «Próximos» no disponibles)
-  expect(await within(screen.getByTestId('bloque-proximos')).findByTestId('proximos-vacio')).toBeTruthy();
+  expect(await within(ver('bloque-proximos')).findByTestId('proximos-vacio')).toBeTruthy();
 });
 
 test('Home (F05-D003 §16.6): la cifra real va en tarjeta PARCIAL separada, nunca en «Este mes»', async () => {
@@ -152,10 +154,10 @@ test('Home (F05-D003 §16.6): la cifra real va en tarjeta PARCIAL separada, nunc
   montar(f.cliente);
   await screen.findByText('12,40 €');
   // F05-05 A9: «Este mes» muestra el Resultado del mes (su propio read model), nunca la cifra parcial de gasto-mes.
-  expect(within(screen.getByTestId('bloque-mes')).queryByText('12,40 €')).toBeNull();
-  expect(within(screen.getByTestId('bloque-mes')).queryAllByText('No disponible')).toHaveLength(0); // M5 (D-HOME-07): sin línea de presupuesto hasta F08
-  expect(within(screen.getByTestId('bloque-mes')).queryByText('Presupuesto de gasto')).toBeNull();
-  const tarjeta = within(screen.getByTestId('bloque-gasto-parcial'));
+  expect(within(ver('bloque-mes')).queryByText('12,40 €')).toBeNull();
+  expect(within(ver('bloque-mes')).queryAllByText('No disponible')).toHaveLength(0); // M5 (D-HOME-07): sin línea de presupuesto hasta F08
+  expect(within(ver('bloque-mes')).queryByText('Presupuesto de gasto')).toBeNull();
+  const tarjeta = within(ver('bloque-gasto-parcial'));
   expect(tarjeta.getByText('12,40 €')).toBeTruthy();
   expect(tarjeta.getByTestId('gastos-parcial')).toBeTruthy(); // siempre marcada como parcial
   expect(tarjeta.getByTestId('gasto-parcial-aviso').props.children).toMatch(/No es tu gasto total/);
@@ -164,16 +166,16 @@ test('Home (F05-D003 §16.6): la cifra real va en tarjeta PARCIAL separada, nunc
 test('Home: gasto PARCIAL se marca y no se presenta como total confirmado', async () => {
   const f = crearFake({ gastos: [gasto('3.50', 'PARCIAL', 2)] });
   montar(f.cliente);
-  expect(await screen.findByTestId('gastos-parcial')).toBeTruthy();
+  expect(await verPronto('gastos-parcial')).toBeTruthy();
   expect(screen.getByText('2 sin reparto conocido')).toBeTruthy();
 });
 
 test('Home: fallo de lectura es parcial y reintentable, no 0 €', async () => {
   const f = crearFake({ gastos: [{ tipo: 'INDETERMINADO', mensaje: 'x' }, gasto('1.00')] });
   montar(f.cliente);
-  expect(await screen.findByTestId('gastos-error')).toBeTruthy();
-  expect(within(screen.getByTestId('bloque-gasto-parcial')).queryByText('0,00 €')).toBeNull();
-  fireEvent.press(screen.getByTestId('gastos-error'));
+  expect(await verPronto('gastos-error')).toBeTruthy();
+  expect(within(ver('bloque-gasto-parcial')).queryByText('0,00 €')).toBeNull();
+  fireEvent.press(ver('gastos-error'));
   expect(await screen.findByText('1,00 €')).toBeTruthy();
 });
 
@@ -187,23 +189,23 @@ test('validación local de importe (y nota opcional, A8): botón desactivado, er
   const f = crearFake();
   montar(f.cliente);
   await abrirFormulario();
-  fireEvent.changeText(screen.getByTestId('campo-importe'), '3,505');
-  fireEvent.press(screen.getByTestId('presupuestable-true'));
+  fireEvent.changeText(ver('campo-importe'), '3,505');
+  fireEvent.press(ver('presupuestable-true'));
   // El error de formato se ve sin pulsar nada (SPEC-08: no depende del botón desactivado).
   expect(screen.getByText('Máximo dos decimales.')).toBeTruthy();
   // F05-04 §2.7 (A8): la nota es opcional y nunca figura en «faltan».
-  expect(screen.getByTestId('faltan').props.children).toBe('Para registrar falta: importe válido y categoría.');
+  expect(ver('faltan').props.children).toBe('Para registrar falta: importe válido y categoría.');
   await pulsarBloqueado(f);
-  fireEvent.changeText(screen.getByTestId('campo-importe'), '0');
+  fireEvent.changeText(ver('campo-importe'), '0');
   expect(screen.getByText('El importe debe ser mayor que 0.')).toBeTruthy();
   await pulsarBloqueado(f);
   // Discriminante inverso: completar lo que falta habilita el botón.
-  fireEvent.changeText(screen.getByTestId('campo-importe'), '3,50');
+  fireEvent.changeText(ver('campo-importe'), '3,50');
   escribirNota('Café');
-  expect(screen.getByTestId('faltan').props.children).toBe('Para registrar falta: categoría.');
+  expect(ver('faltan').props.children).toBe('Para registrar falta: categoría.');
   await pulsarBloqueado(f);
   elegirSinCategoria();
-  expect(screen.getByTestId('registrar')).toBeEnabled();
+  expect(ver('registrar')).toBeEnabled();
   expect(screen.queryByTestId('faltan')).toBeNull();
   sinEscritura(f);
 });
@@ -213,10 +215,10 @@ test('presupuestable no se inventa: sin elección el botón está desactivado y 
   montar(f.cliente);
   await abrirFormulario();
   rellenar({ presupuestable: null });
-  expect(screen.getByTestId('faltan').props.children).toBe('Para registrar falta: si cuenta para el presupuesto.');
+  expect(ver('faltan').props.children).toBe('Para registrar falta: si cuenta para el presupuesto.');
   await pulsarBloqueado(f);
-  fireEvent.press(screen.getByTestId('presupuestable-false'));
-  expect(screen.getByTestId('registrar')).toBeEnabled();
+  fireEvent.press(ver('presupuestable-false'));
+  expect(ver('registrar')).toBeEnabled();
   sinEscritura(f);
 });
 
@@ -224,10 +226,10 @@ test('«Solo mío» exige acción explícita: sin tocarlo se envía SIN_INDICAR'
   const f = crearFake();
   montar(f.cliente);
   await abrirFormulario();
-  expect(screen.getByTestId('origen-atribucion').props.children).toMatch(/Sin indicar/);
+  expect(ver('origen-atribucion').props.children).toMatch(/Sin indicar/);
   rellenar({ soloMio: false });
-  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
-  await screen.findByTestId('registro-exito');
+  await actVer('registrar', async () => fireEvent.press(ver('registrar')));
+  await verPronto('registro-exito');
   expect(f.enviados[0].atribucion).toBe('SIN_INDICAR');
 });
 
@@ -236,8 +238,8 @@ test('submit construye la intención correcta (magnitud positiva, decisiones exp
   montar(f.cliente);
   await abrirFormulario();
   rellenar({ importe: '3,50', concepto: '  Café ', presupuestable: false });
-  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
-  await screen.findByTestId('registro-exito');
+  await actVer('registrar', async () => fireEvent.press(ver('registrar')));
+  await verPronto('registro-exito');
   expect(f.enviados).toEqual([
     {
       intencion_id: '00000000-0000-4000-8000-000000000001', concepto: 'Café', importe: '3.50', moneda: 'EUR', fecha_hecho: '2026-09-24', cuenta_id: CUENTA, presupuestable: false, atribucion: 'SOLO_MIO',
@@ -254,13 +256,13 @@ test('doble tap no duplica el envío', async () => {
   await abrirFormulario();
   rellenar();
   await act(async () => {
-    fireEvent.press(screen.getByTestId('registrar'));
-    fireEvent.press(screen.getByTestId('registrar'));
-    fireEvent.press(screen.getByTestId('registrar'));
+    fireEvent.press(ver('registrar'));
+    fireEvent.press(ver('registrar'));
+    fireEvent.press(ver('registrar'));
   });
   expect(f.enviados).toHaveLength(1);
   await act(async () => liberar());
-  expect(await screen.findByTestId('registro-exito')).toBeTruthy();
+  expect(await verPronto('registro-exito')).toBeTruthy();
   expect(f.enviados).toHaveLength(1);
 });
 
@@ -270,13 +272,13 @@ test('timeout: estado indeterminado, payload sellado y reintento con la MISMA id
   montar(f.cliente);
   await abrirFormulario();
   rellenar();
-  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
-  expect(await screen.findByTestId('estado-indeterminado')).toBeTruthy();
+  await actVer('registrar', async () => fireEvent.press(ver('registrar')));
+  expect(await verPronto('estado-indeterminado')).toBeTruthy();
   expect(screen.queryByTestId('registro-exito')).toBeNull();
   // El payload está sellado: editar no altera lo que se reintenta
-  fireEvent.changeText(screen.getByTestId('campo-importe'), '99');
-  await act(async () => fireEvent.press(screen.getByTestId('reintentar')));
-  await screen.findByTestId('registro-exito');
+  fireEvent.changeText(ver('campo-importe'), '99');
+  await actVer('reintentar', async () => fireEvent.press(ver('reintentar')));
+  await verPronto('registro-exito');
   expect(f.enviados).toHaveLength(2);
   expect(f.enviados[1]).toEqual(f.enviados[0]);
 });
@@ -287,39 +289,39 @@ test('error de dominio no muestra éxito ni vuelve a Home; el siguiente envío u
   montar(f.cliente);
   await abrirFormulario();
   rellenar();
-  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
-  expect(await screen.findByTestId('error-dominio')).toBeTruthy();
+  await actVer('registrar', async () => fireEvent.press(ver('registrar')));
+  expect(await verPronto('error-dominio')).toBeTruthy();
   expect(screen.queryByTestId('registro-exito')).toBeNull();
-  expect(screen.getByTestId('registro-form')).toBeTruthy();
-  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
-  await screen.findByTestId('registro-exito');
+  expect(ver('registro-form')).toBeTruthy();
+  await actVer('registrar', async () => fireEvent.press(ver('registrar')));
+  await verPronto('registro-exito');
   expect(f.enviados[1].intencion_id).not.toBe(f.enviados[0].intencion_id);
 });
 
 test('éxito: confirmación inequívoca y Home refrescada desde el backend (sin optimistic update)', async () => {
   const f = crearFake({ gastos: [gasto('0.00'), gasto('3.50')] });
   montar(f.cliente);
-  expect(await within(screen.getByTestId('bloque-gasto-parcial')).findByText('0,00 €')).toBeTruthy();
+  expect(await within(ver('bloque-gasto-parcial')).findByText('0,00 €')).toBeTruthy();
   await abrirFormulario();
   rellenar();
-  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
+  await actVer('registrar', async () => fireEvent.press(ver('registrar')));
   expect(await screen.findByText('Gasto registrado')).toBeTruthy();
   const antes = f.lecturas();
-  fireEvent.press(screen.getByTestId('volver-inicio'));
+  fireEvent.press(ver('volver-inicio'));
   await waitFor(() => expect(f.lecturas()).toBe(antes + 1));
   expect(await screen.findByText('3,50 €')).toBeTruthy();
-  expect(screen.getByTestId('tab-INICIO')).toBeTruthy();
+  expect(ver('tab-INICIO')).toBeTruthy();
 });
 
 test('cancelar con datos pide confirmación; sin datos sale directamente', async () => {
   montar(crearFake().cliente);
   await abrirFormulario();
-  fireEvent.press(screen.getByTestId('cancelar')); // cuenta única inferida no cuenta como modificación
-  expect(await screen.findByTestId('tab-INICIO')).toBeTruthy();
+  fireEvent.press(ver('cancelar')); // cuenta única inferida no cuenta como modificación
+  expect(await verPronto('tab-INICIO')).toBeTruthy();
   await abrirFormulario();
   escribirNota('x');
-  fireEvent.press(screen.getByTestId('cancelar'));
-  expect(screen.getByTestId('confirmar-salida')).toBeTruthy();
+  fireEvent.press(ver('cancelar'));
+  expect(ver('confirmar-salida')).toBeTruthy();
 });
 
 // ------------------------------------------------ F05-D003 REG-01 / §16.4
@@ -327,26 +329,26 @@ test('financiación: cuenta 100 % propia se propone visible y se sella sin toque
   const f = crearFake();
   montar(f.cliente);
   await abrirFormulario();
-  expect(screen.getByTestId('financiacion-texto').props.children).toBe('Financiado por ti · cuenta 100 % tuya');
+  expect(ver('financiacion-texto').props.children).toBe('Financiado por ti · cuenta 100 % tuya');
   rellenar();
-  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
-  await screen.findByTestId('registro-exito');
+  await actVer('registrar', async () => fireEvent.press(ver('registrar')));
+  await verPronto('registro-exito');
   expect(f.enviados[0].financiacion.estado).toBe('PROPUESTA_ACEPTADA');
-  expect(screen.getByTestId('exito-financiacion').props.children).toBe('Financiado por ti.');
+  expect(ver('exito-financiacion').props.children).toBe('Financiado por ti.');
 });
 
 test('financiación: «No es así» sella NO_DETERMINADA y cuenta como modificación', async () => {
   const f = crearFake();
   montar(f.cliente);
   await abrirFormulario();
-  fireEvent.press(screen.getByTestId('financiacion-no-es-asi'));
-  expect(screen.getByTestId('financiacion-texto').props.children).toBe('Financiación no determinada');
-  fireEvent.press(screen.getByTestId('cancelar'));
-  expect(screen.getByTestId('confirmar-salida')).toBeTruthy();
-  fireEvent.press(screen.getByTestId('seguir'));
+  fireEvent.press(ver('financiacion-no-es-asi'));
+  expect(ver('financiacion-texto').props.children).toBe('Financiación no determinada');
+  fireEvent.press(ver('cancelar'));
+  expect(ver('confirmar-salida')).toBeTruthy();
+  fireEvent.press(ver('seguir'));
   rellenar();
-  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
-  await screen.findByTestId('registro-exito');
+  await actVer('registrar', async () => fireEvent.press(ver('registrar')));
+  await verPronto('registro-exito');
   expect(f.enviados[0].financiacion).toEqual({ estado: 'NO_DETERMINADA' });
 });
 
@@ -354,11 +356,11 @@ test('financiación: cuenta sin propuesta muestra «no determinada», sin opció
   const f = crearFake({ propuesta: () => 'NO_DETERMINADA' });
   montar(f.cliente);
   await abrirFormulario();
-  expect(screen.getByTestId('financiacion-texto').props.children).toBe('Financiación no determinada');
+  expect(ver('financiacion-texto').props.children).toBe('Financiación no determinada');
   expect(screen.queryByTestId('financiacion-no-es-asi')).toBeNull();
   rellenar();
-  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
-  await screen.findByTestId('registro-exito');
+  await actVer('registrar', async () => fireEvent.press(ver('registrar')));
+  await verPronto('registro-exito');
   expect(f.enviados[0].financiacion).toEqual({ estado: 'NO_DETERMINADA' });
 });
 
@@ -367,13 +369,13 @@ test('fecha: «Ayer» recarga la propuesta de ESA fecha y se sella como fecha de
   const f = crearFake({ propuesta: (fecha) => (fecha < '2026-09-24' ? 'SELF_100' : 'NO_DETERMINADA') });
   montar(f.cliente);
   await abrirFormulario();
-  expect(screen.getByTestId('financiacion-texto').props.children).toBe('Financiación no determinada');
-  fireEvent.press(screen.getByTestId('fecha-ayer'));
+  expect(ver('financiacion-texto').props.children).toBe('Financiación no determinada');
+  fireEvent.press(ver('fecha-ayer'));
   await waitFor(() => expect(f.fechasConsultadas).toContain('2026-09-23'));
-  await waitFor(() => expect(screen.getByTestId('financiacion-texto').props.children).toBe('Financiado por ti · cuenta 100 % tuya'));
+  await waitFor(() => expect(ver('financiacion-texto').props.children).toBe('Financiado por ti · cuenta 100 % tuya'));
   rellenar();
-  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
-  await screen.findByTestId('registro-exito');
+  await actVer('registrar', async () => fireEvent.press(ver('registrar')));
+  await verPronto('registro-exito');
   expect(f.enviados[0].fecha_hecho).toBe('2026-09-23');
   expect(f.enviados[0].financiacion.estado).toBe('PROPUESTA_ACEPTADA');
 });
@@ -383,13 +385,13 @@ test('fecha: otra fecha futura o inválida desactiva el botón y no se envía', 
   montar(f.cliente);
   await abrirFormulario();
   rellenar();
-  expect(screen.getByTestId('registrar')).toBeEnabled();
-  fireEvent.press(screen.getByTestId('fecha-otra'));
-  fireEvent.changeText(screen.getByTestId('campo-fecha'), '25/09/2026');
+  expect(ver('registrar')).toBeEnabled();
+  fireEvent.press(ver('fecha-otra'));
+  fireEvent.changeText(ver('campo-fecha'), '25/09/2026');
   expect(screen.getByText('Solo gastos ya ocurridos: la fecha no puede ser futura.')).toBeTruthy();
-  expect(screen.getByTestId('faltan').props.children).toBe('Para registrar falta: fecha válida.');
+  expect(ver('faltan').props.children).toBe('Para registrar falta: fecha válida.');
   await pulsarBloqueado(f);
-  fireEvent.changeText(screen.getByTestId('campo-fecha'), '31/02/2026');
+  fireEvent.changeText(ver('campo-fecha'), '31/02/2026');
   expect(screen.getByText('Fecha no válida (dd/mm/aaaa).')).toBeTruthy();
   await pulsarBloqueado(f);
   expect(f.fechasConsultadas).not.toContain('2026-09-25'); // una fecha futura ni siquiera pide propuesta
@@ -411,11 +413,11 @@ test('propuesta obsoleta: rechazo definitivo, se recarga la propuesta y el sigui
   montar(f.cliente);
   await abrirFormulario();
   rellenar();
-  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
-  expect(await screen.findByTestId('error-dominio')).toBeTruthy();
-  await waitFor(() => expect(screen.getByTestId('financiacion-texto').props.children).toBe('Financiación no determinada'));
-  await act(async () => fireEvent.press(screen.getByTestId('registrar')));
-  await screen.findByTestId('registro-exito');
+  await actVer('registrar', async () => fireEvent.press(ver('registrar')));
+  expect(await verPronto('error-dominio')).toBeTruthy();
+  await waitFor(() => expect(ver('financiacion-texto').props.children).toBe('Financiación no determinada'));
+  await actVer('registrar', async () => fireEvent.press(ver('registrar')));
+  await verPronto('registro-exito');
   expect(f.enviados[1].intencion_id).not.toBe(f.enviados[0].intencion_id);
   expect(f.enviados[1].financiacion).toEqual({ estado: 'NO_DETERMINADA' });
 });
@@ -425,10 +427,10 @@ test('SPEC-08: al abrir, todo lo bloqueante pendiente se indica y el botón est�
   const f = crearFake();
   montar(f.cliente);
   await abrirFormulario();
-  expect(screen.getByTestId('registrar')).toBeDisabled();
+  expect(ver('registrar')).toBeDisabled();
   // F05-04 §2.7 (A8): sin «concepto» (nota opcional).
-  expect(screen.getByTestId('faltan').props.children).toBe('Para registrar falta: importe, categoría y si cuenta para el presupuesto.');
-  expect(screen.getByTestId('registrar').props.accessibilityHint).toBe('Para registrar falta: importe, categoría y si cuenta para el presupuesto.');
+  expect(ver('faltan').props.children).toBe('Para registrar falta: importe, categoría y si cuenta para el presupuesto.');
+  expect(ver('registrar').props.accessibilityHint).toBe('Para registrar falta: importe, categoría y si cuenta para el presupuesto.');
   await pulsarBloqueado(f);
 });
 
@@ -439,16 +441,16 @@ test('SPEC-08: «Pagado con» cargando bloquea aunque el resto esté completo', 
   const impl = original.getMockImplementation()!;
   original.mockImplementation((fecha: string) => new Promise((res) => { liberar = () => res(impl(fecha)); }));
   montar(f.cliente);
-  fireEvent.press(await screen.findByTestId('accion-registrar'));
-  fireEvent.press(screen.getByTestId('tipo-GASTO')); // F05-04 §2.2: «Registrar» → hoja de tipos
-  await screen.findByTestId('registro-form');
+  fireEvent.press(await verPronto('accion-registrar'));
+  fireEvent.press(ver('tipo-GASTO')); // F05-04 §2.2: «Registrar» → hoja de tipos
+  await verPronto('registro-form');
   rellenar();
   expect(screen.getByText('Cargando…')).toBeTruthy();
-  expect(screen.getByTestId('faltan').props.children).toBe('Para registrar falta: cuenta de pago.');
+  expect(ver('faltan').props.children).toBe('Para registrar falta: cuenta de pago.');
   await pulsarBloqueado(f);
   await act(async () => liberar());
-  await screen.findByTestId('financiacion');
-  expect(screen.getByTestId('registrar')).toBeEnabled();
+  await verPronto('financiacion');
+  expect(ver('registrar')).toBeEnabled();
   sinEscritura(f);
 });
 
@@ -457,7 +459,7 @@ test('SPEC-08: la atribución sin respuesta NO bloquea', async () => {
   montar(f.cliente);
   await abrirFormulario();
   rellenar({ soloMio: false });
-  expect(screen.getByTestId('registrar')).toBeEnabled();
+  expect(ver('registrar')).toBeEnabled();
   expect(screen.queryByTestId('faltan')).toBeNull();
 });
 
@@ -467,12 +469,12 @@ test('A1: los bloques de Home no son tarjetas (sin superficie propia ni radio) y
   montar(f.cliente);
   await screen.findByText('12,40 €');
   for (const id of ['bloque-acciones', 'bloque-mes', 'bloque-gasto-parcial', 'bloque-proximos', 'bloque-patrimonio']) {
-    const st = StyleSheet.flatten(screen.getByTestId(id).props.style);
+    const st = StyleSheet.flatten(ver(id).props.style);
     expect(st.backgroundColor).toBeUndefined();
     expect(st.borderRadius).toBeUndefined();
   }
-  expect(StyleSheet.flatten(screen.getByTestId('bloque-acciones').props.style).borderTopWidth).toBeUndefined(); // el hero ya delimita
-  expect(StyleSheet.flatten(screen.getByTestId('bloque-mes').props.style).borderTopWidth).toBe(1);
+  expect(StyleSheet.flatten(ver('bloque-acciones').props.style).borderTopWidth).toBeUndefined(); // el hero ya delimita
+  expect(StyleSheet.flatten(ver('bloque-mes').props.style).borderTopWidth).toBe(1);
   // La lectura parcial sigue siendo un bloque DISTINTO de «Este mes» (F05-D003 §16.6).
-  expect(within(screen.getByTestId('bloque-mes')).queryByTestId('bloque-gasto-parcial')).toBeNull();
+  expect(within(ver('bloque-mes')).queryByTestId('bloque-gasto-parcial')).toBeNull();
 });

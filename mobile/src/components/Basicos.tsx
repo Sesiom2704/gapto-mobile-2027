@@ -8,7 +8,8 @@
 // v0.4.0 (F05-05 K3 §2.2; F05 §49.4 A2 bis, D-SRCH-11): `ChipAccion`, chip de ACCIÓN (rol botón, sin estado ni «✓»): un toque ejecuta la acción; nunca representa una selección vigente. Lo usan los chips de sugerencias bajo «Categoría».
 // v0.4.1 (F06-M1 Tokens, V1 con anillo (F06-D003; dictamen PT-01..PT-12 del 2026-11-05)): el texto y los iconos con significado usan los tokens de rol (`accentText`, `criticalText`, `positiveText`, `warningText`); los rellenos semánticos siguen solo como relleno, borde o fondo.
 // v0.5.0 (F06 T6 · S1 piezas comunes; F09 0.55 §12.107.1 punto 9, AJ-UX2-10): `BotonCritico` (antes en HojasCategoria.tsx, que lo reexporta) vive aquí con Principal y Texto; misma forma (alto 52, radio 12), sin cambio visual ni de comportamiento. `BotonSecundario` sigue en SelectorCategorias.tsx hasta S2: moverlo cambia los imports del camino categorial (test_154 I13-A), que solo se pueden ampliar en S2 (ver DESVIACIONES T6-D-03).
-// Versión: 0.5.0
+// v0.6.0 (F06 T6 · S2; F09 0.55 §12.107.1 punto 9): `BotonSecundario` (antes en SelectorCategorias.tsx, que lo reexporta) vive aquí; los cuatro botones (Principal, Secundario, Crítico y Texto) quedan juntos, sin cambio visual.
+// Versión: 0.6.0
 // ============================================================
 
 import { Ionicons } from '@expo/vector-icons';
@@ -75,6 +76,21 @@ export function BotonTexto(p: { titulo: string; onPress: () => void; testID?: st
   return (
     <Pressable testID={p.testID} accessibilityRole="button" onPress={p.onPress} hitSlop={8} style={s.texto}>
       <Text style={[tipo.body, { color: p.critico ? c.criticalText : c.accentText, fontWeight: '600' }]}>{p.titulo}</Text>
+    </Pressable>
+  );
+}
+
+export function BotonSecundario(p: { titulo: string; onPress: () => void; testID?: string; critico?: boolean }) {
+  const { c } = useTema();
+  return (
+    <Pressable
+      testID={p.testID}
+      accessibilityRole="button"
+      accessibilityLabel={p.titulo}
+      onPress={p.onPress}
+      style={({ pressed }) => [s.secundario, { borderColor: c.borderStandard, backgroundColor: c.surfacePrimary, opacity: pressed ? 0.85 : 1 }]}
+    >
+      <Text style={[tipo.bodyEmphasis, { color: p.critico ? c.criticalText : c.accentText }]}>{p.titulo}</Text>
     </Pressable>
   );
 }
@@ -203,6 +219,7 @@ const s = StyleSheet.create({
   cabNav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: espacio.l, paddingBottom: espacio.s, borderBottomWidth: StyleSheet.hairlineWidth, gap: espacio.s },
   cabLado: { flex: 1, minHeight: TACTIL_MIN, justifyContent: 'center' },
   atras: { flexDirection: 'row', alignItems: 'center', gap: 2, minHeight: TACTIL_MIN },
+  secundario: { minHeight: 52, borderRadius: radio.m, borderWidth: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: espacio.l },
   critico: { minHeight: 52, borderRadius: radio.m, alignItems: 'center', justifyContent: 'center', paddingHorizontal: espacio.l },
   primario: { minHeight: 52, borderRadius: radio.m, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', paddingHorizontal: espacio.l },
   texto: { minHeight: TACTIL_MIN, justifyContent: 'center', paddingHorizontal: espacio.xs },
