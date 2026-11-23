@@ -6,6 +6,7 @@
 // Versión: 0.3.0 (MANT D18, lote 40): se elimina el jest.setTimeout(30000) propio; el límite (90 s) lo fija solo tiempos_rn (R-TEST-TIMEOUT); sin cambios de aserciones.
 //   previa: 0.1.0 (F06 T2-F06 CAT-VIV N1 (L-04, lámina SET-CAT/REG-CAT v1.0))
 // Versión: 0.4.0 (F06 T6 · S2 FORM-AGIL; F09 0.55 §12.107.1 puntos 1 y 2): los controles se buscan con `ver`/`verPronto` (form_agil.ts), que tocan antes la línea de «Se registrará así», «Más opciones» o «‹ Exprés» como haría el usuario. Mismas aserciones; las de ausencia siguen con queryByTestId.
+// Versión: 0.5.0 (F06 T6 · S6 N1 conservador; dictamen 1 Q3/A4, DF-14): la pregunta «¿Qué tipo de gasto es?» ya no se muestra; se comprueba su ausencia y el payload sigue enviando clase GASTO_CORRIENTE.
 // ============================================================
 
 import './tiempos_rn';
@@ -204,8 +205,8 @@ test('O-CV-12: con marca, «Propiedad» obligatoria (R01); sin ella no se regist
   await verPronto('vivienda-titularidad');
   expect(marcado('vivienda-titularidad')).toBe(true);
   expect(ver('vivienda-partes').props.children).toBe('Tu parte: 60,00 € · Lucía: 60,00 €');
-  expect(marcado('vivienda-clase-GASTO_CORRIENTE')).toBe(true);
-  expect(screen.queryByTestId('vivienda-clase-MEJORA')).toBeNull();
+  // F06 T6 · S6 (DF-14): sin «¿Qué tipo de gasto es?»; la clase sigue siendo GASTO_CORRIENTE en el bloque (ver el payload).
+  for (const k of ['GASTO_CORRIENTE', 'REPARACION', 'MEJORA']) expect(screen.queryByTestId(`vivienda-clase-${k}`)).toBeNull();
   // «¿Quién pagó?» sin valor por defecto.
   expect(ver('faltan').props.children).toBe('Para registrar falta: quién pagó.');
   await actVer('vivienda-quien-yo', async () => fireEvent.press(ver('vivienda-quien-yo')));

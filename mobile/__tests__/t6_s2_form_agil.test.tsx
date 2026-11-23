@@ -8,10 +8,11 @@
 //     habilitado, A7) y «Más opciones»;
 //   - «Más opciones»: «‹ Exprés», resumen tocable, bloques numerados con «Continuar» al siguiente y «Registrar»;
 //   - una línea tocada abre su bloque; el teclado se cierra (FA-04);
-//   - presupuesto obligatorio sin valor por defecto (S4 no entra) y «¿Qué tipo de gasto es?» se mantiene (S6 no entra);
+//   - presupuesto obligatorio sin valor por defecto en el doble sin la lectura de S4; «¿Qué tipo de gasto es?» retirada en S6;
 //   - vivienda: «Revisar» por persona (parte, aportación real y posición), presupuesto y lo que sale de tus cuentas;
 //     la huella cambia si cambian fecha, titularidad, reparto, quién pagó, deudas o cuenta (A6).
 // Versión: 0.1.0 (F06 T6 · S2)
+// Versión: 0.2.0 (F06 T6 · S6): «¿Qué tipo de gasto es?» retirada; se comprueba su ausencia.
 // ============================================================
 
 import './tiempos_rn';
@@ -178,8 +179,8 @@ test('vivienda: propiedad en el exprés; «Registrar» abre «Revisar» por pers
   await pulsar('presupuestable-true');
   await pulsar(`vivienda-prop-${P1}`);
   await screen.findByTestId('vivienda-titularidad');
-  // «¿Qué tipo de gasto es?» se mantiene (S6 no entra).
-  expect(screen.getByTestId('vivienda-clase-GASTO_CORRIENTE')).toBeTruthy();
+  // S6 (DF-14): «¿Qué tipo de gasto es?» ya no se muestra.
+  expect(screen.queryByTestId('vivienda-clase-GASTO_CORRIENTE')).toBeNull();
   expect(screen.queryByTestId('linea-quien')).toBeNull();
   await pulsar('vivienda-quien-yo');
   await pulsar(`cuenta-${C1}`);

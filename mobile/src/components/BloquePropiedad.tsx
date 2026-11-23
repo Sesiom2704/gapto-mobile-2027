@@ -6,6 +6,7 @@
 // Versión: 0.1.0 (F06 T2-F06 CAT-VIV N1 (L-04, lámina SET-CAT/REG-CAT v1.0))
 // Versión: 0.1.1 (F06 T2-F06 CAT-VIV N1, capturas del paso 11): el reparto propuesto («Según la titularidad…») va en columna para que el texto largo se ajuste al ancho (antes desbordaba el formulario en R02/R03).
 // Versión: 0.1.2 (F06 T2-F06 CAT-VIV N1, repetición de capturas sobre 8146e24): «Sí / No, no me debe nada…» de la deuda también en columna (desbordaba con Dynamic Type en R03).
+// Versión: 0.2.0 (F06 T6 · S6 N1 conservador; dictamen 1 Q3/A4, DF-14, F09 0.55 §12.107.3; enmienda Q-CV-04 / B3 AJ-11): se retira «¿Qué tipo de gasto es?» (chips Gasto corriente / Reparación). La selección conserva `clase` = GASTO_CORRIENTE, el valor por defecto que ya se enviaba: el payload es idéntico. El servidor no cambia y sigue aceptando REPARACION (equivalencia en test_323).
 // ============================================================
 
 import React, { useEffect, useState } from 'react';
@@ -21,13 +22,11 @@ import {
   conDeudas,
   conPropuesta,
   esDeOtros,
-  NOMBRE_CLASE_REGISTRO,
   opcionesPagoVivienda,
   partesDe,
   resumenConfirmacion,
   seleccionInicial,
   SeleccionPropiedad,
-  TEXTO_CLASE_TITULO,
   TEXTO_DE_OTROS,
   TEXTO_EXIGE_PROPIEDAD,
   TEXTO_GASTO_CORRIENTE,
@@ -40,7 +39,6 @@ import { espacio, tipo } from '../theme/tokens';
 import { Chip, EstadoDato } from './Basicos';
 import { estilosFormulario as ef } from './Formulario';
 
-const CLASES: ClaseRegistro[] = ['GASTO_CORRIENTE', 'REPARACION'];
 
 export function BloquePropiedad(p: {
   testID: string;
@@ -134,12 +132,7 @@ export function BloquePropiedad(p: {
           ) : null}
           {textoPartes(s, p.importe) ? <Text testID={`${p.testID}-partes`} style={[tipo.footnote, { color: c.textSecondary }]}>{textoPartes(s, p.importe)}</Text> : null}
 
-          <Text style={[tipo.subheadline, { color: c.textPrimary, fontWeight: '600' }]}>{TEXTO_CLASE_TITULO}</Text>
-          <View style={ef.chips}>
-            {CLASES.map((k) => (
-              <Chip key={k} testID={`${p.testID}-clase-${k}`} etiqueta={NOMBRE_CLASE_REGISTRO[k]} seleccionado={s.clase === k} onPress={() => set({ clase: k }, false)} />
-            ))}
-          </View>
+          {/* F06 T6 · S6 (dictamen 1 Q3/A4, DF-14): sin «¿Qué tipo de gasto es?»; la clase queda en GASTO_CORRIENTE, lo que ya se enviaba por defecto. */}
           <Text testID={`${p.testID}-corriente`} style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_GASTO_CORRIENTE}</Text>
 
           {conCotitulares ? (
