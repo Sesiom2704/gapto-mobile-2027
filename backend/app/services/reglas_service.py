@@ -189,6 +189,14 @@ class ReglasService:
                 )
 
             if cerrar_version_id is not None:
+                # LAB T5 · L2 (F06-R-REGLAS, R10b; RVRX-REGLA): la version a cerrar tiene que ser de ESTA regla (la
+                # bloqueada). Antes podia cerrar una version de otra regla sin bloquearla ni versionarla.
+                duena = sesion.uno("SELECT regla_id FROM gapto.regla_versiones WHERE id = %s", (cerrar_version_id,))
+                if duena is None or duena[0] != regla_id:
+                    raise ErrorMotor(
+                        CodigoError.AGREGADO_NO_ENCONTRADO,
+                        "La version a cerrar no existe o no es de esta regla.",
+                    )
                 cerrada = repo_reglas.cerrar_version(
                     sesion, cerrar_version_id, cerrar_vigente_hasta
                 )
@@ -332,6 +340,13 @@ class ReglasService:
                     "llamante.",
                 )
 
+            # LAB T5 · L2 (RVRX-REGLA): la excepcion a corregir tiene que ser de ESTA regla.
+            duena = sesion.uno("SELECT regla_id FROM gapto.regla_excepciones WHERE id = %s", (excepcion_id,))
+            if duena is None or duena[0] != regla_id:
+                raise ErrorMotor(
+                    CodigoError.AGREGADO_NO_ENCONTRADO,
+                    "La excepcion indicada no existe o no es de esta regla.",
+                )
             actualizada = repo_reglas.actualizar_excepcion(
                 sesion, excepcion_id, cambios
             )

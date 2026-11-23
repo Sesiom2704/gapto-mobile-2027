@@ -122,12 +122,15 @@ def test_caracterizacion_crear_version_de_a_cierra_una_version_de_b(servicio_reg
     a, _, version_a = _regla(servicio_reglas, contexto, con_version=False)  # su nueva version no solapa con nada
     b, rv_b, _ = _regla(servicio_reglas, contexto)
     version_b = _version_regla(admin, contexto.owner_user_id, b)
-    servicio_reglas.crear_version(contexto, regla_id=a, regla_row_version_esperada=version_a,
-                                  version=version_rodante(vigente_desde=F("2027-03-01")),
-                                  cerrar_version_id=rv_b, cerrar_vigente_hasta=F("2027-02-01"))
+    # LAB T5 · L2 (RVRX-REGLA corregido en el laboratorio; LAB_GUARDAS.md): ya no cierra la version de B.
+    with pytest.raises(ErrorMotor) as e:
+        servicio_reglas.crear_version(contexto, regla_id=a, regla_row_version_esperada=version_a,
+                                      version=version_rodante(vigente_desde=F("2027-03-01")),
+                                      cerrar_version_id=rv_b, cerrar_vigente_hasta=F("2027-02-01"))
+    assert e.value.codigo is CodigoError.AGREGADO_NO_ENCONTRADO
     assert leer_fila(admin, contexto.owner_user_id, "SELECT regla_id, vigente_hasta FROM gapto.regla_versiones "
-                     "WHERE id = %s", (rv_b,)) == (b, F("2027-02-01"))
-    assert _version_regla(admin, contexto.owner_user_id, b) == version_b  # B ni se bloqueo ni se versiono
+                     "WHERE id = %s", (rv_b,)) == (b, None)
+    assert _version_regla(admin, contexto.owner_user_id, b) == version_b
 
 
 def test_caracterizacion_corregir_excepcion_de_a_reescribe_una_excepcion_de_b(servicio_reglas, contexto, admin):
@@ -138,10 +141,13 @@ def test_caracterizacion_corregir_excepcion_de_a_reescribe_una_excepcion_de_b(se
     servicio_reglas.registrar_excepcion(contexto, regla_id=b, regla_row_version_esperada=version_b,
                                         excepcion=excepcion)
     version_b = _version_regla(admin, contexto.owner_user_id, b)
-    servicio_reglas.corregir_excepcion(contexto, regla_id=a,
-                                       regla_row_version_esperada=_version_regla(admin, contexto.owner_user_id, a),
-                                       excepcion_id=excepcion.excepcion_id,
-                                       cambios={"importe_override": D("99.0000")}, motivo="desde A")
+    # LAB T5 · L2 (RVRX-REGLA corregido en el laboratorio): ya no reescribe la excepcion de B.
+    with pytest.raises(ErrorMotor) as e:
+        servicio_reglas.corregir_excepcion(contexto, regla_id=a,
+                                           regla_row_version_esperada=_version_regla(admin, contexto.owner_user_id, a),
+                                           excepcion_id=excepcion.excepcion_id,
+                                           cambios={"importe_override": D("99.0000")}, motivo="desde A")
+    assert e.value.codigo is CodigoError.AGREGADO_NO_ENCONTRADO
     assert leer_fila(admin, contexto.owner_user_id, "SELECT regla_id, importe_override FROM gapto.regla_excepciones "
-                     "WHERE id = %s", (excepcion.excepcion_id,)) == (b, D("99.0000"))
+                     "WHERE id = %s", (excepcion.excepcion_id,)) == (b, D("10.0000"))
     assert _version_regla(admin, contexto.owner_user_id, b) == version_b
