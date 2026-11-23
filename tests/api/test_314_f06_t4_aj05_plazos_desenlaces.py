@@ -8,6 +8,8 @@
 #   con monkeypatch (`aj.plazo`); el resto usa los valores del perfil. Recuentos exactos y estado HTTP en cada caso.
 #   Las rutas de prueba (`/v1/_aj05/...`) se anaden SOLO a la app de cada test; no existen en el producto.
 # Version: 0.1.0 (F06 T4 · AJ-05 ampliado + R-C7-07, mandato b4ff6b70… y adenda 01 24113472…)
+# Version: 0.1.1 (F06 T4 · AJ-05, adenda 03 3dc097a4… F2): el canario de c17 deja de ser una DSN con credenciales
+#   (test_rv3_000); sigue llevando `postgresql://` y `secreto-aj05`, que el oraculo exige ausentes del registro.
 # ============================================================
 from __future__ import annotations
 
@@ -498,7 +500,7 @@ def _app_con_rutas(t, monkeypatch=None):
 
     @app.post("/v1/_aj05/falla")
     def falla():
-        raise RuntimeError("password=secreto-aj05 CONCEPTO-SECRETO-AJ05 postgresql://u:p@host/db")
+        raise RuntimeError("password=secreto-aj05 CONCEPTO-SECRETO-AJ05 postgresql://usuario-aj05@host/db?password=secreto-aj05")
 
     @app.get("/v1/_aj05/ok")
     def ok():

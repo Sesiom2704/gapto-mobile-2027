@@ -45,6 +45,9 @@
 #   {version_id}, {servicio_id} y {clasificacion_id}; CONSULTA gana `tipo` en la lectura de la propuesta de contrato
 #   (L-CON-03, parametro obligatorio). El oraculo, las rutas recorridas (todas, desde la propia app) y las demas
 #   sustituciones no cambian.
+# Version: 0.6.0 (F06 T4 · AJ-05, adenda 03 3dc097a4… F4, adaptacion declarada): AJ-05 reescribe la unidad de
+#   trabajo (v0.2.0) y su unico `SET LOCAL ROLE` pasa de la linea 231 a la 299. Solo cambia la linea esperada; la
+#   exigencia de un cambio de rol UNICO e IDENTICO y el oraculo de SECURITY DEFINER no cambian.
 # ============================================================
 
 from __future__ import annotations
@@ -297,8 +300,8 @@ def test_g9_sin_security_definer_ni_rol_privilegiado():
             codigo = linea.split("#", 1)[0]
             if re.search(r"execute\(.*SET\s+(LOCAL\s+)?ROLE", codigo, re.I):
                 cambios_de_rol.append(f"{f.relative_to(RAIZ)}:{n}:{codigo.strip()}")
-    assert cambios_de_rol == ['backend\\app\\core\\unidad_trabajo.py:231:cursor.execute(f"SET LOCAL ROLE {self._rol_runtime}")'] or \
-        cambios_de_rol == ['backend/app/core/unidad_trabajo.py:231:cursor.execute(f"SET LOCAL ROLE {self._rol_runtime}")'], cambios_de_rol
+    assert cambios_de_rol == ['backend\\app\\core\\unidad_trabajo.py:299:cursor.execute(f"SET LOCAL ROLE {self._rol_runtime}")'] or \
+        cambios_de_rol == ['backend/app/core/unidad_trabajo.py:299:cursor.execute(f"SET LOCAL ROLE {self._rol_runtime}")'], cambios_de_rol
 
 
 

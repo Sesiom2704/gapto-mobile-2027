@@ -426,6 +426,10 @@
 #     de Moises del 2026-11-18): I13a registra SOLO los 6 `import type` de ./hipoteca en mobile/src/api/cliente.ts
 #     (tipos de L-HIP, W-HIP-00, pago y revision; paso 10). El discriminante (igualdad exacta del conjunto de
 #     imports) se conserva. Ninguna regla ni entrada previa cambia.
+# Version: 0.44.0 (F06 T4 · AJ-05, adenda 03 3dc097a4… F3, adaptacion declarada): alta aditiva en I1 de
+#     backend/app/api/middleware_peticion.py::<modulo>, clase R (no consumidor): solo nombra el parametro
+#     {categoria_id} en plantillas de ruta de la lista cerrada RECHAZOS_TRAS_COMMIT_PREVISTOS; no lee ni escribe
+#     categorias. El discriminante (toda aparicion registrada) se conserva. Ninguna regla ni entrada previa cambia.
 # ============================================================
 
 from __future__ import annotations
@@ -2380,4 +2384,11 @@ MENCIONES_CLIENTE.update({
                                        "(F06 B3, R; C-a en servidor)",
     "mobile/src/domain/gasto_propiedad.ts": "envio de C-MEJ-01 y C-MEJ-03 con la categoria elegida por el usuario "
                                             "(A_FRONTERA via OP-22 / C-MEJ-03; C-a en servidor)",
+})
+
+# ------------------------------------------------------------------ F06 T4 AJ-05 (adenda 03 F3, adaptacion declarada)
+REGISTRO.update({
+    ("backend/app/api/middleware_peticion.py", "<modulo>"): (
+        "R", "AJ-05 lista cerrada de rechazos tras COMMIT", "no consumidor: solo nombra el parametro {categoria_id} "
+        "en plantillas de ruta; no lee ni escribe categorias"),
 })

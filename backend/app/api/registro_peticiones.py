@@ -17,8 +17,8 @@
 #     procesos escribiendo el mismo fichero el registro NO es valido (riesgo declarado).
 #   - Rotacion diaria por fecha UTC en el nombre (`peticiones-AAAAMMDD.jsonl`) y retencion de 30 dias: al cambiar de
 #     dia se borran los ficheros `peticiones-*.jsonl` con fecha anterior a la retencion. Nada mas se borra.
-#   - Directorio `GAPTO_LOG_DIR`, FUERA del repositorio y solo del usuario del backend (ENV-DEV:
-#     C:\DEV\gapto-envdev\logs).
+#   - Directorio `GAPTO_LOG_DIR`, FUERA del repositorio y solo del usuario del backend (ENV-DEV: `<Base>\logs`,
+#     fijado por scripts/dev/envdev_arranque.ps1).
 #
 #   Fallos de almacenamiento:
 #   - Al ARRANCAR (fail-closed): `RegistroPeticiones.abrir` escribe una linea real de comprobacion, la relee y
@@ -32,6 +32,7 @@
 #   excepcion: solo se registra el NOMBRE del tipo). Las cabeceras del cliente se aceptan solo como UUID canonico de
 #   36 caracteres; si no, `INVALIDO`. JSON con `json.dumps` (sin interpolar texto).
 # Version: 0.1.0 (F06 T4 · AJ-05 ampliado + R-C7-07, mandato b4ff6b70…)
+# Version: 0.1.1 (F06 T4 · AJ-05, adenda 03 3dc097a4… F1): el comentario del directorio deja de citar una ruta local.
 # ============================================================
 
 from __future__ import annotations
