@@ -40,6 +40,7 @@
 //   F06-00_Decisiones_Moises_2026-11-15_KO1_reclasificacion_N3_v1.0.md, 022b115a…): la relectura de la propuesta al cambiar fecha o
 //   cuenta es silenciosa (sin «cargando», descarta respuestas atrasadas) y los importes de «Otra combinación» llevan su etiqueta visible.
 // Versión: 0.5.0 (F06 T6 · S1 piezas comunes; F09 0.55 §12.107.1 punto 9): los campos de porcentaje, plazo y tipo abren el teclado decimal (`CampoTexto decimal`); sin otros cambios.
+// Versión: 0.6.0 (F06 T6 · S3 reforma; F09 0.55 §12.107.2 DP-05 y lámina REG-AGIL v0.8 R1/R2; dictamen 1 Q5/A6): el alta de la reforma deja los cuatro pasos y pasa a exprés + «Revisar»: en una pantalla, Propiedad, Importe, «Qué se hizo», «¿Quién pagó?» con la cuenta, reparto con lo pendiente y Fecha (los bloques de antes, mismos testID y reglas: `gprop-paso-datos`, `gprop-paso-pago` y `gprop-paso-reparto` son ahora sus contenedores); «Revisar» (gprop-revisar) muestra lo que se guardará y vincula esa versión: si al confirmar ya no coincide, se recalcula y hay que reconfirmar; «‹ Volver» invalida la revisión. `posiciones_confirmadas` = lo mostrado. La mejora antigua ya era una sola pantalla. Payload sin cambios.
 // ============================================================
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -187,8 +188,12 @@ export function GastoPropiedadScreen(p: {
   const inset = useSafeAreaInsets();
   const hoyIso = isoLocal(p.ahora());
   const ayerIso = isoLocal(ayer(p.ahora()));
-  type Paso = 'DATOS' | 'PAGO' | 'REPARTO' | 'CONFIRMAR' | 'HECHO';
-  const [paso, setPaso] = useState<Paso>('DATOS');
+  // F06 T6 · S3 (F09 0.55 §12.107.2, DP-05; lámina R1/R2): exprés (datos, quién pagó, reparto y fecha en una pantalla) → «Revisar» → hecho.
+  type Paso = 'EXPRES' | 'REVISAR' | 'HECHO';
+  const [paso, setPaso] = useState<Paso>('EXPRES');
+  // A6: «Revisar» vincula la versión del cálculo mostrada; si cambia algo, se invalida y se recalcula antes de reconfirmar.
+  const revisada = useRef<string | null>(null);
+  const [avisoRevision, setAvisoRevision] = useState<string | null>(null);
   // Decisión 2026-11-13: el alta solo registra reformas o mejoras; la clase va fijada (sin chip).
   const [b, setB] = useState<BorradorGastoPropiedad>(() => ({ ...borradorInicial(hoyIso), clase: 'MEJORA' }));
   const [pago, setPago] = useState<EleccionPago>(pagoInicial);
@@ -236,11 +241,23 @@ export function GastoPropiedadScreen(p: {
   // Vía de B3 (cuenta compartida, 8ter): sin preselección y con el importe a mano.
   const mostrados: Derecho[] = compartida ? derechos(b, prop, actores, `${concepto} · ${p.vista.nombre}`) : [];
   const cuentaEsCompartida = cuentaCompartida(prop);
-  const faltas = paso === 'DATOS' ? faltasDatosAlta(b)
-    : paso === 'PAGO' ? faltasPago(pago, b.importe, partes, noLoSe, b.cuentaId, cuentaEsCompartida, deudas, numTitulares).filter((x) => !x.startsWith('cuánto'))
-      : paso === 'REPARTO' ? [...faltasReparto(b, prop, actores, !compartida),
-        ...faltasPago(pago, b.importe, partes, noLoSe, b.cuentaId, cuentaEsCompartida, deudas, numTitulares)]
-        : [];
+  // En el exprés falta lo de los tres bloques de antes (datos, quién pagó y reparto), con las mismas reglas.
+  const faltas = paso === 'EXPRES'
+    ? [...new Set([...faltasDatosAlta(b), ...faltasPago(pago, b.importe, partes, noLoSe, b.cuentaId, cuentaEsCompartida, deudas, numTitulares),
+      ...faltasReparto(b, prop, actores, !compartida)])]
+    : [];
+  /** Huella de lo que «Revisar» muestra y se envía: fecha, importe, cuenta, titularidad leída, reparto, quién pagó y deudas. */
+  const huella = JSON.stringify([b.fecha, b.importe, b.cuentaId, b.nota, prop, b.reparto, pago, deudas, b.deuda, saldosEnvio, posiciones, mostrados]);
+  const abrirRevision = () => {
+    revisada.current = huella;
+    setAvisoRevision(null);
+    setPaso('REVISAR');
+  };
+  const volverAlExpres = () => {
+    revisada.current = null;
+    setAvisoRevision(null);
+    setPaso('EXPRES');
+  };
 
   const cambiarReparto = (e: EleccionReparto) => {
     setAvisoRep(null);
@@ -260,6 +277,11 @@ export function GastoPropiedadScreen(p: {
 
   const guardar = async () => {
     if (ocupado) return;
+    if (revisada.current !== huella) {
+      // A6: lo mostrado ya no es lo que se enviaría: se recalcula (se muestra lo nuevo) y hay que volver a confirmar.
+      revisada.current = huella;
+      return setAvisoRevision(TEXTO_REVISION_CAMBIADA);
+    }
     setOcupado(true);
     setAviso(null);
     // PAG: `posiciones_confirmadas` = exactamente lo que muestra esta confirmación; con la cuenta compartida, la forma de B3
@@ -276,7 +298,8 @@ export function GastoPropiedadScreen(p: {
       setB((x) => ({ ...x, repartoTocado: false, deudaTocada: false }));
       setDeudasTocadas(false);
       setAvisoRep(TEXTO_DESFASADA);
-      setPaso('REPARTO');
+      revisada.current = null;
+      setPaso('EXPRES');
       return void leerPropuesta();
     }
     setAviso({ tipo: 'AVISO', texto: textoError(r.codigo, r.mensaje) });
@@ -294,32 +317,28 @@ export function GastoPropiedadScreen(p: {
     );
   }
 
-  const siguiente: Record<Exclude<Paso, 'HECHO' | 'CONFIRMAR'>, Paso> = { DATOS: 'PAGO', PAGO: 'REPARTO', REPARTO: 'CONFIRMAR' };
-  const anterior: Record<Exclude<Paso, 'HECHO' | 'DATOS'>, Paso> = { PAGO: 'DATOS', REPARTO: 'PAGO', CONFIRMAR: 'REPARTO' };
-  const titulo = paso === 'PAGO' ? TEXTO_QUIEN_PAGO : paso === 'REPARTO' ? '¿De quién es el gasto?' : paso === 'CONFIRMAR' ? 'Revisar y confirmar' : 'Reforma o mejora';
+  const titulo = paso === 'REVISAR' ? 'Revisar' : 'Reforma o mejora';
   const confirmar = compartida ? [] : confirmacion(pago, b.importe, partes, saldosEnvio);
   return (
-    <View testID={`gprop-paso-${paso.toLowerCase()}`} style={[StyleSheet.absoluteFill, { backgroundColor: c.background }]}>
+    <View testID={paso === 'REVISAR' ? 'gprop-paso-confirmar' : 'gprop-expres'} style={[StyleSheet.absoluteFill, { backgroundColor: c.background }]}>
       <CabeceraTarea titulo={titulo} testIDCancelar="gprop-cancelar" onCancelar={() => p.onCerrar(false)} />
       <ScrollView contentContainerStyle={[ef.cuerpo, { paddingBottom: inset.bottom + espacio.xxl }]} keyboardShouldPersistTaps="handled">
         {aviso ? <Caja testID="gprop-aviso" aviso={aviso} /> : null}
-        {paso === 'DATOS' ? (
-          <>
+        {paso === 'EXPRES' ? (
+          <View testID="gprop-paso-datos" style={{ gap: espacio.l }}>
             <Linea testID="gprop-propiedad" etiqueta="Propiedad" valor={p.vista.nombre} />
             <CampoTexto importe testID="gprop-importe" etiqueta="Importe" marcador="0,00" valor={b.importe} onCambiar={(t) => setB({ ...b, importe: t })} />
-            <Campo etiqueta="Fecha del gasto y del pago">
-              <Fecha testID="gprop-fecha" etiqueta="Fecha del gasto" iso={b.fecha} hoyIso={hoyIso} ayerIso={ayerIso} onCambiar={(iso) => setB({ ...b, fecha: iso })} />
-            </Campo>
-            <CampoTexto testID="gprop-nota" etiqueta="Nota" marcador="Opcional" valor={b.nota} onCambiar={(t) => setB({ ...b, nota: t })} />
+            <CampoTexto testID="gprop-nota" etiqueta="Qué se hizo" marcador="Opcional (p. ej., cambio de ventanas)" valor={b.nota} onCambiar={(t) => setB({ ...b, nota: t })} />
             <View testID="gprop-clase" style={{ gap: 2 }}>
               <Text style={[tipo.bodyEmphasis, { color: c.textPrimary }]}>{TEXTO_CLASE_ALTA}</Text>
               <Text style={[tipo.caption, { color: c.textSecondary }]}>{AYUDA_CLASE.MEJORA}</Text>
             </View>
             <Text testID="gprop-nota-registrar-gasto" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_GASTOS_EN_REGISTRAR}</Text>
-          </>
+          </View>
         ) : null}
-        {paso === 'PAGO' ? (
-          <>
+        {paso === 'EXPRES' ? (
+          <View testID="gprop-paso-pago" style={{ gap: espacio.l }}>
+            <RotuloGrupo texto={TEXTO_QUIEN_PAGO} />
             <View testID="gprop-quien-pago" style={ef.chips}>
               {opcionesPago(cotitulares).map((o) => (
                 <Chip key={o.clave} testID={`gprop-pago-${o.clave}`} etiqueta={o.etiqueta}
@@ -348,10 +367,11 @@ export function GastoPropiedadScreen(p: {
                 )}
               </Campo>
             ) : null}
-          </>
+          </View>
         ) : null}
-        {paso === 'REPARTO' ? (
-          <>
+        {paso === 'EXPRES' ? (
+          <View testID="gprop-paso-reparto" style={{ gap: espacio.l }}>
+            <RotuloGrupo texto="¿De quién es el gasto?" />
             <Reparto testID="gprop-rep" propiedad={p.vista.nombre} prop={prop} eleccion={b.reparto} actores={actores} onCambiar={cambiarReparto} aviso={avisoRep} />
             {partes.some((x) => !x.yo) || noLoSe ? <RotuloGrupo texto="¿Queda algo pendiente?" /> : null}
             {noLoSe && !compartida ? <Text testID="gprop-deuda-no-lo-se" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_NO_LO_SE}</Text> : null}
@@ -408,10 +428,18 @@ export function GastoPropiedadScreen(p: {
                 ))}
               </>
             )}
-          </>
+          </View>
         ) : null}
-        {paso === 'CONFIRMAR' ? (
+        {paso === 'EXPRES' ? (
+          <View testID="gprop-bloque-fecha" style={{ gap: espacio.l }}>
+            <Campo etiqueta="Fecha del gasto y del pago">
+              <Fecha testID="gprop-fecha" etiqueta="Fecha del gasto" iso={b.fecha} hoyIso={hoyIso} ayerIso={ayerIso} onCambiar={(iso) => setB({ ...b, fecha: iso })} />
+            </Campo>
+          </View>
+        ) : null}
+        {paso === 'REVISAR' ? (
           <>
+            {avisoRevision ? <Caja testID="gprop-revision-cambiada" aviso={{ tipo: 'AVISO', texto: avisoRevision }} /> : null}
             <Tarjeta testID="gprop-resumen">
               <Linea testID="gprop-res-clase" etiqueta="Clase" valor={TEXTO_CLASE_ALTA} />
               <Linea testID="gprop-res-importe" etiqueta="Importe" valor={formatearEur(parsearImporte(b.importe).ok ? (parsearImporte(b.importe) as { valor: string }).valor : '0')} fuerte />
@@ -462,16 +490,24 @@ export function GastoPropiedadScreen(p: {
           </>
         ) : null}
         {faltas.length > 0 ? <Text testID="gprop-faltas" style={[tipo.footnote, { color: c.textSecondary }]}>{`Falta: ${faltas.join(', ')}.`}</Text> : null}
-        {paso === 'CONFIRMAR' ? (
-          <BotonPrimario testID="gprop-guardar" titulo="Confirmar y guardar" cargando={ocupado} onPress={() => void guardar()} />
+        {paso === 'REVISAR' ? (
+          <>
+            <Text testID="gprop-revisar-pie" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_PIE_REVISAR_REFORMA}</Text>
+            <BotonPrimario testID="gprop-guardar" titulo="Confirmar y guardar" cargando={ocupado} onPress={() => void guardar()} />
+            <BotonTexto testID="gprop-atras" titulo="‹ Volver" onPress={volverAlExpres} />
+          </>
         ) : (
-          <BotonPrimario testID="gprop-continuar" titulo="Continuar" deshabilitado={faltas.length > 0} onPress={() => setPaso(siguiente[paso])} />
+          <BotonPrimario testID="gprop-revisar" titulo="Revisar" deshabilitado={faltas.length > 0}
+            ayuda={faltas.length > 0 ? `Falta: ${faltas.join(', ')}.` : undefined} onPress={abrirRevision} />
         )}
-        {paso !== 'DATOS' ? <BotonTexto testID="gprop-atras" titulo="‹ Atrás" onPress={() => setPaso(anterior[paso])} /> : null}
       </ScrollView>
     </View>
   );
 }
+
+/** F06 T6 · S3 (A6): textos de «Revisar» de la reforma. */
+export const TEXTO_PIE_REVISAR_REFORMA = 'Lo que ves aquí es exactamente lo que se guarda. Si cambias la fecha, el reparto, quién pagó o la cuenta, la revisión se invalida y se recalcula.';
+export const TEXTO_REVISION_CAMBIADA = 'Algo ha cambiado desde que lo revisaste: se ha recalculado. Revísalo de nuevo y confirma.';
 
 /** C-MEJ-02 · Mejora histórica (sin pago: nunca «Te debe su parte»). */
 export function MejoraHistoricaScreen(p: {

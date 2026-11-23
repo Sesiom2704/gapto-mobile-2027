@@ -19,6 +19,7 @@
 //   `posiciones_confirmadas`) y la deuda por defecto es la propuesta de L-08; la cuenta compartida conserva la vía de B3 (O9.16). El test de
 //   HT2-01 (N3) pasa a exigir «¿Quién pagó?» y la AUSENCIA de gprop-aviso-a-medias y del chip «No, no me debe nada (ya está saldado o le
 //   invito)». Los tests de dominio de B3 (payloadGastoPropiedad, derechos, faltasReparto) no cambian: siguen fijando la forma de B3.
+// Versión: 0.4.0 (F06 T6 · S3 reforma; F09 0.55 §12.107.2 DP-05, A6): el alta es exprés + «Revisar»; los «Continuar» entre datos, «¿Quién pagó?» y reparto desaparecen (los tres bloques están en la misma pantalla con sus testID de contenedor) y el que llevaba a la confirmación pasa a `gprop-revisar`. Mismas aserciones y payloads.
 // ============================================================
 
 import './tiempos_rn';
@@ -211,10 +212,10 @@ async function montar(pat: ClientePatrimonioB3) {
 /** PAG: datos → «¿Quién pagó?» (por defecto en estos tests «Yo, todo» o la opción indicada, con la cuenta) → reparto. */
 async function datosMejora(opcion = 'yo', cuenta: string | null = C1) {
   await escribir('gprop-importe', '300');
-  await pulsar('gprop-continuar');
+  // F06 T6 · S3: sin «Continuar» entre bloques (exprés en una pantalla)
   await pulsar(`gprop-pago-${opcion}`);
   if (cuenta) await pulsar(`gprop-cuenta-${cuenta}`);
-  await pulsar('gprop-continuar');
+  // F06 T6 · S3: sin «Continuar» entre bloques (exprés en una pantalla)
 }
 
 // CAMBIO DE CONTRATO (L-02) · (1) antes: la cuenta se elegía en los datos y «Continuar» llevaba al reparto; ahora la cuenta se elige en
@@ -230,12 +231,13 @@ test('C1 (ajuste N3, decisión 2026-11-13): el alta solo ofrece «Reforma o mejo
   expect(screen.getByTestId('gprop-nota-registrar-gasto')).toBeTruthy();
   await escribir('gprop-importe', '300');
   expect(screen.queryByTestId(`gprop-cuenta-${C1}`)).toBeNull();          // PAG: la cuenta ya no está en los datos
-  expect(screen.queryByTestId('gprop-faltas')).toBeNull();   // la clase ya no falta: va fijada a MEJORA
-  await pulsar('gprop-continuar');
+  // F06 T6 · S3: en el exprés aún faltan quién pagó y el reparto; lo que se comprueba es que la clase no falta (va fijada a MEJORA).
+  expect(String(screen.getByTestId('gprop-faltas').props.children)).not.toMatch(/clase/);
+  // F06 T6 · S3: sin «Continuar» entre bloques (exprés en una pantalla)
   expect(screen.getByTestId('gprop-paso-pago')).toBeTruthy();
   await pulsar('gprop-pago-yo');
   await pulsar(`gprop-cuenta-${C1}`);
-  await pulsar('gprop-continuar');
+  // F06 T6 · S3: sin «Continuar» entre bloques (exprés en una pantalla)
   expect(screen.getByTestId('gprop-paso-reparto')).toBeTruthy();
 });
 
@@ -253,7 +255,7 @@ test('O9.14 + O9.23: reparto marcado, «Sí» por defecto, confirmación visible
   expect(screen.getByTestId('gprop-rep-titularidad').props.accessibilityLabel).toBe('Según la titularidad de Piso Ejemplo el 10 oct 2026: tú 50 %, Ana 50 %');
   expect(marcado(`gprop-deuda-${ANA}-si`)).toBe(true);
   expect(screen.getByTestId(`gprop-deuda-${ANA}-texto`).props.children).toBe('Ana te debe 150,00 €');
-  await pulsar('gprop-continuar');
+  await pulsar('gprop-revisar'); // F06 T6 · S3: exprés → «Revisar»
   expect(screen.getByTestId(`gprop-conf-${ANA}-posicion`).props.children).toBe('Ana te debe 150,00 €');
   expect(screen.getByTestId(`gprop-conf-${ANA}-parte`).props.children).toBe('Su parte: 150,00 €');
   expect(screen.getByTestId(`gprop-atr-${ANA}`)).toBeTruthy();
@@ -276,7 +278,7 @@ test('O9.15 + O9.23: si cambia a «No», el derecho desaparece de la confirmaci�
   await montar(pat);
   await datosMejora();
   await pulsar(`gprop-deuda-${ANA}-no`);
-  await pulsar('gprop-continuar');
+  await pulsar('gprop-revisar'); // F06 T6 · S3: exprés → «Revisar»
   expect(screen.getByTestId(`gprop-conf-${ANA}-posicion`).props.children).toBe('No queda nada pendiente');
   expect(screen.queryByText(TEXTO_SE_CREA_DERECHO)).toBeNull();
   await pulsar('gprop-guardar');
@@ -297,7 +299,7 @@ test('O9.16: cuenta compartida → nada marcado, el envío exige elegir y el imp
   await pulsar(`gprop-debe-${ANA}-si`);
   expect(screen.getByTestId(`gprop-debe-${ANA}-importe`).props.value).toBe('');
   await escribir(`gprop-debe-${ANA}-importe`, '120');
-  await pulsar('gprop-continuar');
+  await pulsar('gprop-revisar'); // F06 T6 · S3: exprés → «Revisar»
   await pulsar('gprop-guardar');
   const body = (pat.registrarGastoPropiedad as jest.Mock).mock.calls[0][0] as PayloadGastoPropiedad;
   expect(body.aportacion_indicada).toBe('MANUAL');
@@ -339,13 +341,13 @@ test('ATRIBUCION_PROPUESTA_DESFASADA: vuelve al reparto con la propuesta releíd
   const pat = patrimonio(() => prop(), registrar as unknown as jest.Mock);
   await montar(pat);
   await datosMejora();
-  await pulsar('gprop-continuar');
+  await pulsar('gprop-revisar'); // F06 T6 · S3: exprés → «Revisar»
   const llamadas = (pat.propuestaGasto as jest.Mock).mock.calls.length;
   await pulsar('gprop-guardar');
   expect(screen.getByTestId('gprop-paso-reparto')).toBeTruthy();
   expect(screen.getByTestId('gprop-rep-aviso')).toBeTruthy();
   expect((pat.propuestaGasto as jest.Mock).mock.calls.length).toBeGreaterThan(llamadas);
-  await pulsar('gprop-continuar');
+  await pulsar('gprop-revisar'); // F06 T6 · S3: exprés → «Revisar»
   await pulsar('gprop-guardar');
   const [a, b] = registrar.mock.calls.map((c: any[]) => (c[0] as PayloadGastoPropiedadV2).intencion_id);
   expect(a).not.toBe(b);
@@ -409,11 +411,11 @@ test('chips de fecha: la mejora antigua también ofrece «Hoy · Ayer · Otra fe
 test('HT2-01 sustituido por PAG: «¿Quién pagó?» ofrece «Cada uno su parte» y no queda ni el aviso N3 ni el chip antiguo', async () => {
   await montar(patrimonio(() => prop()));
   await escribir('gprop-importe', '300');
-  await pulsar('gprop-continuar');
+  // F06 T6 · S3: sin «Continuar» entre bloques (exprés en una pantalla)
   expect(screen.getByTestId('gprop-pago-cada-uno')).toBeTruthy();
   await pulsar('gprop-pago-yo');
   await pulsar(`gprop-cuenta-${C1}`);
-  await pulsar('gprop-continuar');
+  // F06 T6 · S3: sin «Continuar» entre bloques (exprés en una pantalla)
   expect(screen.queryByTestId('gprop-aviso-a-medias')).toBeNull();
   expect(screen.queryByText('No, no me debe nada (ya está saldado o le invito)')).toBeNull();
   expect(screen.queryByText(/lo pagamos a medias/)).toBeNull();

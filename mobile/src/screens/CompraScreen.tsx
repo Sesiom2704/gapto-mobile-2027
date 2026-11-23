@@ -9,6 +9,7 @@
 // Versión: 0.4.0 (F06 T3-F06 · MANT N1 R-B2-06 (AJ-01), firma b88a3662…): guardar la compra usa `enviarCompraComprobando`: ante un timeout no dice que ha fallado, muestra «Comprobando…» y reenvía el MISMO cuerpo (misma intención; replay idempotente sin duplicar); si sigue sin confirmarse, `TEXTO_COMPRA_SIN_CONFIRMAR` (nunca «fallo» ni «repítela»). El gasto posterior (C-COMPRA-03) no cambia.
 // Versión: 0.5.0 (F06 T3 · cadena de noche 21->22-11, T-D MANT N3 cliente; D-C7-07): los campos de importe ponen los puntos de miles al teclear (`formatearImporteAlTeclear`). D-C7-08 (OBS-02): el banco de la hipoteca se elige con un buscador de terceros (`bancosVisibles`): sin escribir no se lista ninguno; el elegido se ve siempre.
 // Versión: 0.6.0 (F06 T6 · S1 piezas comunes; F09 0.55 §12.107.1 puntos 5 y 9): «Banco» de la hipoteca usa el mismo selector común de terceros que Registrar gasto (`CampoSelector` + `SelectorTercero` a pantalla completa, título «Banco»; sustituye al buscador con chips de D-C7-08 y a `bancosVisibles`); se envía el identificador del tercero elegido como `financiador.tercero_id`, igual que antes. Los campos de porcentaje, plazo y tipo abren el teclado decimal (`CampoTexto decimal`).
+// Versión: 0.7.0 (F06 T6 · S3 compra; F09 0.55 §12.107.2 y lámina REG-AGIL v0.8 C1–C4): en «¿Cómo se pagó?», primero la hipoteca y después los pagos desde tus cuentas: cada pago se edita en su tarjeta («Confirmar pago» / «Cancelar») y queda en una línea con Editar y Eliminar; totales de presentación (Precio, Pagado desde tus cuentas, · de la hipoteca, · resto, sin hipoteca, Falta por cuadrar; DT-02, no se persisten); importe del préstamo con 80 % · 90 % · Otro % · Otro importe (DP-14, AJ-UX2-07: céntimos enteros con round_half_up; el importe se ve y se edita; el % no viaja) y ayuda «préstamo ≤ precio» (DT-03, solo pantalla). `faltasPagos`, «Lo deja en» y el payload no cambian.
 // ============================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -19,7 +20,7 @@ import type { ClienteApi, CuentaElegible } from '../api/cliente';
 import type { CuadroPrevio } from '../api/hipoteca';
 import type { ClientePatrimonio, ParteEnFecha } from '../api/patrimonio';
 import type { VistaPropiedad } from '../api/propiedades';
-import { BotonPrimario, BotonTexto, Chip, EstadoDato } from '../components/Basicos';
+import { BotonPrimario, BotonSecundario, BotonTexto, Chip, EstadoDato } from '../components/Basicos';
 import { CampoFecha } from '../components/CampoFecha';
 import { AvisoCaja, CabeceraTarea, Caja, Campo, CampoTexto, estilosFormulario as ef, RotuloGrupo, Tarjeta } from '../components/Formulario';
 import { CampoSelector } from '../components/PantallaSelector';
@@ -29,9 +30,10 @@ import {
   faltasGastos, faltasPagos, faltasPrecio, filasDiaADia, GastoBorrador, NOMBRE_CONCEPTO, NOMBRE_ROL, PagoBorrador, payloadCompra,
   enviarCompraComprobando, payloadGastoCompra, puedeDeclararCompleto, resumen, ROLES, TEXTO_COMPRA_SIN_CONFIRMAR, TEXTO_COMPROBANDO_COMPRA, TEXTO_DESFASADA, TEXTO_GASTOS, TEXTO_INDETERMINADO_COMPRA, TEXTO_NADIE_MARCADO, TEXTO_NOTA_SIN_FECHA, TEXTO_SIN_HIPOTECA,
   TEXTO_SIN_TITULARIDAD, TEXTO_VALOR_REFERENCIA, textoErrorCompra, textoPartes, textoPropuestaEscritura,
+  faltasDeUnPago, importePorcentaje, prestamoSuperaPrecio, totalesPagos,
 } from '../domain/compra';
 import { ddmmaaaaAIso, diaMesAnioIso, isoADdmmaaaa, isoLocal } from '../domain/fechas';
-import { formatearEur, parsearImporte } from '../domain/importe';
+import { formatearEur, formatearImporteAlTeclear, parsearImporte } from '../domain/importe';
 import {
   BorradorHipoteca, borradorHipoteca, conHipoteca, eleccionPropuesta, faltasHipoteca, NOMBRE_TIPO, numeroCuotas, payloadCuadroPrevio, puedeVerCuadro,
   ROTULO_CUENTA_DESEMBOLSO, TEXTO_AVISO_REPARTO, TEXTO_CONVENCION, TEXTO_CUENTA_DESEMBOLSO, TEXTO_PRESTAMO, TEXTO_SIN_CUENTAS_CARGO, TEXTO_SIN_CUENTAS_DESEMBOLSO,
@@ -151,6 +153,10 @@ export function CompraScreen(p: {
   const [selectorBanco, setSelectorBanco] = useState(false);
   const [bancoNombre, setBancoNombre] = useState<string | null>(null);
   const [avisoReparto, setAvisoReparto] = useState(false);
+  // F06 T6 · S3 (F09 0.55 §12.107.2): un pago se edita en su tarjeta y, al confirmarlo, queda en una línea con Editar y Eliminar.
+  // `copiaPago` permite «Cancelar»: vuelve a lo confirmado o, si el pago es nuevo, lo quita. Solo presentación.
+  const [pagoAbierto, setPagoAbierto] = useState<string | null>(() => b.pagos[0]?.id ?? null);
+  const [copiaPago, setCopiaPago] = useState<PagoBorrador | null>(null);
 
   useEffect(() => {
     void p.cliente.cuentasElegibles('GASTO', hoyIso).then((r) => { if (r.tipo === 'OK') setCuentas(r.datos.cuentas); });
@@ -175,13 +181,38 @@ export function CompraScreen(p: {
     if (paso === 'ATRIBUCION') void cargarPropuesta();
   }, [paso]);
 
-  const faltas = paso === 'PRECIO' ? faltasPrecio(b) : paso === 'PAGOS' ? [...faltasPagos(b), ...(hip ? faltasHipoteca(hip, b.fechaEscritura, propuestaHip) : [])] : paso === 'GASTOS' ? faltasGastos(b)
+  const faltas = paso === 'PRECIO' ? faltasPrecio(b) : paso === 'PAGOS' ? [...faltasPagos(b), ...(hip ? faltasHipoteca(hip, b.fechaEscritura, propuestaHip) : []),
+      ...(hip && prestamoSuperaPrecio(b.precio, hip.importe) ? [TEXTO_FALTA_PRESTAMO_PRECIO] : [])] : paso === 'GASTOS' ? faltasGastos(b)
     : paso === 'ATRIBUCION' ? faltasAtribucion(b.atribucion, propuesta) : [];
   const nombreCuenta = (id: string | null) => cuentas.find((x) => x.cuenta_id === id)?.nombre ?? 'Cuenta';
   const r = resumen(b);
   const indice = PASOS.indexOf(paso);
   const atras = () => (indice > 0 ? setPaso(PASOS[indice - 1]) : p.onCerrar(null));
   const setPago = (i: number, x: Partial<PagoBorrador>) => setB({ ...b, pagos: b.pagos.map((y, j) => (j === i ? { ...y, ...x } : y)) });
+  const abrirPago = (x: PagoBorrador) => {
+    if (pagoAbierto && pagoAbierto !== x.id) return;
+    setCopiaPago({ ...x });
+    setPagoAbierto(x.id);
+  };
+  const confirmarPago = (x: PagoBorrador) => {
+    if (faltasDeUnPago(b, x).length > 0) return;
+    setPagoAbierto(null);
+    setCopiaPago(null);
+  };
+  const cancelarPago = (x: PagoBorrador) => {
+    const antes = copiaPago;
+    setB({ ...b, pagos: antes ? b.pagos.map((y) => (y.id === x.id ? antes : y)) : b.pagos.filter((y) => y.id !== x.id) });
+    setPagoAbierto(null);
+    setCopiaPago(null);
+  };
+  const anadirPago = () => {
+    if (pagoAbierto) return;
+    const id = p.nuevoId();
+    setB({ ...b, pagos: [...b.pagos, { id, rol: 'ARRAS', cuentaId: null, fecha: b.fechaEscritura, importe: '' }] });
+    setCopiaPago(null);
+    setPagoAbierto(id);
+  };
+  const totales = totalesPagos(b, hip ? hip.importe : null);
   const setGasto = (i: number, x: Partial<GastoBorrador>) => setB({ ...b, gastos: b.gastos.map((y, j) => (j === i ? { ...y, ...x } : y)) });
 
   const guardar = async () => {
@@ -271,25 +302,10 @@ export function CompraScreen(p: {
         {paso === 'PAGOS' ? (
           <>
             <Text style={[tipo.footnote, { color: c.textSecondary }]}>2 de 3 · ¿Cómo se pagó el precio?</Text>
-            <RotuloGrupo texto="Con tu dinero" />
-            {b.pagos.map((x, i) => (
-              <Tarjeta key={x.id} testID={`compra-pago-${i}`}>
-                <View style={{ padding: espacio.m, gap: espacio.s }}>
-                  <View style={ef.chips}>
-                    {ROLES.map((rol) => <Chip key={rol} testID={`compra-pago-${i}-rol-${rol}`} etiqueta={NOMBRE_ROL[rol]} seleccionado={x.rol === rol} onPress={() => setPago(i, { rol, ...(rol === 'FIRMA' ? { fecha: b.fechaEscritura } : {}) })} />)}
-                  </View>
-                  <Cuentas testID={`compra-pago-${i}-cuenta`} cuentas={cuentas} valor={x.cuentaId} onCambiar={(id) => setPago(i, { cuentaId: id })} />
-                  <Fecha testID={`compra-pago-${i}-fecha`} etiqueta="Fecha del pago" iso={x.fecha} hoyIso={hoyIso} onCambiar={(iso) => setPago(i, { fecha: iso })} />
-                  <CampoTexto importe testID={`compra-pago-${i}-importe`} etiqueta="Importe del pago" marcador="0,00" valor={x.importe} onCambiar={(t) => setPago(i, { importe: t })} />
-                  {b.pagos.length > 1 ? <BotonTexto testID={`compra-pago-${i}-quitar`} titulo="Quitar este pago" critico onPress={() => setB({ ...b, pagos: b.pagos.filter((_, j) => j !== i) })} /> : null}
-                </View>
-              </Tarjeta>
-            ))}
-            <BotonTexto testID="compra-pago-anadir" titulo="+ Añadir pago" onPress={() => setB({ ...b, pagos: [...b.pagos, { id: p.nuevoId(), rol: 'ARRAS', cuentaId: null, fecha: b.fechaEscritura, importe: '' }] })} />
-            <Linea testID="compra-pagado" etiqueta="Pagado entre todo" valor={formatearEur(textoPagado(b))} fuerte />
+            {/* F06 T6 · S3 (lámina C1–C4): primero la hipoteca; después los pagos desde tus cuentas, cada uno en su línea. */}
             {hip ? (
               <BloqueHipoteca cliente={p.cliente} hip={hip} escrituraIso={b.fechaEscritura} hoyIso={hoyIso} propuesta={propuestaHip}
-                onCambiar={(x) => setHip({ ...hip, ...x })} onQuitar={() => setHip(null)} onAviso={setAviso} onCuadro={setPrevio}
+                onCambiar={(x) => setHip({ ...hip, ...x })} onQuitar={() => setHip(null)} onAviso={setAviso} onCuadro={setPrevio} precio={b.precio}
                 bancoNombre={bancoNombre} onElegirBanco={() => setSelectorBanco(true)} />
             ) : (
               <>
@@ -297,6 +313,47 @@ export function CompraScreen(p: {
                 <BotonTexto testID="compra-hip-anadir" titulo="+ Añadir la hipoteca de esta compra" onPress={() => setHip(borradorHipoteca())} />
               </>
             )}
+            <RotuloGrupo texto="Pagos desde tus cuentas" />
+            {b.pagos.length === 0 ? <Text testID="compra-sin-pagos" style={[tipo.footnote, { color: c.textSecondary }]}>Sin pagos todavía</Text> : null}
+            {b.pagos.map((x, i) => (pagoAbierto === x.id ? (
+              <Tarjeta key={x.id} testID={`compra-pago-${i}`}>
+                <View style={{ padding: espacio.m, gap: espacio.s }}>
+                  <Text style={[tipo.subheadline, { color: c.textPrimary, fontWeight: '600' }]}>{copiaPago ? 'Editar pago' : 'Nuevo pago'}</Text>
+                  <View style={ef.chips}>
+                    {ROLES.map((rol) => <Chip key={rol} testID={`compra-pago-${i}-rol-${rol}`} etiqueta={NOMBRE_ROL[rol]} seleccionado={x.rol === rol} onPress={() => setPago(i, { rol, ...(rol === 'FIRMA' ? { fecha: b.fechaEscritura } : {}) })} />)}
+                  </View>
+                  <Cuentas testID={`compra-pago-${i}-cuenta`} cuentas={cuentas} valor={x.cuentaId} onCambiar={(id) => setPago(i, { cuentaId: id })} />
+                  <Fecha testID={`compra-pago-${i}-fecha`} etiqueta="Fecha del pago" iso={x.fecha} hoyIso={hoyIso} onCambiar={(iso) => setPago(i, { fecha: iso })} />
+                  <CampoTexto importe testID={`compra-pago-${i}-importe`} etiqueta="Importe del pago" marcador="0,00" valor={x.importe} onCambiar={(t) => setPago(i, { importe: t })} />
+                  {hip && hip.cuentaDesembolsoId && x.cuentaId === hip.cuentaDesembolsoId && parsearImporte(hip.importe).ok && parsearImporte(x.importe).ok ? (
+                    <Text testID={`compra-pago-${i}-hip`} style={[tipo.footnote, { color: c.textSecondary }]}>
+                      {textoDeLaHipoteca(x.importe, hip.importe, nombreCuenta(x.cuentaId))}
+                    </Text>
+                  ) : null}
+                  <BotonPrimario testID={`compra-pago-${i}-confirmar`} titulo="Confirmar pago" deshabilitado={faltasDeUnPago(b, x).length > 0}
+                    ayuda={faltasDeUnPago(b, x).length > 0 ? `Falta: ${faltasDeUnPago(b, x).join(', ')}.` : undefined} onPress={() => confirmarPago(x)} />
+                  <BotonSecundario testID={`compra-pago-${i}-cancelar`} titulo="Cancelar" onPress={() => cancelarPago(x)} />
+                </View>
+              </Tarjeta>
+            ) : (
+              <View key={x.id} testID={`compra-pago-${i}-linea`} style={[s.lineaPago, { borderBottomColor: c.borderDefault }]}>
+                <View style={{ flex: 1, gap: 2 }}>
+                  <Text testID={`compra-pago-${i}-linea-titulo`} style={[tipo.body, { color: c.textPrimary }]}>{`${NOMBRE_ROL[x.rol]} · ${formatearEur(parsearImporte(x.importe).ok ? (parsearImporte(x.importe) as { valor: string }).valor : '0')}`}</Text>
+                  <Text style={[tipo.caption, { color: c.textSecondary }]}>{`${nombreCuenta(x.cuentaId)} · ${esFechaIso(x.fecha) ? isoADdmmaaaa(x.fecha) : x.fecha}`}</Text>
+                </View>
+                <BotonTexto testID={`compra-pago-${i}-editar`} titulo="Editar" onPress={() => abrirPago(x)} />
+                <BotonTexto testID={`compra-pago-${i}-eliminar`} titulo="Eliminar" critico onPress={() => setB({ ...b, pagos: b.pagos.filter((_, j) => j !== i) })} />
+              </View>
+            )))}
+            {pagoAbierto ? null : <BotonTexto testID="compra-pago-anadir" titulo="+ Añadir pago" onPress={anadirPago} />}
+            <Tarjeta testID="compra-totales">
+              <Linea testID="compra-tot-precio" etiqueta="Precio" valor={formatearEur(totales.precio)} />
+              <Linea testID="compra-pagado" etiqueta="Pagado desde tus cuentas" valor={formatearEur(totales.pagado)} fuerte />
+              {totales.hipoteca !== null ? <Linea testID="compra-tot-hipoteca" etiqueta="· de la hipoteca" valor={formatearEur(totales.hipoteca)} /> : null}
+              {totales.resto !== null ? <Linea testID="compra-tot-resto" etiqueta="· resto, sin hipoteca" valor={formatearEur(totales.resto)} /> : null}
+              <Linea testID="compra-tot-falta" etiqueta="Falta por cuadrar" valor={`${formatearEur(totales.falta)}${totales.falta === '0.00' ? ' ✓' : ''}`} />
+            </Tarjeta>
+            {hip ? <Text testID="compra-tot-nota" style={[tipo.footnote, { color: c.textSecondary }]}>{TEXTO_TOTALES_HIPOTECA}</Text> : null}
           </>
         ) : null}
         {paso === 'GASTOS' ? (
@@ -355,7 +412,8 @@ export function CompraScreen(p: {
         {paso === 'RESUMEN' ? (
           <BotonPrimario testID="compra-guardar" titulo="Guardar la compra" cargando={ocupado} onPress={() => void guardar()} />
         ) : (
-          <BotonPrimario testID="compra-continuar" titulo="Continuar" deshabilitado={faltas.length > 0} onPress={() => setPaso(PASOS[indice + 1])} />
+          <BotonPrimario testID="compra-continuar" titulo="Continuar" deshabilitado={faltas.length > 0}
+            onPress={() => { if (paso === 'PAGOS') { setPagoAbierto(null); setCopiaPago(null); } setPaso(PASOS[indice + 1]); }} />
         )}
         {indice > 0 ? <BotonTexto testID="compra-atras" titulo="‹ Atrás" onPress={atras} /> : null}
       </ScrollView>
@@ -410,6 +468,21 @@ function CuentasHip(p: { testID: string; cuentas: CuentaElegible[] | null; valor
   );
 }
 
+/** F06 T6 · S3: textos de presentación de «¿Cómo se pagó?» (DT-02, DT-03). */
+export const TEXTO_FALTA_PRESTAMO_PRECIO = 'un préstamo que no supere el precio';
+export const TEXTO_PRESTAMO_SUPERA = 'El préstamo es mayor que el precio de compra. Es una ayuda de pantalla: revísalo antes de seguir.';
+export const TEXTO_TOTALES_HIPOTECA = 'El préstamo entra en tu cuenta y sale en la firma, como siempre. Solo cambia cómo se ve: cuánto de lo pagado cubre la hipoteca y cuánto queda sin ella.';
+/** «De este pago, 160.000,00 € vienen de la hipoteca que entró en Cuenta…» (lámina C2; como mucho, el préstamo). */
+export function textoDeLaHipoteca(pago: string, prestamo: string, cuenta: string): string {
+  const a = parsearImporte(pago);
+  const h = parsearImporte(prestamo);
+  if (!a.ok || !h.ok) return '';
+  const menor = Number(a.valor) <= Number(h.valor) ? a.valor : h.valor;
+  return `De este pago, ${formatearEur(menor)} vienen de la hipoteca que entró en ${cuenta}.`;
+}
+/** Importe canónico («160000.00») al texto del campo («160.000,00»). */
+const aTextoCampo = (canonico: string) => formatearImporteAlTeclear(canonico.replace('.', ','));
+
 /** F06-01H · bloque «Hipoteca» de la compra (contrato v0.4 §3.2.1 y §8). El cliente no calcula importes: «Ver el cuadro» lo pide al servidor (W-HIP-00). */
 function BloqueHipoteca(p: {
   cliente: ClienteApi;
@@ -424,9 +497,20 @@ function BloqueHipoteca(p: {
   /** F06 T6 · S1: nombre del banco elegido y apertura del selector común de terceros (lo pinta la pantalla, a pantalla completa). */
   bancoNombre: string | null;
   onElegirBanco: () => void;
+  /** F06 T6 · S3: precio de compra para el importe por porcentaje y la ayuda «préstamo ≤ precio». */
+  precio: string;
 }) {
   const { c } = useTema();
   const h = p.hip;
+  // Solo presentación: el porcentaje sirve para calcular el importe y no se guarda ni viaja (AJ-UX2-07).
+  const [modoImporte, setModoImporte] = useState<'80' | '90' | 'OTRO_PCT' | 'OTRO_IMPORTE' | null>(null);
+  const [pctTexto, setPctTexto] = useState('');
+  const aplicarPct = (pct: string) => {
+    const imp = importePorcentaje(p.precio, pct);
+    if (imp) p.onCambiar({ importe: aTextoCampo(imp) });
+  };
+  const prestamoOk = parsearImporte(h.importe);
+  const precioOk = parsearImporte(p.precio);
   const [cuentasDesembolso, setCuentasDesembolso] = useState<CuentaElegible[] | null>(null);
   const [cuentasCargo, setCuentasCargo] = useState<CuentaElegible[] | null>(null);
   const [pidiendo, setPidiendo] = useState(false);
@@ -461,7 +545,28 @@ function BloqueHipoteca(p: {
         <CampoSelector testID="compra-hip-banco" etiqueta="Banco" valor={h.financiadorId ? p.bancoNombre : null} marcador="Elige el banco" onAbrir={p.onElegirBanco} />
       </Campo>
       <Campo etiqueta="Importe del préstamo">
-        <CampoTexto importe testID="compra-hip-importe" etiqueta="Importe del préstamo" marcador="Ej.: 160.000,00" valor={h.importe} onCambiar={(t) => p.onCambiar({ importe: t })} />
+        {/* F06 T6 · S3 (DP-14): 80 % · 90 % · Otro % · Otro importe; el importe se ve y se puede corregir antes de seguir. */}
+        <View style={ef.chips}>
+          {(['80', '90'] as const).map((x) => (
+            <Chip key={x} testID={`compra-hip-pct-${x}`} etiqueta={`${x} %`} seleccionado={modoImporte === x} onPress={() => { setModoImporte(x); aplicarPct(x); }} />
+          ))}
+          <Chip testID="compra-hip-pct-otro" etiqueta="Otro %" seleccionado={modoImporte === 'OTRO_PCT'} onPress={() => setModoImporte('OTRO_PCT')} />
+          <Chip testID="compra-hip-otro-importe" etiqueta="Otro importe" seleccionado={modoImporte === 'OTRO_IMPORTE'} onPress={() => setModoImporte('OTRO_IMPORTE')} />
+        </View>
+        {modoImporte === 'OTRO_PCT' ? (
+          <CampoTexto decimal testID="compra-hip-pct" etiqueta="Porcentaje del precio" marcador="Ej.: 75,5" valor={pctTexto}
+            onCambiar={(t) => { setPctTexto(t); aplicarPct(t); }} />
+        ) : null}
+        <CampoTexto importe testID="compra-hip-importe" etiqueta="Importe del préstamo" marcador="Ej.: 160.000,00" valor={h.importe}
+          onCambiar={(t) => { if (modoImporte !== 'OTRO_IMPORTE') setModoImporte('OTRO_IMPORTE'); p.onCambiar({ importe: t }); }} />
+        {prestamoOk.ok && precioOk.ok ? (
+          <Text testID="compra-hip-importe-texto" style={[tipo.footnote, { color: c.textSecondary }]}>
+            {`Préstamo ${formatearEur(prestamoOk.valor)} · precio ${formatearEur(precioOk.valor)}. Se guarda el importe; el porcentaje solo sirve para calcularlo.`}
+          </Text>
+        ) : null}
+        {prestamoSuperaPrecio(p.precio, h.importe) ? (
+          <Text testID="compra-hip-supera" accessibilityRole="alert" style={[tipo.footnote, { color: c.warningText }]}>{TEXTO_PRESTAMO_SUPERA}</Text>
+        ) : null}
       </Campo>
       <Campo etiqueta={ROTULO_CUENTA_DESEMBOLSO}>
         <CuentasHip testID="compra-hip-desembolso" cuentas={cuentasDesembolso} valor={h.cuentaDesembolsoId} vacio={TEXTO_SIN_CUENTAS_DESEMBOLSO}
@@ -577,4 +682,5 @@ export function GastoCompraScreen(p: {
 const s = StyleSheet.create({
   linea: { flexDirection: 'row', alignItems: 'center', gap: espacio.s, paddingHorizontal: espacio.m, paddingVertical: espacio.s },
   fila: { flexDirection: 'row', alignItems: 'center', gap: espacio.s, paddingHorizontal: espacio.m, paddingVertical: espacio.m },
+  lineaPago: { flexDirection: 'row', alignItems: 'center', gap: espacio.s, borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: espacio.s },
 });

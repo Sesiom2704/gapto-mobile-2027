@@ -7,6 +7,7 @@
 // Versión: 0.2.0 (F06 T2-F06 A3-0352 (L-05)): `CONSUMIDORES_0352_HABILITADOS = true`; R15-a en el cliente (contrato A3-0352 v1.1 §6): `puedeDeclararCompleto` (UX-1, solo con la fecha de adquisición conocida), `TEXTO_NOTA_SIN_FECHA` (UX-2), `MOTIVOS_COSTE_ADQUISICION` y `textoEstadoCoste` con SIN_FECHA_DE_ADQUISICION y LECTURA_NO_ESTABLE (UX-3) y `TEXTOS_ERROR` con COMPLETITUD_SIN_FECHA_DE_ADQUISICION, mismo texto que el servidor (UX-4).
 // Versión: 0.3.0 (F06 T3-F06 bloque 2 F06-01H, paso 10): `TEXTO_SIN_HIPOTECA` deja de decir que la hipoteca no se registra (ya se registra dentro de la compra, bloque «Hipoteca» de CompraScreen). Nada más cambia: la lógica de la hipoteca vive en domain/hipoteca.ts.
 // Versión: 0.4.0 (F06 T3-F06 · MANT N1 R-B2-06 (AJ-01), firma b88a3662…): `enviarCompraComprobando` (ante un INDETERMINADO reenvía la MISMA petición, replay idempotente sin duplicar, y devuelve el resultado real), `TEXTO_COMPROBANDO_COMPRA`, `TEXTO_COMPRA_SIN_CONFIRMAR` y `COMPROBACIONES_COMPRA`. La compra con hipoteca larga puede tardar más que el timeout general por la validación G2 de 0354 al COMMIT (≈ 35 ms por cuota; STOP_MANT_RB206_B).
+// Versión: 0.5.0 (F06 T6 · S3 compra; F09 0.55 §12.107.2, DP-14, DT-02, DT-03, AJ-UX2-07): SOLO funciones de presentación nuevas (`faltasPagos` y el wire no cambian): `faltasDeUnPago` (lo que falta a un pago para confirmarlo en su línea, con las mismas reglas por pago de `faltasPagos`), `totalesPagos` («Pagado desde tus cuentas», «· de la hipoteca», «· resto, sin hipoteca» y «Falta por cuadrar», no persistidos), `importePorcentaje` (préstamo = round_half_up(precio_céntimos × pct / 100) en céntimos enteros, pct de hasta 2 decimales) y `prestamoSuperaPrecio` (ayuda de pantalla, no invariante).
 // ============================================================
 
 import type {
@@ -279,3 +280,55 @@ export function filasDiaADia(b: BorradorCompra, propiedad: string, nombreCuenta:
 }
 
 export const formatearTotal = (cent: string) => formatearEur(cent);
+
+// ------------------------------------------------------------------ F06 T6 · S3: presentación de «¿Cómo se pagó?» (no se persiste)
+
+/** Lo que falta a UN pago para confirmarlo en su línea: las mismas reglas por pago de `faltasPagos`, sin la suma total. */
+export function faltasDeUnPago(b: BorradorCompra, pago: PagoBorrador): string[] {
+  return faltasPagos({ ...b, pagos: [pago] }).filter((x) => x !== 'los pagos tienen que sumar el precio');
+}
+
+/** Totales de presentación (DT-02): no se persisten ni crean atribuciones; «de la hipoteca» es el préstamo indicado. */
+export function totalesPagos(b: BorradorCompra, prestamo: string | null): {
+  precio: string; pagado: string; hipoteca: string | null; resto: string | null; falta: string;
+} {
+  const precio = Number.isNaN(D(b.precio)) ? 0 : D(b.precio);
+  const pagado = b.pagos.reduce((s, x) => s + (Number.isNaN(D(x.importe)) ? 0 : D(x.importe)), 0);
+  const hip = prestamo === null ? null : Number.isNaN(D(prestamo)) ? 0 : D(prestamo);
+  return {
+    precio: texto2(precio),
+    pagado: texto2(pagado),
+    hipoteca: hip === null ? null : texto2(hip),
+    resto: hip === null ? null : texto2(Math.max(0, pagado - hip)),
+    falta: texto2(precio - pagado),
+  };
+}
+
+const PCT = /^\d{1,3}(?:[.,]\d{1,2})?$/;
+
+/**
+ * Préstamo por porcentaje del precio (AJ-UX2-07): round_half_up(precio_céntimos × pct / 100) en céntimos ENTEROS (BigInt),
+ * pct con hasta 2 decimales. Devuelve el importe canónico «160000.00» o null si el precio o el porcentaje no valen.
+ * Solo viaja el importe; el porcentaje no se guarda.
+ */
+export function importePorcentaje(precio: string, pct: string): string | null {
+  const p = parsearImporte(precio);
+  const q = pct.trim();
+  if (!p.ok || !PCT.test(q)) return null;
+  const [ent, dec = ''] = q.replace(',', '.').split('.');
+  const pctCent = BigInt(ent) * 100n + BigInt((dec + '00').slice(0, 2));
+  if (pctCent <= 0n || pctCent > 10000n) return null;
+  const [pe, pd = ''] = p.valor.split('.');
+  const precioCent = BigInt(pe) * 100n + BigInt((pd + '00').slice(0, 2));
+  // round_half_up de precioCent × pctCent / 10000 (todo positivo): floor((2·n + d) / (2·d)).
+  const cent = (2n * precioCent * pctCent + 10000n) / 20000n;
+  const s = cent.toString().padStart(3, '0');
+  return `${s.slice(0, -2)}.${s.slice(-2)}`;
+}
+
+/** DT-03: ayuda de pantalla «préstamo ≤ precio». No es invariante del sistema: el servidor no lo garantiza. */
+export function prestamoSuperaPrecio(precio: string, prestamo: string): boolean {
+  const a = D(precio);
+  const h = D(prestamo);
+  return !Number.isNaN(a) && !Number.isNaN(h) && h > a;
+}

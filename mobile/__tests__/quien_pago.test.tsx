@@ -15,6 +15,7 @@
 // Versión: 0.1.0 (F06 T2-F06 PAG N1)
 // Versión: 0.1.1 (F06 T2-F06 ajuste N3 · KO-1, KO-2 y KO-3 de la prueba en iPhone; decisión de Moisés del 2026-11-15, 022b115a…):
 //   texto de la falta de cuenta solo tuya, relectura silenciosa con respuestas atrasadas descartadas y etiquetas visibles del mixto.
+// Versión: 0.2.0 (F06 T6 · S3 reforma; F09 0.55 §12.107.2 DP-05, A6): el alta es exprés + «Revisar»; los «Continuar» entre datos, «¿Quién pagó?» y reparto desaparecen (los tres bloques están en la misma pantalla con sus testID de contenedor) y el que llevaba a la confirmación pasa a `gprop-revisar`. Mismas aserciones y payloads.
 // ============================================================
 
 import './tiempos_rn';
@@ -157,7 +158,7 @@ async function montar(pat: ClientePatrimonioB3, cli: ClienteApi = cliente()) {
   );
   await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
   await escribir('gprop-importe', '1500');
-  await pulsar('gprop-continuar');
+  // F06 T6 · S3: sin «Continuar» entre bloques (exprés en una pantalla)
 }
 
 const cuerpo = (pat: ClientePatrimonioB3) => (pat.registrarGastoPropiedad as jest.Mock).mock.calls[0][0] as PayloadGastoPropiedadV2;
@@ -176,10 +177,10 @@ test('«Ana, todo»: sin cuenta, LE_DEBO preseleccionado (L-08), confirmación y
   await pulsar(`gprop-pago-cotitular-${ANA}`);
   expect(screen.queryByTestId(`gprop-cuenta-${C1}`)).toBeNull();
   expect(screen.getByTestId('gprop-pago-sin-movimiento')).toBeTruthy();
-  await pulsar('gprop-continuar');
+  // F06 T6 · S3: sin «Continuar» entre bloques (exprés en una pantalla)
   expect(marcado(`gprop-deuda-${ANA}-si`)).toBe(true);
   expect(screen.getByTestId(`gprop-deuda-${ANA}-texto`).props.children).toBe('Le debes 750,00 € a Ana');
-  await pulsar('gprop-continuar');
+  await pulsar('gprop-revisar'); // F06 T6 · S3: exprés → «Revisar»
   expect(screen.getByTestId(`gprop-conf-${ANA}-puso`).props.children).toBe('Puso: 1.500,00 €');
   expect(screen.getByTestId(`gprop-conf-${ANA}-posicion`).props.children).toBe('Le debes 750,00 € a Ana');
   expect(screen.getByTestId('gprop-res-sale-valor').props.children).toBe('0,00 €');
@@ -195,9 +196,9 @@ test('deuda parcial editable: «Yo, todo» con Ana debiéndome 400 de 750 viaja 
   await montar(pat);
   await pulsar('gprop-pago-yo');
   await pulsar(`gprop-cuenta-${C1}`);
-  await pulsar('gprop-continuar');
+  // F06 T6 · S3: sin «Continuar» entre bloques (exprés en una pantalla)
   await escribir(`gprop-deuda-${ANA}-importe`, '400');
-  await pulsar('gprop-continuar');
+  await pulsar('gprop-revisar'); // F06 T6 · S3: exprés → «Revisar»
   expect(screen.getByTestId(`gprop-conf-${ANA}-posicion`).props.children).toBe('Ana te debe 400,00 €');
   await pulsar('gprop-guardar');
   expect(cuerpo(pat).posiciones_confirmadas).toEqual([{ actor_id: ANA, tipo: 'DERECHO_COBRO', importe: '400.00' }]);
@@ -209,10 +210,10 @@ test('«Cada uno su parte»: de tu cuenta sale solo tu parte, Ana pone la suya y
   await montar(pat);
   await pulsar('gprop-pago-cada-uno');
   await pulsar(`gprop-cuenta-${C1}`);
-  await pulsar('gprop-continuar');
+  // F06 T6 · S3: sin «Continuar» entre bloques (exprés en una pantalla)
   expect(screen.queryByTestId(`gprop-deuda-${ANA}`)).toBeNull();
   expect(screen.getByTestId('gprop-deuda-nada')).toBeTruthy();
-  await pulsar('gprop-continuar');
+  await pulsar('gprop-revisar'); // F06 T6 · S3: exprés → «Revisar»
   expect(screen.getByTestId('gprop-res-sale-valor').props.children).toBe('750,00 €');
   await pulsar('gprop-guardar');
   expect(cuerpo(pat).pagos).toEqual([{ pagador: ANA, importe: '750.00' }, { pagador: 'YO', cuenta_id: C1, importe: '750.00' }]);
@@ -231,9 +232,9 @@ test('«Otra combinación» (mixto bilateral): lo que puso cada uno debe sumar e
   await escribir('gprop-pago-suyo', '400');
   expect(screen.getByTestId('gprop-faltas').props.children).toContain('sume el importe');
   await escribir('gprop-pago-suyo', '500');
-  await pulsar('gprop-continuar');
+  // F06 T6 · S3: sin «Continuar» entre bloques (exprés en una pantalla)
   expect(screen.getByTestId(`gprop-deuda-${ANA}-texto`).props.children).toBe('Ana te debe 250,00 €');
-  await pulsar('gprop-continuar');
+  await pulsar('gprop-revisar'); // F06 T6 · S3: exprés → «Revisar»
   await pulsar('gprop-guardar');
   expect(cuerpo(pat).pagos).toEqual([{ pagador: 'YO', cuenta_id: C1, importe: '1000.00' }, { pagador: ANA, importe: '500.00' }]);
 });

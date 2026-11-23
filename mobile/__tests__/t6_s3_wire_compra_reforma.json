@@ -1,0 +1,170 @@
+{
+  "compra_sin_hipoteca": {
+    "intencion_id": "<uuid>",
+    "row_version_esperada": 1,
+    "fecha_escritura": "2026-03-20",
+    "precio": "1000.00",
+    "pagos_propios": [
+      {
+        "linea_id": "00000000-0000-4000-8000-000000000001",
+        "rol": "FIRMA",
+        "cuenta_id": "c0000000-0000-4000-8000-0000000000c1",
+        "fecha_pago": "2026-03-20",
+        "importe": "800.00"
+      },
+      {
+        "linea_id": "00000000-0000-4000-8000-000000000008",
+        "rol": "ARRAS",
+        "cuenta_id": "c0000000-0000-4000-8000-0000000000c2",
+        "fecha_pago": "2026-01-15",
+        "importe": "200.00"
+      }
+    ],
+    "gastos": [
+      {
+        "linea_id": "00000000-0000-4000-8000-000000000015",
+        "concepto": "AGENCIA",
+        "cuenta_id": "c0000000-0000-4000-8000-0000000000c2",
+        "fecha_economica": "2026-02-28",
+        "fecha_pago": "2026-02-28",
+        "importe": "60.00"
+      }
+    ],
+    "atribucion": {
+      "modo": "SEGUN_TITULARIDAD_ACEPTADA",
+      "propuesta_vista": {
+        "criterio": "TITULARIDAD_EN_FECHA_ESCRITURA",
+        "fecha_referencia": "2026-03-20",
+        "partes": [
+          {
+            "actor_id": "a0000000-0000-4000-8000-0000000000a1",
+            "porcentaje": "40.0000"
+          },
+          {
+            "actor_id": "f0000000-0000-4000-8000-0000000000ff",
+            "porcentaje": "60.0000"
+          }
+        ]
+      }
+    }
+  },
+  "compra_con_hipoteca": {
+    "intencion_id": "<uuid>",
+    "row_version_esperada": 1,
+    "fecha_escritura": "2026-03-20",
+    "precio": "200000.00",
+    "pagos_propios": [
+      {
+        "linea_id": "00000000-0000-4000-8000-000000000001",
+        "rol": "FIRMA",
+        "cuenta_id": "c0000000-0000-4000-8000-0000000000c1",
+        "fecha_pago": "2026-03-20",
+        "importe": "200000.00"
+      }
+    ],
+    "gastos": [
+      {
+        "linea_id": "00000000-0000-4000-8000-000000000021",
+        "concepto": "AGENCIA",
+        "cuenta_id": "c0000000-0000-4000-8000-0000000000c2",
+        "fecha_economica": "2026-02-28",
+        "fecha_pago": "2026-02-28",
+        "importe": "60.00"
+      }
+    ],
+    "atribucion": {
+      "modo": "SEGUN_TITULARIDAD_ACEPTADA",
+      "propuesta_vista": {
+        "criterio": "TITULARIDAD_EN_FECHA_ESCRITURA",
+        "fecha_referencia": "2026-03-20",
+        "partes": [
+          {
+            "actor_id": "a0000000-0000-4000-8000-0000000000a1",
+            "porcentaje": "40.0000"
+          },
+          {
+            "actor_id": "f0000000-0000-4000-8000-0000000000ff",
+            "porcentaje": "60.0000"
+          }
+        ]
+      }
+    },
+    "hipoteca": {
+      "financiador": {
+        "tercero_id": "b0000000-0000-4000-8000-0000000000b1"
+      },
+      "importe_prestamo": "160000.00",
+      "cuenta_desembolso_id": "c0000000-0000-4000-8000-0000000000c1",
+      "titularidad": {
+        "modo": "SEGUN_TITULARIDAD_ACEPTADA",
+        "propuesta_vista": {
+          "criterio": "TITULARIDAD_EN_FECHA_ESCRITURA",
+          "fecha_referencia": "2026-03-20",
+          "partes": [
+            {
+              "actor_id": "a0000000-0000-4000-8000-0000000000a1",
+              "porcentaje": "40.0000"
+            },
+            {
+              "actor_id": "f0000000-0000-4000-8000-0000000000ff",
+              "porcentaje": "60.0000"
+            }
+          ]
+        }
+      },
+      "tipo_interes": "FIJO",
+      "tasa_anual_pct": "2.5",
+      "numero_cuotas": 360,
+      "fecha_primera_cuota": "2026-04-20",
+      "cuenta_cargo_id": "c0000000-0000-4000-8000-0000000000c2"
+    }
+  },
+  "reforma": {
+    "intencion_id": "<uuid>",
+    "propiedad_id": "p1",
+    "clase": "MEJORA",
+    "importe": "8400.00",
+    "fecha_hecho": "2026-10-10",
+    "nota": "Cambio de ventanas",
+    "categoria_id": null,
+    "presupuestable": null,
+    "atribucion": {
+      "modo": "SEGUN_TITULARIDAD_ACEPTADA",
+      "propuesta_vista": {
+        "criterio": "TITULARIDAD_EN_FECHA_HECHO",
+        "fecha_referencia": "2026-10-10",
+        "partes": [
+          {
+            "actor_id": "a0000000-0000-4000-8000-0000000000a1",
+            "porcentaje": "50.0000"
+          },
+          {
+            "actor_id": "f0000000-0000-4000-8000-0000000000ff",
+            "porcentaje": "50.0000"
+          }
+        ]
+      }
+    },
+    "pagos": [
+      {
+        "pagador": "YO",
+        "cuenta_id": "c0000000-0000-4000-8000-0000000000c1",
+        "importe": "8400.00"
+      }
+    ],
+    "saldos": [
+      {
+        "actor_id": "a0000000-0000-4000-8000-0000000000a1",
+        "sentido": "ME_DEBE",
+        "importe": "4200.00"
+      }
+    ],
+    "posiciones_confirmadas": [
+      {
+        "actor_id": "a0000000-0000-4000-8000-0000000000a1",
+        "tipo": "DERECHO_COBRO",
+        "importe": "4200.00"
+      }
+    ]
+  }
+}
