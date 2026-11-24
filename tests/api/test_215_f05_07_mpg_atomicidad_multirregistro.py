@@ -85,6 +85,11 @@
 #   test_inventario_post_cerrado): las 23 rutas POST de contratos, servicios y terceros (contratos/rutas.py) se
 #   clasifican como ajenas a F05-06: atomicidad propia (savepoint de ejecutar_escritura; rechazo = estado identico,
 #   test_300..306). Ninguna otra ruta ni comando cambia; el barrido no cambia.
+# Version: 0.6.5 (F06 T6 · fila 76, levantamiento del STOP D de test_215 autorizado por Moises (v1.0), solo
+#   test_inventario_post_cerrado): la ruta POST nueva de S5 (/v1/preferencias/ambos, «Ambos» al recordar) se clasifica
+#   como ajena a F05-06 con atomicidad propia: las dos preferencias van en UNA transaccion de UnidadDeTrabajo (todas o
+#   ninguna; test_321 con fallo inyectado en la segunda escritura: cero filas y cero auditoria; M-S5-01 MUERTO).
+#   Ninguna otra entrada se quita, reclasifica ni relaja; la logica de la guarda y el barrido no cambian.
 # ============================================================
 
 from __future__ import annotations
@@ -632,6 +637,8 @@ AJENAS_A_F05_06 = {
                     "/v1/clasificaciones-tercero/{clasificacion_id}/mover",
                     "/v1/clasificaciones-tercero/{clasificacion_id}/desactivar",
                     "/v1/clasificaciones-tercero/{clasificacion_id}/reactivar")},
+    "/v1/preferencias/ambos": "F06 T6 S5 «Ambos»: atomicidad propia (una transaccion de UnidadDeTrabajo, todas o "
+                              "ninguna; test_321 fallo inyectado en la segunda escritura sin filas ni auditoria)",
 }
 
 
