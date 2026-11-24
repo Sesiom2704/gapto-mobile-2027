@@ -32,6 +32,18 @@
 #   Limites (documentados en INFORME_NO_INVOCACION_F06.md): solo codigo Python
 #   de backend/app; no ve funciones SQL, triggers ni otros procesos.
 #   Sin base de datos: no exige GAPTO_TEST_DATABASE_URL.
+# Version: 0.2.0 (F06 T5 E1 · RN-02/RN-03, Cons. §7, A §3.1-3, adenda T5 ronda 3; O-A36): MATRIZ NOMINAL de
+#   escritores de reglas, ADITIVA. OBJETIVOS (los tres de F05) y su test NO cambian (test_299, AJ-COMP-02). Nuevo
+#   OBJETIVOS_REGLAS con los siete escritores de reglas/previsiones (crear_regla, crear_version,
+#   registrar_excepcion, corregir_excepcion, cerrar_vigencia, generar_calendario, recalcular_futuras),
+#   identificados por (fichero, qualname). Una ruta puede alcanzar uno de ellos SOLO a
+#   traves de un modulo de MATRIZ_ESCRITORES_REGLAS que lo permita (barrera por modulo); cualquier otro
+#   camino, transitivo, por alias o por adaptador, falla. Precision: `alias.attr` con `alias` un MODULO de
+#   app importado enlaza solo con las funciones que ese modulo define (si no la define, por nombre como
+#   antes): evita el falso positivo de `app.contratos.repositorio.cerrar_vigencia` (homonimo). Controles
+#   positivo (por permiso) y negativo (por frontera) sobre un arbol sintetico con llamadas transitivas,
+#   alias y adaptadores. Los permisos de app/alquileres/* son de E3+ (modulos aun inexistentes): su
+#   control positivo real queda PENDIENTE hasta que existan. test_299 no se toca.
 # Version: 0.1.0 (F05-D052 paso 7)
 # ============================================================
 
@@ -57,6 +69,36 @@ OBJETIVOS = {
     "crear_version": "app/services/reglas_service.py",
     "corregir_excepcion": "app/services/reglas_service.py",
     "recalcular_futuras": "app/services/previsiones_service.py",
+}
+
+#: F06 T5 E1 (RN-02, aditivo): escritores de reglas/previsiones por (fichero, qualname). Ninguna ruta los alcanza
+#: salvo a traves de MATRIZ_ESCRITORES_REGLAS.
+_RS = "app/services/reglas_service.py"
+_PS = "app/services/previsiones_service.py"
+OBJETIVOS_REGLAS = {
+    (_RS, "ReglasService.crear_regla"),
+    (_RS, "ReglasService.crear_version"),
+    (_RS, "ReglasService.registrar_excepcion"),
+    (_RS, "ReglasService.corregir_excepcion"),
+    (_RS, "ReglasService.cerrar_vigencia"),
+    (_PS, "PrevisionesService.generar_calendario"),
+    (_PS, "PrevisionesService.recalcular_futuras"),
+}
+
+#: MATRIZ NOMINAL (Cons. §7, adenda T5 ronda 3 §2): modulo escritor -> objetivos que puede alcanzar.
+#: `corregir_excepcion` solo en sus DOS usos nominales (prorroga y revision); `cerrar_vigencia` solo para el
+#: writer de terminacion (E3). Los modulos de app/alquileres/ aun no existen (E3+): hoy ninguna ruta puede
+#: alcanzar ningun objetivo. Tocar esta matriz es una decision N1 (RN-02), no un ajuste del test.
+MATRIZ_ESCRITORES_REGLAS: dict[str, frozenset] = {
+    "app/alquileres/alta.py": frozenset({"ReglasService.crear_regla", "PrevisionesService.generar_calendario",
+                                         "ReglasService.registrar_excepcion"}),
+    "app/alquileres/prorroga.py": frozenset({"PrevisionesService.generar_calendario",
+                                             "ReglasService.corregir_excepcion"}),
+    "app/alquileres/revision.py": frozenset({"ReglasService.crear_version", "PrevisionesService.recalcular_futuras",
+                                             "ReglasService.corregir_excepcion"}),
+    "app/alquileres/terminacion.py": frozenset({"ReglasService.cerrar_vigencia",
+                                                "PrevisionesService.recalcular_futuras",
+                                                "ReglasService.registrar_excepcion"}),
 }
 
 #: Sitios de despacho dinamico revisados: (fichero, funcion, tipo). Ver informe, seccion «Despacho dinamico».
@@ -98,8 +140,33 @@ class Clase:
     metodos: list
 
 
-def _refs_y_dinamicos(nodo: ast.AST) -> tuple[set, list]:
-    refs: set[str] = set()
+def _alias_de_modulos(arbol: ast.AST, app_dir: pathlib.Path, base: pathlib.Path) -> dict[str, str]:
+    """Nombres locales que son MODULOS de app (`from app.x import y as z`, `import app.x.y as z`) -> fichero."""
+    out: dict[str, str] = {}
+
+    def fichero(punteado: str) -> str | None:
+        partes = punteado.split(".")
+        if partes[0] != "app":
+            return None
+        ruta = app_dir.joinpath(*partes[1:]).with_suffix(".py")
+        return ruta.relative_to(base).as_posix() if ruta.is_file() else None
+
+    for n in ast.walk(arbol):
+        if isinstance(n, ast.ImportFrom) and n.module and n.level == 0:
+            for a in n.names:
+                rel = fichero(f"{n.module}.{a.name}")
+                if rel:
+                    out[a.asname or a.name] = rel
+        elif isinstance(n, ast.Import):
+            for a in n.names:
+                rel = fichero(a.name)
+                if rel and a.asname:
+                    out[a.asname] = rel
+    return out
+
+
+def _refs_y_dinamicos(nodo: ast.AST, alias_mod: dict[str, str] | None = None) -> tuple[set, list]:
+    refs: set = set()
     din: list[str] = []
     for n in ast.walk(nodo):
         if isinstance(n, ast.Name):
@@ -107,7 +174,10 @@ def _refs_y_dinamicos(nodo: ast.AST) -> tuple[set, list]:
             if n.id in DINAMICOS_NOMBRE:
                 din.append(n.id)
         elif isinstance(n, ast.Attribute):
-            refs.add(n.attr)
+            if alias_mod and isinstance(n.value, ast.Name) and n.value.id in alias_mod:
+                refs.add(("MOD", alias_mod[n.value.id], n.attr))   # acceso exacto a un modulo de app
+            else:
+                refs.add(n.attr)
             if n.attr in DINAMICOS_ATRIBUTO:
                 din.append(n.attr)
         elif isinstance(n, ast.alias):
@@ -124,14 +194,16 @@ def _refs_y_dinamicos(nodo: ast.AST) -> tuple[set, list]:
     return refs, din
 
 
-def indexar() -> tuple[list[Funcion], dict[str, list[Clase]], list[Funcion]]:
+def indexar(app_dir: pathlib.Path = APP, base: pathlib.Path = BACKEND
+            ) -> tuple[list[Funcion], dict[str, list[Clase]], list[Funcion]]:
     """Todas las funciones (cualquier anidamiento) y clases de backend/app, y el nivel de modulo."""
     funciones: list[Funcion] = []
     clases: dict[str, list[Clase]] = {}
     modulos: list[Funcion] = []
-    for ruta in sorted(APP.rglob("*.py")):
-        rel = ruta.relative_to(BACKEND).as_posix()
+    for ruta in sorted(app_dir.rglob("*.py")):
+        rel = ruta.relative_to(base).as_posix()
         arbol = ast.parse(ruta.read_text(encoding="utf-8"), filename=str(ruta))
+        alias_mod = _alias_de_modulos(arbol, app_dir, base)
 
         def visitar(nodo: ast.AST, prefijo: str, clase: Clase | None) -> None:
             for hijo in ast.iter_child_nodes(nodo):
@@ -139,7 +211,7 @@ def indexar() -> tuple[list[Funcion], dict[str, list[Clase]], list[Funcion]]:
                     q = f"{prefijo}{hijo.name}"
                     inicio = {hijo.lineno} | {d.lineno for d in hijo.decorator_list}
                     f = Funcion(rel, q, hijo.name, hijo.lineno, frozenset(inicio), hijo)
-                    f.refs, f.dinamicos = _refs_y_dinamicos(hijo)
+                    f.refs, f.dinamicos = _refs_y_dinamicos(hijo, alias_mod)
                     funciones.append(f)
                     if clase is not None:
                         clase.metodos.append(f)
@@ -161,14 +233,14 @@ def indexar() -> tuple[list[Funcion], dict[str, list[Clase]], list[Funcion]]:
                 # El cuerpo de clase se ejecuta al importar, pero no los cuerpos de sus metodos.
                 for b in s.body:
                     if not isinstance(b, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        r, d = _refs_y_dinamicos(b)
+                        r, d = _refs_y_dinamicos(b, alias_mod)
                         m.refs |= r
                         m.dinamicos += d
                 for b in s.bases + s.decorator_list + s.keywords:
-                    r, d = _refs_y_dinamicos(b)
+                    r, d = _refs_y_dinamicos(b, alias_mod)
                     m.refs |= r
             else:
-                r, d = _refs_y_dinamicos(s)
+                r, d = _refs_y_dinamicos(s, alias_mod)
                 m.refs |= r
                 m.dinamicos += d
         modulos.append(m)
@@ -238,11 +310,68 @@ def _callables_de_rutas(app) -> list[tuple[str, object]]:
     return out
 
 
-def grafo() -> dict:
-    funciones, clases, modulos = indexar()
+def construir_sucesores(funciones: list[Funcion], clases: dict[str, list[Clase]]):
+    """Aristas por nombre (sobreaproximacion) y, para `modulo.attr`, exactas al modulo (con respaldo por nombre)."""
     por_nombre: dict[str, list[Funcion]] = {}
+    por_modulo: dict[tuple[str, str], list[Funcion]] = {}
     for f in funciones:
         por_nombre.setdefault(f.nombre, []).append(f)
+        if "." not in f.qualname:
+            por_modulo.setdefault((f.fichero, f.nombre), []).append(f)
+
+    def sucesores(f: Funcion) -> list[Funcion]:
+        out = []
+        for ref in f.refs:
+            if isinstance(ref, tuple):
+                _, fichero, nombre = ref
+                exactas = por_modulo.get((fichero, nombre))
+                out += exactas if exactas else por_nombre.get(nombre, [])
+            else:
+                nombre = ref
+                out += por_nombre.get(nombre, [])
+            for c in clases.get(nombre, []):
+                out += _metodos_implicitos(c, clases, set())
+        return out
+
+    return sucesores, por_nombre
+
+
+def alcanzables_con_barrera(raices: list, sucesores, barrera) -> dict[int, tuple[int | None, str]]:
+    """BFS desde las raices sin EXPANDIR las funciones para las que `barrera(f)` es cierto (modulo autorizado)."""
+    padre: dict[int, tuple[int | None, str]] = {}
+    cola = []
+    for etiqueta, f in raices:
+        if id(f) not in padre:
+            padre[id(f)] = (None, etiqueta)
+            cola.append(f)
+    i = 0
+    while i < len(cola):
+        f = cola[i]
+        i += 1
+        if barrera(f):
+            continue
+        for s in sucesores(f):
+            if id(s) not in padre:
+                padre[id(s)] = (id(f), "")
+                cola.append(s)
+    return padre
+
+
+def violaciones_matriz(raices: list, sucesores, funciones: list[Funcion], objetivos, matriz) -> list:
+    """(objetivo, funcion alcanzada, padre) para cada objetivo alcanzable SIN pasar por un modulo que lo permita."""
+    out = []
+    for fichero, qual in sorted(objetivos):
+        permitidos = {m for m, objs in matriz.items() if qual in objs}
+        padre = alcanzables_con_barrera(raices, sucesores, lambda f, p=permitidos: f.fichero in p)
+        for f in funciones:
+            if f.fichero == fichero and f.qualname == qual and id(f) in padre:
+                out.append(((fichero, qual), f, padre))
+    return out
+
+
+def grafo() -> dict:
+    funciones, clases, modulos = indexar()
+    sucesores, por_nombre = construir_sucesores(funciones, clases)
     app = _app_real()
     rutas = [r for r in app.routes if r.__class__.__name__ == "APIRoute"]
     raices: list[tuple[str, Funcion]] = []
@@ -266,14 +395,6 @@ def grafo() -> dict:
         raices.append((etiqueta, casados[0]))
     for m in modulos:
         raices.append((f"modulo {m.fichero}", m))
-
-    def sucesores(f: Funcion) -> list[Funcion]:
-        out = []
-        for nombre in f.refs:
-            out += por_nombre.get(nombre, [])
-            for c in clases.get(nombre, []):
-                out += _metodos_implicitos(c, clases, set())
-        return out
 
     # BFS conservando el primer camino (para el diagnostico).
     padre: dict[int, tuple[int | None, str]] = {}
@@ -305,7 +426,10 @@ def grafo() -> dict:
     return {
         "rutas": rutas, "raices": raices, "externas": externas, "sin_casar": sin_casar,
         "funciones": funciones, "alcanzables": alcanzables, "camino": camino,
+        "sucesores": sucesores, "por_id": por_id,
         "objetivos_definidos": {n: [f for f in por_nombre.get(n, [])] for n in OBJETIVOS},
+        "objetivos_reglas_definidos": {o: [f for f in funciones if (f.fichero, f.qualname) == o]
+                                       for o in OBJETIVOS_REGLAS},
         "dinamicos": sorted({(f.fichero, f.qualname, d) for f in alcanzables for d in f.dinamicos}),
     }
 
@@ -330,6 +454,12 @@ def test_objetivos_existen_con_su_firma(g):
         assert [f.fichero for f in defs] == [fichero], f"{nombre}: definiciones {[(f.fichero, f.qualname) for f in defs]}"
 
 
+def test_objetivos_reglas_existen_una_vez(g):
+    for objetivo in OBJETIVOS_REGLAS:
+        defs = g["objetivos_reglas_definidos"][objetivo]
+        assert len(defs) == 1, f"{objetivo}: definiciones {[(f.fichero, f.qualname) for f in defs]}"
+
+
 def test_control_positivo_el_grafo_alcanza_el_motor(g):
     # Sin este control, un grafo vacio pasaria el test negativo: OP-22 debe ser alcanzable desde la ruta VS-01.
     alc = {(f.fichero, f.qualname) for f in g["alcanzables"]}
@@ -342,6 +472,120 @@ def test_control_positivo_el_grafo_alcanza_el_motor(g):
 def test_ninguna_ruta_alcanza_rvrx_regla_ni_recalcular_futuras(g):
     malos = [f for f in g["alcanzables"] if f.nombre in OBJETIVOS and f.fichero == OBJETIVOS[f.nombre]]
     assert malos == [], "\n\n".join("ALCANZABLE " + f.qualname + ":\n  " + "\n  ".join(g["camino"](f)) for f in malos)
+
+
+def test_matriz_nominal_escritores_de_reglas(g):
+    # RN-02 (O-A36, frontera): ningun objetivo alcanzable salvo a traves de un modulo de la matriz que lo permita.
+    malos = violaciones_matriz(g["raices"], g["sucesores"], g["funciones"], OBJETIVOS_REGLAS,
+                               MATRIZ_ESCRITORES_REGLAS)
+    assert malos == [], [o for o, _, _ in malos]
+
+
+def test_matriz_corregir_excepcion_solo_en_sus_dos_usos_nominales():
+    usos = sorted(m for m, objs in MATRIZ_ESCRITORES_REGLAS.items() if "ReglasService.corregir_excepcion" in objs)
+    assert usos == ["app/alquileres/prorroga.py", "app/alquileres/revision.py"]
+    usos = sorted(m for m, objs in MATRIZ_ESCRITORES_REGLAS.items() if "ReglasService.cerrar_vigencia" in objs)
+    assert usos == ["app/alquileres/terminacion.py"]
+    assert all(m.startswith("app/alquileres/") for m in MATRIZ_ESCRITORES_REGLAS)
+    assert all(q in {o[1] for o in OBJETIVOS_REGLAS} for objs in MATRIZ_ESCRITORES_REGLAS.values() for q in objs)
+
+
+def test_permisos_de_la_matriz_pendientes_hasta_e3(g):
+    # Control positivo REAL por permiso: si el modulo autorizado existe, debe alcanzar lo que se le permite.
+    # Hoy (E1) ninguno existe: PENDIENTE, nunca «no aplicable» (adenda ronda 3 §5).
+    por_fichero = {}
+    for f in g["funciones"]:
+        por_fichero.setdefault(f.fichero, []).append(f)
+    for modulo, objs in MATRIZ_ESCRITORES_REGLAS.items():
+        if modulo not in por_fichero:
+            continue
+        raices = [(f"permiso {modulo}", f) for f in por_fichero[modulo]]
+        padre = alcanzables_con_barrera(raices, g["sucesores"], lambda f: False)
+        for q in objs:
+            assert any(id(f) in padre for f in g["funciones"] if f.qualname == q), (modulo, q)
+    if not any(m in por_fichero for m in MATRIZ_ESCRITORES_REGLAS):
+        pytest.xfail("PENDIENTE (E3+): ningun modulo de app/alquileres existe todavia")
+
+
+def test_homonimo_de_contratos_no_alcanza_reglas(g):
+    # app.contratos usa `repo.cerrar_vigencia` (su repositorio): la arista cualificada no llega a ReglasService.
+    alc = {(f.fichero, f.qualname) for f in g["alcanzables"]}
+    assert ("app/contratos/repositorio.py", "cerrar_vigencia") in alc
+    assert ("app/services/reglas_service.py", "ReglasService.cerrar_vigencia") not in alc
+
+
+# ------------------------------------------------------------------ controles sobre arbol sintetico (O-A36)
+_SINTETICO = {
+    "app/__init__.py": "",
+    "app/services/__init__.py": "",
+    "app/services/reglas_service.py": (
+        "class ReglasService:\n"
+        "    def cerrar_vigencia(self):\n        return 1\n"
+        "    def corregir_excepcion(self):\n        return 2\n"),
+    "app/alquileres/__init__.py": "",
+    "app/alquileres/terminacion.py": (
+        "from app.services.reglas_service import ReglasService\n"
+        "def escribir():\n    return ReglasService().cerrar_vigencia()\n"),
+    "app/otros/__init__.py": "",
+    "app/otros/directo.py": (
+        "from app.services.reglas_service import ReglasService\n"
+        "def escribir():\n    return ReglasService().corregir_excepcion()\n"),
+    "app/otros/transitivo.py": (
+        "from app.otros import intermedio\n"
+        "def escribir():\n    return intermedio.paso()\n"),
+    "app/otros/intermedio.py": (
+        "from app.services.reglas_service import ReglasService as RS\n"
+        "def paso():\n    return RS().cerrar_vigencia()\n"),
+    "app/otros/adaptador.py": (
+        "def escribir(svc):\n    cb = svc.cerrar_vigencia\n    return ejecutar(cb)\n"
+        "def ejecutar(f):\n    return f()\n"),
+    "app/otros/homonimo.py": (
+        "from app.otros import repo_propio as repo\n"
+        "def escribir():\n    return repo.cerrar_vigencia()\n"),
+    "app/otros/repo_propio.py": "def cerrar_vigencia():\n    return 3\n",
+}
+_OBJ_SINT = {("app/services/reglas_service.py", "ReglasService.cerrar_vigencia"),
+             ("app/services/reglas_service.py", "ReglasService.corregir_excepcion")}
+_MATRIZ_SINT = {"app/alquileres/terminacion.py": frozenset({"ReglasService.cerrar_vigencia"})}
+
+
+@pytest.fixture(scope="module")
+def sint(tmp_path_factory):
+    base = tmp_path_factory.mktemp("arbol_230")
+    for rel, texto in _SINTETICO.items():
+        ruta = base / rel
+        ruta.parent.mkdir(parents=True, exist_ok=True)
+        ruta.write_text(texto, encoding="utf-8")
+    funciones, clases, _ = indexar(base / "app", base)
+    sucesores, _ = construir_sucesores(funciones, clases)
+    por = {(f.fichero, f.qualname): f for f in funciones}
+    return funciones, sucesores, por
+
+
+def _viol(sint, raiz):
+    funciones, sucesores, por = sint
+    return {o[1] for o, _, _ in violaciones_matriz([("ruta", por[raiz])], sucesores, funciones, _OBJ_SINT,
+                                                   _MATRIZ_SINT)}
+
+
+def test_control_positivo_por_permiso(sint):
+    assert _viol(sint, ("app/alquileres/terminacion.py", "escribir")) == set()
+
+
+def test_control_negativo_directo_desde_frontera_no_autorizada(sint):
+    assert _viol(sint, ("app/otros/directo.py", "escribir")) == {"ReglasService.corregir_excepcion"}
+
+
+def test_control_negativo_transitivo_y_alias(sint):
+    assert _viol(sint, ("app/otros/transitivo.py", "escribir")) == {"ReglasService.cerrar_vigencia"}
+
+
+def test_control_negativo_adaptador(sint):
+    assert _viol(sint, ("app/otros/adaptador.py", "escribir")) == {"ReglasService.cerrar_vigencia"}
+
+
+def test_control_homonimo_en_otro_modulo_no_es_violacion(sint):
+    assert _viol(sint, ("app/otros/homonimo.py", "escribir")) == set()
 
 
 def test_despacho_dinamico_alcanzable_revisado(g):

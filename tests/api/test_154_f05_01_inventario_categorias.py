@@ -450,6 +450,15 @@
 #     S4–S7-A que mencionan categoria_id (bloque «F06 T6 S4–S7-A» al final, cada alta con slice, funcion y motivo;
 #     tabla ALTAS_I1_T6.md en la evidencia). Ninguna entrada existente se quita, renombra ni relaja; la logica de la
 #     guarda no cambia. Discriminantes: M-I1-T6-A (consumidor nuevo sin registrar) y M-I1-T6-B (alta quitada), MUERTOS.
+# Version: 0.48.0 (F06 T5 E1 · RN-03, Cons. §7, A §3.1-3; mandato T5E1_HITO v1.0 P1.4, autorizacion de Moises del
+#     2026-11-24 SOLO para la matriz de Cons. §7 y la adenda 3): I3-REGLAS ADITIVA. Escaneo de TODO backend/app (no
+#     solo la frontera): toda referencia a un escritor de reglas/previsiones (crear_regla, crear_version,
+#     registrar_excepcion, corregir_excepcion, cerrar_vigencia, generar_calendario, recalcular_futuras) fuera de sus
+#     ficheros definidores solo puede estar en un modulo de la matriz nominal que lo permita (MATRIZ_ESCRITORES_REGLAS
+#     de test_230, fuente unica). Cubre llamada, referencia sin llamar (adaptador/callback), alias de import y
+#     cadena constante (getattr). `modulo.attr` sobre un modulo de app que define ese nombre (homonimo, p. ej.
+#     app.contratos.repositorio.cerrar_vigencia) no es referencia al escritor. Control positivo y negativo sobre
+#     texto sintetico (O-A36). Lo transitivo lo cubre test_230. Ninguna regla ni entrada previa cambia; test_299 intacto.
 # ============================================================
 
 from __future__ import annotations
@@ -2464,3 +2473,71 @@ REGISTRO.update({
         "PREFERENCIA", "F06 T6 S5 POST /v1/preferencias/ambos",
         "escritura: delega en servicio.alta/editar bajo el advisory, en una transaccion; todas o ninguna"),
 })
+
+
+# ------------------------------------------------------------------ I3-REGLAS (F06 T5 E1, RN-03; aditiva)
+import test_230_f05_d052_no_invocacion_f06 as _t230  # noqa: E402  (fuente unica de la matriz nominal)
+
+_ESCRITORES_REGLAS = {q.split(".", 1)[1]: (f, q) for f, q in _t230.OBJETIVOS_REGLAS}
+_DEFINIDORES_REGLAS = {"backend/" + f for f, _ in _t230.OBJETIVOS_REGLAS}
+
+
+def _refs_escritores_no_autorizadas(rel: str, texto: str, app_dir: pathlib.Path = APP,
+                                    base: pathlib.Path = BACKEND) -> list[str]:
+    """Nombres de escritores de reglas referenciados en `texto` (fichero `rel`, relativo a la raiz) sin permiso."""
+    if rel in _DEFINIDORES_REGLAS:
+        return []
+    arbol = ast.parse(texto)
+    alias_mod = _t230._alias_de_modulos(arbol, app_dir, base)
+
+    def define(fichero_mod: str, nombre: str) -> bool:
+        ruta = base / fichero_mod
+        return ruta.is_file() and any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == nombre
+                                      for n in ast.parse(ruta.read_text(encoding="utf-8")).body)
+
+    vistos: set[str] = set()
+    for n in ast.walk(arbol):
+        nombre = None
+        if isinstance(n, ast.Attribute) and n.attr in _ESCRITORES_REGLAS:
+            if isinstance(n.value, ast.Name) and n.value.id in alias_mod and define(alias_mod[n.value.id], n.attr):
+                continue                                   # homonimo en un modulo de app (no es el escritor)
+            nombre = n.attr
+        elif isinstance(n, ast.Name) and n.id in _ESCRITORES_REGLAS:
+            nombre = n.id
+        elif isinstance(n, ast.alias) and (n.name.split(".")[-1] in _ESCRITORES_REGLAS
+                                           or (n.asname or "") in _ESCRITORES_REGLAS):
+            nombre = n.name.split(".")[-1]
+        elif isinstance(n, ast.Constant) and isinstance(n.value, str) and n.value in _ESCRITORES_REGLAS:
+            nombre = n.value
+        if nombre:
+            vistos.add(nombre)
+    modulo = rel[len("backend/"):] if rel.startswith("backend/") else rel
+    permitidos = _t230.MATRIZ_ESCRITORES_REGLAS.get(modulo, frozenset())
+    return sorted(x for x in vistos if _ESCRITORES_REGLAS[x][1] not in permitidos)
+
+
+def test_i3_reglas_matriz_nominal_en_todo_backend_app():
+    malos = {}
+    for p in sorted(APP.rglob("*.py")):
+        rel = _rel(p)
+        nombres = _refs_escritores_no_autorizadas(rel, p.read_text(encoding="utf-8"))
+        if nombres:
+            malos[rel] = nombres
+    assert malos == {}, f"referencias a escritores de reglas fuera de la matriz nominal (Cons. §7): {malos}"
+
+
+def test_i3_reglas_controles_positivo_y_negativo():
+    llamada = "def f(svc):\n    return svc.cerrar_vigencia()\n"
+    adaptador = "def f(svc):\n    cb = svc.corregir_excepcion\n    return cb\n"
+    dinamico = "def f(svc):\n    return getattr(svc, 'recalcular_futuras')()\n"
+    alias = "from app.services.reglas_service import ReglasService as RS\ncrear_regla = RS.crear_regla\n"
+    # positivo: el modulo autorizado puede usar lo suyo
+    assert _refs_escritores_no_autorizadas("backend/app/alquileres/terminacion.py", llamada) == []
+    # negativo: el mismo texto en otro modulo, o un uso no autorizado en un modulo de la matriz
+    assert _refs_escritores_no_autorizadas("backend/app/contratos/x.py", llamada) == ["cerrar_vigencia"]
+    assert _refs_escritores_no_autorizadas("backend/app/alquileres/terminacion.py", adaptador) == ["corregir_excepcion"]
+    assert _refs_escritores_no_autorizadas("backend/app/api/x.py", dinamico) == ["recalcular_futuras"]
+    assert _refs_escritores_no_autorizadas("backend/app/api/x.py", alias) == ["crear_regla"]
+    # homonimo de app.contratos.repositorio: no es referencia al escritor
+    homonimo = "from app.contratos import repositorio as repo\ndef f(s):\n    return repo.cerrar_vigencia(s, 't', [], None)\n"
+    assert _refs_escritores_no_autorizadas("backend/app/contratos/x.py", homonimo) == []
