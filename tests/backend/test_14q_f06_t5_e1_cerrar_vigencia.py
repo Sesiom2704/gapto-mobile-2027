@@ -106,6 +106,20 @@ def test_c2_o_a19_version_de_otra_regla_del_mismo_owner(servicio_reglas, context
     assert _rv(admin, contexto.owner_user_id, b) == rv_b
 
 
+def test_c2_o_a19_version_cerrada_de_otra_regla_es_no_encontrada_y_no_ya_cerrada(servicio_reglas, contexto, admin):
+    # La pertenencia se comprueba ANTES que el estado: una version ajena (aunque este cerrada) es
+    # AGREGADO_NO_ENCONTRADO, nunca VERSION_YA_CERRADA (no revela ni toca el agregado ajeno).
+    a, _, rv_a = _regla(servicio_reglas, contexto)
+    b, version_b, rv_b = _regla(servicio_reglas, contexto)
+    _cerrar(servicio_reglas, contexto, b, version_b, rv_b, hasta="2027-03-31")
+    rv_b = _rv(admin, contexto.owner_user_id, b)
+    with pytest.raises(ErrorMotor) as e:
+        _cerrar(servicio_reglas, contexto, a, version_b, rv_a)
+    assert e.value.codigo is CodigoError.AGREGADO_NO_ENCONTRADO
+    assert _fila(admin, contexto.owner_user_id, version_b)[2] == F("2027-03-31")
+    assert _rv(admin, contexto.owner_user_id, a) == rv_a and _rv(admin, contexto.owner_user_id, b) == rv_b
+
+
 def test_c2_c8_version_y_regla_de_otro_owner(servicio_reglas, contexto, admin, otro_owner):
     ajeno = ContextoOperacion.de_usuario(otro_owner)
     b, version_b, rv_b = _regla(servicio_reglas, ajeno)
