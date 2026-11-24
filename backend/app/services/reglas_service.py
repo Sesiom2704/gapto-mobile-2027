@@ -27,6 +27,9 @@
 #   no-solapamiento y `uq_regla_excepciones__regla_fecha` la de una excepcion
 #   por identidad. Aqui se TRADUCEN sus violaciones a errores de dominio; no se
 #   reimplementan como segunda fuente de verdad, que podria divergir.
+# Version: 0.3.0 (F06 T5 E1 · adenda T5 ronda 3 §2, AJ-T5-R3-02): operacion nominal `cerrar_vigencia`
+#   (cierra una version ABIERTA de la regla sin crear otra; sin recalculo ni DDL). Solo para el writer de
+#   terminacion futuro (E3, lista nominal de test_230/test_154).
 # Version: 0.2.0 (F06 T5 E1 · RN-01, RVRX-REGLA): crear_version y corregir_excepcion pasan regla_id al
 #   repositorio; version/excepcion de otra regla (tambien del mismo owner) -> AGREGADO_NO_ENCONTRADO sin cambios.
 # Version: 0.1.0
@@ -219,6 +222,103 @@ class ReglasService:
             )
 
         return self._ejecutar(contexto, operacion, "crear_version")
+
+    def cerrar_vigencia(
+        self,
+        contexto: ContextoOperacion,
+        *,
+        regla_id: uuid.UUID,
+        version_id: uuid.UUID,
+        vigente_hasta: dt.date,
+        regla_row_version_esperada: int,
+        motivo: str,
+    ) -> ResultadoRegla:
+        """Cierra la vigencia de una version ABIERTA sin crear una version nueva.
+
+        F06 T5 E1, contrato de la adenda T5 ronda 3 §2 (AJ-T5-R3-02):
+          1. bloquea la regla (protocolo de siempre: `_exigir_regla`) y verifica
+             su row_version (VERSION_DESFASADA);
+          2. pertenencia de `version_id` a `regla_id` EN EL REPOSITORIO, con el
+             predicado de RVRX (AGREGADO_NO_ENCONTRADO, sin cambios);
+          3. la version debe estar abierta (VERSION_YA_CERRADA): ni acorta ni
+             amplia una vigencia ya cerrada;
+          4. `vigente_hasta >= vigente_desde` (ENTRADA_INVALIDA);
+          5. ninguna version posterior en conflicto (VERSION_REGLA_SOLAPADA);
+          6. motivo obligatorio (MOTIVO_AUSENTE) y auditoria con el motivo;
+          7. solo cambia `vigente_hasta`: el resto de la version se conserva;
+          8. RLS y owner: todo dentro de la UdT como gapto_runtime.
+        No recalcula previsiones: el writer de terminacion (E3) compone en UNA UdT
+        esta operacion, el ajuste del ultimo mes y `recalcular_futuras`.
+        """
+        if motivo is None or not str(motivo).strip():
+            raise ErrorMotor(
+                CodigoError.MOTIVO_AUSENTE,
+                "Cerrar la vigencia de una version exige un motivo.",
+            )
+        motivo = str(motivo).strip()
+
+        def operacion(sesion: SesionMotor) -> ResultadoRegla:
+            repo_hechos.exigir_contexto(sesion)
+            self._exigir_regla(sesion, regla_id)                                   # 1 (lock)
+            nueva_version = repo_reglas.tocar_regla(
+                sesion, regla_id, regla_row_version_esperada
+            )
+            if nueva_version is None:                                              # 1 (row_version)
+                raise ErrorMotor(
+                    CodigoError.VERSION_DESFASADA,
+                    "La regla ha cambiado desde la version que conoce el "
+                    "llamante.",
+                )
+            vigencia = repo_reglas.leer_version_de_regla(sesion, regla_id, version_id)
+            if vigencia is None:                                                   # 2
+                raise ErrorMotor(
+                    CodigoError.AGREGADO_NO_ENCONTRADO,
+                    "La version no existe, no es accesible o no es de esta regla.",
+                )
+            vigente_desde, hasta_actual = vigencia
+            if hasta_actual is not None:                                           # 3
+                raise ErrorMotor(
+                    CodigoError.VERSION_YA_CERRADA,
+                    "La version ya esta cerrada: cerrar_vigencia no acorta ni "
+                    "amplia una vigencia cerrada.",
+                )
+            if vigente_hasta < vigente_desde:                                      # 4
+                raise ErrorMotor(
+                    CodigoError.ENTRADA_INVALIDA,
+                    "La fecha de fin no puede ser anterior al inicio de la version.",
+                )
+            if repo_reglas.existe_version_posterior(                               # 5
+                sesion, regla_id, version_id, vigente_desde
+            ):
+                raise ErrorMotor(
+                    CodigoError.VERSION_REGLA_SOLAPADA,
+                    "Hay una version posterior de la regla: cerrar esta no es "
+                    "un cierre de vigencia.",
+                )
+            cerrada = repo_reglas.cerrar_version(                                  # 7 (solo vigente_hasta)
+                sesion, regla_id, version_id, vigente_hasta
+            )
+            if cerrada is None:
+                raise ErrorMotor(
+                    CodigoError.AGREGADO_NO_ENCONTRADO,
+                    "La version no existe, no es accesible o no es de esta regla.",
+                )
+            auditoria.registrar(                                                   # 6
+                sesion,
+                tabla=repo_reglas.TABLA_VERSIONES,
+                registro_id=version_id,
+                accion=auditoria.ACCION_ACTUALIZAR,
+                datos_antes_json=cerrada[0],
+                datos_despues_json=cerrada[1],
+                motivo=motivo,
+            )
+            return ResultadoRegla(
+                regla_id=regla_id,
+                regla_row_version=nueva_version,
+                version_id=version_id,
+            )
+
+        return self._ejecutar(contexto, operacion, "cerrar_vigencia")
 
     # ==================================================================
     # Excepciones

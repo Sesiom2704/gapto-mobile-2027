@@ -31,6 +31,8 @@
 #   Las invariantes que PostgreSQL ya garantiza se CONSUMEN, no se reimplementan:
 #   `ex_regla_versiones__regla` es la autoridad del no-solapamiento y
 #   `uq_regla_excepciones__regla_fecha` la de una excepcion por identidad.
+# Version: 0.3.0 (F06 T5 E1 · cerrar_vigencia, adenda ronda 3 §2): `leer_version_de_regla` (FOR UPDATE
+#   con el MISMO predicado de pertenencia que RVRX) y `existe_version_posterior`.
 # Version: 0.2.0 (F06 T5 E1 · RN-01, RVRX-REGLA): `cerrar_version` y `actualizar_excepcion` reciben
 #   `regla_id` y filtran por id Y regla_id (pertenencia en el repositorio; 0 filas -> None).
 # Version: 0.1.0
@@ -420,6 +422,40 @@ def leer_excepcion(
         "motivo": fila[4],
         "snapshot": fila[5],
     }
+
+
+def leer_version_de_regla(
+    sesion: SesionMotor, regla_id: uuid.UUID, version_id: uuid.UUID
+) -> tuple[dt.date, dt.date | None] | None:
+    """(vigente_desde, vigente_hasta) de la version SI es de esa regla; bloquea la fila.
+
+    F06 T5 E1 · cerrar_vigencia (adenda ronda 3 §2.2): el predicado de pertenencia
+    es el de RVRX (`id` Y `regla_id`). None = no existe, no es accesible (RLS) o
+    es de otra regla.
+    """
+    fila = sesion.uno(
+        "SELECT vigente_desde, vigente_hasta FROM gapto.regla_versiones "
+        "WHERE id = %s::uuid AND regla_id = %s::uuid FOR UPDATE",
+        (version_id, regla_id),
+    )
+    return None if fila is None else (fila[0], fila[1])
+
+
+def existe_version_posterior(
+    sesion: SesionMotor, regla_id: uuid.UUID, version_id: uuid.UUID, vigente_desde: dt.date
+) -> bool:
+    """Hay otra version de la regla que empieza despues de `vigente_desde`.
+
+    Con la version abierta, `ex_regla_versiones__regla` ya lo impide (una version
+    abierta solapa con cualquier posterior); esta lectura es la comprobacion
+    explicita de la condicion §2.5 de la adenda y nunca sustituye al EXCLUDE.
+    """
+    fila = sesion.uno(
+        "SELECT 1 FROM gapto.regla_versiones "
+        "WHERE regla_id = %s::uuid AND id <> %s::uuid AND vigente_desde > %s::date LIMIT 1",
+        (regla_id, version_id, vigente_desde),
+    )
+    return fila is not None
 
 
 def actualizar_excepcion(

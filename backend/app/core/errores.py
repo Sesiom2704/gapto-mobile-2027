@@ -15,6 +15,11 @@
 #   operacion y reintentar no la hara posible". Fusionarlos haria que la UX
 #   reintentase indefinidamente algo imposible, o que abandonase algo que solo
 #   necesitaba otro intento.
+# Version: 0.26.0
+#   0.26.0 (F06 T5 E1 · adenda T5 ronda 3 §2, AJ-T5-R3-02): `VERSION_YA_CERRADA`.
+#   `ReglasService.cerrar_vigencia` solo cierra una version ABIERTA; cerrar una
+#   ya cerrada (acortar o ampliar su vigencia) se rechaza con este codigo, sin
+#   cambios. Ningun codigo existente cambia de significado.
 # Version: 0.25.0
 #   0.25.0 (F06 T3-F06 · F04-R-HIP, literal F04 v1.1 A9; adenda v1.3 del
 #   mandato, D-04/D-08): `ANULACION_FINANCIACION_SIN_REVERSION`. OP-03 y OP-03P
@@ -306,6 +311,8 @@ class CodigoError(str, enum.Enum):
     # --- F04-05 · reglas y versionado -------------------------------------
     REGLA_NO_ENCONTRADA = "REGLA_NO_ENCONTRADA"
     VERSION_REGLA_SOLAPADA = "VERSION_REGLA_SOLAPADA"
+    # F06 T5 E1 (adenda ronda 3 §2.3): cerrar_vigencia sobre una version ya cerrada.
+    VERSION_YA_CERRADA = "VERSION_YA_CERRADA"
     CADENCIA_INVALIDA = "CADENCIA_INVALIDA"
     ANCLAJE_INVALIDO = "ANCLAJE_INVALIDO"
     CALENDARIO_ENTIDAD_NO_SOPORTADO = "CALENDARIO_ENTIDAD_NO_SOPORTADO"
