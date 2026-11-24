@@ -31,6 +31,8 @@
 #   Las invariantes que PostgreSQL ya garantiza se CONSUMEN, no se reimplementan:
 #   `ex_regla_versiones__regla` es la autoridad del no-solapamiento y
 #   `uq_regla_excepciones__regla_fecha` la de una excepcion por identidad.
+# Version: 0.2.0 (F06 T5 E1 · RN-01, RVRX-REGLA): `cerrar_version` y `actualizar_excepcion` reciben
+#   `regla_id` y filtran por id Y regla_id (pertenencia en el repositorio; 0 filas -> None).
 # Version: 0.1.0
 # ============================================================
 
@@ -238,27 +240,31 @@ def insertar_version(sesion: SesionMotor, valores: dict[str, Any]) -> str | None
 
 
 def cerrar_version(
-    sesion: SesionMotor, version_id: uuid.UUID, vigente_hasta: dt.date
+    sesion: SesionMotor, regla_id: uuid.UUID, version_id: uuid.UUID, vigente_hasta: dt.date
 ) -> tuple[str, str] | None:
     """Cierra la vigencia de una version. (snapshot_antes, snapshot_despues).
 
     Cerrar una version NO la reescribe: su condicion funcional permanece. Solo
     deja de aplicarse a partir de la fecha indicada.
+
+    F06 T5 E1 · RN-01 (RVRX-REGLA, A §3.1-1): la PERTENENCIA vive aqui. El UPDATE
+    filtra por `id` Y `regla_id`; una version de otra regla (tambien del mismo
+    owner, O-A19) no se toca y la funcion devuelve None (0 filas afectadas).
     """
     consulta = sql.SQL(
         """
         WITH previo AS (
             SELECT ({})::text AS snap FROM gapto.regla_versiones v
-             WHERE v.id = %s::uuid
+             WHERE v.id = %s::uuid AND v.regla_id = %s::uuid
         )
         UPDATE gapto.regla_versiones AS v
            SET vigente_hasta = %s::date
-         WHERE v.id = %s::uuid
+         WHERE v.id = %s::uuid AND v.regla_id = %s::uuid
         RETURNING (SELECT snap FROM previo), ({})::text
         """
     ).format(_snapshot("v", TIPOS_SQL_VERSION), _snapshot("v", TIPOS_SQL_VERSION))
     with sesion.conexion.cursor() as cursor:
-        cursor.execute(consulta, (version_id, vigente_hasta, version_id))
+        cursor.execute(consulta, (version_id, regla_id, vigente_hasta, version_id, regla_id))
         fila = cursor.fetchone()
     return None if fila is None else (fila[0], fila[1])
 
@@ -417,9 +423,13 @@ def leer_excepcion(
 
 
 def actualizar_excepcion(
-    sesion: SesionMotor, excepcion_id: uuid.UUID, cambios: dict[str, Any]
+    sesion: SesionMotor, regla_id: uuid.UUID, excepcion_id: uuid.UUID, cambios: dict[str, Any]
 ) -> tuple[str, str] | None:
-    """Correccion auditada de una excepcion. (snapshot_antes, despues)."""
+    """Correccion auditada de una excepcion. (snapshot_antes, despues).
+
+    F06 T5 E1 · RN-01: filtra por `id` Y `regla_id` (pertenencia en el
+    repositorio); una excepcion de otra regla -> None sin cambios.
+    """
     if not cambios:
         return None
     asignaciones = [
@@ -432,11 +442,11 @@ def actualizar_excepcion(
         """
         WITH previo AS (
             SELECT ({})::text AS snap FROM gapto.regla_excepciones e
-             WHERE e.id = %s::uuid
+             WHERE e.id = %s::uuid AND e.regla_id = %s::uuid
         )
         UPDATE gapto.regla_excepciones AS e
            SET {}, updated_at = CURRENT_TIMESTAMP
-         WHERE e.id = %s::uuid
+         WHERE e.id = %s::uuid AND e.regla_id = %s::uuid
         RETURNING (SELECT snap FROM previo), ({})::text
         """
     ).format(
@@ -446,7 +456,7 @@ def actualizar_excepcion(
     )
     with sesion.conexion.cursor() as cursor:
         cursor.execute(
-            consulta, (excepcion_id, *cambios.values(), excepcion_id)
+            consulta, (excepcion_id, regla_id, *cambios.values(), excepcion_id, regla_id)
         )
         fila = cursor.fetchone()
     return None if fila is None else (fila[0], fila[1])

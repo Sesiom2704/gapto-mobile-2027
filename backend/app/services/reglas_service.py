@@ -27,6 +27,8 @@
 #   no-solapamiento y `uq_regla_excepciones__regla_fecha` la de una excepcion
 #   por identidad. Aqui se TRADUCEN sus violaciones a errores de dominio; no se
 #   reimplementan como segunda fuente de verdad, que podria divergir.
+# Version: 0.2.0 (F06 T5 E1 · RN-01, RVRX-REGLA): crear_version y corregir_excepcion pasan regla_id al
+#   repositorio; version/excepcion de otra regla (tambien del mismo owner) -> AGREGADO_NO_ENCONTRADO sin cambios.
 # Version: 0.1.0
 # ============================================================
 
@@ -190,12 +192,14 @@ class ReglasService:
 
             if cerrar_version_id is not None:
                 cerrada = repo_reglas.cerrar_version(
-                    sesion, cerrar_version_id, cerrar_vigente_hasta
+                    sesion, regla_id, cerrar_version_id, cerrar_vigente_hasta
                 )
                 if cerrada is None:
+                    # RN-01: 0 filas -> no existe, no es accesible o es de otra regla.
                     raise ErrorMotor(
                         CodigoError.AGREGADO_NO_ENCONTRADO,
-                        "La version a cerrar no existe o no es accesible.",
+                        "La version a cerrar no existe, no es accesible o no es "
+                        "de esta regla.",
                     )
                 auditoria.registrar(
                     sesion,
@@ -333,12 +337,14 @@ class ReglasService:
                 )
 
             actualizada = repo_reglas.actualizar_excepcion(
-                sesion, excepcion_id, cambios
+                sesion, regla_id, excepcion_id, cambios
             )
             if actualizada is None:
+                # RN-01: 0 filas -> no existe, no es accesible o es de otra regla.
                 raise ErrorMotor(
                     CodigoError.AGREGADO_NO_ENCONTRADO,
-                    "La excepcion indicada no existe o no es accesible.",
+                    "La excepcion indicada no existe, no es accesible o no es "
+                    "de esta regla.",
                 )
             auditoria.registrar(
                 sesion,

@@ -16,6 +16,11 @@
 #     - RVRX-REGLA: crear_version de la regla A cierra una version de la regla
 #       B, y corregir_excepcion de A reescribe una excepcion de B, bajo el lock
 #       de A y sin tocar la version de B.
+# Version: 0.3.0 (F06 T5 E1 · RN-01, A §3.1-1; mandato T5E1_HITO v1.0 P1.1): RVRX-REGLA queda
+#   CERRADO. La pertenencia vive en el repositorio (`cerrar_version` y `actualizar_excepcion` filtran
+#   por id Y regla_id); sus dos casos se INVIERTEN a rechazo AGREGADO_NO_ENCONTRADO sin cambios: la
+#   version/excepcion de B intacta, y tampoco A cambia (la transaccion se deshace entera: row_version
+#   de A igual). Es O-A19 (version y excepcion de otra regla del MISMO owner).
 # Version: 0.2.0 (F04-D060 · F04-R2 R2-A, contrato v0.6 §7.3): OP21-PERTENENCIA
 #   queda CERRADO y sus tres casos se INVIERTEN a rechazo (efecto y relacion de
 #   H2 -> AGREGADO_NO_ENCONTRADO; conciliacion de H2 ->
@@ -118,19 +123,26 @@ def _version_regla(admin, owner, regla_id) -> int:
     return leer_fila(admin, owner, "SELECT row_version FROM gapto.reglas_financieras WHERE id = %s", (regla_id,))[0]
 
 
-def test_caracterizacion_crear_version_de_a_cierra_una_version_de_b(servicio_reglas, contexto, admin):
+def test_rvrx_crear_version_de_a_no_cierra_una_version_de_b(servicio_reglas, contexto, admin):
+    # RN-01 / O-A19 (antes: caracterizacion del hueco). Mismo owner: A y B son del mismo contexto.
     a, _, version_a = _regla(servicio_reglas, contexto, con_version=False)  # su nueva version no solapa con nada
     b, rv_b, _ = _regla(servicio_reglas, contexto)
     version_b = _version_regla(admin, contexto.owner_user_id, b)
-    servicio_reglas.crear_version(contexto, regla_id=a, regla_row_version_esperada=version_a,
-                                  version=version_rodante(vigente_desde=F("2027-03-01")),
-                                  cerrar_version_id=rv_b, cerrar_vigente_hasta=F("2027-02-01"))
+    with pytest.raises(ErrorMotor) as e:
+        servicio_reglas.crear_version(contexto, regla_id=a, regla_row_version_esperada=version_a,
+                                      version=version_rodante(vigente_desde=F("2027-03-01")),
+                                      cerrar_version_id=rv_b, cerrar_vigente_hasta=F("2027-02-01"))
+    assert e.value.codigo is CodigoError.AGREGADO_NO_ENCONTRADO
     assert leer_fila(admin, contexto.owner_user_id, "SELECT regla_id, vigente_hasta FROM gapto.regla_versiones "
-                     "WHERE id = %s", (rv_b,)) == (b, F("2027-02-01"))
-    assert _version_regla(admin, contexto.owner_user_id, b) == version_b  # B ni se bloqueo ni se versiono
+                     "WHERE id = %s", (rv_b,)) == (b, None)                       # B intacta
+    assert _version_regla(admin, contexto.owner_user_id, b) == version_b
+    assert _version_regla(admin, contexto.owner_user_id, a) == version_a          # A tampoco cambia (rollback)
+    assert leer_fila(admin, contexto.owner_user_id, "SELECT count(*) FROM gapto.regla_versiones WHERE regla_id = %s",
+                     (a,)) == (0,)                                                 # ni version nueva de A
 
 
-def test_caracterizacion_corregir_excepcion_de_a_reescribe_una_excepcion_de_b(servicio_reglas, contexto, admin):
+def test_rvrx_corregir_excepcion_de_a_no_reescribe_una_excepcion_de_b(servicio_reglas, contexto, admin):
+    # RN-01 / O-A19 (antes: caracterizacion del hueco).
     a, _, _ = _regla(servicio_reglas, contexto)
     b, _, version_b = _regla(servicio_reglas, contexto)
     excepcion = DatosExcepcion(excepcion_id=uuid.uuid4(), fecha_objetivo=F("2027-03-10"),
@@ -138,10 +150,32 @@ def test_caracterizacion_corregir_excepcion_de_a_reescribe_una_excepcion_de_b(se
     servicio_reglas.registrar_excepcion(contexto, regla_id=b, regla_row_version_esperada=version_b,
                                         excepcion=excepcion)
     version_b = _version_regla(admin, contexto.owner_user_id, b)
-    servicio_reglas.corregir_excepcion(contexto, regla_id=a,
-                                       regla_row_version_esperada=_version_regla(admin, contexto.owner_user_id, a),
-                                       excepcion_id=excepcion.excepcion_id,
-                                       cambios={"importe_override": D("99.0000")}, motivo="desde A")
+    version_a = _version_regla(admin, contexto.owner_user_id, a)
+    with pytest.raises(ErrorMotor) as e:
+        servicio_reglas.corregir_excepcion(contexto, regla_id=a, regla_row_version_esperada=version_a,
+                                           excepcion_id=excepcion.excepcion_id,
+                                           cambios={"importe_override": D("99.0000")}, motivo="desde A")
+    assert e.value.codigo is CodigoError.AGREGADO_NO_ENCONTRADO
     assert leer_fila(admin, contexto.owner_user_id, "SELECT regla_id, importe_override FROM gapto.regla_excepciones "
-                     "WHERE id = %s", (excepcion.excepcion_id,)) == (b, D("99.0000"))
+                     "WHERE id = %s", (excepcion.excepcion_id,)) == (b, D("10.0000"))   # B intacta
     assert _version_regla(admin, contexto.owner_user_id, b) == version_b
+    assert _version_regla(admin, contexto.owner_user_id, a) == version_a              # A tampoco cambia
+
+
+def test_rvrx_control_positivo_version_y_excepcion_propias(servicio_reglas, contexto, admin):
+    # Control positivo de RN-01: con la version/excepcion de la MISMA regla, ambas operaciones siguen funcionando.
+    a, rv_a, version_a = _regla(servicio_reglas, contexto)
+    r = servicio_reglas.crear_version(contexto, regla_id=a, regla_row_version_esperada=version_a,
+                                      version=version_rodante(vigente_desde=F("2027-03-01")),
+                                      cerrar_version_id=rv_a, cerrar_vigente_hasta=F("2027-02-28"))
+    assert leer_fila(admin, contexto.owner_user_id, "SELECT vigente_hasta FROM gapto.regla_versiones WHERE id = %s",
+                     (rv_a,)) == (F("2027-02-28"),)
+    excepcion = DatosExcepcion(excepcion_id=uuid.uuid4(), fecha_objetivo=F("2027-03-10"),
+                               importe_override=D("10.0000"), motivo="de A")
+    r = servicio_reglas.registrar_excepcion(contexto, regla_id=a, regla_row_version_esperada=r.regla_row_version,
+                                            excepcion=excepcion)
+    servicio_reglas.corregir_excepcion(contexto, regla_id=a, regla_row_version_esperada=r.regla_row_version,
+                                       excepcion_id=excepcion.excepcion_id,
+                                       cambios={"importe_override": D("12.0000")}, motivo="correccion propia")
+    assert leer_fila(admin, contexto.owner_user_id, "SELECT importe_override FROM gapto.regla_excepciones "
+                     "WHERE id = %s", (excepcion.excepcion_id,)) == (D("12.0000"),)
