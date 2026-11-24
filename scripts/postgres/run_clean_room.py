@@ -56,6 +56,14 @@
 # ROLE DRIFT, que es correcto y deliberado. En ese caso se usa --desde 0002
 # y el clean-room demuestra reproducibilidad DE LA BASE, no de la instancia.
 # Reproducir tambien la instancia exige un proyecto nuevo.
+# Versión: 0.24.0 -- F06 T5 E1 (adenda T5 ronda 3 §6, AJ-T5-R3-14, O-R3-18). MODO GATE
+#                    (--junit, --manifiesto, --completar-manifiesto, --proyecto o
+#                    --commit) EXIGE --head explicito. Fallo inequivoco
+#                    CONTRATO_NO_CORRESPONDE si el contrato pedido (--head, o el
+#                    por defecto sin --head) no es el de la ultima migration de la
+#                    cadena ejecutada (o de la fase 1 en --completar-manifiesto).
+#                    Se registra head pedido, contrato, cadena y huellas D-111
+#                    esperadas/obtenidas. Contratos y huellas sin cambios.
 # Versión: 0.23.0 -- F06 T4 P-RB206-1 (mandato 753bebb2… §2.6, enmienda 01 257be460…):
 #                    se DECLARA el head 0356 (G2 deduplicada con memo de transaccion):
 #                    CONTRATO_0356 = 0355 con funciones 35 y triggers no internos 68
@@ -308,7 +316,7 @@ from pathlib import Path
 
 # Version del runner que se materializa en el manifest. Debe coincidir con la
 # primera linea "Versión:" de la cabecera; test_040 lo comprueba.
-VERSION_RUNNER = "0.23.0"
+VERSION_RUNNER = "0.24.0"
 
 try:
     import psycopg
@@ -436,6 +444,38 @@ CONTRATOS_POR_HEAD = {
 
 # Head vigente de la cadena cuando no se declara --head.
 CONTRATO_POR_DEFECTO = CONTRATO_0355
+# F06 T5 E1 (O-R3-18): head al que corresponde el contrato por defecto.
+HEAD_POR_DEFECTO = next(h for h, c in CONTRATOS_POR_HEAD.items() if c is CONTRATO_POR_DEFECTO)
+
+#: Opciones que hacen de la invocacion un GATE (manifest, JUnit o identidad declarada).
+OPCIONES_DE_GATE = ("junit", "manifiesto", "completar", "proyecto", "commit")
+
+
+def exigir_head_en_gate(args) -> str | None:
+    """F06 T5 E1 (AJ-T5-R3-14): en modo gate el head es OBLIGATORIO. Mensaje de rechazo o None."""
+    usadas = [o for o in OPCIONES_DE_GATE if getattr(args, o, None)]
+    if usadas and not args.head:
+        return ("MODO GATE sin --head (" + ", ".join("--" + o.replace("completar", "completar-manifiesto")
+                                                    for o in usadas)
+                + "): el gate exige declarar la migration final con --head explicito.")
+    return None
+
+
+def contrato_corresponde(head_pedido: str | None, ultima_ejecutada: str | None) -> str | None:
+    """F06 T5 E1 (O-R3-18): None si el contrato pedido corresponde a la cadena; si no, el motivo.
+
+    `head_pedido` None significa contrato por defecto (HEAD_POR_DEFECTO). `ultima_ejecutada`
+    es el prefijo NNNN de la ultima migration aplicada (None: no se ejecuto cadena y no
+    hay nada que contrastar).
+    """
+    if ultima_ejecutada is None:
+        return None
+    head = head_pedido or HEAD_POR_DEFECTO
+    if head != ultima_ejecutada:
+        origen = f"--head {head_pedido}" if head_pedido else f"el contrato por defecto ({HEAD_POR_DEFECTO})"
+        return (f"CONTRATO_NO_CORRESPONDE: se pidio {origen} pero la cadena ejecutada termina en "
+                f"{ultima_ejecutada}. Declara --head {ultima_ejecutada} o ejecuta la cadena hasta {head}.")
+    return None
 
 
 # ------------------------------------------------------------
@@ -1230,6 +1270,9 @@ def main() -> int:
 
     if args.manifiesto and not args.head:
         sys.exit("--manifiesto exige --head: el veredicto se compone con la migration final declarada.")
+    rechazo_gate = exigir_head_en_gate(args)
+    if rechazo_gate:
+        sys.exit(rechazo_gate)
 
     raiz = raiz_repositorio()
     for etiqueta, ruta, debe_existir in (
@@ -1300,6 +1343,30 @@ def main() -> int:
         contrato = leer_contrato(conexion)
         huellas = leer_huellas(conexion)
         huellas_d111 = leer_huellas_d111(conexion) if args.head else None
+
+    # F06 T5 E1 (O-R3-18): el contrato pedido debe ser el de la cadena examinada.
+    if args.completar:
+        ultima = json.loads(Path(args.completar).read_text(encoding="utf-8"))[
+            "observado"]["migrations_aplicadas"][-1][:4]
+    elif args.solo_verificar:
+        ultima = None
+    else:
+        ultima = ficheros[-1].name[:4]
+    print("\nREGISTRO DEL CONTRATO (O-R3-18):")
+    print(f"  head pedido:      {args.head or '(ninguno: contrato por defecto)'}")
+    print(f"  contrato usado:   {args.head or HEAD_POR_DEFECTO}")
+    print(f"  cadena ejecutada: "
+          + (f"{ficheros[0].name[:4]}..{ultima}" if ultima and not args.completar
+             else (f"..{ultima} (fase 1)" if ultima else "(no se ejecuto: solo verificar)")))
+    if args.head:
+        _, esperadas = referencia_d111_de(args.head)
+        print(f"  huellas D-111 esperadas: {esperadas if esperadas else '(el head no exige referencia)'}")
+        print(f"  huellas D-111 obtenidas: {huellas_d111}")
+    no_corresponde = contrato_corresponde(args.head, ultima)
+    if no_corresponde:
+        print()
+        print("RESULTADO: FALLO. " + no_corresponde)
+        return 1
 
     fallos = list(problemas_rol)
     fallos += comparar(contrato, contrato_de(args.head), "CONTRATO FISICO")
